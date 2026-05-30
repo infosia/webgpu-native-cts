@@ -47,3 +47,7 @@ webgpu:api,validation,createTexture:usage:usage1=32;usage2=32
 webgpu:api,validation,createTexture:usage:usage1=32;usage2=1073741824
 webgpu:api,validation,createTexture:usage:usage1=1073741824;usage2=1073741824
 webgpu:api,validation,createTexture:new_usages:usage=48
+
+# F-007: wgpu-native eager-panics on transient/storage texture usage; every compatible
+# texture_usage case crashes (only feature-skips do not). See docs/FINDINGS.md.
+webgpu:api,validation,createTexture:texture_usage:*

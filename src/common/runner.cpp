@@ -6,7 +6,6 @@
 #include <optional>
 #include <string_view>
 #include <sstream>
-#include <unordered_set>
 
 #include "common/query.h"
 
@@ -48,8 +47,8 @@ std::string trim(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
-std::unordered_set<std::string> loadExpectations(const std::string& path) {
-    std::unordered_set<std::string> expectations;
+ExpectationSet loadExpectations(const std::string& path) {
+    ExpectationSet expectations;
     if (path.empty()) {
         return expectations;
     }
@@ -66,8 +65,13 @@ std::unordered_set<std::string> loadExpectations(const std::string& path) {
             line = line.substr(0, comment);
         }
         line = trim(line);
-        if (!line.empty()) {
-            expectations.insert(line);
+        if (line.empty()) {
+            continue;
+        }
+        if (line.ends_with(":*")) {
+            expectations.prefixes.push_back(line.substr(0, line.size() - 1));
+        } else {
+            expectations.exact.insert(line);
         }
     }
     return expectations;
@@ -408,7 +412,7 @@ std::vector<SubcaseResult> collectIsolatedRuns(const RunOptions& options, const 
     return results;
 }
 
-int printRunResults(const std::vector<SubcaseResult>& results, const std::unordered_set<std::string>& expectations) {
+int printRunResults(const std::vector<SubcaseResult>& results, const ExpectationSet& expectations) {
     size_t pass = 0;
     size_t skip = 0;
     size_t warn = 0;
@@ -417,7 +421,7 @@ int printRunResults(const std::vector<SubcaseResult>& results, const std::unorde
     size_t xfail = 0;
     size_t xpass = 0;
     for (const SubcaseResult& result : results) {
-        const bool expected = expectations.contains(result.query);
+        const bool expected = expectationMatches(expectations, result.query);
         std::string status = statusName(result.status);
         bool unexpectedFailure = result.status == TestStatus::Fail || result.status == TestStatus::Crash;
         if (expected && (result.status == TestStatus::Fail || result.status == TestStatus::Crash)) {
@@ -447,6 +451,18 @@ int printRunResults(const std::vector<SubcaseResult>& results, const std::unorde
 }
 
 } // namespace
+
+bool expectationMatches(const ExpectationSet& expectations, const std::string& query) {
+    if (expectations.exact.contains(query)) {
+        return true;
+    }
+    for (const std::string& prefix : expectations.prefixes) {
+        if (query.size() >= prefix.size() && query.compare(0, prefix.size(), prefix) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 int runQueries(const RunOptions& options) {
     if (!options.runCaseQuery.empty()) {
@@ -491,7 +507,7 @@ int runQueries(const RunOptions& options) {
         return 0;
     }
 
-    std::unordered_set<std::string> expectations;
+    ExpectationSet expectations;
     try {
         expectations = loadExpectations(options.expectationsPath);
     } catch (const std::exception& e) {

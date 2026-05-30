@@ -59,6 +59,15 @@ std::vector<Value> compressedTextureFormatValues() {
     return textureFormatValues(kCompressedTextureFormats);
 }
 
+std::vector<Value> textureUsageValues() {
+    std::vector<Value> values;
+    values.reserve(kTextureUsages.size());
+    for (WGPUTextureUsage usage : kTextureUsages) {
+        values.emplace_back(static_cast<int64_t>(usage));
+    }
+    return values;
+}
+
 std::vector<Value> textureUsageValuesWithZeroAndBogus() {
     std::vector<Value> values;
     values.reserve(kTextureUsages.size() + 2);
@@ -218,6 +227,76 @@ CTS_TEST(g, "new_usages")
         desc.size.height = 1;
         desc.size.depthOrArrayLayers = 1;
         desc.format = WGPUTextureFormat_RGBA8Unorm;
+        desc.usage = usage;
+
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_usage")
+    .desc("Test texture usage validation for every dimension, format, and valid usage combination.")
+    .params([](ParamsBuilder u) {
+        const std::vector<Value> usages = textureUsageValues();
+        return u.combine("dimension", textureDimensionValuesWithUndefined())
+            .combine("format", allTextureFormatValues())
+            .beginSubcases()
+            .combine("usage0", usages)
+            .combine("usage1", usages)
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureDimension dimension = dimensionFromParams(params);
+                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                return textureFormatAndDimensionPossiblyCompatible(dimension, format);
+            })
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureUsage usage0 = static_cast<WGPUTextureUsage>(
+                    valueAs<uint64_t>(*findParam(params, "usage0")));
+                const WGPUTextureUsage usage1 = static_cast<WGPUTextureUsage>(
+                    valueAs<uint64_t>(*findParam(params, "usage1")));
+                return isValidTextureUsageCombination(usage0 | usage1);
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension dimension = dimensionParam(t);
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureUsage usage0 = t.param<WGPUTextureUsage>("usage0");
+        const WGPUTextureUsage usage1 = t.param<WGPUTextureUsage>("usage1");
+        const WGPUTextureUsage usage = usage0 | usage1;
+
+        t.skipIfTextureFormatNotSupported(format);
+        t.skipIfTextureFormatAndDimensionNotCompatible(format, dimension);
+        const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+
+        if (usage & WGPUTextureUsage_TransientAttachment) {
+            t.skipIfTransientAttachmentNotSupported();
+        }
+
+        bool success = true;
+        const WGPUTextureDimension appliedDimension = dimension == WGPUTextureDimension_Undefined
+            ? WGPUTextureDimension_2D
+            : dimension;
+        if ((usage & WGPUTextureUsage_StorageBinding)
+            && !t.isTextureFormatUsableAsWriteOnlyStorageTexture(format)) {
+            success = false;
+        }
+        if (usage & WGPUTextureUsage_RenderAttachment) {
+            if (appliedDimension == WGPUTextureDimension_1D) {
+                success = false;
+            }
+            if (isColorTextureFormat(format) && !t.isTextureFormatColorRenderable(format)) {
+                success = false;
+            }
+        }
+        if ((usage & WGPUTextureUsage_TransientAttachment) && appliedDimension != WGPUTextureDimension_2D) {
+            success = false;
+        }
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size.width = info.blockWidth;
+        desc.size.height = info.blockHeight;
+        desc.size.depthOrArrayLayers = 1;
+        desc.dimension = dimension;
+        desc.format = format;
         desc.usage = usage;
 
         t.expectValidationError([&] {

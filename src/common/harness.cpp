@@ -450,6 +450,28 @@ bool GpuTest::textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension 
     return !(info.blockWidth > 1 || info.hasDepth || info.hasStencil);
 }
 
+bool GpuTest::isTextureFormatColorRenderable(WGPUTextureFormat format) {
+    if (format == WGPUTextureFormat_RG11B10Ufloat) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_RG11B10UfloatRenderable);
+    }
+    if (isTier1BlendableMultisampleTextureFormat(format)) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureFormatsTier1);
+    }
+    return textureFormatInList(format, kColorRenderableTextureFormats);
+}
+
+bool GpuTest::isTextureFormatUsableAsWriteOnlyStorageTexture(WGPUTextureFormat format) {
+    if (format == WGPUTextureFormat_BGRA8Unorm
+        && wgpuDeviceHasFeature(device(), WGPUFeatureName_BGRA8UnormStorage)) {
+        return true;
+    }
+    if (textureFormatInList(format, kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly)
+        && wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureFormatsTier1)) {
+        return true;
+    }
+    return textureFormatInList(format, kStorageTextureFormats);
+}
+
 bool GpuTest::isTextureFormatMultisampled(WGPUTextureFormat format) {
     if (format == WGPUTextureFormat_RG11B10Ufloat) {
         return wgpuDeviceHasFeature(device(), WGPUFeatureName_RG11B10UfloatRenderable);

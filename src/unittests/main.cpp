@@ -24,6 +24,16 @@ bool containsRegularTextureFormat(WGPUTextureFormat format) {
     return false;
 }
 
+template <std::size_t N>
+bool containsTextureFormat(const std::array<WGPUTextureFormat, N>& formats, WGPUTextureFormat format) {
+    for (WGPUTextureFormat listedFormat : formats) {
+        if (listedFormat == format) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 int main() {
@@ -93,6 +103,20 @@ int main() {
         require(cts::stringifyValue(cts::Value("abc")) == "\"abc\"", "string stringify");
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
+
+        cts::ExpectationSet expectations;
+        expectations.exact.insert("a:b:exact:foo=1");
+        expectations.exact.insert("a:b:test:*");
+        expectations.prefixes.push_back("a:b:test:");
+        require(cts::expectationMatches(expectations, "a:b:exact:foo=1"), "expectation exact match");
+        require(!cts::expectationMatches(expectations, "a:b:exact:foo=2"), "expectation exact mismatch");
+        require(cts::expectationMatches(expectations, "a:b:test:foo=1"), "expectation prefix match params");
+        require(cts::expectationMatches(expectations, "a:b:test:"), "expectation prefix match empty params");
+        require(!cts::expectationMatches(expectations, "a:b:test2:foo"), "expectation prefix avoids test2");
+        require(!cts::expectationMatches(expectations, "a:b:test_more:foo"), "expectation prefix avoids test_more");
+        require(!cts::expectationMatches(expectations, "a:b:tes:foo"), "expectation prefix avoids shorter test");
+        require(cts::expectationMatches(expectations, "a:b:test:*"), "expectation non-wildcard exact match");
+
         require(cts::kTextureUsages.size() == 6, "texture usages count");
         require(cts::kAllTextureUsages == 0x3F, "all texture usages bits");
         require((cts::kSomeBogusTextureUsage & cts::kAllTextureUsages) == 0, "bogus texture usage disjoint");
@@ -112,15 +136,37 @@ int main() {
         require(cts::kRegularTextureFormats.size() == 43, "regular texture format count");
         require(cts::kCompressedTextureFormats.size() == 52, "compressed texture format count");
         require(cts::kAllTextureFormats.size() == 101, "all texture format count");
+        require(cts::kColorRenderableTextureFormats.size() == 39, "color-renderable texture format count");
+        require(cts::kStorageTextureFormats.size() == 22, "storage texture format count");
+        require(cts::kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly.size() == 17,
+                "tier1 storage texture format count");
         for (WGPUTextureFormat format : cts::kRegularTextureFormats) {
             const cts::TextureFormatInfo& info = cts::textureFormatInfo(format);
             require(info.formatClass == cts::TextureFormatClass::Uncompressed, "regular texture format class");
             require(!info.hasDepth, "regular texture format has no depth");
             require(!info.hasStencil, "regular texture format has no stencil");
         }
+        require(cts::isColorTextureFormat(WGPUTextureFormat_RGBA8Unorm), "rgba8unorm color format");
+        require(!cts::isColorTextureFormat(WGPUTextureFormat_Depth24Plus), "depth24plus not color format");
+        require(cts::isColorTextureFormat(WGPUTextureFormat_BC1RGBAUnorm), "bc1 color format");
         require(containsRegularTextureFormat(WGPUTextureFormat_RGBA8Unorm), "regular contains rgba8unorm");
         require(!containsRegularTextureFormat(WGPUTextureFormat_Depth16Unorm), "regular excludes depth16unorm");
         require(!containsRegularTextureFormat(WGPUTextureFormat_BC1RGBAUnorm), "regular excludes bc1-rgba-unorm");
+        require(containsTextureFormat(cts::kColorRenderableTextureFormats, WGPUTextureFormat_RGBA8Unorm),
+                "rgba8unorm color-renderable");
+        require(containsTextureFormat(cts::kStorageTextureFormats, WGPUTextureFormat_RGBA8Unorm),
+                "rgba8unorm storage");
+        require(containsTextureFormat(cts::kColorRenderableTextureFormats, WGPUTextureFormat_RGBA8UnormSrgb),
+                "rgba8unorm-srgb color-renderable");
+        require(!containsTextureFormat(cts::kStorageTextureFormats, WGPUTextureFormat_RGBA8UnormSrgb),
+                "rgba8unorm-srgb not storage");
+        require(!containsTextureFormat(cts::kColorRenderableTextureFormats, WGPUTextureFormat_R8Snorm),
+                "r8snorm not base color-renderable");
+        require(!containsTextureFormat(cts::kStorageTextureFormats, WGPUTextureFormat_R8Unorm),
+                "r8unorm not base storage");
+        require(containsTextureFormat(cts::kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly,
+                                      WGPUTextureFormat_R8Unorm),
+                "r8unorm tier1 storage");
         size_t multisampleCount = 0;
         for (WGPUTextureFormat format : cts::kAllTextureFormats) {
             if (cts::textureFormatInfo(format).multisample) {

@@ -192,6 +192,11 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 - **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; the 16 cases are
   in `expectations/wgpu-native.txt` (contained crashes), so a `--isolate --expectations` run over
   `createTexture:*` exits 0; yawgpu and Dawn need no entries.
+- **Pervasive (T6):** `createTexture:texture_usage` exercises transient/storage usage on every
+  format/dimension, so **every one of its 306 compatible cases crashes wgpu-native** (0 pass; the only
+  non-crashes are 24 feature-skips). Dawn passes all 330. Because the whole test is unusable on
+  wgpu-native, it is recorded with a single **prefix expectation**
+  `…:texture_usage:*` rather than 306 lines (see the wildcard expectation support added alongside T6).
 
 ---
 
@@ -210,6 +215,34 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 - **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 6 cases are in
   `expectations/yawgpu.txt`, so a `--isolate --expectations` run over `createTexture:*` exits 0;
   wgpu-native and Dawn need no entries.
+
+---
+
+## F-009 — yawgpu over-restricts render-attachment dimension and under-validates storage usage
+
+- **Backend:** yawgpu (`55ac04d`). **Not** present in wgpu-native (which aborts these inputs, F-007) or
+  Dawn.
+- **Found by:** `webgpu:api,validation,createTexture:texture_usage` (Texture T6) — usage flags × every
+  format × every dimension. **Dawn passes all 330 cases (the reference for the success model); yawgpu
+  fails 111 + crashes 2**, isolating the gaps to yawgpu. (The 2 crashes are the
+  [F-005](#f-005--yawgpu-mishandles-several-valid-uncompressed-texture-formats) `Depth24PlusStencil8`
+  abort; many fails are the F-005 format rejections recurring. The two divergences below are the new,
+  usage-specific ones.)
+- **Observed on yawgpu (two usage-validation gaps):**
+  - **Render-attachment on 3D textures is wrongly rejected.** Per spec, `RENDER_ATTACHMENT` is invalid
+    only for **1D** textures (a 3D texture may be created with it and rendered to per-slice). yawgpu
+    rejects `RENDER_ATTACHMENT` on **3D** textures (e.g. `R8Unorm` 3D), which Dawn accepts — the 3D
+    dimension has ~18 more failing cases than the others (3D=42 vs ~24).
+  - **Storage usage validation gaps.** yawgpu rejects `STORAGE_BINDING` on some tier1 storage-capable
+    formats that the all-features fixture enables (and that Dawn accepts), and/or accepts/rejects
+    storage on formats inconsistently with the spec's `isTextureFormatUsableAsWriteOnlyStorageTexture`.
+- **Expected (WebGPU):** render-attachment is dimension-invalid only for 1D; storage-binding validity
+  follows the format's storage capability (with `texture-formats-tier1` enabled on the all-features
+  device). Dawn matches.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 113 cases are in
+  `expectations/yawgpu.txt` (per-case — yawgpu has 69 *passing* `texture_usage` cases, so unlike
+  wgpu-native it is not blanket-crashed); a `--isolate --expectations` run over `createTexture:*` exits
+  0; wgpu-native and Dawn need no entries.
 
 ---
 

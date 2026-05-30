@@ -144,6 +144,13 @@ struct SubcaseResult {
     std::string message;
 };
 
+struct ExpectationSet {
+    std::unordered_set<std::string> exact;
+    std::vector<std::string> prefixes;
+};
+
+bool expectationMatches(const ExpectationSet& expectations, const std::string& query);
+
 using FixtureFactory = std::function<std::unique_ptr<Fixture>()>;
 using TestFn = std::function<void(Fixture&)>;
 using ParamsFn = std::function<ParamsBuilder(ParamsBuilder)>;
