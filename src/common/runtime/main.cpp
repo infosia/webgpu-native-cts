@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 
+#include "cts/test.h"
 #include "common/webgpu/backend.h"
 #include "common/webgpu/sync.h"
 
@@ -62,7 +63,7 @@ const char* adapterTypeName(WGPUAdapterType type) {
 }
 
 void printUsage() {
-    std::cout << "Usage: cts [--help] [--version]\n"
+    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] <query>...\n"
               << "\n"
               << "Without arguments, creates a WebGPU instance, requests an adapter,\n"
               << "prints adapter information, and exits.\n";
@@ -115,11 +116,6 @@ int runAdapterEnumeration() {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc > 2) {
-        printUsage();
-        return EXIT_FAILURE;
-    }
-
     if (argc == 2) {
         const std::string arg = argv[1];
         if (arg == "--help") {
@@ -130,11 +126,29 @@ int main(int argc, char** argv) {
             printVersion();
             return EXIT_SUCCESS;
         }
-
-        std::cerr << "unknown option: " << arg << "\n";
-        printUsage();
-        return EXIT_FAILURE;
     }
 
+    if (argc > 1) {
+        cts::RunOptions options;
+        for (int i = 1; i < argc; ++i) {
+            const std::string arg = argv[i];
+            if (arg == "--list") {
+                options.list = true;
+            } else if (arg == "--list-cases") {
+                options.listCases = true;
+            } else if (arg.starts_with("--")) {
+                std::cerr << "unknown option: " << arg << "\n";
+                printUsage();
+                return EXIT_FAILURE;
+            } else {
+                options.queries.push_back(arg);
+            }
+        }
+        if (options.queries.empty()) {
+            std::cerr << "missing query\n";
+            return EXIT_FAILURE;
+        }
+        return cts::runQueries(options);
+    }
     return runAdapterEnumeration();
 }

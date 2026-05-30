@@ -50,7 +50,15 @@ if(NOT WGPU_NATIVE_LIB)
     message(FATAL_ERROR "Could not find libwgpu_native. Build wgpu-native or set CTS_WGPU_NATIVE_LIB.")
 endif()
 
+file(GLOB_RECURSE CTS_SPEC_SOURCES CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/src/webgpu/**/*.spec.cpp"
+)
+
 add_library(cts_harness
+    src/common/harness.cpp
+    src/common/params.cpp
+    src/common/query.cpp
+    src/common/runner.cpp
     src/common/webgpu/backend_wgpu.cpp
     src/common/webgpu/sync.cpp
 )
@@ -91,14 +99,20 @@ endfunction()
 cts_configure_target(cts_harness)
 
 add_executable(cts src/common/runtime/main.cpp)
+target_sources(cts PRIVATE ${CTS_SPEC_SOURCES})
 target_link_libraries(cts PRIVATE cts_harness)
 target_include_directories(cts PRIVATE "${PROJECT_SOURCE_DIR}/src")
 cts_configure_target(cts)
 
 add_executable(cts_unittests src/unittests/main.cpp)
+target_link_libraries(cts_unittests PRIVATE cts_harness)
+target_include_directories(cts_unittests PRIVATE "${PROJECT_SOURCE_DIR}/src")
 cts_configure_target(cts_unittests)
 
 add_executable(gen_listings tools/gen_listings/main.cpp)
+target_sources(gen_listings PRIVATE ${CTS_SPEC_SOURCES})
+target_link_libraries(gen_listings PRIVATE cts_harness)
+target_include_directories(gen_listings PRIVATE "${PROJECT_SOURCE_DIR}/src")
 cts_configure_target(gen_listings)
 
 install(TARGETS cts cts_unittests gen_listings)

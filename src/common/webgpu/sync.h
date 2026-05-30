@@ -17,4 +17,20 @@ struct AdapterResult {
 
 AdapterResult requestAdapterSync(WGPUInstance instance, const WGPURequestAdapterOptions* options);
 
+struct DeviceResult {
+    WGPURequestDeviceStatus status;
+    WGPUDevice device;
+    std::string message;
+};
+
+DeviceResult requestDeviceSync(WGPUInstance instance, WGPUAdapter adapter, const WGPUDeviceDescriptor* descriptor);
+
+struct ScopeResult {
+    WGPUPopErrorScopeStatus status;
+    WGPUErrorType type;
+    std::string message;
+};
+
+ScopeResult popErrorScopeSync(WGPUInstance instance, WGPUDevice device);
+
 } // namespace cts

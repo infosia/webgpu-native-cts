@@ -1,3 +1,5 @@
+#include "cts/test.h"
+
 int main() {
-    return 0;
+    return cts::writeListingJson("src/webgpu/listing.json");
 }
