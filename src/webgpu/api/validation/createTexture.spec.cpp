@@ -7,6 +7,7 @@
 
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
 
 using namespace cts;
@@ -20,6 +21,7 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpu
 // Size variant params keep the upstream key names but encode unsupported array/object values as integer indexes:
 // widthVariant 0..2 maps to offsets -1..+1; sizeVariant 0..8 maps to dimension=index/3 and offset=index%3-1.
 // Compressed texture sizeVariant 0..27 indexes kCompressedTextureSizeVariants.
+// The C enum exposes every texture usage member, so new_usages is faithful but success is always true.
 
 std::vector<Value> textureDimensionValuesWithUndefined() {
     std::vector<Value> values;
@@ -55,6 +57,28 @@ std::vector<Value> regularTextureFormatValues() {
 
 std::vector<Value> compressedTextureFormatValues() {
     return textureFormatValues(kCompressedTextureFormats);
+}
+
+std::vector<Value> textureUsageValuesWithZeroAndBogus() {
+    std::vector<Value> values;
+    values.reserve(kTextureUsages.size() + 2);
+    values.emplace_back(0);
+    for (WGPUTextureUsage usage : kTextureUsages) {
+        values.emplace_back(static_cast<int64_t>(usage));
+    }
+    values.emplace_back(static_cast<int64_t>(kSomeBogusTextureUsage));
+    return values;
+}
+
+std::vector<Value> newTextureUsageValues() {
+    std::vector<Value> values;
+    values.reserve(kTextureUsages.size() + 1);
+    for (WGPUTextureUsage usage : kTextureUsages) {
+        values.emplace_back(static_cast<int64_t>(usage));
+    }
+    values.emplace_back(static_cast<int64_t>(WGPUTextureUsage_RenderAttachment |
+                                             WGPUTextureUsage_TransientAttachment));
+    return values;
 }
 
 std::vector<Value> sampleCountValues() {
@@ -135,6 +159,71 @@ std::vector<Value> mipLevelCountValues() {
         Value(7),
     };
 }
+
+CTS_TEST(g, "usage")
+    .desc("Test combinations of zero to two usage flags are validated to be valid.")
+    .params([](ParamsBuilder u) {
+        const std::vector<Value> usages = textureUsageValuesWithZeroAndBogus();
+        return u.combine("usage1", usages)
+            .combine("usage2", usages)
+            .filter([](const ParamRecord& params) {
+                const auto usage1 = valueAs<uint64_t>(*findParam(params, "usage1"));
+                const auto usage2 = valueAs<uint64_t>(*findParam(params, "usage2"));
+                return usage1 <= usage2;
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureUsage usage1 = t.param<WGPUTextureUsage>("usage1");
+        const WGPUTextureUsage usage2 = t.param<WGPUTextureUsage>("usage2");
+        const WGPUTextureUsage usage = usage1 | usage2;
+
+        if (usage & WGPUTextureUsage_TransientAttachment) {
+            t.skipIfTransientAttachmentNotSupported();
+        }
+
+        const bool isValid =
+            usage != 0 &&
+            (usage & ~kAllTextureUsages) == 0 &&
+            ((usage & WGPUTextureUsage_TransientAttachment) == 0 ||
+             usage == (WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TransientAttachment));
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size.width = 1;
+        desc.size.height = 1;
+        desc.size.depthOrArrayLayers = 1;
+        desc.format = WGPUTextureFormat_RGBA8Unorm;
+        desc.usage = usage;
+
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !isValid);
+    });
+
+CTS_TEST(g, "new_usages")
+    .desc("Valid usages exposed by GPUTextureUsage should be accepted by createTexture().")
+    .params([](ParamsBuilder u) {
+        return u.combine("usage", newTextureUsageValues())
+            .filter([](const ParamRecord& params) {
+                const auto usage = static_cast<WGPUTextureUsage>(valueAs<uint64_t>(*findParam(params, "usage")));
+                return isValidTextureUsageCombination(usage);
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureUsage usage = t.param<WGPUTextureUsage>("usage");
+        constexpr WGPUTextureUsage exposedUsages = kAllTextureUsages;
+        const bool success = (usage & exposedUsages) == usage;
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size.width = 1;
+        desc.size.height = 1;
+        desc.size.depthOrArrayLayers = 1;
+        desc.format = WGPUTextureFormat_RGBA8Unorm;
+        desc.usage = usage;
+
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
 
 CTS_TEST(g, "sample_count,1d_2d_array_3d")
     .desc("Test that 1d, 2d array, and 3d multisampled textures are invalid.")

@@ -172,4 +172,45 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
+## F-007 — wgpu-native aborts on bogus and transient texture-usage bits
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu or Dawn. Same
+  eager-panic class as [F-001](#f-001--wgpu-native-aborts-on-an-invalid-buffer-usage-bit) (which was the
+  *buffer* analog).
+- **Found by:** `webgpu:api,validation,createTexture:{usage,new_usages}` (Texture T5). **yawgpu and Dawn
+  handle the same inputs without aborting; wgpu-native aborts on 16 cases**, isolating it to the backend.
+- **Observed on wgpu-native — two abort triggers in `createTexture` usage handling:**
+  - **Bogus usage bit** `kSomeBogusTextureUsage = 0x40000000` (the 8 `usage` cases where it appears):
+    wgpu-native **panics** instead of returning a validation error — identical to F-001's bogus
+    *buffer* usage.
+  - **`TransientAttachment` (0x20)** in any combination (7 `usage` cases + the 1 `new_usages` case
+    `usage = 0x30`): wgpu-native **panics**, including on the **valid** `RenderAttachment |
+    TransientAttachment` combination that yawgpu and Dawn create successfully — so wgpu-native cannot
+    create a transient-attachment texture at all here.
+- **Expected (WebGPU):** an out-of-range usage bit, or an invalid transient combination, is a
+  **validation error**; a valid `RENDER|TRANSIENT` texture should be **created**. Never a process abort.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; the 16 cases are
+  in `expectations/wgpu-native.txt` (contained crashes), so a `--isolate --expectations` run over
+  `createTexture:*` exits 0; yawgpu and Dawn need no entries.
+
+---
+
+## F-008 — yawgpu under-validates transient texture-usage combinations
+
+- **Backend:** yawgpu (`55ac04d`). **Not** present in wgpu-native or Dawn.
+- **Found by:** `webgpu:api,validation,createTexture:usage` (Texture T5). wgpu-native (where these
+  inputs abort, see F-007) aside, **Dawn rejects the invalid combinations and yawgpu does not** —
+  isolating the gap to yawgpu's validation.
+- **Observed on yawgpu:** the **6** invalid combinations that include `TransientAttachment` but are not
+  exactly `RenderAttachment | TransientAttachment` — i.e. transient alone and transient combined with
+  `CopySrc` / `CopyDst` / `TextureBinding` / `StorageBinding` — are **accepted without a validation
+  error**. (yawgpu does correctly accept the *valid* `RENDER|TRANSIENT` combination.)
+- **Expected (WebGPU):** `TransientAttachment` is only valid together with `RenderAttachment` (and no
+  other usage); every other transient combination must raise a validation error, as Dawn does.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 6 cases are in
+  `expectations/yawgpu.txt`, so a `--isolate --expectations` run over `createTexture:*` exits 0;
+  wgpu-native and Dawn need no entries.
+
+---
+
 _Add new findings as `F-00N` with the same fields._

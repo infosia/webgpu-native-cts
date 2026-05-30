@@ -334,3 +334,11 @@ webgpu:api,validation,createTexture:texture_size,3d_texture,uncompressed_format:
 webgpu:api,validation,createTexture:texture_size,3d_texture,uncompressed_format:format=21
 webgpu:api,validation,createTexture:texture_size,3d_texture,uncompressed_format:format=29
 webgpu:api,validation,createTexture:texture_size,3d_texture,uncompressed_format:format=30
+
+# T5: yawgpu accepts invalid transient texture usage combinations without a validation error.
+webgpu:api,validation,createTexture:usage:usage1=0;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=1;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=2;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=4;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=8;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=32;usage2=32

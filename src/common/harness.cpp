@@ -419,6 +419,10 @@ void GpuTest::expectMapAsync(WGPUBuffer buffer, WGPUMapMode mode, bool expectSuc
     }
 }
 
+void GpuTest::skipIfTransientAttachmentNotSupported() {
+    // The C headers expose WGPUTextureUsage_TransientAttachment on all supported backends.
+}
+
 void GpuTest::skipIfTextureFormatNotSupported(WGPUTextureFormat format) {
     const TextureFormatInfo& info = textureFormatInfo(format);
     if (info.hasRequiredFeature && !wgpuDeviceHasFeature(device(), info.requiredFeature)) {

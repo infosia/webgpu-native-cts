@@ -29,3 +29,21 @@ webgpu:api,validation,encoding,cmds,clearBuffer:buffer_state:bufferState=2
 webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=0;dstBufferState=2
 webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=2;dstBufferState=0
 webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=2;dstBufferState=2
+
+# T5: wgpu-native aborts on transient texture usages and bogus texture usage bits before validation can be observed.
+webgpu:api,validation,createTexture:usage:usage1=0;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=0;usage2=1073741824
+webgpu:api,validation,createTexture:usage:usage1=1;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=1;usage2=1073741824
+webgpu:api,validation,createTexture:usage:usage1=2;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=2;usage2=1073741824
+webgpu:api,validation,createTexture:usage:usage1=4;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=4;usage2=1073741824
+webgpu:api,validation,createTexture:usage:usage1=8;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=8;usage2=1073741824
+webgpu:api,validation,createTexture:usage:usage1=16;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=16;usage2=1073741824
+webgpu:api,validation,createTexture:usage:usage1=32;usage2=32
+webgpu:api,validation,createTexture:usage:usage1=32;usage2=1073741824
+webgpu:api,validation,createTexture:usage:usage1=1073741824;usage2=1073741824
+webgpu:api,validation,createTexture:new_usages:usage=48

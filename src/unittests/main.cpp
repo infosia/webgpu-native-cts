@@ -4,6 +4,7 @@
 
 #include "common/query.h"
 #include "cts/test.h"
+#include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
 
 namespace {
@@ -92,6 +93,20 @@ int main() {
         require(cts::stringifyValue(cts::Value("abc")) == "\"abc\"", "string stringify");
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
+        require(cts::kTextureUsages.size() == 6, "texture usages count");
+        require(cts::kAllTextureUsages == 0x3F, "all texture usages bits");
+        require((cts::kSomeBogusTextureUsage & cts::kAllTextureUsages) == 0, "bogus texture usage disjoint");
+        require(!cts::isValidTextureUsageCombination(0), "zero texture usage invalid");
+        require(cts::isValidTextureUsageCombination(WGPUTextureUsage_CopySrc), "copy-src texture usage valid");
+        require(!cts::isValidTextureUsageCombination(WGPUTextureUsage_TransientAttachment),
+                "transient texture usage alone invalid");
+        require(cts::isValidTextureUsageCombination(WGPUTextureUsage_RenderAttachment |
+                                                    WGPUTextureUsage_TransientAttachment),
+                "transient render attachment texture usage valid");
+        require(cts::isValidTextureUsageCombination(WGPUTextureUsage_CopySrc |
+                                                    WGPUTextureUsage_RenderAttachment),
+                "copy-src render attachment texture usage valid");
+        require(!cts::isValidTextureUsageCombination(cts::kSomeBogusTextureUsage), "bogus texture usage invalid");
         require(!cts::kUncompressedTextureFormats.empty(), "uncompressed texture formats non-empty");
         require(cts::kUncompressedTextureFormats.size() == 49, "uncompressed texture format count");
         require(cts::kRegularTextureFormats.size() == 43, "regular texture format count");
