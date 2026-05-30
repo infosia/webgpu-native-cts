@@ -37,8 +37,9 @@ Harness pieces (minimum viable):
 - Tree: build from registry; `--list` / `--list-cases`.
 - Fixture: `Fixture` + `GpuTest` with pooled device; subcase iteration; cleanup tracking;
   per-subcase failure isolation (C++ exception boundary around each subcase).
-- Async→sync: `waitFuture`, `requestAdapterSync`, `requestDeviceSync`, error-scope sync helpers;
-  uncaptured-error routing to current fixture.
+- Async→sync: capability-gated `waitFuture` (WaitAny path) **and** `pumpUntil` (ProcessEvents-poll
+  path, used by wgpu-native — Phase 0 left `waitFuture` as a placeholder); `requestAdapterSync`,
+  `requestDeviceSync`, error-scope sync helpers; uncaptured-error routing to current fixture.
 - Assertions: `t.expect`, `t.fail`, `t.skip`, `t.expectValidationError(lambda, shouldError)`.
 - Runner: query → tree → run → text report; non-zero exit on failure.
 
