@@ -26,7 +26,7 @@ target this revision.
 
 ## Pinned canonical WebGPU headers
 
-The C API both backends implement. Tests are written against this header.
+The C API all three backends implement. Tests are written against this header.
 
 | Field | Value |
 |-------|-------|
@@ -35,10 +35,11 @@ The C API both backends implement. Tests are written against this header.
 | Commit date | 2026-03-19 |
 | Source | wgpu-native submodule `ffi/webgpu-headers` (`7d3186c`) |
 
-This is the revision vendored under `third_party/webgpu-headers/` (planned). Dawn regenerates its
-own header from its generator; we treat the webgpu-native/webgpu-headers revision above as the
-reference for struct/enum/function shapes and reconcile any Dawn drift in the backend shim
-(see [03-webgpu-c-abstraction §6](03-webgpu-c-abstraction.md)).
+This is the revision vendored under `third_party/webgpu-headers/` (planned). Each backend ships its
+own copy of the canonical header (wgpu-native and yawgpu both under `ffi/webgpu-headers/webgpu.h`;
+Dawn regenerates its own from its generator). We treat the webgpu-native/webgpu-headers revision
+above as the reference for struct/enum/function shapes and reconcile any per-backend drift in the
+backend shim (see [03-webgpu-c-abstraction §6](03-webgpu-c-abstraction.md)).
 
 ## Backends under test
 
@@ -46,10 +47,11 @@ Recorded for reproducibility of conformance results. Not a hard pin — CI may t
 but the versions a given results set was produced against should be noted alongside that result
 set (e.g. in an `--expectations` file header).
 
-| Backend | Version observed (local) | Notes |
-|---------|--------------------------|-------|
-| wgpu-native | `v29.0.0.0-8-g9176708` | local `../wgpu-native` checkout |
-| Dawn | `802f147f1fb7ab972f87f3e9f95098e0f4b5077b` (2026-05-15) | local `../../C/dawn` checkout |
+| Backend | Repo | Version observed (local) | License | Notes |
+|---------|------|--------------------------|---------|-------|
+| wgpu-native | github.com/gfx-rs/wgpu-native | `v29.0.0.0-8-g9176708` | MIT / Apache-2.0 | harness bring-up reference |
+| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `7ac36c61aa44b34fab1db0ae4672b10f70982ff0` (2026-05-30) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h` |
+| Dawn | dawn.googlesource.com/dawn | `802f147f1fb7ab972f87f3e9f95098e0f4b5077b` (2026-05-15) | BSD-3-Clause / Apache-2.0 | C++ reference impl |
 
 ## Re-baselining process
 

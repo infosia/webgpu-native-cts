@@ -65,17 +65,37 @@ assertions, the fixture lifecycle, and the runner — i.e. all the load-bearing 
 
 ---
 
-## Phase 2 — Second backend + hardening
+## Phase 2 — yawgpu (primary subject) + hardening
 
-**Goal:** the same slice runs against **Dawn**; the abstraction's rough edges are settled.
+**Goal:** the slice runs against **yawgpu**, the implementation this suite chiefly validates; the
+abstraction's rough edges are settled.
 
-- Dawn backend shim; `CTS_BACKEND=dawn` builds and runs the Phase 1 tests.
-- Resolve WaitAny/timeout differences; exercise the ProcessEvents fallback on both backends.
-- Skip-vs-fail policy validated where backends differ (optional features/limits).
+- yawgpu backend shim (`backend_yawgpu.cpp`); `CTS_BACKEND=yawgpu` builds and runs the Phase 1
+  tests; `--yawgpu-backend metal|vulkan` selects the GPU backend.
+- Resolve WaitAny/timeout differences vs the wgpu-native bring-up; exercise the ProcessEvents
+  fallback on both.
+- Skip-vs-fail policy validated where backends differ (optional features/limits); since yawgpu is
+  young, expect more skips/fails — capture them in a yawgpu `--expectations` file so regressions
+  are visible without failing the run.
 - `--expectations` file support; first per-backend known-failure lists.
 - `--format json` and merge-able results.
 
-**Exit:** Phase 1 tests green (or explicitly skipped) on both backends; CI matrix runs them.
+**Exit:** Phase 1 tests run on yawgpu with results triaged (pass / explicit skip / tracked
+expected-fail); CI runs wgpu-native + yawgpu.
+
+---
+
+## Phase 2b — Dawn
+
+**Goal:** the slice also runs against **Dawn** (the C++ reference), completing the three-backend
+matrix.
+
+- Dawn backend shim (`backend_dawn.cpp`, proc table if required); `CTS_BACKEND=dawn` builds and
+  runs the Phase 1 tests.
+- Per-backend expectations for Dawn; CI matrix over all three backends.
+
+**Exit:** Phase 1 tests green (or explicitly skipped) on wgpu-native and Dawn, triaged on yawgpu;
+CI matrix runs all three.
 
 ---
 
@@ -90,7 +110,7 @@ assertions, the fixture lifecycle, and the runner — i.e. all the load-bearing 
 - Port files area-by-area (buffers, textures, encoding, render pipeline, compute pipeline, bind
   groups, queue), tracking N/A tests (WebIDL TypeError cases) explicitly.
 
-**Exit:** a substantial, tracked fraction of `api/validation` ported and green on both backends.
+**Exit:** a substantial, tracked fraction of `api/validation` ported and green on all three backends.
 
 ---
 
@@ -104,7 +124,7 @@ assertions, the fixture lifecycle, and the runner — i.e. all the load-bearing 
 - Port representative operation tests (buffer copies, `writeBuffer`, simple compute, simple
   render-to-texture + readback).
 
-**Exit:** operation tests with deterministic results pass on both backends.
+**Exit:** operation tests with deterministic results pass on all three backends.
 
 ---
 
@@ -115,7 +135,7 @@ assertions, the fixture lifecycle, and the runner — i.e. all the load-bearing 
 - `createShaderModule` + compilation-info handling; expect creation error vs success.
 - Port a slice of `shader/validation/` (parsing/type-checking cases that don't need execution).
 
-**Exit:** a slice of shader validation green on both backends.
+**Exit:** a slice of shader validation green on all three backends.
 
 ---
 

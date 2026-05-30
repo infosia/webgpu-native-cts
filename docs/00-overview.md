@@ -37,7 +37,7 @@ JavaScript runtime. The tests are C++ that drive the WebGPU **C** API directly.
 
 | Topic | Decision | Rationale |
 |-------|----------|-----------|
-| Target implementation | **Both** wgpu-native and Dawn, link-agnostic against canonical `webgpu.h`; differences behind a backend shim | Maximizes value; the C API is shared between the two |
+| Target implementation | **Three backends** — wgpu-native, yawgpu, and Dawn — link-agnostic against canonical `webgpu.h`; differences behind a backend shim. Bring up on wgpu-native, then make yawgpu the primary subject, then Dawn | Maximizes value; the C API is shared across all three. yawgpu ([github.com/infosia/yawgpu](https://github.com/infosia/yawgpu)) is the implementation this suite is chiefly built to validate |
 | Language | **C++20 throughout** (tests and harness); tests call the WebGPU **C** API | The upstream framework is OO/fluent/closure-based; C++ ports to it almost 1:1, maximizing fidelity. (Originally scoped as C; relaxed to C++ for the test surface.) |
 | Harness style | **Custom C++ framework mirroring the upstream framework 1:1**; **not** hosted on GoogleTest/Catch2/doctest/Criterion | The CTS case/subcase split + query-string identity + the params builder are not provided by any general framework and conflict with their models; porting *is* re-implementing that framework. General frameworks are reused only for self-tests and CI output formats |
 | Initial scope | **Harness + vertical slice**: build the framework (registry, params, query, fixtures, runner), then port a handful of representative `api/validation` tests end-to-end | Proves the architecture before scaling out |
@@ -75,7 +75,7 @@ See [07-roadmap](07-roadmap.md) for phasing.
 
 ## Glossary
 
-- **Backend** — the WebGPU implementation under test (wgpu-native or Dawn).
+- **Backend** — the WebGPU implementation under test (wgpu-native, yawgpu, or Dawn).
 - **Fixture** — per-test object providing the device/queue and helpers; upstream `GPUTest`.
 - **Case / Subcase** — a parameterized instance of a test; cases are addressable by query,
   subcases are inner iterations sharing one fixture setup. (Mirrors upstream.)

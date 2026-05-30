@@ -4,7 +4,7 @@ The upstream CTS is written with `async`/`await` over the WebGPU JS API. The Web
 models the same operations as `WGPUFuture` values resolved through callbacks driven by
 `wgpuInstanceWaitAny` / `wgpuInstanceProcessEvents`. Straight-line C++ test code needs
 **synchronous wrappers**. This document specifies those wrappers, the error-scope helpers, and
-the backend shim that lets one test binary build against wgpu-native or Dawn.
+the backend shim that lets one test binary build against wgpu-native, yawgpu, or Dawn.
 
 This is the layer with no direct upstream analog; it is the most important thing to get right.
 The harness and tests are C++20, so the wrappers use values/`std::optional`, RAII, and lambdas
@@ -239,27 +239,30 @@ pooled, long-lived devices.
 
 ## 6. Backend shim
 
-Both backends implement the canonical `webgpu.h`, but a few things differ at the edges:
+All three backends implement the canonical `webgpu.h`, but a few things differ at the edges:
 
-| Concern | wgpu-native | Dawn | Shim approach |
-|---------|-------------|------|---------------|
-| Canonical header | `ffi/webgpu-headers/webgpu.h` | `include/webgpu/webgpu.h` (generated) | `cts/webgpu.h` includes the active backend's canonical header via an include path chosen by CMake |
-| Instance creation extras | `wgpuCreateInstance` (+ `wgpu.h` native extensions) | `wgpuCreateInstance` / `dawnProcSetProcs` proc table | `cts::createInstance()` wraps creation; Dawn path sets the proc table if required |
-| Native feature enums | `WGPUNativeFeature` (`wgpu.h`) | C++-only native extensions | Native-only features accessed through optional `cts/backend_wgpu.h` / `cts/backend_dawn.h`; portable tests avoid them |
-| Logging/callbacks setup | `wgpuSetLogCallback` (native) | Dawn toggles | Optional, behind the backend header |
-| Adapter enumeration nuances | impl-specific defaults | impl-specific defaults | normalized in `cts::requestAdapterSync` defaults |
+| Concern | wgpu-native | yawgpu | Dawn | Shim approach |
+|---------|-------------|--------|------|---------------|
+| Canonical header | `ffi/webgpu-headers/webgpu.h` | `ffi/webgpu-headers/webgpu.h` | `include/webgpu/webgpu.h` (generated) | `cts/webgpu.h` includes the active backend's canonical header via an include path chosen by CMake |
+| Instance creation extras | `wgpuCreateInstance` (+ `wgpu.h` native extensions) | `wgpuCreateInstance` (+ `yawgpu.h`: chain `YaWGPUInstanceBackendSelect` on the instance descriptor to pick Metal/Vulkan/GLES) | `wgpuCreateInstance` / `dawnProcSetProcs` proc table | `cts::createInstance()` wraps creation; yawgpu path optionally chains the backend-select struct; Dawn path sets the proc table if required |
+| Native feature / vendor enums | `WGPUNativeFeature` (`wgpu.h`) | `YAWGPU_*` / `YAWGPU_STYPE_*` (`yawgpu.h`) | C++-only native extensions | Vendor-only features accessed through optional `cts/backend_wgpu.h` / `cts/backend_yawgpu.h` / `cts/backend_dawn.h`; portable tests avoid them |
+| Logging/callbacks setup | `wgpuSetLogCallback` (native) | impl-specific | Dawn toggles | Optional, behind the backend header |
+| Adapter enumeration nuances | impl-specific defaults | impl-specific defaults | impl-specific defaults | normalized in `cts::requestAdapterSync` defaults |
 
 Design:
 
 - `include/cts/webgpu.h` re-exports the canonical `webgpu.h` and declares only spec types/calls.
 - `src/common/webgpu/backend.h` declares `cts::createInstance`, `cts::backendName`, and capability
   flags (`cts::backendSupportsTimeoutWaitAny()`).
-- Two implementations: `backend_wgpu.cpp`, `backend_dawn.cpp`; CMake compiles exactly one based on
-  `CTS_BACKEND`.
+- One implementation per backend: `backend_wgpu.cpp`, `backend_yawgpu.cpp`, `backend_dawn.cpp`;
+  CMake compiles exactly one based on `CTS_BACKEND`.
 - **Portable tests include only `cts/*.h`** and the canonical `webgpu.h`. A test that needs a
-  native extension includes the backend-specific header and is compiled only for that backend
-  (guarded by `#ifdef CTS_BACKEND_WGPU` etc.). Such tests are excluded from the other backend's
-  run and reported as N/A.
+  vendor extension includes the backend-specific header and is compiled only for that backend
+  (guarded by `#ifdef CTS_BACKEND_WGPU` / `CTS_BACKEND_YAWGPU` / `CTS_BACKEND_DAWN`). Such tests are
+  excluded from the other backends' runs and reported as N/A.
+- yawgpu selects its GPU backend (Metal/Vulkan) at its own build time (cargo features) and/or at
+  runtime via `YaWGPUInstanceBackendSelect`; the runner exposes `--yawgpu-backend metal|vulkan` for
+  the latter (a no-op for the other backends).
 
 ### Conformance philosophy regarding backend differences
 
@@ -291,6 +294,6 @@ recreated on loss. Teardown releases pooled devices, the adapter, then the insta
   `std::string`. Confirm length handling and truncation are sane.
 - **Uncaptured-error timing**: when exactly does each backend deliver uncaptured errors relative
   to `submit`/`processEvents`? The error-scope helpers must drain enough for the assertion to be
-  reliable. Validate against both backends with a deliberately-invalid operation.
+  reliable. Validate against all three backends with a deliberately-invalid operation.
 - **Pooled device + error scope interaction**: ensure a leftover error scope or pending error
   from a prior case cannot leak into the next (reset/drain on case boundaries).

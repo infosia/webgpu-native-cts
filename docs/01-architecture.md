@@ -21,8 +21,8 @@ TypeScript CTS maps onto the C++ implementation.
                           ┌──────────────────────────────────────────────┐
                           │  backend shim (selects header + entry points) │
                           └──────────────────────────────────────────────┘
-                                    │                         │
-                              wgpu-native (.a/.so)        Dawn (.a/.so)
+                              │             │             │
+                    wgpu-native (.a/.so)  yawgpu (.a/.so)  Dawn (.a/.so)
 ```
 
 The test author writes C++ in `src/webgpu/**/*.spec.cpp`. Each spec file *registers* a test

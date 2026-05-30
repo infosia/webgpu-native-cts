@@ -204,4 +204,4 @@ how upstream tracks `.unimplemented()` tests.
 4. Replace `await`/Promise patterns with the sync wrappers ([03](03-webgpu-c-abstraction.md)).
 5. Mark untranslatable tests `.unimplemented()` or omit + note in `COVERAGE.md`.
 6. `gen_listings`; run `cts --list 'webgpu:<file>:*'` to confirm the case count matches upstream.
-7. Run against both backends; record skips vs failures.
+7. Run against the backends (wgpu-native, yawgpu, Dawn); record skips vs failures per backend.

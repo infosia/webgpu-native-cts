@@ -21,17 +21,26 @@ implementations through a JS engine bound to native code:
 
 Both approaches require shipping and maintaining a JavaScript runtime and a binding layer.
 This project takes a different path: the tests are written directly against the C API that
-both [wgpu-native](https://github.com/gfx-rs/wgpu-native) and
+implementations such as [wgpu-native](https://github.com/gfx-rs/wgpu-native),
+[yawgpu](https://github.com/infosia/yawgpu), and
 [Dawn](https://dawn.googlesource.com/dawn) export, so the test binary links straight against
 the implementation under test.
 
 ## Target implementations
 
 Tests are written against the **canonical** `webgpu.h` from
-[webgpu-native/webgpu-headers](https://github.com/webgpu-native/webgpu-headers), which both
-backends implement. The suite is **link-agnostic**: a build-time option selects whether to
-link against wgpu-native or Dawn. Implementation-specific differences (native feature enums,
-instance-creation extras) are isolated behind a thin backend shim.
+[webgpu-native/webgpu-headers](https://github.com/webgpu-native/webgpu-headers), which all of the
+target backends implement. The suite is **link-agnostic**: a build-time option (`CTS_BACKEND`)
+selects which implementation to link against. The three initial targets:
+
+- **wgpu-native** — mature Rust implementation; used as the harness bring-up reference.
+- **yawgpu** ([github.com/infosia/yawgpu](https://github.com/infosia/yawgpu)) — a from-scratch
+  Rust implementation of `webgpu.h` (Metal/Vulkan backends; vendor extensions in a companion
+  `yawgpu.h`); the primary conformance subject this suite is built to validate.
+- **Dawn** — the C++ reference implementation; added after the vertical slice.
+
+Implementation-specific differences (native feature enums, instance-creation extras like
+yawgpu's `YaWGPUInstanceBackendSelect`) are isolated behind a thin backend shim.
 
 ## Language
 

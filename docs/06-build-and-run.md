@@ -29,16 +29,16 @@ Language: `CXX` (C++20) only. Tests and harness are all C++; tests call the WebG
 A single cache variable selects the implementation under test:
 
 ```bash
-cmake -S . -B build -DCTS_BACKEND=wgpu-native   # or: -DCTS_BACKEND=dawn
+cmake -S . -B build -DCTS_BACKEND=wgpu-native   # or: yawgpu | dawn
 ```
 
-`CTS_BACKEND` controls:
+`CTS_BACKEND` ∈ `{wgpu-native, yawgpu, dawn}` controls:
 
 - which canonical `webgpu.h` include path is used,
-- which backend shim TU is compiled (`backend_wgpu.cpp` vs `backend_dawn.cpp`,
+- which backend shim TU is compiled (`backend_wgpu.cpp` / `backend_yawgpu.cpp` / `backend_dawn.cpp`,
   see [03-webgpu-c-abstraction §6](03-webgpu-c-abstraction.md)),
-- a `CTS_BACKEND_WGPU` / `CTS_BACKEND_DAWN` compile definition (for the rare backend-specific
-  test), and
+- a `CTS_BACKEND_WGPU` / `CTS_BACKEND_YAWGPU` / `CTS_BACKEND_DAWN` compile definition (for the rare
+  backend-specific test), and
 - which library the runner links.
 
 ### Locating the backend library
@@ -79,9 +79,31 @@ shared lib — sets an rpath / copies the dylib next to `build/cts`. (wgpu-nativ
 dir layout differs slightly between `make` and `cargo`; the exact `CTS_WGPU_NATIVE_DIR` to pass for
 the local checkout is pinned in the Phase 0 task spec, `specs/phase0-build-skeleton.md`.)
 
-For **Dawn** (`../../C/dawn`, added after the slice): it exposes a `webgpu_dawn` /
-`dawn::webgpu_dawn` CMake target and `include/webgpu/webgpu.h`; the `find_library`/header paths
-differ accordingly and are captured when Dawn is wired.
+**yawgpu** (added right after the slice; the primary conformance subject). yawgpu
+([github.com/infosia/yawgpu](https://github.com/infosia/yawgpu)) is a Rust crate
+(`crate-type = ["cdylib", "staticlib", "rlib"]`) that, like wgpu-native, exposes the canonical
+`webgpu.h` plus a vendor header `yawgpu.h`. Build it with cargo, selecting a GPU backend feature:
+
+```
+$CTS_YAWGPU_DIR/
+  include/webgpu-headers/webgpu.h   # canonical C API   (yawgpu/ffi/webgpu-headers/webgpu.h)
+  include/webgpu-headers/yawgpu.h   # vendor extensions
+  lib/libyawgpu.a  (or .dylib/.so)  # from cargo build
+```
+
+```bash
+# In the yawgpu checkout (macOS → metal; Linux → vulkan):
+cargo build --release --features metal        # produces target/release/libyawgpu.{a,dylib}
+# Point CTS at a dir laid out as above:
+cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=/abs/path/to/yawgpu/dist
+```
+
+The runner exposes `--yawgpu-backend metal|vulkan` to select the GPU backend at runtime via
+`YaWGPUInstanceBackendSelect` (ignored by the other backends).
+
+For **Dawn** (added after yawgpu): it exposes a `webgpu_dawn` / `dawn::webgpu_dawn` CMake target
+and `include/webgpu/webgpu.h`; the `find_library`/header paths differ accordingly and are captured
+when Dawn is wired.
 
 ---
 
@@ -139,6 +161,7 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 | `--verbose` / `--quiet` | log level |
 | `--power-preference {low,high}` | adapter selection |
 | `--force-fallback-adapter` | request the fallback adapter |
+| `--yawgpu-backend {metal,vulkan}` | (yawgpu only) select its GPU backend at runtime; ignored otherwise |
 | `--adapter-name <substr>` | pick an adapter by name substring |
 | `--enable-feature <name>` | request an optional feature for device creation |
 | `--future-timeout-ms <n>` | timeout for async-wait wrappers (default 5000) |
@@ -179,7 +202,8 @@ self-tests include the **param-stringification parity** table against upstream-d
 
 ## 7. CI shape (later)
 
-- Matrix over `CTS_BACKEND ∈ {wgpu-native, dawn}` and OS.
+- Matrix over `CTS_BACKEND ∈ {wgpu-native, yawgpu, dawn}` and OS (yawgpu: Metal on macOS, Vulkan on
+  Linux).
 - Build, run `cts_unittests`, then run the suite with an `--expectations` file capturing known
   failures/skips per backend.
 - `--format json` output merged across shards (the result model is merge-able).
@@ -194,9 +218,10 @@ selection options exist to make CI deterministic where a software adapter is ava
 
 ## 8. Platform notes
 
-- **macOS** (this workspace): Metal backend via either implementation; link against the
-  backend's `.dylib`/`.a`. The async wrappers use `wgpuInstanceWaitAny`/`ProcessEvents`; verify
-  timeout support on Metal for both backends (see [03 §8](03-webgpu-c-abstraction.md)).
+- **macOS** (this workspace): Metal backend on any of the three implementations (yawgpu via its
+  `metal` feature); link against the backend's `.dylib`/`.a`. The async wrappers use
+  `wgpuInstanceWaitAny`/`ProcessEvents`; verify timeout support on Metal for each backend (see
+  [03 §8](03-webgpu-c-abstraction.md)).
 - **Linux/Windows**: same CMake flow; backend libraries differ. MSVC is a supported compiler;
   compiling the `.spec.cpp` files directly into the executable keeps their static initializers on
   every compiler without `--whole-archive`/`/WHOLEARCHIVE` tricks (see
