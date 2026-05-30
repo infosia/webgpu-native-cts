@@ -104,4 +104,36 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
+## F-005 — yawgpu mishandles several valid uncompressed texture formats
+
+- **Backend:** yawgpu (`55ac04d`). **Not** present in wgpu-native or Dawn — this is the **first
+  finding against yawgpu** (the primary conformance subject); F-001..F-004 were all wgpu-native.
+- **Found by:** `webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:*`
+  (Texture T1). The test creates a 1×1 texture (`usage = TEXTURE_BINDING`) for every uncompressed
+  format on every dimension and asserts a validation error **only** when the dimension/format pair is
+  incompatible. **wgpu-native and Dawn pass all 168 non-skipped cases; yawgpu fails 32 and aborts 2**,
+  isolating the behavior to yawgpu.
+- **Observed on yawgpu (two sub-defects):**
+  - **Rejects 8 valid core color formats as if `Undefined`** — `R16Uint/Sint/Float`,
+    `RG16Uint/Sint/Float`, `RGB10A2Uint`, `RGB10A2Unorm` (`WGPUTextureFormat` enum values
+    `7,8,9,19,20,21,29,30`). `createTexture` raises a validation error where the texture should be
+    created successfully → **32 fails** (8 formats × 4 dimension values). The neighbouring 8-bit,
+    32-bit, RGBA16, and packed-float formats are accepted, so the gap is specific to these enum
+    values, not a whole size class.
+  - **Aborts on `Depth24PlusStencil8`** (`enum 47`) when the dimension is *compatible*
+    (`undefined`/`2d`): `createTexture` panics instead of succeeding → **2 crashes**. For `1d`/`3d`
+    yawgpu correctly rejects it (depth/stencil is incompatible with those dimensions) *before*
+    reaching the crash path, so those two cases pass.
+- **Expected (WebGPU):** all nine are valid formats; `createTexture` with `TEXTURE_BINDING` on a
+  compatible dimension must **succeed** (no validation error, no abort). wgpu-native and Dawn do.
+- **Not an ABI artifact:** the `WGPUTextureFormat` enum mapping is **byte-identical** between the
+  wgpu-native and yawgpu `webgpu-headers/webgpu.h` (verified by diff), so the same `format=N` value
+  denotes the same format on both — this is a genuine format-handling gap in yawgpu, not an
+  enum/ABI mismatch in how the suite passes the value.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 34 cases are in
+  `expectations/yawgpu.txt` (32 fails + 2 contained crashes), so a `--isolate --expectations` run
+  over `createTexture:*` exits 0 on yawgpu (`xfail=34`); wgpu-native and Dawn need no entries.
+
+---
+
 _Add new findings as `F-00N` with the same fields._

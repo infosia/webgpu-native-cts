@@ -34,6 +34,7 @@ class GpuTest : public Fixture {
     WGPUBuffer createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc);
     WGPUBuffer getErrorBuffer();
     WGPUSampler createSamplerTracked(const WGPUSamplerDescriptor& desc);
+    WGPUTexture createTextureTracked(const WGPUTextureDescriptor& desc);
     WGPUBindGroupLayout createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc);
     WGPUPipelineLayout createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc);
     WGPUCommandEncoder createCommandEncoderTracked();
@@ -44,10 +45,13 @@ class GpuTest : public Fixture {
                         bool expectSuccess,
                         size_t offset = 0,
                         size_t size = WGPU_WHOLE_MAP_SIZE);
+    void skipIfTextureFormatNotSupported(WGPUTextureFormat format);
+    bool textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format);
 
   private:
     std::vector<WGPUBuffer> buffers_;
     std::vector<WGPUSampler> samplers_;
+    std::vector<WGPUTexture> textures_;
     std::vector<WGPUBindGroupLayout> bindGroupLayouts_;
     std::vector<WGPUPipelineLayout> pipelineLayouts_;
     std::vector<WGPUCommandEncoder> encoders_;

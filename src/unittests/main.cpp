@@ -3,6 +3,7 @@
 
 #include "common/query.h"
 #include "cts/test.h"
+#include "webgpu/texture_format.h"
 
 namespace {
 
@@ -52,6 +53,12 @@ int main() {
         require(cts::stringifyValue(cts::Value("abc")) == "\"abc\"", "string stringify");
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
+        require(!cts::kUncompressedTextureFormats.empty(), "uncompressed texture formats non-empty");
+        require(cts::kUncompressedTextureFormats.size() == 49, "uncompressed texture format count");
+        const cts::TextureBlockInfo rgba8 = cts::getBlockInfoForTextureFormat(WGPUTextureFormat_RGBA8Unorm);
+        require(rgba8.blockWidth == 1, "rgba8unorm block width");
+        require(rgba8.blockHeight == 1, "rgba8unorm block height");
+        require(rgba8.bytesPerBlock == 4, "rgba8unorm bytes per block");
 
         cts::Fixture fixture;
         fixture.setParams({{"x", cts::Value::undef()}, {"y", 1}});

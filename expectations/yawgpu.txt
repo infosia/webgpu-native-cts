@@ -1,3 +1,39 @@
 # yawgpu expectations captured against commit 55ac04d64f59f03ed6d066283d400d03cc001575.
 # One full case query per line. Subcase params are not part of CTS query identity.
-# No expected failures are currently listed.
+# T1: yawgpu rejects several uncompressed texture format enum values as Undefined in
+# createTexture dimension/format compatibility validation. depth24plus also aborts in the
+# undefined and 2D dimension cases.
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=7
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=8
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=9
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=19
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=20
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=21
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=29
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=30
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=_undef_;format=47
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=1;format=7
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=1;format=8
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=1;format=9
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=1;format=19
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=1;format=20
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=1;format=21
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=1;format=29
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=1;format=30
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=7
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=8
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=9
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=19
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=20
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=21
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=29
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=30
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=2;format=47
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=3;format=7
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=3;format=8
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=3;format=9
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=3;format=19
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=3;format=20
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=3;format=21
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=3;format=29
+webgpu:api,validation,createTexture:dimension_type_and_format_compatibility:dimension=3;format=30

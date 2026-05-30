@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 0 | 8 | 0 | 0 | 121 |
+| `api/validation` | 129 | 0 | 9 | 0 | 0 | 120 |
 | `api/operation` | 72 | 0 | 0 | 0 | 0 | 72 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **0** | **8** | **16** | **446** | **213** |
+| **Total** | **683** | **0** | **9** | **16** | **446** | **212** |
 
 Notes on the pre-classified rows:
 
@@ -72,6 +72,7 @@ that are no longer `todo` (the area summary covers the rest).
 | `api/validation/createBindGroupLayout.spec.ts` | partial | 2 ported (`duplicate_bindings`, `maximum_binding_limit`) | `visibility*` (validStages/per-stage storage limits), storage-texture/format/multisampled tests | green on **all three** backends (agree; no divergence). New BGL resource type; `b0`/`b1` deviation for the array param; fixture deviation `GpuTest` |
 | `api/validation/createPipelineLayout.spec.ts` | partial | 1 ported (`number_of_bind_group_layouts_exceeds_the_maximum_value`) | `number_of_dynamic_buffers…`, `bind_group_layouts,device_mismatch`, others | green on **all three** backends (agree). New pipeline-layout resource type; fixture deviation `GpuTest` |
 | `api/validation/buffer/mapping.spec.ts` | partial | 5 ported (`mapAsync,usage`, `mapAsync,state,{destroyed,mappedAtCreation,mapped}`, `mapAsync,invalidBuffer`) | `mapAsync,state,mappingPending` (JS timing); other mapping tests (getMappedRange/unmap/ranges) not yet ported | green on **yawgpu and Dawn**. wgpu-native diverges on 3 of the mapAsync tests ([FINDINGS F-003](FINDINGS.md)). `bufferMapSync` + `getErrorBuffer`; fixture deviation `GpuTest` |
+| `api/validation/createTexture.spec.ts` | partial | 2 ported (`sample_count,1d_2d_array_3d`, `dimension_type_and_format_compatibility`) | `dimension_type…` covers the **uncompressed** subset only (49 formats); compressed + the other ~19 createTexture tests + `texture_size,*` (JS array-length defaulting) deferred to T2/T3 | **First texture file.** `sample_count` green on all three. `dimension_type…` (196 cases = 4×49, 28 feature-gated skips) green on **wgpu-native & Dawn**; **yawgpu fails 32 + crashes 2** ([FINDINGS F-005](FINDINGS.md) — first yawgpu defect). New `texture_format.h` (uncompressed table, count parity 49 vs upstream) + `createTextureTracked` + `skipIfTextureFormatNotSupported` + `textureDimensionAndFormatCompatibleForDevice`; fixture deviation `GpuTest` |
 
 ## Maintenance
 

@@ -4,6 +4,7 @@
 
 #include "common/webgpu/backend.h"
 #include "common/webgpu/sync.h"
+#include "webgpu/texture_format.h"
 
 namespace cts {
 namespace {
@@ -179,6 +180,10 @@ void GpuTest::finalize() {
         wgpuSamplerRelease(sampler);
     }
     samplers_.clear();
+    for (WGPUTexture texture : textures_) {
+        wgpuTextureRelease(texture);
+    }
+    textures_.clear();
     for (WGPUPipelineLayout pipelineLayout : pipelineLayouts_) {
         wgpuPipelineLayoutRelease(pipelineLayout);
     }
@@ -255,6 +260,14 @@ WGPUSampler GpuTest::createSamplerTracked(const WGPUSamplerDescriptor& desc) {
     return sampler;
 }
 
+WGPUTexture GpuTest::createTextureTracked(const WGPUTextureDescriptor& desc) {
+    WGPUTexture texture = wgpuDeviceCreateTexture(device(), &desc);
+    if (texture != nullptr) {
+        textures_.push_back(texture);
+    }
+    return texture;
+}
+
 WGPUBindGroupLayout GpuTest::createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc) {
     WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(device(), &desc);
     if (layout != nullptr) {
@@ -324,6 +337,21 @@ void GpuTest::expectMapAsync(WGPUBuffer buffer, WGPUMapMode mode, bool expectSuc
     if (status == WGPUMapAsyncStatus_Success) {
         fail("expected mapAsync failure");
     }
+}
+
+void GpuTest::skipIfTextureFormatNotSupported(WGPUTextureFormat format) {
+    const TextureFormatInfo& info = textureFormatInfo(format);
+    if (info.hasRequiredFeature && !wgpuDeviceHasFeature(device(), info.requiredFeature)) {
+        skip("texture format requires an unsupported feature");
+    }
+}
+
+bool GpuTest::textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format) {
+    if (dimension == WGPUTextureDimension_Undefined || dimension == WGPUTextureDimension_2D) {
+        return true;
+    }
+    const TextureFormatInfo& info = textureFormatInfo(format);
+    return !(info.blockWidth > 1 || info.hasDepth || info.hasStencil);
 }
 
 } // namespace cts
