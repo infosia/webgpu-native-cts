@@ -13,7 +13,7 @@ The upstream CTS is BSD-3-Clause. Each ported file should:
 - Preserve the upstream `description` text (as the `MakeTestGroup` description arg).
 - Preserve test names and (where possible) case-param names/values so query identities match.
 
-Record the upstream commit being ported against in `docs/UPSTREAM.md` (to be created) so the suite
+Record the upstream commit being ported against in [`docs/UPSTREAM.md`](UPSTREAM.md) so the suite
 tracks a known CTS revision.
 
 ## 1. Structural mapping
@@ -176,7 +176,7 @@ acceptable and documented per file. Prefer this only where unavoidable.
 
 ## 7. Tracking coverage & non-ports
 
-Maintain `docs/COVERAGE.md` (to be created) listing, per upstream file:
+Maintain [`docs/COVERAGE.md`](COVERAGE.md) listing, per upstream file:
 
 - **ported** (file + which tests),
 - **partial** (which tests ported / skipped),

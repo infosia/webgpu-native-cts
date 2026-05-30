@@ -87,6 +87,8 @@ in [`docs/`](docs/). Start with [`docs/00-overview.md`](docs/00-overview.md).
 | [05-porting-guide](docs/05-porting-guide.md) | How to port a `.spec.ts` to a `.spec.cpp` |
 | [06-build-and-run](docs/06-build-and-run.md) | CMake build, backend selection, running, filtering |
 | [07-roadmap](docs/07-roadmap.md) | Phased milestones |
+| [UPSTREAM](docs/UPSTREAM.md) | Pinned upstream CTS / header / backend revisions |
+| [COVERAGE](docs/COVERAGE.md) | Per-area / per-file port status |
 
 ## License
 
