@@ -37,9 +37,9 @@ Harness pieces (minimum viable):
 - Tree: build from registry; `--list` / `--list-cases`.
 - Fixture: `Fixture` + `GpuTest` with pooled device; subcase iteration; cleanup tracking;
   per-subcase failure isolation (C++ exception boundary around each subcase).
-- Async→sync: capability-gated `waitFuture` (WaitAny path) **and** `pumpUntil` (ProcessEvents-poll
-  path, used by wgpu-native — Phase 0 left `waitFuture` as a placeholder); `requestAdapterSync`,
-  `requestDeviceSync`, error-scope sync helpers; uncaptured-error routing to current fixture.
+- Async→sync: `pumpUntil` (ProcessEvents polling — the single wait path; `wgpuInstanceWaitAny` is
+  sidestepped because wgpu-native's panics); `requestAdapterSync`, `requestDeviceSync`, error-scope
+  sync helpers; uncaptured-error routing to current fixture.
 - Assertions: `t.expect`, `t.fail`, `t.skip`, `t.expectValidationError(lambda, shouldError)`.
 - Runner: query → tree → run → text report; non-zero exit on failure.
 
@@ -100,10 +100,9 @@ matrix.
 inputs gracefully**. This differential is the suite's unique value vs yawgpu's own single-backend
 Rust CTS.
 
-**Follow-up (async cleanup):** `backendSupportsTimeoutWaitAny()` is currently dead code (no
-callers); all sync wrappers use `pumpUntil` polling and `waitFuture` is an unimplemented
-placeholder. Either wire the WaitAny path (and make `waitFuture` real, gated by the flag) or drop
-the flag — reconcile [docs/03 §2](03-webgpu-c-abstraction.md) with the code.
+**Follow-up (async cleanup) — done:** the dead `backendSupportsTimeoutWaitAny()` flag and the
+placeholder `waitFuture` were removed; `pumpUntil` (ProcessEvents polling) is the single wait path
+on all three backends. [docs/03 §2](03-webgpu-c-abstraction.md) now matches the code.
 
 ---
 

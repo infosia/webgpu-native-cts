@@ -44,57 +44,30 @@ Async operations the CTS uses (and we must wrap):
 
 ## 2. Synchronous wrappers (`cts/webgpu.h` → `src/common/webgpu/sync.cpp`)
 
-The core primitive: block until an async op completes, with a timeout, pumping the instance. There
-are two paths, chosen by `cts::backendSupportsTimeoutWaitAny()`:
+The core primitive blocks until an async op completes, with a timeout, pumping the instance:
 
 ```cpp
 namespace cts {
-// WaitAny path (backendSupportsTimeoutWaitAny() == true):
-WGPUWaitStatus waitFuture(WGPUInstance instance, WGPUFuture future, uint64_t timeoutNs);
-
-// ProcessEvents-poll path (no usable WaitAny): pump until a caller-owned flag is set.
-// A bare WGPUFuture cannot be polled without WaitAny, so completion is observed via the
-// callback's own `completed` flag, not via the future handle.
+// Poll via wgpuInstanceProcessEvents until a caller-owned `completed` flag (set by the op's
+// callback) is true, or the deadline elapses. A bare WGPUFuture cannot be queried without
+// WaitAny, so completion is observed via the flag, not the future handle.
 WGPUWaitStatus pumpUntil(WGPUInstance instance, const bool* completed, uint64_t timeoutNs);
 }
 ```
 
-Implementation strategy (target design):
+`pumpUntil` is the **single** wait path for every backend (wgpu-native, yawgpu, Dawn). We do
+**not** use `wgpuInstanceWaitAny`: the current wgpu-native build leaves it unimplemented (it
+*panics/aborts* across the FFI rather than returning a status — see [FINDINGS](FINDINGS.md)), while
+`AllowProcessEvents` polling resolves callbacks uniformly on all three backends. A capability-gated
+WaitAny path could be added later if some backend ever needs it (not needed today); an earlier
+`backendSupportsTimeoutWaitAny()` flag and a `waitFuture` placeholder were removed as dead code
+(see [07-roadmap](07-roadmap.md)).
 
-> **Current status (as of Phase 2b):** the sync wrappers ALWAYS use the `pumpUntil` poll path for
-> **every** backend (wgpu-native, yawgpu, **and Dawn** — Dawn polls fine too). The WaitAny path
-> below is **not yet wired**: `backendSupportsTimeoutWaitAny()` has no callers (dead code) and
-> `waitFuture` is a placeholder. This is harmless today but should be reconciled — either implement
-> the WaitAny path gated by the flag (and a real `waitFuture`) or drop the flag. See
-> [07-roadmap Phase 2b follow-up](07-roadmap.md).
+> **Callback mode**: all harness-issued async ops use `WGPUCallbackMode_AllowProcessEvents`. We
+> avoid `AllowSpontaneous` for harness ops so callbacks only fire at well-defined drain points; the
+> device-lost and uncaptured-error callbacks are the exception (§5).
 
-1. **If `backendSupportsTimeoutWaitAny()`** — build a single-element `WGPUFutureWaitInfo` and call
-   `wgpuInstanceWaitAny(instance, 1, &info, timeoutNs)`. If the backend returns
-   `WGPUWaitStatus_UnsupportedTimeout` (some configs only support `timeoutNs == 0`), loop
-   `wgpuInstanceProcessEvents` + `wgpuInstanceWaitAny(..., 0)` until `info.completed` or the
-   deadline.
-2. **Otherwise** — go straight to `pumpUntil`: loop `wgpuInstanceProcessEvents(instance)` until the
-   wrapper's own `completed` flag (set by its callback) is true or the deadline elapses. **Do not
-   call `wgpuInstanceWaitAny` at all** in this path — some backends (e.g. the current wgpu-native
-   build, confirmed in Phase 0) leave `wgpuInstanceWaitAny` unimplemented and it *panics/aborts*
-   rather than returning a status, so it cannot be probed.
-
-> Why the flag, not the future: without `WaitAny` there is no API to query a `WGPUFuture`'s
-> completion, so the typed wrappers (§below) each keep a small result struct with a `completed`
-> bool that their callback sets; `pumpUntil` watches that flag. This is exactly what the Phase 0
-> `requestAdapterSync` does.
-
-> **Callback mode**: all harness-issued async ops use `WGPUCallbackMode_AllowProcessEvents` (or
-> `WaitAnyOnly` where the backend requires it for `WaitAny`). We avoid `AllowSpontaneous` for
-> harness ops so callbacks only fire at well-defined drain points; the device-lost and
-> uncaptured-error callbacks are the exception (§5).
-
-> **Callback mode**: all harness-issued async ops use `WGPUCallbackMode_AllowProcessEvents` (or
-> `WaitAnyOnly` where the backend requires it for `WaitAny`). We avoid `AllowSpontaneous` for
-> harness ops so callbacks only fire at well-defined drain points; the device-lost and
-> uncaptured-error callbacks are the exception (§5).
-
-On top of `waitFuture`, typed blocking helpers capture the callback result and return it by
+On top of `pumpUntil`, typed blocking helpers capture the callback result and return it by
 value:
 
 ```cpp
@@ -130,8 +103,9 @@ Each helper:
 1. Declares a small result struct on the stack.
 2. Sets `callbackInfo.userdata1 = &result`.
 3. The C callback (a `static`/captureless trampoline) copies status/handle/message into `result`
-   (copying the `WGPUStringView` message into the `std::string`; messages are not owned by us).
-4. Calls `waitFuture(...)`, then returns `result`.
+   (copying the `WGPUStringView` message into the `std::string`; messages are not owned by us) and
+   sets `result.completed = true`.
+4. Calls `pumpUntil(instance, &result.completed, timeoutNs)`, then returns `result`.
 
 These wrappers are what test code and the `GpuTest` fixture call. A test never writes a raw
 callback. (RAII wrappers — e.g. a `unique_ptr`-like handle that calls `wgpuXxxRelease` — may wrap
@@ -289,8 +263,7 @@ All three backends implement the canonical `webgpu.h`, but a few things differ a
 Design:
 
 - `include/cts/webgpu.h` re-exports the canonical `webgpu.h` and declares only spec types/calls.
-- `src/common/webgpu/backend.h` declares `cts::createInstance`, `cts::backendName`, and capability
-  flags (`cts::backendSupportsTimeoutWaitAny()`).
+- `src/common/webgpu/backend.h` declares `cts::createInstance` and `cts::backendName`.
 - One implementation per backend: `backend_wgpu.cpp`, `backend_yawgpu.cpp`, `backend_dawn.cpp`;
   CMake compiles exactly one based on `CTS_BACKEND`.
 - **Portable tests include only `cts/*.h`** and the canonical `webgpu.h`. A test that needs a
@@ -327,10 +300,10 @@ recreated on loss. Teardown releases pooled devices, the adapter, then the insta
 
 ## 8. Risks / things to validate during the slice
 
-- **WaitAny support** differs between backends and configurations; the `pumpUntil` fallback
-  (ProcessEvents polling) must be exercised on each. *Confirmed in Phase 0:* the current
-  wgpu-native build leaves `wgpuInstanceWaitAny` unimplemented (it panics), so wgpu-native uses the
-  poll path (`backendSupportsTimeoutWaitAny() == false`); validate yawgpu and Dawn separately.
+- **WaitAny support** differs between backends; we sidestep it entirely with `pumpUntil`
+  (ProcessEvents polling), exercised on each. *Confirmed:* the current wgpu-native build leaves
+  `wgpuInstanceWaitAny` unimplemented (it panics); yawgpu and Dawn resolve callbacks fine under
+  ProcessEvents too, so all three use the single poll path.
 - **Message ownership**: `WGPUStringView` messages in callbacks are not owned; we copy into
   `std::string`. Confirm length handling and truncation are sane.
 - **Uncaptured-error timing**: when exactly does each backend deliver uncaptured errors relative
