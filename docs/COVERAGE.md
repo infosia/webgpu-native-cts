@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 0 | 1 | 0 | 0 | 128 |
+| `api/validation` | 129 | 0 | 2 | 0 | 0 | 127 |
 | `api/operation` | 72 | 0 | 0 | 0 | 0 | 72 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **0** | **1** | **16** | **446** | **220** |
+| **Total** | **683** | **0** | **2** | **16** | **446** | **219** |
 
 Notes on the pre-classified rows:
 
@@ -65,6 +65,7 @@ that are no longer `todo` (the area summary covers the rest).
 | File | Status | Tests ported / total | Skipped / N/A tests | Notes |
 |------|--------|----------------------|---------------------|-------|
 | `api/validation/buffer/create.spec.ts` | partial | 4 / 5 (`limit`, `new_usages`, `usage`, `createBuffer_invalid_and_oom`) | `size` (shouldThrow RangeError — no C analog) | green on **yawgpu** (all 4: `usage`=78 cases/156 subcases, `c_i_a_o`=8, `limit`=3, `new_usages`=10). On wgpu-native all pass **except `usage`, which aborts wgpu-native** (see [FINDINGS F-001](FINDINGS.md)). Fixture deviation `GpuTest` |
+| `api/validation/buffer/destroy.spec.ts` | partial | 2 / 4 (`all_usages`, `twice`) | `error_buffer` (C error-buffer return semantics), `while_mapped` (needs mapAsync) | green on wgpu-native **and yawgpu** (`all_usages`=10, `twice`=6); first real exercise of the uncaptured-error path; fixture deviation `GpuTest` |
 
 ## Maintenance
 
