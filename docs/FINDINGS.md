@@ -49,6 +49,9 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 - **Expected (WebGPU):** an invalid clear size/range must produce a **validation error** (surfaced at
   `commandEncoder.finish()`), not abort. yawgpu does this correctly — it passes all of
   `size_alignment` (7), `out_of_bounds` (8) and the other clearBuffer subcases (39 total).
+- **Scope note:** this is **clearBuffer-specific** — `copyBufferToBuffer` with the same kinds of
+  invalid sizes does *not* abort wgpu-native (it returns a validation error at `finish`, all 137
+  subcases pass). So wgpu-native validates copy sizes gracefully but panics on clearBuffer sizes.
 - **Status:** open; tracked as a **wgpu-native defect** (same class as [F-001](#f-001--wgpu-native-aborts-on-an-invalid-buffer-usage-bit)).
   Not masked. Avoid running `…clearBuffer:size_alignment:*` / `:out_of_bounds:*` against
   wgpu-native; they run fine on yawgpu. Reinforces the need for crash isolation (see
