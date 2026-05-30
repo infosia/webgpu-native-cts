@@ -1,3 +1,6 @@
+/HANDOFF.md
+/REPORT.md
+
 # Build output
 /build/
 /build-*/
@@ -34,3 +37,8 @@ compile_commands.json
 .idea/
 *.swp
 *~
+
+# Agent / local (HANDOFF.md and REPORT.md are ignored at the top of this file)
+.claude/
+/transcripts/
+*.transcript
