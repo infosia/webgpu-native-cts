@@ -158,6 +158,12 @@ Re-planned when Phases 1–5 are solid. May remain partial indefinitely (it is e
 
 - **Upstream tracking**: pin a CTS revision in `docs/UPSTREAM.md`; periodically re-baseline.
 - **Coverage reporting**: `docs/COVERAGE.md` + a diff tool vs the upstream listing.
+- **Findings**: `docs/FINDINGS.md` records per-backend conformance defects the suite surfaces.
+- **Crash isolation** (newly needed — see [FINDINGS F-001](FINDINGS.md)): some backends *abort*
+  (panic across the FFI) instead of returning a validation error, which kills the whole run and
+  cannot be triaged by `--expectations`. Add a per-backend **crash skiplist** (exclude known-aborting
+  cases, reported as `skip(known-crash:<backend>)`, never as pass) and, longer term, **per-case
+  subprocess isolation** (also enables case-level parallelism below).
 - **CI**: backend × OS matrix; listing-freshness check; expectations files.
 - **Performance**: case-level parallelism (worker processes) once the suite is large enough to
   need it; the result model is already designed to merge shards.

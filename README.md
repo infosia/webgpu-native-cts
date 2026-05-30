@@ -98,6 +98,7 @@ in [`docs/`](docs/). Start with [`docs/00-overview.md`](docs/00-overview.md).
 | [07-roadmap](docs/07-roadmap.md) | Phased milestones |
 | [UPSTREAM](docs/UPSTREAM.md) | Pinned upstream CTS / header / backend revisions |
 | [COVERAGE](docs/COVERAGE.md) | Per-area / per-file port status |
+| [FINDINGS](docs/FINDINGS.md) | Per-backend conformance defects the suite surfaced |
 
 ## License
 
