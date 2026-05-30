@@ -31,4 +31,24 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
+## F-002 — wgpu-native aborts on an invalid clearBuffer size
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu.
+- **Found by:** `webgpu:api,validation,encoding,cmds,clearBuffer:size_alignment:*` and
+  `:out_of_bounds:*` (Phase 3d). Both feed `clearBuffer` sizes that are mis-aligned (e.g. 2, 5) or
+  out of bounds (e.g. 36 on a 32-byte buffer).
+- **Observed:** wgpu-native **panics and aborts** at the *encode* call —
+  `panicked at src/lib.rs:1294:18: invalid size` inside `wgpuCommandEncoderClearBuffer` — before the
+  harness can observe a `finish()`-time validation error. (`offset_alignment` and `overflow` do
+  *not* abort; it is specifically invalid *size* that panics.)
+- **Expected (WebGPU):** an invalid clear size/range must produce a **validation error** (surfaced at
+  `commandEncoder.finish()`), not abort. yawgpu does this correctly — it passes all of
+  `size_alignment` (7), `out_of_bounds` (8) and the other clearBuffer subcases (39 total).
+- **Status:** open; tracked as a **wgpu-native defect** (same class as [F-001](#f-001--wgpu-native-aborts-on-an-invalid-buffer-usage-bit)).
+  Not masked. Avoid running `…clearBuffer:size_alignment:*` / `:out_of_bounds:*` against
+  wgpu-native; they run fine on yawgpu. Reinforces the need for crash isolation (see
+  [07-roadmap](07-roadmap.md)).
+
+---
+
 _Add new findings as `F-00N` with the same fields._
