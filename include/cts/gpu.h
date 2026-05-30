@@ -34,6 +34,8 @@ class GpuTest : public Fixture {
     WGPUBuffer createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc);
     WGPUBuffer getErrorBuffer();
     WGPUSampler createSamplerTracked(const WGPUSamplerDescriptor& desc);
+    WGPUBindGroupLayout createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc);
+    WGPUPipelineLayout createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc);
     WGPUCommandEncoder createCommandEncoderTracked();
     WGPUCommandBuffer finishTracked(WGPUCommandEncoder encoder);
     void expectValidationError(const std::function<void()>& body, bool shouldError);
@@ -46,6 +48,8 @@ class GpuTest : public Fixture {
   private:
     std::vector<WGPUBuffer> buffers_;
     std::vector<WGPUSampler> samplers_;
+    std::vector<WGPUBindGroupLayout> bindGroupLayouts_;
+    std::vector<WGPUPipelineLayout> pipelineLayouts_;
     std::vector<WGPUCommandEncoder> encoders_;
     std::vector<WGPUCommandBuffer> commandBuffers_;
 };

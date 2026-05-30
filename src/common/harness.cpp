@@ -105,6 +105,11 @@ bool Fixture::paramIsUndefined(std::string_view key) const {
     return value != nullptr && std::holds_alternative<Value::Undefined>(value->data());
 }
 
+bool Fixture::paramIsString(std::string_view key) const {
+    const Value* value = findParam(params_, key);
+    return value != nullptr && std::holds_alternative<std::string>(value->data());
+}
+
 void Fixture::expect(bool condition, const std::string& message) {
     if (!condition) {
         fail(message.empty() ? "expectation failed" : message);
@@ -174,6 +179,14 @@ void GpuTest::finalize() {
         wgpuSamplerRelease(sampler);
     }
     samplers_.clear();
+    for (WGPUPipelineLayout pipelineLayout : pipelineLayouts_) {
+        wgpuPipelineLayoutRelease(pipelineLayout);
+    }
+    pipelineLayouts_.clear();
+    for (WGPUBindGroupLayout bindGroupLayout : bindGroupLayouts_) {
+        wgpuBindGroupLayoutRelease(bindGroupLayout);
+    }
+    bindGroupLayouts_.clear();
     for (WGPUBuffer buffer : buffers_) {
         wgpuBufferRelease(buffer);
     }
@@ -240,6 +253,22 @@ WGPUSampler GpuTest::createSamplerTracked(const WGPUSamplerDescriptor& desc) {
         samplers_.push_back(sampler);
     }
     return sampler;
+}
+
+WGPUBindGroupLayout GpuTest::createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc) {
+    WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(device(), &desc);
+    if (layout != nullptr) {
+        bindGroupLayouts_.push_back(layout);
+    }
+    return layout;
+}
+
+WGPUPipelineLayout GpuTest::createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc) {
+    WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(device(), &desc);
+    if (layout != nullptr) {
+        pipelineLayouts_.push_back(layout);
+    }
+    return layout;
 }
 
 WGPUCommandEncoder GpuTest::createCommandEncoderTracked() {

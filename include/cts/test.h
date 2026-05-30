@@ -104,6 +104,7 @@ class Fixture {
     const ParamRecord& params() const;
     bool hasParam(std::string_view key) const;
     bool paramIsUndefined(std::string_view key) const;
+    bool paramIsString(std::string_view key) const;
 
     template <class T>
     T param(std::string_view key) const {
