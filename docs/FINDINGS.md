@@ -87,4 +87,21 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
+## F-004 — wgpu-native aborts when a destroyed buffer reaches queue submit
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu or Dawn.
+- **Found by:** `clearBuffer:buffer_state` and `copyBufferToBuffer:buffer_state` (Phase 3g), the
+  `bufferState == destroyed` cases. **yawgpu and Dawn pass all 14 resource-state cases with the same
+  harness code; wgpu-native aborts on the 4 destroyed-buffer cases**, isolating it to the backend.
+- **Observed on wgpu-native:** recording a command that uses a *destroyed* buffer and then calling
+  `wgpuQueueSubmit` **aborts** (panic), instead of producing a submit-time validation error. (Same
+  eager-panic class as F-001/F-002; the encode + `finish()` succeed, the abort is at submit.)
+  *Invalid/error buffers* (the `invalid` state, `getErrorBuffer`) did **not** crash any backend.
+- **Expected (WebGPU):** submitting a command buffer that references a destroyed resource is a
+  validation error at `queue.submit`, not a process abort. yawgpu and Dawn do this.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; the four cases
+  are in `expectations/wgpu-native.txt`, so a `--isolate --expectations` run exits 0.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
