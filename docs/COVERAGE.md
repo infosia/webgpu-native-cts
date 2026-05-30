@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 0 | 6 | 0 | 0 | 123 |
+| `api/validation` | 129 | 0 | 8 | 0 | 0 | 121 |
 | `api/operation` | 72 | 0 | 0 | 0 | 0 | 72 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **0** | **6** | **16** | **446** | **215** |
+| **Total** | **683** | **0** | **8** | **16** | **446** | **213** |
 
 Notes on the pre-classified rows:
 
@@ -69,6 +69,8 @@ that are no longer `todo` (the area summary covers the rest).
 | `api/validation/createSampler.spec.ts` | partial | 1 / 2 (`lodMinAndMaxClamp`) | `maxAnisotropy` (WebIDL number coercion `-1`/`undefined` — no C `uint16` analog) | green on wgpu-native **and yawgpu** (`lodMinAndMaxClamp`=1 case/49 subcases — both validate lod clamp ranges). First float-`Value` test; fixture deviation `GpuTest` |
 | `api/validation/encoding/cmds/clearBuffer.spec.ts` | partial | 7 / 8 (`buffer_usage`, `default_args`, `size_alignment`, `offset_alignment`, `overflow`, `out_of_bounds`, `buffer_state`) | `buffer,device_mismatch` (second device) | green on **yawgpu & Dawn**. wgpu-native aborts on `size_alignment`/`out_of_bounds` ([F-002](FINDINGS.md)) and the `buffer_state` destroyed case ([F-004](FINDINGS.md)); contained via `--isolate`. Command-encoder + `undefined`-`Value` + resource-state; fixture deviation `GpuTest` |
 | `api/validation/encoding/cmds/copyBufferToBuffer.spec.ts` | partial | 7 / 8 (`buffer_usage`, `copy_size_alignment`, `copy_offset_alignment`, `copy_overflow`, `copy_out_of_bounds`, `copy_within_same_buffer`, `buffer_state`) | `buffer,device_mismatch` (second device) | green on **yawgpu & Dawn**. wgpu-native passes the copy tests but aborts on the 3 `buffer_state` destroyed-submit cases ([F-004](FINDINGS.md)); contained via `--isolate`. Fixture deviation `GpuTest` |
+| `api/validation/createBindGroupLayout.spec.ts` | partial | 2 ported (`duplicate_bindings`, `maximum_binding_limit`) | `visibility*` (validStages/per-stage storage limits), storage-texture/format/multisampled tests | green on **all three** backends (agree; no divergence). New BGL resource type; `b0`/`b1` deviation for the array param; fixture deviation `GpuTest` |
+| `api/validation/createPipelineLayout.spec.ts` | partial | 1 ported (`number_of_bind_group_layouts_exceeds_the_maximum_value`) | `number_of_dynamic_buffers…`, `bind_group_layouts,device_mismatch`, others | green on **all three** backends (agree). New pipeline-layout resource type; fixture deviation `GpuTest` |
 | `api/validation/buffer/mapping.spec.ts` | partial | 5 ported (`mapAsync,usage`, `mapAsync,state,{destroyed,mappedAtCreation,mapped}`, `mapAsync,invalidBuffer`) | `mapAsync,state,mappingPending` (JS timing); other mapping tests (getMappedRange/unmap/ranges) not yet ported | green on **yawgpu and Dawn**. wgpu-native diverges on 3 of the mapAsync tests ([FINDINGS F-003](FINDINGS.md)). `bufferMapSync` + `getErrorBuffer`; fixture deviation `GpuTest` |
 
 ## Maintenance
