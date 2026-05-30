@@ -21,6 +21,11 @@ class GpuTest : public Fixture {
     WGPUCommandEncoder createCommandEncoderTracked();
     WGPUCommandBuffer finishTracked(WGPUCommandEncoder encoder);
     void expectValidationError(const std::function<void()>& body, bool shouldError);
+    void expectMapAsync(WGPUBuffer buffer,
+                        WGPUMapMode mode,
+                        bool expectSuccess,
+                        size_t offset = 0,
+                        size_t size = WGPU_WHOLE_MAP_SIZE);
 
   private:
     std::vector<WGPUBuffer> buffers_;

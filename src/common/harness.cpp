@@ -246,4 +246,25 @@ void GpuTest::expectValidationError(const std::function<void()>& body, bool shou
     }
 }
 
+void GpuTest::expectMapAsync(WGPUBuffer buffer, WGPUMapMode mode, bool expectSuccess, size_t offset, size_t size) {
+    if (expectSuccess) {
+        const WGPUMapAsyncStatus status = bufferMapSync(cache().instance, buffer, mode, offset, size);
+        if (status != WGPUMapAsyncStatus_Success) {
+            fail("expected mapAsync success");
+        }
+        return;
+    }
+
+    WGPUMapAsyncStatus status = WGPUMapAsyncStatus_Success;
+    wgpuDevicePushErrorScope(device(), WGPUErrorFilter_Validation);
+    status = bufferMapSync(cache().instance, buffer, mode, offset, size);
+    ScopeResult result = popErrorScopeSync(cache().instance, device());
+    if (result.status != WGPUPopErrorScopeStatus_Success) {
+        fail("popErrorScope failed: " + result.message);
+    }
+    if (status == WGPUMapAsyncStatus_Success) {
+        fail("expected mapAsync failure");
+    }
+}
+
 } // namespace cts

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -30,5 +31,6 @@ struct ScopeResult {
 };
 
 ScopeResult popErrorScopeSync(WGPUInstance instance, WGPUDevice device);
+WGPUMapAsyncStatus bufferMapSync(WGPUInstance instance, WGPUBuffer buffer, WGPUMapMode mode, size_t offset, size_t size);
 
 } // namespace cts

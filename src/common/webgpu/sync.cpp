@@ -41,6 +41,11 @@ struct PopErrorScopeState {
     std::string message;
 };
 
+struct BufferMapState {
+    bool completed = false;
+    WGPUMapAsyncStatus status = WGPUMapAsyncStatus_Error;
+};
+
 void onRequestAdapter(WGPURequestAdapterStatus status,
                       WGPUAdapter adapter,
                       WGPUStringView message,
@@ -75,6 +80,12 @@ void onPopErrorScope(WGPUPopErrorScopeStatus status,
     state->status = status;
     state->type = type;
     state->message = toString(message);
+}
+
+void onBufferMap(WGPUMapAsyncStatus status, WGPUStringView, void* userdata1, void*) {
+    auto* state = static_cast<BufferMapState*>(userdata1);
+    state->completed = true;
+    state->status = status;
 }
 
 template <class Pred>
@@ -132,6 +143,21 @@ ScopeResult popErrorScopeSync(WGPUInstance instance, WGPUDevice device) {
         return ScopeResult{WGPUPopErrorScopeStatus_Error, WGPUErrorType_NoError, "popErrorScope timed out"};
     }
     return ScopeResult{state.status, state.type, state.message};
+}
+
+WGPUMapAsyncStatus bufferMapSync(
+    WGPUInstance instance, WGPUBuffer buffer, WGPUMapMode mode, size_t offset, size_t size) {
+    BufferMapState state;
+    WGPUBufferMapCallbackInfo callbackInfo = WGPU_BUFFER_MAP_CALLBACK_INFO_INIT;
+    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    callbackInfo.callback = onBufferMap;
+    callbackInfo.userdata1 = &state;
+
+    (void)wgpuBufferMapAsync(buffer, mode, offset, size, callbackInfo);
+    if (!pumpUntil(instance, 5'000'000'000, [&] { return state.completed; })) {
+        return WGPUMapAsyncStatus_Error;
+    }
+    return state.status;
 }
 
 } // namespace cts

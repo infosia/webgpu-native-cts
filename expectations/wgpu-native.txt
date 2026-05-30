@@ -16,3 +16,10 @@ webgpu:api,validation,buffer,create:usage:usage1=1073741824;usage2=1073741824
 # F-002: wgpu-native aborts on invalid clearBuffer sizes at encode time.
 webgpu:api,validation,encoding,cmds,clearBuffer:size_alignment:*
 webgpu:api,validation,encoding,cmds,clearBuffer:out_of_bounds:*
+
+# F-003: wgpu-native does not complete the new mapAsync validation surface like yawgpu/Dawn.
+# Invalid usage aborts under the current aggregate isolated case; mapped-state errors surface as
+# uncaptured validation errors despite the local validation error scope.
+webgpu:api,validation,buffer,mapping:mapAsync,usage:*
+webgpu:api,validation,buffer,mapping:mapAsync,state,mappedAtCreation:*
+webgpu:api,validation,buffer,mapping:mapAsync,state,mapped:*
