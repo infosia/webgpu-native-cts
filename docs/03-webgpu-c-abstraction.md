@@ -256,6 +256,15 @@ namespace cts { void setCurrentTest(Fixture* t); }   // set by the runner around
 This mirrors upstream's per-device uncaptured-error listener that `GPUTest` installs, adapted to
 pooled, long-lived devices.
 
+> **Hard rule — never throw from a WebGPU C callback.** These callbacks fire from inside the
+> implementation (e.g. during `wgpuInstanceProcessEvents` / `wgpuQueueSubmit`), across the
+> C/Rust FFI boundary. Throwing a C++ exception through that frame is undefined behavior and will
+> typically abort. So the uncaptured-error / device-lost callbacks (and every harness callback)
+> **record** onto the current fixture — set a pending-error string / flag, never call
+> `fail()`/`skip()` (which throw). The runner checks the recorded state *after* the drain point
+> (after `fn()`/`finalize()`) and turns an unexpected pending error into a `Fail`. (Confirmed in
+> the Phase 1 review: an earlier version threw from the callback and was reworked to record.)
+
 ---
 
 ## 6. Backend shim

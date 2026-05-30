@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 0 | 0 | 0 | 0 | 129 |
+| `api/validation` | 129 | 0 | 1 | 0 | 0 | 128 |
 | `api/operation` | 72 | 0 | 0 | 0 | 0 | 72 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **0** | **0** | **16** | **446** | **221** |
+| **Total** | **683** | **0** | **1** | **16** | **446** | **220** |
 
 Notes on the pre-classified rows:
 
@@ -48,15 +48,14 @@ Notes on the pre-classified rows:
 
 These classifications are provisional; revisit per file when the area is worked.
 
-## Phase 1 target (vertical slice)
+## Phase 1 (vertical slice) — done
 
-The first files to port (see [07-roadmap §Phase 1](07-roadmap.md)). Fill in as they land:
+The slice ported one real file to prove the harness end-to-end on wgpu-native (see
+[07-roadmap §Phase 1](07-roadmap.md)):
 
 | Upstream file | Status | Tests ported | Notes |
 |---------------|--------|--------------|-------|
-| `api/validation/createBuffer.spec.ts` | todo | — | the worked example in docs |
-| `api/validation/createTexture.spec.ts` | todo | — | subset: dimension/format/usage |
-| `api/validation/.../<encoding or bind_group_layout>.spec.ts` | todo | — | pick one with non-trivial params |
+| `api/validation/buffer/create.spec.ts` | partial | `limit`, `new_usages` | `size`/`usage`/`createBuffer_invalid_and_oom` unimplemented; uses `GpuTest` instead of `AllFeaturesMaxLimitsGPUTest` (no extra features needed for these two) |
 
 ## Full per-file table
 
@@ -65,7 +64,7 @@ that are no longer `todo` (the area summary covers the rest).
 
 | File | Status | Tests ported / total | Skipped / N/A tests | Notes |
 |------|--------|----------------------|---------------------|-------|
-| _(none yet)_ | | | | |
+| `api/validation/buffer/create.spec.ts` | partial | 2 / 5 (`limit`, `new_usages`) | `size` (shouldThrow RangeError — no C analog), `usage` (needs `.filter`), `createBuffer_invalid_and_oom` (needs `.combineWithParams` + OOM) | green on wgpu-native: `limit`=3 cases, `new_usages`=10 subcases; fixture deviation `GpuTest` |
 
 ## Maintenance
 
