@@ -125,6 +125,23 @@ int main() {
         require(eac.blockWidth == 4 && eac.blockHeight == 4 && eac.bytesPerBlock == 16, "eac-rg11 block info");
         const cts::TextureBlockInfo astc = cts::getBlockInfoForTextureFormat(WGPUTextureFormat_ASTC12x12Unorm);
         require(astc.blockWidth == 12 && astc.blockHeight == 12 && astc.bytesPerBlock == 16, "astc-12x12 block info");
+        require(cts::kCompressedTextureSizeVariants.size() == 28, "compressed texture size variant count");
+        require(cts::roundDown(8192, 4) == 8192, "roundDown exact multiple");
+        require(cts::roundDown(8191, 4) == 8188, "roundDown below multiple");
+        require(cts::roundDown(100, 12) == 96, "roundDown larger multiple");
+        WGPULimits syntheticLimits = WGPU_LIMITS_INIT;
+        syntheticLimits.maxTextureDimension1D = 4096;
+        syntheticLimits.maxTextureDimension2D = 8192;
+        syntheticLimits.maxTextureDimension3D = 2048;
+        syntheticLimits.maxTextureArrayLayers = 256;
+        const auto astc2dMax = cts::getMaxValidTextureSizeForFormatAndDimension(
+            syntheticLimits, WGPUTextureFormat_ASTC12x12Unorm, WGPUTextureDimension_2D);
+        require(astc2dMax[0] == 8184 && astc2dMax[1] == 8184 && astc2dMax[2] == 256,
+                "astc 2d max valid texture size");
+        const auto bc3dMax = cts::getMaxValidTextureSizeForFormatAndDimension(
+            syntheticLimits, WGPUTextureFormat_BC1RGBAUnorm, WGPUTextureDimension_3D);
+        require(bc3dMax[0] == 2048 && bc3dMax[1] == 2048 && bc3dMax[2] == 2048,
+                "bc1 3d max valid texture size");
         require(cts::isBCTextureFormat(WGPUTextureFormat_BC7RGBAUnorm), "bc predicate");
         require(cts::isASTCTextureFormat(WGPUTextureFormat_ASTC4x4Unorm), "astc predicate");
         require(!cts::isCompressedTextureFormat(WGPUTextureFormat_RGBA8Unorm), "compressed predicate false");

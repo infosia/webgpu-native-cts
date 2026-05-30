@@ -36,6 +36,15 @@ struct TextureBlockInfo {
     uint32_t bytesPerBlock;
 };
 
+struct SizeVariantComponent {
+    int mult;
+    int addLiteral;
+    int addBlockW;
+    int addBlockH;
+};
+
+using SizeVariant = std::array<SizeVariantComponent, 3>;
+
 constexpr std::array<WGPUTextureDimension, 3> kTextureDimensions = {
     WGPUTextureDimension_1D,
     WGPUTextureDimension_2D,
@@ -248,6 +257,37 @@ inline constexpr std::array<WGPUTextureFormat, 10> kTextureFormatTier1AllowsRend
     WGPUTextureFormat_RG11B10Ufloat,
 };
 
+inline constexpr std::array<SizeVariant, 28> kCompressedTextureSizeVariants = {{
+    {{{1, -1, 0, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}}},
+    {{{1, 0, -1, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}}},
+    {{{1, 0, -1, 0}, {0, 0, 0, 1}, {0, 1, 0, 0}}},
+    {{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}}},
+    {{{1, 0, 0, 0}, {0, 0, 0, 1}, {0, 1, 0, 0}}},
+    {{{1, 1, 0, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}}},
+    {{{1, 0, 1, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}}},
+    {{{1, 0, 1, 0}, {0, 0, 0, 1}, {0, 1, 0, 0}}},
+    {{{0, 1, 0, 0}, {1, -1, 0, 0}, {0, 1, 0, 0}}},
+    {{{0, 1, 0, 0}, {1, 0, 0, -1}, {0, 1, 0, 0}}},
+    {{{0, 0, 1, 0}, {1, 0, 0, -1}, {0, 1, 0, 0}}},
+    {{{0, 1, 0, 0}, {1, 0, 0, 0}, {0, 1, 0, 0}}},
+    {{{0, 0, 1, 0}, {1, 0, 0, 0}, {0, 1, 0, 0}}},
+    {{{0, 1, 0, 0}, {1, 1, 0, 0}, {0, 1, 0, 0}}},
+    {{{0, 1, 0, 0}, {1, 0, 1, 0}, {0, 1, 0, 0}}},
+    {{{0, 0, 1, 0}, {1, 0, 0, 1}, {0, 1, 0, 0}}},
+    {{{0, 1, 0, 0}, {0, 1, 0, 0}, {1, -1, 0, 0}}},
+    {{{0, 0, 1, 0}, {0, 1, 0, 0}, {1, -1, 0, 0}}},
+    {{{0, 1, 0, 0}, {0, 0, 0, 1}, {1, -1, 0, 0}}},
+    {{{0, 0, 1, 0}, {0, 0, 0, 1}, {1, -1, 0, 0}}},
+    {{{0, 1, 0, 0}, {0, 1, 0, 0}, {1, 0, 0, 0}}},
+    {{{0, 0, 1, 0}, {0, 1, 0, 0}, {1, 0, 0, 0}}},
+    {{{0, 1, 0, 0}, {0, 0, 0, 1}, {1, 0, 0, 0}}},
+    {{{0, 0, 1, 0}, {0, 0, 0, 1}, {1, 0, 0, 0}}},
+    {{{0, 1, 0, 0}, {0, 1, 0, 0}, {1, 1, 0, 0}}},
+    {{{0, 0, 1, 0}, {0, 1, 0, 0}, {1, 1, 0, 0}}},
+    {{{0, 1, 0, 0}, {0, 0, 0, 1}, {1, 1, 0, 0}}},
+    {{{0, 0, 1, 0}, {0, 0, 0, 1}, {1, 1, 0, 0}}},
+}};
+
 inline const TextureFormatInfo& textureFormatInfo(WGPUTextureFormat format) {
     for (const TextureFormatInfo& info : kUncompressedTextureFormatInfos) {
         if (info.format == format) {
@@ -265,6 +305,34 @@ inline const TextureFormatInfo& textureFormatInfo(WGPUTextureFormat format) {
 inline TextureBlockInfo getBlockInfoForTextureFormat(WGPUTextureFormat format) {
     const TextureFormatInfo& info = textureFormatInfo(format);
     return TextureBlockInfo{info.blockWidth, info.blockHeight, info.bytesPerBlock};
+}
+
+inline uint32_t roundDown(uint32_t value, uint32_t multiple) {
+    return (value / multiple) * multiple;
+}
+
+inline std::array<uint32_t, 3> getMaxValidTextureSizeForFormatAndDimension(const WGPULimits& limits,
+                                                                            WGPUTextureFormat format,
+                                                                            WGPUTextureDimension dimension) {
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+    if (dimension == WGPUTextureDimension_1D) {
+        return {limits.maxTextureDimension1D, 1, 1};
+    }
+    if (dimension == WGPUTextureDimension_2D || dimension == WGPUTextureDimension_Undefined) {
+        return {
+            roundDown(limits.maxTextureDimension2D, info.blockWidth),
+            roundDown(limits.maxTextureDimension2D, info.blockHeight),
+            limits.maxTextureArrayLayers,
+        };
+    }
+    if (dimension == WGPUTextureDimension_3D) {
+        return {
+            roundDown(limits.maxTextureDimension3D, info.blockWidth),
+            roundDown(limits.maxTextureDimension3D, info.blockHeight),
+            limits.maxTextureDimension3D,
+        };
+    }
+    std::abort();
 }
 
 inline uint32_t maxMipLevelCount(const WGPUExtent3D& size, WGPUTextureDimension dimension) {

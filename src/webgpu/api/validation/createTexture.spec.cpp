@@ -19,6 +19,7 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpu
 
 // Size variant params keep the upstream key names but encode unsupported array/object values as integer indexes:
 // widthVariant 0..2 maps to offsets -1..+1; sizeVariant 0..8 maps to dimension=index/3 and offset=index%3-1.
+// Compressed texture sizeVariant 0..27 indexes kCompressedTextureSizeVariants.
 
 std::vector<Value> textureDimensionValuesWithUndefined() {
     std::vector<Value> values;
@@ -52,6 +53,10 @@ std::vector<Value> regularTextureFormatValues() {
     return textureFormatValues(kRegularTextureFormats);
 }
 
+std::vector<Value> compressedTextureFormatValues() {
+    return textureFormatValues(kCompressedTextureFormats);
+}
+
 std::vector<Value> sampleCountValues() {
     return {
         Value(0),
@@ -79,8 +84,26 @@ std::vector<Value> sizeVariantValues() {
     };
 }
 
+std::vector<Value> compressedSizeVariantValues() {
+    std::vector<Value> values;
+    values.reserve(kCompressedTextureSizeVariants.size());
+    for (size_t i = 0; i < kCompressedTextureSizeVariants.size(); ++i) {
+        values.emplace_back(static_cast<int64_t>(i));
+    }
+    return values;
+}
+
 uint32_t limitWithOffset(uint32_t limit, int offset) {
     return static_cast<uint32_t>(static_cast<int64_t>(limit) + offset);
+}
+
+uint32_t applySizeVariantComponent(uint32_t base,
+                                   const SizeVariantComponent& component,
+                                   const TextureBlockInfo& blockInfo) {
+    return static_cast<uint32_t>(static_cast<int64_t>(base) * component.mult
+                                 + component.addLiteral
+                                 + component.addBlockW * static_cast<int64_t>(blockInfo.blockWidth)
+                                 + component.addBlockH * static_cast<int64_t>(blockInfo.blockHeight));
 }
 
 bool valueIsUndefined(const Value& value) {
@@ -509,6 +532,90 @@ CTS_TEST(g, "texture_size,3d_texture,uncompressed_format")
         const bool success = size.width <= limits.maxTextureDimension3D
             && size.height <= limits.maxTextureDimension3D
             && size.depthOrArrayLayers <= limits.maxTextureDimension3D;
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_size,2d_texture,compressed_format")
+    .desc("Test upper-bound texture size validation for 2D compressed textures.")
+    .params([](ParamsBuilder u) {
+        return u.combine("dimension", {Value::undef(), Value(static_cast<int64_t>(WGPUTextureDimension_2D))})
+            .combine("format", compressedTextureFormatValues())
+            .beginSubcases()
+            .combine("sizeVariant", compressedSizeVariantValues());
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension dimension = dimensionParam(t);
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const size_t sizeVariant = static_cast<size_t>(t.param<int>("sizeVariant"));
+        const WGPULimits limits = t.getLimits();
+
+        t.skipIfTextureFormatNotSupported(format);
+        const TextureBlockInfo blockInfo = getBlockInfoForTextureFormat(format);
+        const std::array<uint32_t, 3> base =
+            getMaxValidTextureSizeForFormatAndDimension(limits, format, WGPUTextureDimension_2D);
+        const SizeVariant& variant = kCompressedTextureSizeVariants[sizeVariant];
+
+        const WGPUExtent3D size = {
+            applySizeVariantComponent(base[0], variant[0], blockInfo),
+            applySizeVariantComponent(base[1], variant[1], blockInfo),
+            applySizeVariantComponent(base[2], variant[2], blockInfo),
+        };
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size = size;
+        desc.dimension = dimension;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_TextureBinding;
+
+        const bool success = size.width % blockInfo.blockWidth == 0
+            && size.height % blockInfo.blockHeight == 0
+            && size.width <= limits.maxTextureDimension2D
+            && size.height <= limits.maxTextureDimension2D
+            && size.depthOrArrayLayers <= limits.maxTextureArrayLayers;
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_size,3d_texture,compressed_format")
+    .desc("Test upper-bound texture size validation for 3D compressed textures.")
+    .params([](ParamsBuilder u) {
+        return u.combine("format", compressedTextureFormatValues())
+            .beginSubcases()
+            .combine("sizeVariant", compressedSizeVariantValues());
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const size_t sizeVariant = static_cast<size_t>(t.param<int>("sizeVariant"));
+        const WGPULimits limits = t.getLimits();
+
+        t.skipIfTextureFormatNotSupported(format);
+        t.skipIfTextureFormatAndDimensionNotCompatible(format, WGPUTextureDimension_3D);
+        const TextureBlockInfo blockInfo = getBlockInfoForTextureFormat(format);
+        const std::array<uint32_t, 3> base =
+            getMaxValidTextureSizeForFormatAndDimension(limits, format, WGPUTextureDimension_3D);
+        const SizeVariant& variant = kCompressedTextureSizeVariants[sizeVariant];
+
+        const WGPUExtent3D size = {
+            applySizeVariantComponent(base[0], variant[0], blockInfo),
+            applySizeVariantComponent(base[1], variant[1], blockInfo),
+            applySizeVariantComponent(base[2], variant[2], blockInfo),
+        };
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size = size;
+        desc.dimension = WGPUTextureDimension_3D;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_TextureBinding;
+
+        const bool success = size.width % blockInfo.blockWidth == 0
+            && size.height % blockInfo.blockHeight == 0
+            && size.width <= limits.maxTextureDimension3D
+            && size.height <= limits.maxTextureDimension3D
+            && size.depthOrArrayLayers <= limits.maxTextureDimension3D
+            && t.textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension_3D, format);
         t.expectValidationError([&] {
             t.createTextureTracked(desc);
         }, !success);
