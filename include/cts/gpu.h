@@ -27,8 +27,8 @@ class GpuTest : public Fixture {
     void init() override;
     void finalize() override;
 
-    WGPUDevice device() const;
-    WGPUQueue queue() const;
+    virtual WGPUDevice device() const;
+    virtual WGPUQueue queue() const;
     WGPULimits getLimits() const;
     WGPUBuffer createBufferTracked(const WGPUBufferDescriptor& desc);
     WGPUBuffer createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc);
@@ -47,6 +47,7 @@ class GpuTest : public Fixture {
                         size_t size = WGPU_WHOLE_MAP_SIZE);
     void skipIfTextureFormatNotSupported(WGPUTextureFormat format);
     bool textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format);
+    bool isTextureFormatMultisampled(WGPUTextureFormat format);
 
   private:
     std::vector<WGPUBuffer> buffers_;
@@ -56,6 +57,13 @@ class GpuTest : public Fixture {
     std::vector<WGPUPipelineLayout> pipelineLayouts_;
     std::vector<WGPUCommandEncoder> encoders_;
     std::vector<WGPUCommandBuffer> commandBuffers_;
+};
+
+class AllFeaturesMaxLimitsGpuTest : public GpuTest {
+  public:
+    void init() override;
+    WGPUDevice device() const override;
+    WGPUQueue queue() const override;
 };
 
 } // namespace cts

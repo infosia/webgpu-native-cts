@@ -1,6 +1,8 @@
 #include "cts/gpu.h"
 
+#include <array>
 #include <utility>
+#include <vector>
 
 #include "common/webgpu/backend.h"
 #include "common/webgpu/sync.h"
@@ -26,8 +28,17 @@ struct DeviceCache {
     WGPUAdapter adapter = nullptr;
     WGPUDevice device = nullptr;
     WGPUQueue queue = nullptr;
+    WGPUDevice deviceAllFeatures = nullptr;
+    WGPUQueue queueAllFeatures = nullptr;
+    bool allFeaturesDeviceUsedFallback = false;
 
     ~DeviceCache() {
+        if (queueAllFeatures != nullptr) {
+            wgpuQueueRelease(queueAllFeatures);
+        }
+        if (deviceAllFeatures != nullptr) {
+            wgpuDeviceRelease(deviceAllFeatures);
+        }
         if (queue != nullptr) {
             wgpuQueueRelease(queue);
         }
@@ -54,10 +65,9 @@ void onUncapturedError(WGPUDevice const*, WGPUErrorType, WGPUStringView message,
     }
 }
 
-WGPUDevice getDevice() {
-    DeviceCache& c = cache();
-    if (c.device != nullptr) {
-        return c.device;
+void ensureAdapter(DeviceCache& c) {
+    if (c.adapter != nullptr) {
+        return;
     }
 
     c.instance = createInstance();
@@ -69,6 +79,15 @@ WGPUDevice getDevice() {
         throw TestFailed("failed to request adapter: " + adapter.message);
     }
     c.adapter = adapter.adapter;
+}
+
+WGPUDevice getDevice() {
+    DeviceCache& c = cache();
+    if (c.device != nullptr) {
+        return c.device;
+    }
+
+    ensureAdapter(c);
 
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
     descriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
@@ -79,6 +98,66 @@ WGPUDevice getDevice() {
     c.device = device.device;
     c.queue = wgpuDeviceGetQueue(c.device);
     return c.device;
+}
+
+WGPUDevice getAllFeaturesMaxLimitsDevice() {
+    DeviceCache& c = cache();
+    if (c.deviceAllFeatures != nullptr) {
+        return c.deviceAllFeatures;
+    }
+
+    ensureAdapter(c);
+
+    WGPULimits limits = WGPU_LIMITS_INIT;
+    if (wgpuAdapterGetLimits(c.adapter, &limits) != WGPUStatus_Success) {
+        throw TestFailed("failed to get adapter limits");
+    }
+
+    WGPUSupportedFeatures supportedFeatures = WGPU_SUPPORTED_FEATURES_INIT;
+    wgpuAdapterGetFeatures(c.adapter, &supportedFeatures);
+
+    WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
+    descriptor.requiredFeatureCount = supportedFeatures.featureCount;
+    descriptor.requiredFeatures = supportedFeatures.features;
+    descriptor.requiredLimits = &limits;
+    descriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
+    DeviceResult device = requestDeviceSync(c.instance, c.adapter, &descriptor);
+    wgpuSupportedFeaturesFreeMembers(supportedFeatures);
+
+    if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
+        static constexpr std::array<WGPUFeatureName, 8> kTextureFeatures = {
+            WGPUFeatureName_TextureCompressionBC,
+            WGPUFeatureName_TextureCompressionETC2,
+            WGPUFeatureName_TextureCompressionASTC,
+            WGPUFeatureName_TextureCompressionBCSliced3D,
+            WGPUFeatureName_TextureCompressionASTCSliced3D,
+            WGPUFeatureName_TextureFormatsTier1,
+            WGPUFeatureName_Depth32FloatStencil8,
+            WGPUFeatureName_RG11B10UfloatRenderable,
+        };
+        std::vector<WGPUFeatureName> fallbackFeatures;
+        fallbackFeatures.reserve(kTextureFeatures.size());
+        for (WGPUFeatureName feature : kTextureFeatures) {
+            if (wgpuAdapterHasFeature(c.adapter, feature)) {
+                fallbackFeatures.push_back(feature);
+            }
+        }
+
+        WGPUDeviceDescriptor fallbackDescriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
+        fallbackDescriptor.requiredFeatureCount = fallbackFeatures.size();
+        fallbackDescriptor.requiredFeatures = fallbackFeatures.data();
+        fallbackDescriptor.requiredLimits = &limits;
+        fallbackDescriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
+        device = requestDeviceSync(c.instance, c.adapter, &fallbackDescriptor);
+        c.allFeaturesDeviceUsedFallback = true;
+    }
+
+    if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
+        throw TestFailed("failed to request all-features/max-limits device: " + device.message);
+    }
+    c.deviceAllFeatures = device.device;
+    c.queueAllFeatures = wgpuDeviceGetQueue(c.deviceAllFeatures);
+    return c.deviceAllFeatures;
 }
 
 } // namespace
@@ -164,7 +243,7 @@ const std::vector<SpecFile>& Registry::files() const {
 }
 
 void GpuTest::init() {
-    (void)getDevice();
+    (void)device();
 }
 
 void GpuTest::finalize() {
@@ -199,10 +278,11 @@ void GpuTest::finalize() {
 }
 
 WGPUDevice GpuTest::device() const {
-    return cache().device;
+    return getDevice();
 }
 
 WGPUQueue GpuTest::queue() const {
+    (void)getDevice();
     return cache().queue;
 }
 
@@ -347,11 +427,40 @@ void GpuTest::skipIfTextureFormatNotSupported(WGPUTextureFormat format) {
 }
 
 bool GpuTest::textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format) {
+    if (dimension == WGPUTextureDimension_3D
+        && ((isBCTextureFormat(format) && wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureCompressionBCSliced3D))
+            || (isASTCTextureFormat(format)
+                && wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureCompressionASTCSliced3D)))) {
+        return true;
+    }
     if (dimension == WGPUTextureDimension_Undefined || dimension == WGPUTextureDimension_2D) {
         return true;
     }
     const TextureFormatInfo& info = textureFormatInfo(format);
     return !(info.blockWidth > 1 || info.hasDepth || info.hasStencil);
+}
+
+bool GpuTest::isTextureFormatMultisampled(WGPUTextureFormat format) {
+    if (format == WGPUTextureFormat_RG11B10Ufloat) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_RG11B10UfloatRenderable);
+    }
+    if (isTier1BlendableMultisampleTextureFormat(format)) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureFormatsTier1);
+    }
+    return textureFormatInfo(format).multisample;
+}
+
+void AllFeaturesMaxLimitsGpuTest::init() {
+    (void)device();
+}
+
+WGPUDevice AllFeaturesMaxLimitsGpuTest::device() const {
+    return getAllFeaturesMaxLimitsDevice();
+}
+
+WGPUQueue AllFeaturesMaxLimitsGpuTest::queue() const {
+    (void)getAllFeaturesMaxLimitsDevice();
+    return cache().queueAllFeatures;
 }
 
 } // namespace cts

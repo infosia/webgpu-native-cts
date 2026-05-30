@@ -114,25 +114,57 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
   incompatible. **wgpu-native and Dawn pass all 168 non-skipped cases; yawgpu fails 32 and aborts 2**,
   isolating the behavior to yawgpu.
 - **Observed on yawgpu (two sub-defects):**
-  - **Rejects 8 valid core color formats as if `Undefined`** — `R16Uint/Sint/Float`,
-    `RG16Uint/Sint/Float`, `RGB10A2Uint`, `RGB10A2Unorm` (`WGPUTextureFormat` enum values
-    `7,8,9,19,20,21,29,30`). `createTexture` raises a validation error where the texture should be
-    created successfully → **32 fails** (8 formats × 4 dimension values). The neighbouring 8-bit,
-    32-bit, RGBA16, and packed-float formats are accepted, so the gap is specific to these enum
-    values, not a whole size class.
+  - **Rejects valid core color formats as if `Undefined`.** First seen (T1, no-feature device) for the
+    8 always-core formats `R16Uint/Sint/Float`, `RG16Uint/Sint/Float`, `RGB10A2Uint`, `RGB10A2Unorm`
+    (`WGPUTextureFormat` enum `7,8,9,19,20,21,29,30`). **Under T2's all-features device** (which enables
+    `texture-formats-tier1`) the same bug also surfaces for the 4 tier1 formats `R16Unorm/Snorm`,
+    `RG16Unorm/Snorm` (enum `5,6,17,18`) — **12 color formats total**. `createTexture` raises a
+    validation error where the texture should be created successfully. The neighbouring 8-bit, 32-bit,
+    RGBA16, and packed-float formats are accepted, so the gap is specific to these enum values, not a
+    whole size class. The same rejection re-surfaces in
+    `sampleCount,various_sampleCount_with_all_formats` (the format fails even at `sampleCount=1`).
   - **Aborts on `Depth24PlusStencil8`** (`enum 47`) when the dimension is *compatible*
-    (`undefined`/`2d`): `createTexture` panics instead of succeeding → **2 crashes**. For `1d`/`3d`
-    yawgpu correctly rejects it (depth/stencil is incompatible with those dimensions) *before*
-    reaching the crash path, so those two cases pass.
-- **Expected (WebGPU):** all nine are valid formats; `createTexture` with `TEXTURE_BINDING` on a
+    (`undefined`/`2d`): `createTexture` panics instead of succeeding → crashes in both
+    `dimension_type…` and `sampleCount,various…`. For `1d`/`3d` yawgpu correctly rejects it
+    (depth/stencil is incompatible with those dimensions) *before* reaching the crash path.
+- **Expected (WebGPU):** all of these are valid formats; `createTexture` with `TEXTURE_BINDING` on a
   compatible dimension must **succeed** (no validation error, no abort). wgpu-native and Dawn do.
 - **Not an ABI artifact:** the `WGPUTextureFormat` enum mapping is **byte-identical** between the
   wgpu-native and yawgpu `webgpu-headers/webgpu.h` (verified by diff), so the same `format=N` value
   denotes the same format on both — this is a genuine format-handling gap in yawgpu, not an
   enum/ABI mismatch in how the suite passes the value.
-- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 34 cases are in
-  `expectations/yawgpu.txt` (32 fails + 2 contained crashes), so a `--isolate --expectations` run
-  over `createTexture:*` exits 0 on yawgpu (`xfail=34`); wgpu-native and Dawn need no entries.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; recorded in
+  `expectations/yawgpu.txt` (T1: 32 fails + 2 crashes; T2 added 16 more `dimension_type…` fails for the
+  4 tier1 formats, and the same rejections re-appear inside the `sampleCount…` triage), so a
+  `--isolate --expectations` run over `createTexture:*` exits 0 on yawgpu; wgpu-native and Dawn need no
+  entries.
+
+---
+
+## F-006 — yawgpu disagrees on which texture formats are multisampleable
+
+- **Backend:** yawgpu (`55ac04d`). **Not** present in wgpu-native or Dawn.
+- **Found by:** `webgpu:api,validation,createTexture:sampleCount,various_sampleCount_with_all_formats:*`
+  (Texture T2), which creates each format at sample counts `{0,1,2,4,8,16,32,256}` and asserts a
+  validation error unless the format is single-sampled or `sampleCount==4` on a multisampleable format.
+  wgpu-native and Dawn pass all non-skipped cases; yawgpu diverges on **6 formats** (separate from the
+  [F-005](#f-005--yawgpu-mishandles-several-valid-uncompressed-texture-formats) format-rejection bug,
+  which also surfaces here).
+- **Observed on yawgpu (two opposite errors):**
+  - **Rejects multisampling on formats the spec marks multisampleable.** With the all-features device
+    enabling `texture-formats-tier1` (and `rg11b10ufloat-renderable`), the tier1-blendable formats
+    `R8Snorm`, `RG8Snorm`, `RGBA8Snorm` (enum `2,11,24`) and `RG11B10Ufloat` (enum `31`) are
+    4×-multisampleable, so `createTexture(sampleCount=4)` should **succeed** — yawgpu raises a
+    validation error.
+  - **Accepts multisampling on formats that are not multisampleable.** `R32Uint`, `R32Sint` (enum
+    `15,16`) are single-sample-only, so `createTexture(sampleCount=4)` must be a **validation error** —
+    yawgpu creates the texture without error (too permissive).
+- **Expected (WebGPU):** multisample support follows the format's capability (gated by
+  `texture-formats-tier1` / `rg11b10ufloat-renderable` for the tier1 set); `R32Uint/Sint` are never
+  multisampleable. wgpu-native and Dawn agree with the spec.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 12 cases (6
+  formats × 2 dimensions) are in `expectations/yawgpu.txt`, so a `--isolate --expectations` run over
+  `createTexture:*` exits 0 on yawgpu; wgpu-native and Dawn need no entries.
 
 ---
 

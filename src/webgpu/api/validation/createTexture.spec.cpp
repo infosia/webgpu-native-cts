@@ -1,5 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/createTexture.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// T1 covers only the uncompressed format subset for dimension_type_and_format_compatibility.
 
 #include "cts/gpu.h"
 #include "cts/test.h"
@@ -9,7 +8,7 @@ using namespace cts;
 
 namespace {
 
-TestGroup<GpuTest> g = MakeTestGroup<GpuTest>(
+TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpuTest>(
     "api,validation,createTexture",
     "createTexture validation tests.");
 
@@ -23,13 +22,26 @@ std::vector<Value> textureDimensionValuesWithUndefined() {
     return values;
 }
 
-std::vector<Value> uncompressedTextureFormatValues() {
+std::vector<Value> allTextureFormatValues() {
     std::vector<Value> values;
-    values.reserve(kUncompressedTextureFormats.size());
-    for (WGPUTextureFormat format : kUncompressedTextureFormats) {
+    values.reserve(kAllTextureFormats.size());
+    for (WGPUTextureFormat format : kAllTextureFormats) {
         values.emplace_back(static_cast<int64_t>(format));
     }
     return values;
+}
+
+std::vector<Value> sampleCountValues() {
+    return {
+        Value(0),
+        Value(1),
+        Value(2),
+        Value(4),
+        Value(8),
+        Value(16),
+        Value(32),
+        Value(256),
+    };
 }
 
 CTS_TEST(g, "sample_count,1d_2d_array_3d")
@@ -43,7 +55,7 @@ CTS_TEST(g, "sample_count,1d_2d_array_3d")
             ParamRecord{{"dimension", static_cast<int64_t>(WGPUTextureDimension_3D)}, {"w", 4}, {"h", 4}, {"d", 4}, {"shouldError", true}},
         });
     })
-    .fn([](GpuTest& t) {
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
         desc.size.width = static_cast<uint32_t>(t.param<int>("w"));
         desc.size.height = static_cast<uint32_t>(t.param<int>("h"));
@@ -59,12 +71,12 @@ CTS_TEST(g, "sample_count,1d_2d_array_3d")
     });
 
 CTS_TEST(g, "dimension_type_and_format_compatibility")
-    .desc("Test every dimension type on every uncompressed format.")
+    .desc("Test every dimension type on every texture format.")
     .params([](ParamsBuilder u) {
         return u.combine("dimension", textureDimensionValuesWithUndefined())
-            .combine("format", uncompressedTextureFormatValues());
+            .combine("format", allTextureFormatValues());
     })
-    .fn([](GpuTest& t) {
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPUTextureDimension dimension = t.paramIsUndefined("dimension")
             ? WGPUTextureDimension_Undefined
             : static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
@@ -84,6 +96,42 @@ CTS_TEST(g, "dimension_type_and_format_compatibility")
         t.expectValidationError([&] {
             t.createTextureTracked(desc);
         }, !t.textureDimensionAndFormatCompatibleForDevice(dimension, format));
+    });
+
+CTS_TEST(g, "sampleCount,various_sampleCount_with_all_formats")
+    .desc("Test texture creation with various sample counts on all texture formats.")
+    .params([](ParamsBuilder u) {
+        return u.combine("dimension", {Value::undef(), Value(static_cast<int64_t>(WGPUTextureDimension_2D))})
+            .combine("format", allTextureFormatValues())
+            .beginSubcases()
+            .combine("sampleCount", sampleCountValues());
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension dimension = t.paramIsUndefined("dimension")
+            ? WGPUTextureDimension_Undefined
+            : static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const uint32_t sampleCount = static_cast<uint32_t>(t.param<int>("sampleCount"));
+
+        t.skipIfTextureFormatNotSupported(format);
+        const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size.width = 32 * info.blockWidth;
+        desc.size.height = 32 * info.blockHeight;
+        desc.size.depthOrArrayLayers = 1;
+        desc.dimension = dimension;
+        desc.sampleCount = sampleCount;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_TextureBinding;
+        if (sampleCount > 1) {
+            desc.usage |= WGPUTextureUsage_RenderAttachment;
+        }
+
+        const bool success = sampleCount == 1 || (sampleCount == 4 && t.isTextureFormatMultisampled(format));
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
     });
 
 } // namespace
