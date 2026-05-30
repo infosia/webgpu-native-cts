@@ -7,47 +7,93 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CTS_BACKEND "wgpu-native" CACHE STRING "Backend to test")
-set_property(CACHE CTS_BACKEND PROPERTY STRINGS "wgpu-native")
-
-if(NOT CTS_BACKEND STREQUAL "wgpu-native")
-    message(FATAL_ERROR "Phase 0 supports only CTS_BACKEND=wgpu-native")
-endif()
+set_property(CACHE CTS_BACKEND PROPERTY STRINGS "wgpu-native" "yawgpu")
 
 set(CTS_WGPU_NATIVE_DIR "" CACHE PATH "Path to a wgpu-native checkout or distribution")
 set(CTS_WGPU_NATIVE_LIB "" CACHE FILEPATH "Explicit path to libwgpu_native")
+set(CTS_YAWGPU_DIR "" CACHE PATH "Path to a yawgpu checkout or distribution")
+set(CTS_YAWGPU_LIB "" CACHE FILEPATH "Explicit path to libyawgpu")
 
-if(NOT CTS_WGPU_NATIVE_DIR)
-    message(FATAL_ERROR "CTS_WGPU_NATIVE_DIR is required for CTS_BACKEND=wgpu-native")
-endif()
+set(CTS_BACKEND_SOURCE "")
+set(CTS_BACKEND_LIB "")
+set(CTS_BACKEND_DEFINE "")
 
-set(CTS_WGPU_HEADER_DIR "${CTS_WGPU_NATIVE_DIR}/ffi")
-if(NOT EXISTS "${CTS_WGPU_HEADER_DIR}/webgpu-headers/webgpu.h")
-    set(CTS_WGPU_HEADER_DIR "${CTS_WGPU_NATIVE_DIR}/include")
-endif()
-
-if(NOT EXISTS "${CTS_WGPU_HEADER_DIR}/webgpu-headers/webgpu.h")
-    message(FATAL_ERROR "Could not find webgpu-headers/webgpu.h under ${CTS_WGPU_NATIVE_DIR}")
-endif()
-
-if(CTS_WGPU_NATIVE_LIB)
-    set(WGPU_NATIVE_LIB "${CTS_WGPU_NATIVE_LIB}")
-else()
-    set(_cts_original_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")
-    if(APPLE OR UNIX)
-        set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ${CMAKE_FIND_LIBRARY_SUFFIXES})
+if(CTS_BACKEND STREQUAL "wgpu-native")
+    if(NOT CTS_WGPU_NATIVE_DIR)
+        message(FATAL_ERROR "CTS_WGPU_NATIVE_DIR is required for CTS_BACKEND=wgpu-native")
     endif()
-    find_library(WGPU_NATIVE_LIB
-        NAMES wgpu_native
-        PATHS
-            "${CTS_WGPU_NATIVE_DIR}/target/release"
-            "${CTS_WGPU_NATIVE_DIR}/lib"
-        NO_DEFAULT_PATH
-    )
-    set(CMAKE_FIND_LIBRARY_SUFFIXES "${_cts_original_suffixes}")
-endif()
 
-if(NOT WGPU_NATIVE_LIB)
-    message(FATAL_ERROR "Could not find libwgpu_native. Build wgpu-native or set CTS_WGPU_NATIVE_LIB.")
+    set(CTS_WGPU_HEADER_DIR "${CTS_WGPU_NATIVE_DIR}/ffi")
+    if(NOT EXISTS "${CTS_WGPU_HEADER_DIR}/webgpu-headers/webgpu.h")
+        set(CTS_WGPU_HEADER_DIR "${CTS_WGPU_NATIVE_DIR}/include")
+    endif()
+
+    if(NOT EXISTS "${CTS_WGPU_HEADER_DIR}/webgpu-headers/webgpu.h")
+        message(FATAL_ERROR "Could not find webgpu-headers/webgpu.h under ${CTS_WGPU_NATIVE_DIR}")
+    endif()
+
+    if(CTS_WGPU_NATIVE_LIB)
+        set(CTS_BACKEND_LIB "${CTS_WGPU_NATIVE_LIB}")
+    else()
+        set(_cts_original_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")
+        if(APPLE OR UNIX)
+            set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ${CMAKE_FIND_LIBRARY_SUFFIXES})
+        endif()
+        find_library(WGPU_NATIVE_LIB
+            NAMES wgpu_native
+            PATHS
+                "${CTS_WGPU_NATIVE_DIR}/target/release"
+                "${CTS_WGPU_NATIVE_DIR}/lib"
+            NO_DEFAULT_PATH
+        )
+        set(CMAKE_FIND_LIBRARY_SUFFIXES "${_cts_original_suffixes}")
+        set(CTS_BACKEND_LIB "${WGPU_NATIVE_LIB}")
+    endif()
+
+    if(NOT CTS_BACKEND_LIB)
+        message(FATAL_ERROR "Could not find libwgpu_native. Build wgpu-native or set CTS_WGPU_NATIVE_LIB.")
+    endif()
+
+    set(CTS_BACKEND_SOURCE src/common/webgpu/backend_wgpu.cpp)
+    set(CTS_BACKEND_DEFINE CTS_BACKEND_WGPU=1)
+elseif(CTS_BACKEND STREQUAL "yawgpu")
+    if(NOT CTS_YAWGPU_DIR)
+        message(FATAL_ERROR "CTS_YAWGPU_DIR is required for CTS_BACKEND=yawgpu")
+    endif()
+
+    set(CTS_WGPU_HEADER_DIR "${CTS_YAWGPU_DIR}/yawgpu/ffi")
+    if(NOT EXISTS "${CTS_WGPU_HEADER_DIR}/webgpu-headers/webgpu.h")
+        message(FATAL_ERROR "Could not find yawgpu webgpu-headers/webgpu.h under ${CTS_YAWGPU_DIR}")
+    endif()
+
+    if(CTS_YAWGPU_LIB)
+        set(CTS_BACKEND_LIB "${CTS_YAWGPU_LIB}")
+    else()
+        set(_cts_original_suffixes "${CMAKE_FIND_LIBRARY_SUFFIXES}")
+        if(APPLE OR UNIX)
+            set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ${CMAKE_FIND_LIBRARY_SUFFIXES})
+        endif()
+        find_library(YAWGPU_LIB
+            NAMES yawgpu
+            PATHS
+                "${CTS_YAWGPU_DIR}/target/release"
+                "${CTS_YAWGPU_DIR}/target-metal/release"
+                "${CTS_YAWGPU_DIR}/target-vulkan/release"
+                "${CTS_YAWGPU_DIR}/lib"
+            NO_DEFAULT_PATH
+        )
+        set(CMAKE_FIND_LIBRARY_SUFFIXES "${_cts_original_suffixes}")
+        set(CTS_BACKEND_LIB "${YAWGPU_LIB}")
+    endif()
+
+    if(NOT CTS_BACKEND_LIB)
+        message(FATAL_ERROR "Could not find libyawgpu. Build yawgpu or set CTS_YAWGPU_LIB.")
+    endif()
+
+    set(CTS_BACKEND_SOURCE src/common/webgpu/backend_yawgpu.cpp)
+    set(CTS_BACKEND_DEFINE CTS_BACKEND_YAWGPU=1)
+else()
+    message(FATAL_ERROR "Unsupported CTS_BACKEND=${CTS_BACKEND}")
 endif()
 
 file(GLOB_RECURSE CTS_SPEC_SOURCES CONFIGURE_DEPENDS
@@ -59,7 +105,7 @@ add_library(cts_harness
     src/common/params.cpp
     src/common/query.cpp
     src/common/runner.cpp
-    src/common/webgpu/backend_wgpu.cpp
+    ${CTS_BACKEND_SOURCE}
     src/common/webgpu/sync.cpp
 )
 target_include_directories(cts_harness
@@ -69,8 +115,8 @@ target_include_directories(cts_harness
     PRIVATE
         "${PROJECT_SOURCE_DIR}/src"
 )
-target_compile_definitions(cts_harness PUBLIC CTS_BACKEND_WGPU=1)
-target_link_libraries(cts_harness PUBLIC "${WGPU_NATIVE_LIB}")
+target_compile_definitions(cts_harness PUBLIC ${CTS_BACKEND_DEFINE})
+target_link_libraries(cts_harness PUBLIC "${CTS_BACKEND_LIB}")
 
 if(APPLE)
     target_link_libraries(cts_harness

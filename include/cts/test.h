@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -223,6 +224,7 @@ TestBuilder<F> makeTestBuilder(TestGroup<F>& group, std::string name) {
 struct RunOptions {
     bool list = false;
     bool listCases = false;
+    std::string expectationsPath;
     std::vector<std::string> queries;
 };
 

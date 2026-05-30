@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <unordered_set>
 
 #include "common/query.h"
 
@@ -21,6 +22,40 @@ const char* statusName(TestStatus status) {
         return "fail";
     }
     return "fail";
+}
+
+std::string trim(const std::string& text) {
+    const size_t first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return {};
+    }
+    const size_t last = text.find_last_not_of(" \t\r\n");
+    return text.substr(first, last - first + 1);
+}
+
+std::unordered_set<std::string> loadExpectations(const std::string& path) {
+    std::unordered_set<std::string> expectations;
+    if (path.empty()) {
+        return expectations;
+    }
+
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("failed to open expectations file: " + path);
+    }
+
+    std::string line;
+    while (std::getline(in, line)) {
+        const size_t comment = line.find('#');
+        if (comment != std::string::npos) {
+            line = line.substr(0, comment);
+        }
+        line = trim(line);
+        if (!line.empty()) {
+            expectations.insert(line);
+        }
+    }
+    return expectations;
 }
 
 ParamsBuilder buildParams(const TestSpec& test) {
@@ -156,13 +191,35 @@ int runQueries(const RunOptions& options) {
         return 0;
     }
 
+    std::unordered_set<std::string> expectations;
+    try {
+        expectations = loadExpectations(options.expectationsPath);
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n";
+        return 1;
+    }
+
     std::vector<SubcaseResult> results = collectRuns(queries);
     size_t pass = 0;
     size_t skip = 0;
     size_t warn = 0;
     size_t fail = 0;
+    size_t xfail = 0;
+    size_t xpass = 0;
     for (const SubcaseResult& result : results) {
-        std::cout << statusName(result.status) << " " << result.query;
+        const bool expected = expectations.contains(result.query);
+        std::string status = statusName(result.status);
+        bool unexpectedFailure = result.status == TestStatus::Fail;
+        if (expected && result.status == TestStatus::Fail) {
+            status = "xfail";
+            unexpectedFailure = false;
+            ++xfail;
+        } else if (expected && result.status == TestStatus::Pass) {
+            status = "xpass";
+            ++xpass;
+        }
+
+        std::cout << status << " " << result.query;
         if (!result.message.empty()) {
             std::cout << " " << result.message;
         }
@@ -170,9 +227,10 @@ int runQueries(const RunOptions& options) {
         pass += result.status == TestStatus::Pass ? 1 : 0;
         skip += result.status == TestStatus::Skip ? 1 : 0;
         warn += result.status == TestStatus::Warn ? 1 : 0;
-        fail += result.status == TestStatus::Fail ? 1 : 0;
+        fail += unexpectedFailure ? 1 : 0;
     }
-    std::cout << "summary: pass=" << pass << " skip=" << skip << " warn=" << warn << " fail=" << fail << "\n";
+    std::cout << "summary: pass=" << pass << " skip=" << skip << " warn=" << warn
+              << " fail=" << fail << " xfail=" << xfail << " xpass=" << xpass << "\n";
     return fail == 0 ? 0 : 1;
 }
 

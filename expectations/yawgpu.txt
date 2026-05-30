@@ -1,0 +1,3 @@
+# yawgpu expectations captured against commit 55ac04d64f59f03ed6d066283d400d03cc001575.
+# One full case query per line. Subcase params are not part of CTS query identity.
+# No expected failures are currently listed.
