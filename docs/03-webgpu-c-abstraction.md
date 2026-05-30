@@ -7,7 +7,7 @@ models the same operations as `WGPUFuture` values resolved through callbacks dri
 the backend shim that lets one test binary build against wgpu-native or Dawn.
 
 This is the layer with no direct upstream analog; it is the most important thing to get right.
-The harness and tests are C++17, so the wrappers use values/`std::optional`, RAII, and lambdas
+The harness and tests are C++20, so the wrappers use values/`std::optional`, RAII, and lambdas
 — but they call the plain WebGPU **C** API underneath.
 
 ---
@@ -89,8 +89,10 @@ DeviceResult requestDeviceSync(WGPUAdapter, const WGPUDeviceDescriptor*);
 WGPUMapAsyncStatus       bufferMapSync(WGPUInstance, WGPUBuffer, WGPUMapMode, size_t off, size_t size);
 WGPUQueueWorkDoneStatus  queueWaitSync(WGPUInstance, WGPUQueue);            // onSubmittedWorkDone
 
-struct PipelineResult { WGPUCreatePipelineAsyncStatus status; WGPUComputePipeline pipeline; std::string message; };
-PipelineResult createComputePipelineAsyncSync(WGPUInstance, WGPUDevice, const WGPUComputePipelineDescriptor*);
+struct ComputePipelineResult { WGPUCreatePipelineAsyncStatus status; WGPUComputePipeline pipeline; std::string message; };
+struct RenderPipelineResult  { WGPUCreatePipelineAsyncStatus status; WGPURenderPipeline  pipeline; std::string message; };
+ComputePipelineResult createComputePipelineAsyncSync(WGPUInstance, WGPUDevice, const WGPUComputePipelineDescriptor*);
+RenderPipelineResult  createRenderPipelineAsyncSync (WGPUInstance, WGPUDevice, const WGPURenderPipelineDescriptor*);
 
 } // namespace cts
 ```
@@ -108,11 +110,36 @@ callback. (RAII wrappers — e.g. a `unique_ptr`-like handle that calls `wgpuXxx
 the returned owned handles where convenient, but the raw `WGPUDevice`/`WGPUAdapter` is exposed to
 match the upstream shape.)
 
+### Error contract: wait/delivery status vs operation status
+
+Every wrapper separates two independent failure axes, and treats them differently:
+
+- **Wait/delivery failure** — the future never resolved within the timeout, or the callback was
+  reported with a delivery-level failure (a `WGPUWaitStatus` other than `Success`; a
+  `WGPUPopErrorScopeStatus` of `Unknown`/`DeviceLost`; an unexpected device loss). This is a
+  **harness failure**, not something the test reasons about. The wrapper **throws**
+  `cts::AsyncFailure` (with `cts::AsyncTimeout` for the timeout case); the runner catches it at the
+  (sub)case boundary and turns it into a `fail` with a clear message (e.g. "future did not resolve
+  within N ms"). Tests never handle these.
+- **Operation status** — the operation succeeded or failed *as the API defines it*
+  (`WGPURequestAdapterStatus`, `WGPUMapAsyncStatus`, `WGPUQueueWorkDoneStatus`, or the
+  `WGPUErrorType` from a popped scope). This is **returned by value** so the test can assert on it,
+  because some tests legitimately expect the operation to fail. It is never thrown.
+
+So: a non-`Success` **wait** status → the wrapper throws; a resolved future carrying a non-success
+**operation** status → returned, never thrown. For `popErrorScopeSync`, `ScopeResult.status`
+(delivery) follows the wait-failure axis (throws on `DeviceLost`/`Unknown`), while
+`ScopeResult.type` (the error type) follows the operation axis (returned, asserted by
+`expectValidationError`). The fixture's `eventually(...)` and tracked-cleanup paths convert any
+escaping `AsyncFailure` during `finalize` into a case failure rather than letting it propagate out
+of the runner.
+
 ### Timeouts and hangs
 
 A default timeout (e.g. 5 s, configurable via `--future-timeout-ms`) guards against a backend
-that never resolves a future. On timeout the helper records a harness error and the case fails
-with a clear "future did not resolve" message rather than hanging the run.
+that never resolves a future. On timeout the helper throws `cts::AsyncTimeout` (see the error
+contract above), which the runner turns into a clear "future did not resolve" case failure rather
+than hanging the run.
 
 ---
 
@@ -126,6 +153,7 @@ with a clear "future did not resolve" message rather than hanging the run.
 | `await queue.onSubmittedWorkDone()` | `cts::queueWaitSync(instance, queue);` |
 | `const err = await device.popErrorScope()` | `auto r = cts::popErrorScopeSync(instance, device);` (§4) |
 | `await device.createComputePipelineAsync(d)` | `cts::createComputePipelineAsyncSync(instance, device, &d);` |
+| `await device.createRenderPipelineAsync(d)` | `cts::createRenderPipelineAsyncSync(instance, device, &d);` |
 | `t.shouldReject('OperationError', p)` | check the wrapper's returned status equals the expected failure |
 
 Synchronous JS calls (`device.createBuffer`, `encoder.finish`, `queue.submit`) map 1:1 to their
@@ -170,6 +198,8 @@ t.expectValidationError([&] {
 1. `pushErrorScope(device, Validation)`,
 2. runs `body()`,
 3. `popErrorScopeSync(instance, device)`, then asserts:
+   - if the pop's delivery `status` is `DeviceLost`/`Unknown` → harness failure (throws
+     `cts::AsyncFailure`; see §2 error contract), distinct from the error `type`;
    - if `shouldError` and `type == NoError` → fail ("expected validation error, got none");
    - if `!shouldError` and `type != NoError` → fail (reports the message);
    - records the scope message as info for debugging.

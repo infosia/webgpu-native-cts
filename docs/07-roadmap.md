@@ -17,7 +17,8 @@ async→sync layer carry almost all the risk, so they come first, proven against
 - Vendor canonical `webgpu.h` (`third_party/webgpu-headers/`).
 - Backend shim for **wgpu-native** only; `cts::createInstance` + adapter request works; print the
   adapter name and exit.
-- Generated-index codegen wired (empty index).
+- Registration via direct compilation of `.spec.cpp` into the executable (no generated index; the
+  generated-index TU is a later fallback only if a static-library split is ever needed).
 
 **Exit:** `build/cts --version` and adapter enumeration work against wgpu-native.
 

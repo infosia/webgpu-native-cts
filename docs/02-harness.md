@@ -42,7 +42,7 @@ TestGroup<GpuTest> g = MakeTestGroup<GpuTest>(
 CTS_TEST(g, "size_alignment")
     .desc("Buffer size must be a multiple of 4 when a MAP_* usage is set.")
     .params([](ParamsBuilder u) {                  // see §2
-        return u.combine("usage", {BufferUsage::MapRead, BufferUsage::MapWrite})
+        return u.combine("usage", {WGPUBufferUsage_MapRead, WGPUBufferUsage_MapWrite})
                 .beginSubcases()
                 .combine("size", {0, 2, 4, 6, 8});
     })
@@ -127,14 +127,22 @@ A parameter value is a `std::variant` (`cts::Value`) covering exactly what upstr
 strings can encode:
 
 ```cpp
-struct Undefined {};                         // upstream `undefined`
-struct Null {};                              // upstream `null`
-using Value = std::variant<
-    Undefined, Null, bool, int64_t, double, std::string,
-    std::vector<Value>,                      // arrays
-    std::map<std::string, Value>>;           // small objects
+struct Value;                                 // recursive: arrays/objects hold Values
+using Array  = std::vector<Value>;            // ordered
+using Object = std::vector<std::pair<std::string, Value>>;  // ordered key→value
+struct Undefined {};                          // upstream `undefined`
+struct Null {};                               // upstream `null`
+struct Value {
+    std::variant<Undefined, Null, bool, int64_t, double, std::string, Array, Object> v;
+    // implicit constructors from bool / integer / double / const char* (below)
+};
 ```
 
+`Value` is a `struct` wrapping the `std::variant` — a wrapper, **not** a bare
+`using Value = std::variant<...>`, because a type alias cannot reference itself while incomplete.
+`Array` uses `std::vector` (which supports an incomplete element type); `Object` uses a
+`std::vector<std::pair<...>>` rather than `std::map` both to avoid `std::map`'s incomplete-type
+restriction and to **preserve key order**, which the stringifier needs for deterministic output.
 `Value` has implicit constructors from `bool`/integer/`double`/`const char*` so authors write
 `{0, 2, 4}` and `{"rgba8unorm", "rgba16float"}` naturally.
 
@@ -168,7 +176,7 @@ u.combine('usage', [MAP_READ, MAP_WRITE])
  .combine('offset', [0, 4, 8])
 ```
 ```cpp
-u.combine("usage", {MapRead, MapWrite})
+u.combine("usage", {WGPUBufferUsage_MapRead, WGPUBufferUsage_MapWrite})
  .combine("size", {0, 4, 6, 16})
  .expand("aligned", [](const ParamRecord& p){ return std::vector<Value>{...}; })
  .filter([](const ParamRecord& p){ return ...; })
@@ -327,7 +335,7 @@ fail the *current* case (routing in the abstraction doc).
 ## 6. Assertions / expectations
 
 Mirror `framework/fixture.ts` and `gpu_test.ts`. Methods on the fixture; source location is
-captured with `std::source_location` (C++20) or a `CTS_EXPECT(...)` macro fallback (C++17).
+captured with `std::source_location` (C++20).
 
 ```cpp
 t.expect(cond, "msg");                 // boolean assertion

@@ -6,12 +6,22 @@ sides are object-oriented, fluent, and closure-based, the port is **near-mechani
 
 ## 0. Attribution & licensing
 
-The upstream CTS is BSD-3-Clause. Each ported file should:
+This repository is **BSD-3-Clause** (see [`LICENSE`](../LICENSE)), the same license as the upstream
+CTS, so ported test logic (a derivative work) stays license-compatible. Each ported file should:
 
-- Keep a header comment crediting the upstream source path and revision, e.g.
-  `// Ported from gpuweb/cts src/webgpu/api/validation/createBuffer.spec.ts @ <commit>`.
+- Carry the attribution/license header below, crediting the upstream source path and pinned
+  revision (see [UPSTREAM.md](UPSTREAM.md)).
 - Preserve the upstream `description` text (as the `MakeTestGroup` description arg).
 - Preserve test names and (where possible) case-param names/values so query identities match.
+
+**Per-file header template** (top of every ported `.spec.cpp`):
+
+```cpp
+// SPDX-License-Identifier: BSD-3-Clause
+// Ported from gpuweb/cts src/webgpu/<path>.spec.ts @ <pinned-commit> (see docs/UPSTREAM.md).
+// Upstream CTS: Copyright (c) <year> The WebGPU CTS Contributors, BSD-3-Clause.
+// Port:         Copyright (c) <year> <this project's copyright holder>, BSD-3-Clause.
+```
 
 Record the upstream commit being ported against in [`docs/UPSTREAM.md`](UPSTREAM.md) so the suite
 tracks a known CTS revision.
@@ -128,7 +138,7 @@ TestGroup<GpuTest> g = MakeTestGroup<GpuTest>(
 CTS_TEST(g, "size_alignment")
     .desc("When MAP_READ/MAP_WRITE is set, size must be a multiple of 4.")
     .params([](ParamsBuilder u) {
-        return u.combine("usage", {BufferUsage::MapRead, BufferUsage::MapWrite})
+        return u.combine("usage", {WGPUBufferUsage_MapRead, WGPUBufferUsage_MapWrite})
                 .beginSubcases()
                 .combine("size", {0, 2, 4, 6, 8});
     })

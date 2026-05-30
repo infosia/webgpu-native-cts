@@ -28,7 +28,7 @@ TestGroup<GpuTest> g = MakeTestGroup<GpuTest>(
 CTS_TEST(g, "size_alignment")
     .desc("Buffer size must be a multiple of 4 when a MAP_* usage is requested.")
     .params([](ParamsBuilder u) {
-        return u.combine("usage", {BufferUsage::MapRead, BufferUsage::MapWrite})
+        return u.combine("usage", {WGPUBufferUsage_MapRead, WGPUBufferUsage_MapWrite})
                 .beginSubcases()
                 .combine("size", {0, 2, 4, 6, 8});
     })
@@ -77,7 +77,7 @@ g.test('size_alignment')
 | `g.test('name')` | `CTS_TEST(g, "name")` | returns a fluent builder |
 | `.desc(s)` | `.desc("s")` | |
 | `.params(u => ...)` | `.params([](ParamsBuilder u){ return ...; })` | a lambda returning the built `u` |
-| `.paramsSubcasesOnly(u => ...)` | `.paramsSubcasesOnly([](ParamsBuilder u){ ... })` | subcase-only params |
+| `.paramsSubcasesOnly(u => ...)` | `.paramsSubcasesOnly([](ParamsBuilder u){ return u...; })` | subcase-only params (lambda returns the built `u`, like `.params`) |
 | `.fn(t => { ... })` | `.fn([](GpuTest& t){ ... })` | the test body; the lambda's parameter type is the fixture |
 | `.unimplemented()` | `.unimplemented()` | registers a TODO test that reports `skip(unimplemented)` |
 
@@ -95,7 +95,7 @@ is a valid namespace-scope declaration. Test **names** may contain commas for ne
 
 ```cpp
 // Inside the .params lambda, on a ParamsBuilder u (chained, returns the builder):
-u.combine("usage", {MapRead, MapWrite});                 // cartesian product with a new key
+u.combine("usage", {WGPUBufferUsage_MapRead, WGPUBufferUsage_MapWrite});  // cartesian product with a new key
 u.combineWithParams({ {{"format","rgba8unorm"},{"samples",4}}, {...} });  // full-object combine
 u.expand("aligned", [](const ParamRecord& p){ return std::vector<Value>{...}; });  // computed
 u.filter([](const ParamRecord& p){ return /* keep iff */ true; });
@@ -247,7 +247,8 @@ encoding (`usage=4`) follows the parity rules in [02-harness §2/§3](02-harness
 ## 9. Minimal checklist for a new test file
 
 1. `#include "cts/test.h"` (+ `cts/gpu.h` for GPU tests); `using namespace cts;`.
-2. `MakeTestGroup<GpuTest>("path/matching/file", "description")`.
+2. `MakeTestGroup<GpuTest>("api,validation,createBuffer", "description")` (comma-separated path
+   matching the file's location under `src/webgpu/`).
 3. For each test: `CTS_TEST(g, "name").desc(...).params([]{...}).fn([](GpuTest& t){...});`.
 4. Use `t.expectValidationError([&]{...}, shouldError)` / assertions; track created resources.
 5. Regenerate the listing (`cmake --build build --target gen_listings`) and run via query.

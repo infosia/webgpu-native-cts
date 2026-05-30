@@ -35,7 +35,7 @@ instance-creation extras) are isolated behind a thin backend shim.
 
 ## Language
 
-- The entire suite — tests and harness — is **C++17**.
+- The entire suite — tests and harness — is **C++20**.
 - Tests call the WebGPU **C** API (`webgpu.h`) directly; they do not depend on any C++ wrapper
   for WebGPU itself.
 - The harness is a **custom C++ framework that mirrors the upstream CTS framework 1:1**
@@ -92,5 +92,6 @@ in [`docs/`](docs/). Start with [`docs/00-overview.md`](docs/00-overview.md).
 
 ## License
 
-To be decided. The upstream CTS is BSD-3-Clause; ports of test logic should preserve upstream
-attribution. See [05-porting-guide](docs/05-porting-guide.md).
+**BSD-3-Clause** (see [`LICENSE`](LICENSE)), matching the upstream CTS so that ported test logic —
+a derivative work — stays license-compatible. Each ported file must preserve upstream attribution;
+see [05-porting-guide §0](docs/05-porting-guide.md).

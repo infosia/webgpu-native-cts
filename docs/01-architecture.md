@@ -35,16 +35,16 @@ WebGPU **C** API (directly, plus async→sync helpers) and assert via the fixtur
 
 | Layer | Language | Upstream analog | Responsibility |
 |-------|----------|-----------------|----------------|
-| **Test-author API** (`include/cts/*.h`) | C++17 | `common/framework/*` public surface | The classes/templates test files use: `makeTestGroup`, the test builder, `ParamsBuilder`, the `Fixture`/`GpuTest` interface, assertions |
-| **Harness core** (`src/common/`) | C++17 | `common/internal/*`, `common/framework/*` | Registry, parameter expansion, query parse/compare, test tree, runner, logging, result model |
-| **GPU fixtures** (`src/webgpu/fixtures/`) | C++17 | `webgpu/gpu_test.ts`, `util/device_pool.ts` | Device pool, `GpuTest` base fixture, validation/error-scope helpers, readback helpers |
-| **WebGPU C abstraction** (`src/common/webgpu/`) | C++17 | (n/a — upstream uses `async/await`) | Async→sync future helpers, error-scope sync helpers, backend shim |
-| **Tests** (`src/webgpu/**/*.spec.cpp`) | C++17 | `webgpu/**/*.spec.ts` | The ported tests (call the WebGPU **C** API) |
-| **Tools** (`tools/gen_listings/`) | C++17 (reuses harness) | `common/tools/{crawl,gen_listings}.ts` | Emit the static listing |
+| **Test-author API** (`include/cts/*.h`) | C++20 | `common/framework/*` public surface | The classes/templates test files use: `makeTestGroup`, the test builder, `ParamsBuilder`, the `Fixture`/`GpuTest` interface, assertions |
+| **Harness core** (`src/common/`) | C++20 | `common/internal/*`, `common/framework/*` | Registry, parameter expansion, query parse/compare, test tree, runner, logging, result model |
+| **GPU fixtures** (`src/webgpu/fixtures/`) | C++20 | `webgpu/gpu_test.ts`, `util/device_pool.ts` | Device pool, `GpuTest` base fixture, validation/error-scope helpers, readback helpers |
+| **WebGPU C abstraction** (`src/common/webgpu/`) | C++20 | (n/a — upstream uses `async/await`) | Async→sync future helpers, error-scope sync helpers, backend shim |
+| **Tests** (`src/webgpu/**/*.spec.cpp`) | C++20 | `webgpu/**/*.spec.ts` | The ported tests (call the WebGPU **C** API) |
+| **Tools** (`tools/gen_listings/`) | C++20 (reuses harness) | `common/tools/{crawl,gen_listings}.ts` | Emit the static listing |
 
 ### One language, no ABI seam
 
-Tests and harness are all C++17, so there is **no C ABI boundary** between them. Test files
+Tests and harness are all C++20, so there is **no C ABI boundary** between them. Test files
 `#include "cts/test.h"` and use the harness's classes and templates directly. The only C
 involved is the WebGPU API itself (`webgpu.h`), which the tests call.
 
@@ -67,7 +67,7 @@ The upstream framework's essential concepts and their C++ realization:
 |------------------|-----------------|-------------------|
 | `makeTestGroup(Fixture)` | `internal/test_group.ts` | `MakeTestGroup<Fixture>(path, desc)` → a `TestGroup<Fixture>`; registered at static-init time |
 | `g.test('name').desc().params().fn()` builder | `internal/test_group.ts` | `g.test("name")` returns a fluent `TestBuilder`; `.fn(lambda)` / `.unimplemented()` commits the test into `g` |
-| Params builder (`u.combine/expand/filter`) | `framework/params_builder.ts` | `cts::ParamsBuilder` fluent class; `.combine/.expand/.filter` take `std::initializer_list<Value>` / lambdas; `Value` is a `std::variant` |
+| Params builder (`u.combine/expand/filter`) | `framework/params_builder.ts` | `cts::ParamsBuilder` fluent class; `.combine/.expand/.filter` take `std::initializer_list<Value>` / lambdas; `Value` wraps a `std::variant` |
 | Case vs subcase (`.params` vs `.paramsSubcasesOnly`) | `framework/params_builder.ts` | `.beginSubcases()` marks the boundary (mirrors `u.beginSubcases()`); `paramsSubcasesOnly` is the single-case shortcut |
 | Query classes (MultiFile/MultiTest/MultiCase/SingleCase) | `internal/query/query.ts` | `cts::TestQuery` variants; same string grammar |
 | Query parse/compare/stringify | `internal/query/{parseQuery,compare,stringifyParams}.ts` | `cts/query.h` + `query.cpp`; param-value stringification must match upstream byte-for-byte |
@@ -162,9 +162,9 @@ ported file lives at the same logical path and produces the same query prefix.
   Plan: compile `.spec.cpp` files **directly into the `cts` executable** (object files linked
   directly, not via a static archive), so their static initializers are never dropped. If a
   static library is ever needed, fall back to a generated index TU / `--whole-archive`. Detailed
-  in [02-harness](02-harness.md §Registration).
+  in [02-harness §1](02-harness.md#1-registration).
 - **Param-value stringification parity**: exact rules to match upstream query strings for
   non-trivial values (numbers, booleans, undefined, small objects). Detailed in
-  [02-harness](02-harness.md §Query).
+  [02-harness §3](02-harness.md#3-query-system).
 - **Device-lost / uncaptured-error routing** across the pooled-device lifecycle. Detailed in
   [03-webgpu-c-abstraction](03-webgpu-c-abstraction.md).

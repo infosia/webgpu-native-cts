@@ -19,7 +19,8 @@ what Dawn itself uses. The top-level `CMakeLists.txt` defines:
 - `cts_harness` — the harness as a library (so tools share it; the `.spec.cpp` files are compiled
   into the executables that need them, not into this library — see §3).
 
-Language: `CXX` (C++17) only. Tests and harness are all C++; tests call the WebGPU **C** API.
+Language: `CXX` (C++20) only. Tests and harness are all C++; tests call the WebGPU **C** API.
+(C++20 is used for designated initializers, `std::span`, and `std::source_location`.)
 
 ---
 
@@ -49,23 +50,48 @@ Two supported modes, chosen by additional cache vars:
 | **Prebuilt** | `CTS_WGPU_NATIVE_DIR` / `CTS_DAWN_DIR` pointing at an install/build dir | Use `find_library` + a known header dir; link the prebuilt `.a`/`.so`/`.dylib` |
 | **FetchContent / submodule** | default | Add the backend as a subproject and build it (Dawn via its CMake; wgpu-native via its Makefile/meson invoked from CMake, or a prebuilt release) |
 
-For wgpu-native (built from `../wgpu-native`): it produces `libwgpu_native` and ships
-`ffi/webgpu.h` + `ffi/webgpu-headers/webgpu.h`. The prebuilt mode points `CTS_WGPU_NATIVE_DIR`
-at its build output. For Dawn (`../../C/dawn`): it exposes a `webgpu_dawn` (or
-`dawn::webgpu_dawn`) target and `include/webgpu/webgpu.h`.
+**Vertical-slice path — wgpu-native, concretely.** Phase 0/1 wires exactly one backend:
+wgpu-native (it lives in this workspace and links as a plain C library). The expected layout and a
+known-good configure command:
 
-The slice will wire **one** backend first (wgpu-native, since it lives in this workspace and is
-simplest to link as a C library), then add Dawn.
+```
+$CTS_WGPU_NATIVE_DIR/
+  include/
+    webgpu.h                     # wgpu-native extensions
+    webgpu-headers/webgpu.h      # canonical C API (the header tests compile against)
+  lib/
+    libwgpu_native.a             # static lib (preferred for the slice)
+    libwgpu_native.dylib         # or the shared lib (then handle rpath at runtime)
+```
+
+```bash
+# Build wgpu-native first (from ../wgpu-native): `cargo build --release` (or `make`),
+# then point CTS at a dir laid out as above (header dir + lib dir).
+cmake -S . -B build \
+      -DCTS_BACKEND=wgpu-native \
+      -DCTS_WGPU_NATIVE_DIR=/abs/path/to/wgpu-native/dist
+```
+
+The CMake glue resolves the canonical header as
+`${CTS_WGPU_NATIVE_DIR}/include/webgpu-headers/webgpu.h`, finds the library with
+`find_library(WGPU_NATIVE_LIB wgpu_native PATHS ${CTS_WGPU_NATIVE_DIR}/lib)`, links it, and — for a
+shared lib — sets an rpath / copies the dylib next to `build/cts`. (wgpu-native's own build output
+dir layout differs slightly between `make` and `cargo`; the exact `CTS_WGPU_NATIVE_DIR` to pass for
+the local checkout is pinned in the Phase 0 task spec, `specs/phase0-build-skeleton.md`.)
+
+For **Dawn** (`../../C/dawn`, added after the slice): it exposes a `webgpu_dawn` /
+`dawn::webgpu_dawn` CMake target and `include/webgpu/webgpu.h`; the `find_library`/header paths
+differ accordingly and are captured when Dawn is wired.
 
 ---
 
 ## 3. Building
 
 ```bash
-# Configure (pick a backend + how to find it)
+# Configure (pick a backend + how to find it; see §2 for the expected dir layout)
 cmake -S . -B build \
       -DCTS_BACKEND=wgpu-native \
-      -DCTS_WGPU_NATIVE_DIR=/path/to/wgpu-native/target/release
+      -DCTS_WGPU_NATIVE_DIR=/abs/path/to/wgpu-native/dist
 
 # Build everything
 cmake --build build -j
