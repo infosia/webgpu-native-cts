@@ -28,6 +28,45 @@ WGPUBuffer createCopyBuffer(GpuTest& t, uint64_t size, WGPUBufferUsage usage) {
     return t.createBufferTracked(desc);
 }
 
+std::vector<Value> resourceStateValues() {
+    std::vector<Value> values;
+    values.reserve(kResourceStates.size());
+    for (ResourceState state : kResourceStates) {
+        values.emplace_back(static_cast<int64_t>(state));
+    }
+    return values;
+}
+
+enum class CommandExpectation {
+    Success,
+    FinishError,
+    SubmitError,
+};
+
+void testCopyBufferToBuffer(
+    GpuTest& t,
+    WGPUBuffer src,
+    uint64_t srcOffset,
+    WGPUBuffer dst,
+    uint64_t dstOffset,
+    uint64_t copySize,
+    CommandExpectation expectation) {
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, src, srcOffset, dst, dstOffset, copySize);
+
+    if (expectation == CommandExpectation::FinishError) {
+        t.expectValidationError([&] {
+            t.finishTracked(encoder);
+        }, true);
+        return;
+    }
+
+    WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
+    t.expectValidationError([&] {
+        wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
+    }, expectation == CommandExpectation::SubmitError);
+}
+
 void testCopyBufferToBuffer(
     GpuTest& t,
     WGPUBuffer src,
@@ -36,17 +75,40 @@ void testCopyBufferToBuffer(
     uint64_t dstOffset,
     uint64_t copySize,
     bool isSuccess) {
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    wgpuCommandEncoderCopyBufferToBuffer(encoder, src, srcOffset, dst, dstOffset, copySize);
-
-    t.expectValidationError([&] {
-        t.finishTracked(encoder);
-    }, !isSuccess);
+    testCopyBufferToBuffer(
+        t,
+        src,
+        srcOffset,
+        dst,
+        dstOffset,
+        copySize,
+        isSuccess ? CommandExpectation::Success : CommandExpectation::FinishError);
 }
 
 CTS_TEST(g, "buffer_state")
     .desc("Test that copying an invalid or destroyed buffer fails.")
-    .unimplemented("needs createBufferWithState and queue.submit");
+    .params([](ParamsBuilder u) {
+        return u.combine("srcBufferState", resourceStateValues()).combine("dstBufferState", resourceStateValues());
+    })
+    .fn([](GpuTest& t) {
+        const ResourceState srcState = static_cast<ResourceState>(t.param<int64_t>("srcBufferState"));
+        const ResourceState dstState = static_cast<ResourceState>(t.param<int64_t>("dstBufferState"));
+
+        WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        desc.size = 16;
+        desc.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
+        WGPUBuffer src = t.createBufferWithState(srcState, desc);
+        WGPUBuffer dst = t.createBufferWithState(dstState, desc);
+
+        CommandExpectation expectation = CommandExpectation::SubmitError;
+        if (srcState == ResourceState::Invalid || dstState == ResourceState::Invalid) {
+            expectation = CommandExpectation::FinishError;
+        } else if (srcState == ResourceState::Valid && dstState == ResourceState::Valid) {
+            expectation = CommandExpectation::Success;
+        }
+
+        testCopyBufferToBuffer(t, src, 0, dst, 0, 8, expectation);
+    });
 
 CTS_TEST(g, "buffer,device_mismatch")
     .desc("Tests copyBufferToBuffer cannot be called with src buffer or dst buffer created from another device.")

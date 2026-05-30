@@ -204,6 +204,36 @@ WGPUBuffer GpuTest::createBufferTracked(const WGPUBufferDescriptor& desc) {
     return buffer;
 }
 
+WGPUBuffer GpuTest::createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc) {
+    if (state == ResourceState::Valid) {
+        return createBufferTracked(desc);
+    }
+
+    if (state == ResourceState::Invalid) {
+        WGPUBufferDescriptor invalidDesc = desc;
+        invalidDesc.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_MapWrite;
+
+        wgpuDevicePushErrorScope(device(), WGPUErrorFilter_Validation);
+        WGPUBuffer buffer = createBufferTracked(invalidDesc);
+        ScopeResult result = popErrorScopeSync(cache().instance, device());
+        if (result.status != WGPUPopErrorScopeStatus_Success) {
+            fail("popErrorScope failed: " + result.message);
+        }
+        return buffer;
+    }
+
+    WGPUBuffer buffer = createBufferTracked(desc);
+    wgpuBufferDestroy(buffer);
+    return buffer;
+}
+
+WGPUBuffer GpuTest::getErrorBuffer() {
+    WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    desc.size = 4;
+    desc.usage = WGPUBufferUsage_Vertex;
+    return createBufferWithState(ResourceState::Invalid, desc);
+}
+
 WGPUSampler GpuTest::createSamplerTracked(const WGPUSamplerDescriptor& desc) {
     WGPUSampler sampler = wgpuDeviceCreateSampler(device(), &desc);
     if (sampler != nullptr) {

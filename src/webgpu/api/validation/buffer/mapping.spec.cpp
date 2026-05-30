@@ -56,7 +56,17 @@ CTS_TEST(g, "mapAsync,usage")
 
 CTS_TEST(g, "mapAsync,invalidBuffer")
     .desc("Test that mapAsync is an error when called on an invalid buffer.")
-    .unimplemented("needs getErrorBuffer");
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combine("mapMode", {
+            static_cast<int64_t>(WGPUMapMode_Read),
+            static_cast<int64_t>(WGPUMapMode_Write),
+        });
+    })
+    .fn([](GpuTest& t) {
+        const WGPUMapMode mapMode = t.param<WGPUMapMode>("mapMode");
+        WGPUBuffer buffer = t.getErrorBuffer();
+        t.expectMapAsync(buffer, mapMode, false);
+    });
 
 CTS_TEST(g, "mapAsync,state,destroyed")
     .desc("Test that mapAsync is an error when called on a destroyed buffer.")

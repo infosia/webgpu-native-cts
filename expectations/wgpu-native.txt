@@ -23,3 +23,9 @@ webgpu:api,validation,encoding,cmds,clearBuffer:out_of_bounds:*
 webgpu:api,validation,buffer,mapping:mapAsync,usage:*
 webgpu:api,validation,buffer,mapping:mapAsync,state,mappedAtCreation:*
 webgpu:api,validation,buffer,mapping:mapAsync,state,mapped:*
+
+# F-004: wgpu-native aborts when commands using destroyed buffers reach queue submit.
+webgpu:api,validation,encoding,cmds,clearBuffer:buffer_state:bufferState=2
+webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=0;dstBufferState=2
+webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=2;dstBufferState=0
+webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=2;dstBufferState=2

@@ -35,7 +35,10 @@ CTS_TEST(g, "all_usages")
 
 CTS_TEST(g, "error_buffer")
     .desc("Test that error buffers may be destroyed without generating validation errors.")
-    .unimplemented("needs getErrorBuffer; C-API error-buffer return semantics need investigation");
+    .fn([](GpuTest& t) {
+        WGPUBuffer buffer = t.getErrorBuffer();
+        wgpuBufferDestroy(buffer);
+    });
 
 CTS_TEST(g, "twice")
     .desc("Test that destroying a buffer more than once is allowed.")

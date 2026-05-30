@@ -26,18 +26,63 @@ WGPUBuffer createClearBuffer(GpuTest& t, uint64_t size, WGPUBufferUsage usage = 
     return t.createBufferTracked(desc);
 }
 
-void testClearBuffer(GpuTest& t, WGPUBuffer buffer, uint64_t offset, uint64_t size, bool isSuccess) {
+std::vector<Value> resourceStateValues() {
+    std::vector<Value> values;
+    values.reserve(kResourceStates.size());
+    for (ResourceState state : kResourceStates) {
+        values.emplace_back(static_cast<int64_t>(state));
+    }
+    return values;
+}
+
+enum class CommandExpectation {
+    Success,
+    FinishError,
+    SubmitError,
+};
+
+void testClearBuffer(GpuTest& t, WGPUBuffer buffer, uint64_t offset, uint64_t size, CommandExpectation expectation) {
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     wgpuCommandEncoderClearBuffer(encoder, buffer, offset, size);
 
+    if (expectation == CommandExpectation::FinishError) {
+        t.expectValidationError([&] {
+            t.finishTracked(encoder);
+        }, true);
+        return;
+    }
+
+    WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
     t.expectValidationError([&] {
-        t.finishTracked(encoder);
-    }, !isSuccess);
+        wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
+    }, expectation == CommandExpectation::SubmitError);
+}
+
+void testClearBuffer(GpuTest& t, WGPUBuffer buffer, uint64_t offset, uint64_t size, bool isSuccess) {
+    testClearBuffer(t, buffer, offset, size, isSuccess ? CommandExpectation::Success : CommandExpectation::FinishError);
 }
 
 CTS_TEST(g, "buffer_state")
     .desc("Test that clearing an invalid or destroyed buffer fails.")
-    .unimplemented("needs createBufferWithState and queue.submit");
+    .params([](ParamsBuilder u) {
+        return u.combine("bufferState", resourceStateValues());
+    })
+    .fn([](GpuTest& t) {
+        const ResourceState state = static_cast<ResourceState>(t.param<int64_t>("bufferState"));
+
+        WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        desc.size = 8;
+        desc.usage = WGPUBufferUsage_CopyDst;
+        WGPUBuffer buffer = t.createBufferWithState(state, desc);
+
+        CommandExpectation expectation = CommandExpectation::Success;
+        if (state == ResourceState::Invalid) {
+            expectation = CommandExpectation::FinishError;
+        } else if (state == ResourceState::Destroyed) {
+            expectation = CommandExpectation::SubmitError;
+        }
+        testClearBuffer(t, buffer, 0, 8, expectation);
+    });
 
 CTS_TEST(g, "buffer,device_mismatch")
     .desc("Tests clearBuffer cannot be called with buffer created from another device.")

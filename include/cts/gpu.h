@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <functional>
 #include <vector>
 
@@ -7,6 +9,18 @@
 #include "cts/webgpu.h"
 
 namespace cts {
+
+enum class ResourceState {
+    Valid,
+    Invalid,
+    Destroyed,
+};
+
+constexpr std::array<ResourceState, 3> kResourceStates = {
+    ResourceState::Valid,
+    ResourceState::Invalid,
+    ResourceState::Destroyed,
+};
 
 class GpuTest : public Fixture {
   public:
@@ -17,6 +31,8 @@ class GpuTest : public Fixture {
     WGPUQueue queue() const;
     WGPULimits getLimits() const;
     WGPUBuffer createBufferTracked(const WGPUBufferDescriptor& desc);
+    WGPUBuffer createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc);
+    WGPUBuffer getErrorBuffer();
     WGPUSampler createSamplerTracked(const WGPUSamplerDescriptor& desc);
     WGPUCommandEncoder createCommandEncoderTracked();
     WGPUCommandBuffer finishTracked(WGPUCommandEncoder encoder);
