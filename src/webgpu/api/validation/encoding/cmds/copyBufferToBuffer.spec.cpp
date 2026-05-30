@@ -1,0 +1,196 @@
+// Ported from gpuweb/cts src/webgpu/api/validation/encoding/cmds/copyBufferToBuffer.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+
+#include "cts/gpu.h"
+#include "cts/test.h"
+#include "webgpu/capability_info.h"
+
+using namespace cts;
+
+namespace {
+
+TestGroup<GpuTest> g = MakeTestGroup<GpuTest>(
+    "api,validation,encoding,cmds,copyBufferToBuffer",
+    "copyBufferToBuffer tests.");
+
+std::vector<Value> bufferUsageValues() {
+    std::vector<Value> usages;
+    usages.reserve(kBufferUsages.size());
+    for (WGPUBufferUsage usage : kBufferUsages) {
+        usages.emplace_back(static_cast<int64_t>(usage));
+    }
+    return usages;
+}
+
+WGPUBuffer createCopyBuffer(GpuTest& t, uint64_t size, WGPUBufferUsage usage) {
+    WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    desc.size = size;
+    desc.usage = usage;
+    return t.createBufferTracked(desc);
+}
+
+void testCopyBufferToBuffer(
+    GpuTest& t,
+    WGPUBuffer src,
+    uint64_t srcOffset,
+    WGPUBuffer dst,
+    uint64_t dstOffset,
+    uint64_t copySize,
+    bool isSuccess) {
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, src, srcOffset, dst, dstOffset, copySize);
+
+    t.expectValidationError([&] {
+        t.finishTracked(encoder);
+    }, !isSuccess);
+}
+
+CTS_TEST(g, "buffer_state")
+    .desc("Test that copying an invalid or destroyed buffer fails.")
+    .unimplemented("needs createBufferWithState and queue.submit");
+
+CTS_TEST(g, "buffer,device_mismatch")
+    .desc("Tests copyBufferToBuffer cannot be called with src buffer or dst buffer created from another device.")
+    .unimplemented("needs a second device");
+
+CTS_TEST(g, "buffer_usage")
+    .desc("Test that source requires COPY_SRC usage and destination requires COPY_DST usage.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases()
+            .combine("srcUsage", bufferUsageValues())
+            .combine("dstUsage", bufferUsageValues());
+    })
+    .fn([](GpuTest& t) {
+        const WGPUBufferUsage srcUsage = t.param<WGPUBufferUsage>("srcUsage");
+        const WGPUBufferUsage dstUsage = t.param<WGPUBufferUsage>("dstUsage");
+        WGPUBuffer src = createCopyBuffer(t, 16, srcUsage);
+        WGPUBuffer dst = createCopyBuffer(t, 16, dstUsage);
+        const bool isSuccess = srcUsage == WGPUBufferUsage_CopySrc && dstUsage == WGPUBufferUsage_CopyDst;
+        testCopyBufferToBuffer(t, src, 0, dst, 0, 8, isSuccess);
+    });
+
+CTS_TEST(g, "copy_size_alignment")
+    .desc("Test that copySize must be 4 byte aligned.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combineWithParams({
+            ParamRecord{{"copySize", 0}, {"_isSuccess", true}},
+            ParamRecord{{"copySize", 2}, {"_isSuccess", false}},
+            ParamRecord{{"copySize", 4}, {"_isSuccess", true}},
+            ParamRecord{{"copySize", 5}, {"_isSuccess", false}},
+            ParamRecord{{"copySize", 8}, {"_isSuccess", true}},
+        });
+    })
+    .fn([](GpuTest& t) {
+        WGPUBuffer src = createCopyBuffer(t, 16, WGPUBufferUsage_CopySrc);
+        WGPUBuffer dst = createCopyBuffer(t, 16, WGPUBufferUsage_CopyDst);
+        testCopyBufferToBuffer(t, src, 0, dst, 0, t.param<uint64_t>("copySize"), t.param<bool>("_isSuccess"));
+    });
+
+CTS_TEST(g, "copy_offset_alignment")
+    .desc("Test that copy offsets must be 4 byte aligned.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combineWithParams({
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 0}, {"_isSuccess", true}},
+            ParamRecord{{"srcOffset", 2}, {"dstOffset", 0}, {"_isSuccess", false}},
+            ParamRecord{{"srcOffset", 4}, {"dstOffset", 0}, {"_isSuccess", true}},
+            ParamRecord{{"srcOffset", 5}, {"dstOffset", 0}, {"_isSuccess", false}},
+            ParamRecord{{"srcOffset", 8}, {"dstOffset", 0}, {"_isSuccess", true}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 2}, {"_isSuccess", false}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 4}, {"_isSuccess", true}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 5}, {"_isSuccess", false}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 8}, {"_isSuccess", true}},
+            ParamRecord{{"srcOffset", 4}, {"dstOffset", 4}, {"_isSuccess", true}},
+        });
+    })
+    .fn([](GpuTest& t) {
+        WGPUBuffer src = createCopyBuffer(t, 16, WGPUBufferUsage_CopySrc);
+        WGPUBuffer dst = createCopyBuffer(t, 16, WGPUBufferUsage_CopyDst);
+        testCopyBufferToBuffer(
+            t,
+            src,
+            t.param<uint64_t>("srcOffset"),
+            dst,
+            t.param<uint64_t>("dstOffset"),
+            8,
+            t.param<bool>("_isSuccess"));
+    });
+
+CTS_TEST(g, "copy_overflow")
+    .desc("Test that copies which may cause arithmetic overflows are invalid.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combineWithParams({
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 0}, {"copySize", kMaxSafeMultipleOf8}},
+            ParamRecord{{"srcOffset", 16}, {"dstOffset", 0}, {"copySize", kMaxSafeMultipleOf8}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 16}, {"copySize", kMaxSafeMultipleOf8}},
+            ParamRecord{{"srcOffset", kMaxSafeMultipleOf8}, {"dstOffset", 0}, {"copySize", 16}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", kMaxSafeMultipleOf8}, {"copySize", 16}},
+            ParamRecord{{"srcOffset", kMaxSafeMultipleOf8}, {"dstOffset", 0}, {"copySize", kMaxSafeMultipleOf8}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", kMaxSafeMultipleOf8}, {"copySize", kMaxSafeMultipleOf8}},
+            ParamRecord{{"srcOffset", kMaxSafeMultipleOf8}, {"dstOffset", kMaxSafeMultipleOf8}, {"copySize", kMaxSafeMultipleOf8}},
+        });
+    })
+    .fn([](GpuTest& t) {
+        WGPUBuffer src = createCopyBuffer(t, 16, WGPUBufferUsage_CopySrc);
+        WGPUBuffer dst = createCopyBuffer(t, 16, WGPUBufferUsage_CopyDst);
+        testCopyBufferToBuffer(
+            t,
+            src,
+            t.param<uint64_t>("srcOffset"),
+            dst,
+            t.param<uint64_t>("dstOffset"),
+            t.param<uint64_t>("copySize"),
+            false);
+    });
+
+CTS_TEST(g, "copy_out_of_bounds")
+    .desc("Test that copies which exceed the buffer bounds are invalid.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combineWithParams({
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 0}, {"copySize", 32}, {"_isSuccess", true}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 0}, {"copySize", 36}},
+            ParamRecord{{"srcOffset", 36}, {"dstOffset", 0}, {"copySize", 4}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 36}, {"copySize", 4}},
+            ParamRecord{{"srcOffset", 36}, {"dstOffset", 0}, {"copySize", 0}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 36}, {"copySize", 0}},
+            ParamRecord{{"srcOffset", 20}, {"dstOffset", 0}, {"copySize", 16}},
+            ParamRecord{{"srcOffset", 20}, {"dstOffset", 0}, {"copySize", 12}, {"_isSuccess", true}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 20}, {"copySize", 16}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 20}, {"copySize", 12}, {"_isSuccess", true}},
+        });
+    })
+    .fn([](GpuTest& t) {
+        WGPUBuffer src = createCopyBuffer(t, 32, WGPUBufferUsage_CopySrc);
+        WGPUBuffer dst = createCopyBuffer(t, 32, WGPUBufferUsage_CopyDst);
+        const bool isSuccess = t.hasParam("_isSuccess") && t.param<bool>("_isSuccess");
+        testCopyBufferToBuffer(
+            t,
+            src,
+            t.param<uint64_t>("srcOffset"),
+            dst,
+            t.param<uint64_t>("dstOffset"),
+            t.param<uint64_t>("copySize"),
+            isSuccess);
+    });
+
+CTS_TEST(g, "copy_within_same_buffer")
+    .desc("Test that copying within the same buffer is invalid.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combineWithParams({
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 8}, {"copySize", 4}},
+            ParamRecord{{"srcOffset", 8}, {"dstOffset", 0}, {"copySize", 4}},
+            ParamRecord{{"srcOffset", 0}, {"dstOffset", 4}, {"copySize", 8}},
+            ParamRecord{{"srcOffset", 4}, {"dstOffset", 0}, {"copySize", 8}},
+        });
+    })
+    .fn([](GpuTest& t) {
+        WGPUBuffer buffer = createCopyBuffer(t, 16, WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+        testCopyBufferToBuffer(
+            t,
+            buffer,
+            t.param<uint64_t>("srcOffset"),
+            buffer,
+            t.param<uint64_t>("dstOffset"),
+            t.param<uint64_t>("copySize"),
+            false);
+    });
+
+} // namespace
