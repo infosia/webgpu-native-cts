@@ -7,12 +7,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CTS_BACKEND "wgpu-native" CACHE STRING "Backend to test")
-set_property(CACHE CTS_BACKEND PROPERTY STRINGS "wgpu-native" "yawgpu")
+set_property(CACHE CTS_BACKEND PROPERTY STRINGS "wgpu-native" "yawgpu" "dawn")
 
 set(CTS_WGPU_NATIVE_DIR "" CACHE PATH "Path to a wgpu-native checkout or distribution")
 set(CTS_WGPU_NATIVE_LIB "" CACHE FILEPATH "Explicit path to libwgpu_native")
 set(CTS_YAWGPU_DIR "" CACHE PATH "Path to a yawgpu checkout or distribution")
 set(CTS_YAWGPU_LIB "" CACHE FILEPATH "Explicit path to libyawgpu")
+set(CTS_DAWN_DIR "" CACHE PATH "Path to a Dawn checkout")
+set(CTS_DAWN_BUILD_DIR "" CACHE PATH "Path to a Dawn build directory")
+set(CTS_DAWN_INCLUDE "" CACHE STRING "Explicit Dawn include directories, separated by semicolons")
+set(CTS_DAWN_LIB "" CACHE FILEPATH "Explicit path to libwebgpu_dawn")
 
 set(CTS_BACKEND_SOURCE "")
 set(CTS_BACKEND_LIB "")
@@ -92,6 +96,55 @@ elseif(CTS_BACKEND STREQUAL "yawgpu")
 
     set(CTS_BACKEND_SOURCE src/common/webgpu/backend_yawgpu.cpp)
     set(CTS_BACKEND_DEFINE CTS_BACKEND_YAWGPU=1)
+elseif(CTS_BACKEND STREQUAL "dawn")
+    if(CTS_DAWN_INCLUDE)
+        set(CTS_WGPU_HEADER_DIR ${CTS_DAWN_INCLUDE})
+    else()
+        if(NOT CTS_DAWN_DIR)
+            message(FATAL_ERROR "CTS_DAWN_DIR is required for CTS_BACKEND=dawn unless CTS_DAWN_INCLUDE is set")
+        endif()
+        if(NOT CTS_DAWN_BUILD_DIR)
+            message(FATAL_ERROR "CTS_DAWN_BUILD_DIR is required for CTS_BACKEND=dawn unless CTS_DAWN_INCLUDE is set")
+        endif()
+        set(CTS_WGPU_HEADER_DIR
+            "${CTS_DAWN_DIR}/include"
+            "${CTS_DAWN_BUILD_DIR}/gen/include"
+        )
+    endif()
+
+    set(_cts_dawn_header_found FALSE)
+    foreach(_cts_dawn_include IN LISTS CTS_WGPU_HEADER_DIR)
+        if(EXISTS "${_cts_dawn_include}/webgpu/webgpu.h")
+            set(_cts_dawn_header_found TRUE)
+        endif()
+    endforeach()
+    if(NOT _cts_dawn_header_found)
+        message(FATAL_ERROR "Could not find webgpu/webgpu.h in CTS_DAWN_INCLUDE/CTS_DAWN_DIR.")
+    endif()
+
+    if(CTS_DAWN_LIB)
+        set(CTS_BACKEND_LIB "${CTS_DAWN_LIB}")
+    else()
+        if(NOT CTS_DAWN_BUILD_DIR)
+            message(FATAL_ERROR "CTS_DAWN_BUILD_DIR is required for CTS_BACKEND=dawn unless CTS_DAWN_LIB is set")
+        endif()
+        find_library(DAWN_WEBGPU_LIB
+            NAMES webgpu_dawn
+            PATHS
+                "${CTS_DAWN_BUILD_DIR}/src/dawn/native"
+                "${CTS_DAWN_BUILD_DIR}/src/dawn"
+                "${CTS_DAWN_BUILD_DIR}"
+            NO_DEFAULT_PATH
+        )
+        set(CTS_BACKEND_LIB "${DAWN_WEBGPU_LIB}")
+    endif()
+
+    if(NOT CTS_BACKEND_LIB)
+        message(FATAL_ERROR "Could not find libwebgpu_dawn. Build Dawn or set CTS_DAWN_LIB.")
+    endif()
+
+    set(CTS_BACKEND_SOURCE src/common/webgpu/backend_dawn.cpp)
+    set(CTS_BACKEND_DEFINE CTS_BACKEND_DAWN=1)
 else()
     message(FATAL_ERROR "Unsupported CTS_BACKEND=${CTS_BACKEND}")
 endif()
