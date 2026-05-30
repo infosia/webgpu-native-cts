@@ -37,7 +37,47 @@ CTS_TEST(g, "limit")
 
 CTS_TEST(g, "usage")
     .desc("Test combinations of zero to two usage flags are validated to be valid.")
-    .unimplemented("requires ParamsBuilder::filter, deferred");
+    .params([](ParamsBuilder u) {
+        std::vector<Value> usages;
+        usages.reserve(kBufferUsages.size() + 2);
+        usages.emplace_back(0);
+        for (WGPUBufferUsage usage : kBufferUsages) {
+            usages.emplace_back(static_cast<int64_t>(usage));
+        }
+        usages.emplace_back(static_cast<int64_t>(kSomeBogusBufferUsage));
+
+        return u.combine("usage1", usages)
+            .combine("usage2", usages)
+            .filter([](const ParamRecord& params) {
+                const auto usage1 = valueAs<uint64_t>(*findParam(params, "usage1"));
+                const auto usage2 = valueAs<uint64_t>(*findParam(params, "usage2"));
+                return usage1 <= usage2;
+            })
+            .beginSubcases()
+            .combine("mappedAtCreation", {false, true});
+    })
+    .fn([](GpuTest& t) {
+        const WGPUBufferUsage usage1 = t.param<WGPUBufferUsage>("usage1");
+        const WGPUBufferUsage usage2 = t.param<WGPUBufferUsage>("usage2");
+        const bool mappedAtCreation = t.param<bool>("mappedAtCreation");
+        const WGPUBufferUsage usage = usage1 | usage2;
+
+        const bool isValid =
+            usage != 0 &&
+            (usage & ~kAllBufferUsageBits) == 0 &&
+            ((usage & WGPUBufferUsage_MapRead) == 0 ||
+             (usage & ~(WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead)) == 0) &&
+            ((usage & WGPUBufferUsage_MapWrite) == 0 ||
+             (usage & ~(WGPUBufferUsage_CopySrc | WGPUBufferUsage_MapWrite)) == 0);
+
+        t.expectValidationError([&] {
+            WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+            desc.size = kBufferSizeAlignment * 2;
+            desc.usage = usage;
+            desc.mappedAtCreation = mappedAtCreation ? WGPU_TRUE : WGPU_FALSE;
+            t.createBufferTracked(desc);
+        }, !isValid);
+    });
 
 CTS_TEST(g, "new_usages")
     .desc("Valid usages not present in GPUBufferUsage should not be accepted by createBuffer().")
@@ -61,6 +101,29 @@ CTS_TEST(g, "new_usages")
 
 CTS_TEST(g, "createBuffer_invalid_and_oom")
     .desc("Validation should be more severe than OOM for invalid mappable buffers.")
-    .unimplemented("requires combineWithParams and OOM scope, deferred");
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combineWithParams({
+            ParamRecord{{"_valid", true}, {"usage", static_cast<int64_t>(WGPUBufferUsage_Uniform)}, {"size", 16}},
+            ParamRecord{{"_valid", true}, {"usage", static_cast<int64_t>(WGPUBufferUsage_Storage)}, {"size", 16}},
+            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapWrite | WGPUBufferUsage_Uniform)}, {"size", 16}},
+            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapWrite | WGPUBufferUsage_Uniform)}, {"size", kMaxSafeMultipleOf8}},
+            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapWrite | WGPUBufferUsage_Uniform)}, {"size", 0x2000000000ULL}},
+            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapRead | WGPUBufferUsage_Uniform)}, {"size", 16}},
+            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapRead | WGPUBufferUsage_Uniform)}, {"size", kMaxSafeMultipleOf8}},
+            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapRead | WGPUBufferUsage_Uniform)}, {"size", 0x2000000000ULL}},
+        });
+    })
+    .fn([](GpuTest& t) {
+        const bool valid = t.hasParam("_valid") && t.param<bool>("_valid");
+        const WGPUBufferUsage usage = t.param<WGPUBufferUsage>("usage");
+        const uint64_t size = t.param<uint64_t>("size");
+
+        t.expectValidationError([&] {
+            WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+            desc.size = size;
+            desc.usage = usage;
+            t.createBufferTracked(desc);
+        }, !valid);
+    });
 
 } // namespace

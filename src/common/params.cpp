@@ -97,7 +97,32 @@ ParamsBuilder ParamsBuilder::combine(std::string key, std::initializer_list<Valu
 
 ParamsBuilder ParamsBuilder::combine(std::string key, std::vector<Value> values) const {
     ParamsBuilder copy = *this;
-    copy.ops_.push_back(Op{copy.inSubcases_, std::move(key), std::move(values)});
+    Op op;
+    op.kind = Op::Kind::Combine;
+    op.subcase = copy.inSubcases_;
+    op.key = std::move(key);
+    op.values = std::move(values);
+    copy.ops_.push_back(std::move(op));
+    return copy;
+}
+
+ParamsBuilder ParamsBuilder::combineWithParams(std::vector<ParamRecord> records) const {
+    ParamsBuilder copy = *this;
+    Op op;
+    op.kind = Op::Kind::CombineWithParams;
+    op.subcase = copy.inSubcases_;
+    op.records = std::move(records);
+    copy.ops_.push_back(std::move(op));
+    return copy;
+}
+
+ParamsBuilder ParamsBuilder::filter(std::function<bool(const ParamRecord&)> predicate) const {
+    ParamsBuilder copy = *this;
+    Op op;
+    op.kind = Op::Kind::Filter;
+    op.subcase = copy.inSubcases_;
+    op.predicate = std::move(predicate);
+    copy.ops_.push_back(std::move(op));
     return copy;
 }
 
@@ -115,15 +140,35 @@ std::vector<ParamsBuilder::ExpandedCase> ParamsBuilder::expand() const {
     for (const Op& op : ops_) {
         hasSubcaseOps = hasSubcaseOps || op.subcase;
         std::vector<ParamRecord>& target = op.subcase ? subcases : cases;
-        std::vector<ParamRecord> next;
-        for (const ParamRecord& record : target) {
-            for (const Value& value : op.values) {
-                ParamRecord copy = record;
-                copy.emplace_back(op.key, value);
-                next.push_back(std::move(copy));
+        if (op.kind == Op::Kind::Filter) {
+            std::vector<ParamRecord> next;
+            for (const ParamRecord& record : target) {
+                if (op.predicate(record)) {
+                    next.push_back(record);
+                }
             }
+            target = std::move(next);
+        } else if (op.kind == Op::Kind::CombineWithParams) {
+            std::vector<ParamRecord> next;
+            for (const ParamRecord& record : target) {
+                for (const ParamRecord& additions : op.records) {
+                    ParamRecord copy = record;
+                    copy.insert(copy.end(), additions.begin(), additions.end());
+                    next.push_back(std::move(copy));
+                }
+            }
+            target = std::move(next);
+        } else {
+            std::vector<ParamRecord> next;
+            for (const ParamRecord& record : target) {
+                for (const Value& value : op.values) {
+                    ParamRecord copy = record;
+                    copy.emplace_back(op.key, value);
+                    next.push_back(std::move(copy));
+                }
+            }
+            target = std::move(next);
         }
-        target = std::move(next);
     }
 
     std::vector<ExpandedCase> expanded;

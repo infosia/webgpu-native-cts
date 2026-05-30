@@ -49,6 +49,8 @@ class ParamsBuilder {
   public:
     ParamsBuilder combine(std::string key, std::initializer_list<Value> values) const;
     ParamsBuilder combine(std::string key, std::vector<Value> values) const;
+    ParamsBuilder combineWithParams(std::vector<ParamRecord> records) const;
+    ParamsBuilder filter(std::function<bool(const ParamRecord&)> predicate) const;
     ParamsBuilder beginSubcases() const;
 
     struct ExpandedCase {
@@ -60,9 +62,18 @@ class ParamsBuilder {
 
   private:
     struct Op {
+        enum class Kind {
+            Combine,
+            CombineWithParams,
+            Filter,
+        };
+
+        Kind kind = Kind::Combine;
         bool subcase = false;
         std::string key;
         std::vector<Value> values;
+        std::vector<ParamRecord> records;
+        std::function<bool(const ParamRecord&)> predicate;
     };
 
     std::vector<Op> ops_;

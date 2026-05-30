@@ -21,6 +21,30 @@ int main() {
         require(cases.size() == 2, "case expansion count");
         require(cases[0].subcases.size() == 2, "subcase expansion count");
 
+        auto filtered = cts::ParamsBuilder()
+            .combine("x", {1, 2, 3})
+            .filter([](const cts::ParamRecord& params) {
+                return cts::valueAs<int>(*cts::findParam(params, "x")) >= 2;
+            })
+            .expand();
+        require(filtered.size() == 2, "case filter count");
+
+        auto combined = cts::ParamsBuilder()
+            .combine("outer", {7, 8})
+            .combineWithParams({
+                cts::ParamRecord{{"a", 1}, {"b", true}},
+                cts::ParamRecord{{"a", 2}, {"b", false}},
+            })
+            .beginSubcases()
+            .combine("sub", {1, 2, 3})
+            .filter([](const cts::ParamRecord& params) {
+                return cts::valueAs<int>(*cts::findParam(params, "sub")) != 2;
+            })
+            .expand();
+        require(combined.size() == 4, "combineWithParams case count");
+        require(combined[0].subcases.size() == 2, "subcase filter count");
+        require(cts::findParam(combined[0].params, "a") != nullptr, "combineWithParams record key");
+
         require(cts::stringifyValue(cts::Value(1)) == "1", "int stringify");
         require(cts::stringifyValue(cts::Value(true)) == "true", "bool stringify");
         require(cts::stringifyValue(cts::Value("abc")) == "\"abc\"", "string stringify");
