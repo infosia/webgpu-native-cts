@@ -11,8 +11,4 @@ const char* backendName() {
     return "wgpu-native";
 }
 
-bool backendSupportsTimeoutWaitAny() {
-    return false;
-}
-
 } // namespace cts

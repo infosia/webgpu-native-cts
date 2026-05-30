@@ -90,13 +90,6 @@ bool pumpUntil(WGPUInstance instance, uint64_t timeoutNs, Pred done) {
 
 } // namespace
 
-WGPUWaitStatus waitFuture(WGPUInstance instance, WGPUFuture future, uint64_t timeoutNs) {
-    (void)future;
-
-    (void)pumpUntil(instance, timeoutNs, [] { return false; });
-    return WGPUWaitStatus_TimedOut;
-}
-
 AdapterResult requestAdapterSync(WGPUInstance instance, const WGPURequestAdapterOptions* options) {
     RequestAdapterState state;
     WGPURequestAdapterCallbackInfo callbackInfo = WGPU_REQUEST_ADAPTER_CALLBACK_INFO_INIT;

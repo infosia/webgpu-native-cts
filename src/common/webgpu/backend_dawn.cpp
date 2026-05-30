@@ -11,8 +11,4 @@ const char* backendName() {
     return "dawn";
 }
 
-bool backendSupportsTimeoutWaitAny() {
-    return true;
-}
-
 } // namespace cts

@@ -19,8 +19,4 @@ const char* backendName() {
     return "yawgpu";
 }
 
-bool backendSupportsTimeoutWaitAny() {
-    return false;
-}
-
 } // namespace cts

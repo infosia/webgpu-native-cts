@@ -7,8 +7,6 @@
 
 namespace cts {
 
-WGPUWaitStatus waitFuture(WGPUInstance instance, WGPUFuture future, uint64_t timeoutNs);
-
 struct AdapterResult {
     WGPURequestAdapterStatus status;
     WGPUAdapter adapter;
