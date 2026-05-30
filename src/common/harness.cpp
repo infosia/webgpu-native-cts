@@ -100,6 +100,11 @@ bool Fixture::hasParam(std::string_view key) const {
     return findParam(params_, key) != nullptr;
 }
 
+bool Fixture::paramIsUndefined(std::string_view key) const {
+    const Value* value = findParam(params_, key);
+    return value != nullptr && std::holds_alternative<Value::Undefined>(value->data());
+}
+
 void Fixture::expect(bool condition, const std::string& message) {
     if (!condition) {
         fail(message.empty() ? "expectation failed" : message);
@@ -157,6 +162,14 @@ void GpuTest::init() {
 }
 
 void GpuTest::finalize() {
+    for (WGPUCommandBuffer commandBuffer : commandBuffers_) {
+        wgpuCommandBufferRelease(commandBuffer);
+    }
+    commandBuffers_.clear();
+    for (WGPUCommandEncoder encoder : encoders_) {
+        wgpuCommandEncoderRelease(encoder);
+    }
+    encoders_.clear();
     for (WGPUSampler sampler : samplers_) {
         wgpuSamplerRelease(sampler);
     }
@@ -197,6 +210,24 @@ WGPUSampler GpuTest::createSamplerTracked(const WGPUSamplerDescriptor& desc) {
         samplers_.push_back(sampler);
     }
     return sampler;
+}
+
+WGPUCommandEncoder GpuTest::createCommandEncoderTracked() {
+    WGPUCommandEncoderDescriptor desc = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device(), &desc);
+    if (encoder != nullptr) {
+        encoders_.push_back(encoder);
+    }
+    return encoder;
+}
+
+WGPUCommandBuffer GpuTest::finishTracked(WGPUCommandEncoder encoder) {
+    WGPUCommandBufferDescriptor desc = WGPU_COMMAND_BUFFER_DESCRIPTOR_INIT;
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, &desc);
+    if (commandBuffer != nullptr) {
+        commandBuffers_.push_back(commandBuffer);
+    }
+    return commandBuffer;
 }
 
 void GpuTest::expectValidationError(const std::function<void()>& body, bool shouldError) {

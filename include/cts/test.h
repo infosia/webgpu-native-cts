@@ -20,7 +20,8 @@ class Fixture;
 
 class Value {
   public:
-    using Data = std::variant<int64_t, bool, double, std::string>;
+    struct Undefined {};
+    using Data = std::variant<int64_t, bool, double, Undefined, std::string>;
 
     Value();
     Value(int value);
@@ -30,10 +31,12 @@ class Value {
     Value(double value);
     Value(const char* value);
     Value(std::string value);
+    static Value undef();
 
     const Data& data() const;
 
   private:
+    explicit Value(Undefined value);
     Data data_;
 };
 
@@ -100,6 +103,7 @@ class Fixture {
     void setParams(ParamRecord params);
     const ParamRecord& params() const;
     bool hasParam(std::string_view key) const;
+    bool paramIsUndefined(std::string_view key) const;
 
     template <class T>
     T param(std::string_view key) const {

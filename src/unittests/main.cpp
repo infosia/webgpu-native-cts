@@ -48,9 +48,16 @@ int main() {
         require(cts::stringifyValue(cts::Value(1)) == "1", "int stringify");
         require(cts::stringifyValue(cts::Value(true)) == "true", "bool stringify");
         require(cts::stringifyValue(cts::Value(0.5)) == "0.5", "double stringify");
+        require(cts::stringifyValue(cts::Value::undef()) == "_undef_", "undefined stringify");
         require(cts::stringifyValue(cts::Value("abc")) == "\"abc\"", "string stringify");
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
+
+        cts::Fixture fixture;
+        fixture.setParams({{"x", cts::Value::undef()}, {"y", 1}});
+        require(fixture.paramIsUndefined("x"), "paramIsUndefined true");
+        require(!fixture.paramIsUndefined("y"), "paramIsUndefined false");
+        require(!fixture.paramIsUndefined("missing"), "paramIsUndefined missing");
 
         cts::Query query = cts::parseQuery("webgpu:api,validation,buffer,create:limit:sizeAddition=0");
         cts::ParamRecord params{{"sizeAddition", cts::Value(0)}};

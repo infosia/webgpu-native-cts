@@ -30,6 +30,11 @@ Value::Value(bool value) : data_(value) {}
 Value::Value(double value) : data_(value) {}
 Value::Value(const char* value) : data_(std::string(value)) {}
 Value::Value(std::string value) : data_(std::move(value)) {}
+Value::Value(Undefined value) : data_(value) {}
+
+Value Value::undef() {
+    return Value(Undefined{});
+}
 
 const Value::Data& Value::data() const {
     return data_;
@@ -52,6 +57,8 @@ std::string stringifyValue(const Value& value) {
                     throw std::runtime_error("failed to stringify double parameter");
                 }
                 return std::string(buffer.data(), result.ptr);
+            } else if constexpr (std::is_same_v<T, Value::Undefined>) {
+                return "_undef_";
             } else {
                 return jsonQuote(v);
             }
