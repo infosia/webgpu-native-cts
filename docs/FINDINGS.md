@@ -7,6 +7,11 @@ backend defect to make it pass.
 
 Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
+> **Crashing findings are now runnable.** Both F-001 and F-002 are process *aborts*. Since Phase 4
+> they are contained by `--isolate` (per-case subprocess isolation) and marked expected in
+> `expectations/wgpu-native.txt`, so a `cts --isolate --expectations expectations/wgpu-native.txt …`
+> run on wgpu-native completes and exits 0. They remain **open backend defects** (still not masked).
+
 ---
 
 ## F-001 — wgpu-native aborts on an invalid buffer-usage bit

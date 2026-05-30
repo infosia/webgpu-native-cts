@@ -166,7 +166,9 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 | `--verbose` / `--quiet` | log level |
 | `--power-preference {low,high}` | adapter selection |
 | `--force-fallback-adapter` | request the fallback adapter |
-| `--expectations <file>` | known-failure list (case-query lines); matching fails → `xfail`, matching passes → `xpass`; run fails only on an unexpected fail |
+| `--expectations <file>` | known-failure list (case-query lines); matching fails/crashes → `xfail`, matching passes → `xpass`; run fails only on an unexpected fail/crash |
+| `--isolate` | run each case in a child process (fork+exec `--run-case`); a backend abort becomes a contained `crash` result instead of killing the run (POSIX only; sequential) |
+| `--run-case <case-query>` | (internal, used by `--isolate`) run exactly one case in-process and print `RESULT\t<status>\t<message>` |
 | `--yawgpu-backend {metal,vulkan}` | (deferred — planned) select yawgpu's GPU backend at runtime once multiple are compiled in |
 | `--adapter-name <substr>` | pick an adapter by name substring |
 | `--enable-feature <name>` | request an optional feature for device creation |
