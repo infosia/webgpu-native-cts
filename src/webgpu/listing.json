@@ -1,6 +1,7 @@
 {
   "files": [
     {"path":"api,validation,buffer,create","tests":[{"name":"size","cases":1,"subcases":0,"unimplemented":true},{"name":"limit","cases":3,"subcases":0,"unimplemented":false},{"name":"usage","cases":78,"subcases":156,"unimplemented":false},{"name":"new_usages","cases":1,"subcases":10,"unimplemented":false},{"name":"createBuffer_invalid_and_oom","cases":1,"subcases":8,"unimplemented":false}]},
-    {"path":"api,validation,buffer,destroy","tests":[{"name":"all_usages","cases":1,"subcases":10,"unimplemented":false},{"name":"error_buffer","cases":1,"subcases":0,"unimplemented":true},{"name":"twice","cases":1,"subcases":6,"unimplemented":false},{"name":"while_mapped","cases":1,"subcases":0,"unimplemented":true}]}
+    {"path":"api,validation,buffer,destroy","tests":[{"name":"all_usages","cases":1,"subcases":10,"unimplemented":false},{"name":"error_buffer","cases":1,"subcases":0,"unimplemented":true},{"name":"twice","cases":1,"subcases":6,"unimplemented":false},{"name":"while_mapped","cases":1,"subcases":0,"unimplemented":true}]},
+    {"path":"api,validation,createSampler","tests":[{"name":"lodMinAndMaxClamp","cases":1,"subcases":49,"unimplemented":false},{"name":"maxAnisotropy","cases":1,"subcases":0,"unimplemented":true}]}
   ]
 }

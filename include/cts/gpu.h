@@ -17,10 +17,12 @@ class GpuTest : public Fixture {
     WGPUQueue queue() const;
     WGPULimits getLimits() const;
     WGPUBuffer createBufferTracked(const WGPUBufferDescriptor& desc);
+    WGPUSampler createSamplerTracked(const WGPUSamplerDescriptor& desc);
     void expectValidationError(const std::function<void()>& body, bool shouldError);
 
   private:
     std::vector<WGPUBuffer> buffers_;
+    std::vector<WGPUSampler> samplers_;
 };
 
 } // namespace cts

@@ -157,6 +157,10 @@ void GpuTest::init() {
 }
 
 void GpuTest::finalize() {
+    for (WGPUSampler sampler : samplers_) {
+        wgpuSamplerRelease(sampler);
+    }
+    samplers_.clear();
     for (WGPUBuffer buffer : buffers_) {
         wgpuBufferRelease(buffer);
     }
@@ -185,6 +189,14 @@ WGPUBuffer GpuTest::createBufferTracked(const WGPUBufferDescriptor& desc) {
         buffers_.push_back(buffer);
     }
     return buffer;
+}
+
+WGPUSampler GpuTest::createSamplerTracked(const WGPUSamplerDescriptor& desc) {
+    WGPUSampler sampler = wgpuDeviceCreateSampler(device(), &desc);
+    if (sampler != nullptr) {
+        samplers_.push_back(sampler);
+    }
+    return sampler;
 }
 
 void GpuTest::expectValidationError(const std::function<void()>& body, bool shouldError) {

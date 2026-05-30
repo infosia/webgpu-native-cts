@@ -1,5 +1,8 @@
 #include "cts/test.h"
 
+#include <array>
+#include <charconv>
+#include <system_error>
 #include <sstream>
 
 namespace cts {
@@ -24,6 +27,7 @@ Value::Value(int value) : data_(static_cast<int64_t>(value)) {}
 Value::Value(int64_t value) : data_(value) {}
 Value::Value(uint64_t value) : data_(static_cast<int64_t>(value)) {}
 Value::Value(bool value) : data_(value) {}
+Value::Value(double value) : data_(value) {}
 Value::Value(const char* value) : data_(std::string(value)) {}
 Value::Value(std::string value) : data_(std::move(value)) {}
 
@@ -39,6 +43,15 @@ std::string stringifyValue(const Value& value) {
                 return std::to_string(v);
             } else if constexpr (std::is_same_v<T, bool>) {
                 return v ? "true" : "false";
+            } else if constexpr (std::is_same_v<T, double>) {
+                // TODO: Implement JS-compatible number formatting and upstream magic values
+                // (_nan_, _posinfinity_, _neginfinity_, _negzero_) before floats become case params.
+                std::array<char, 32> buffer{};
+                const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), v);
+                if (result.ec != std::errc()) {
+                    throw std::runtime_error("failed to stringify double parameter");
+                }
+                return std::string(buffer.data(), result.ptr);
             } else {
                 return jsonQuote(v);
             }
@@ -79,6 +92,14 @@ int64_t valueAs<int64_t>(const Value& value) {
 template <>
 uint64_t valueAs<uint64_t>(const Value& value) {
     return static_cast<uint64_t>(std::get<int64_t>(value.data()));
+}
+
+template <>
+double valueAs<double>(const Value& value) {
+    if (const auto* stored = std::get_if<double>(&value.data())) {
+        return *stored;
+    }
+    return static_cast<double>(std::get<int64_t>(value.data()));
 }
 
 template <>

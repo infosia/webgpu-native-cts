@@ -20,13 +20,14 @@ class Fixture;
 
 class Value {
   public:
-    using Data = std::variant<int64_t, bool, std::string>;
+    using Data = std::variant<int64_t, bool, double, std::string>;
 
     Value();
     Value(int value);
     Value(int64_t value);
     Value(uint64_t value);
     Value(bool value);
+    Value(double value);
     Value(const char* value);
     Value(std::string value);
 
