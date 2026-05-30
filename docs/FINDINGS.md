@@ -11,6 +11,11 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 > they are contained by `--isolate` (per-case subprocess isolation) and marked expected in
 > `expectations/wgpu-native.txt`, so a `cts --isolate --expectations expectations/wgpu-native.txt …`
 > run on wgpu-native completes and exits 0. They remain **open backend defects** (still not masked).
+>
+> **3-way confirmation (Phase 2b).** Running the same C tests on all three backends shows
+> **wgpu-native is the only one that aborts** on F-001/F-002 inputs; **yawgpu and Dawn both handle
+> them gracefully** (validation errors, all subcases pass). This cross-implementation agreement
+> isolates the defects to wgpu-native and is the differential value this suite provides.
 
 ---
 

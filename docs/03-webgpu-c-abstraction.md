@@ -59,7 +59,14 @@ WGPUWaitStatus pumpUntil(WGPUInstance instance, const bool* completed, uint64_t 
 }
 ```
 
-Implementation strategy:
+Implementation strategy (target design):
+
+> **Current status (as of Phase 2b):** the sync wrappers ALWAYS use the `pumpUntil` poll path for
+> **every** backend (wgpu-native, yawgpu, **and Dawn** — Dawn polls fine too). The WaitAny path
+> below is **not yet wired**: `backendSupportsTimeoutWaitAny()` has no callers (dead code) and
+> `waitFuture` is a placeholder. This is harmless today but should be reconciled — either implement
+> the WaitAny path gated by the flag (and a real `waitFuture`) or drop the flag. See
+> [07-roadmap Phase 2b follow-up](07-roadmap.md).
 
 1. **If `backendSupportsTimeoutWaitAny()`** — build a single-element `WGPUFutureWaitInfo` and call
    `wgpuInstanceWaitAny(instance, 1, &info, timeoutNs)`. If the backend returns

@@ -86,17 +86,24 @@ expected-fail); CI runs wgpu-native + yawgpu.
 
 ---
 
-## Phase 2b — Dawn
+## Phase 2b — Dawn — **done**
 
 **Goal:** the slice also runs against **Dawn** (the C++ reference), completing the three-backend
 matrix.
 
-- Dawn backend shim (`backend_dawn.cpp`, proc table if required); `CTS_BACKEND=dawn` builds and
-  runs the Phase 1 tests.
-- Per-backend expectations for Dawn; CI matrix over all three backends.
+- Dawn backend shim (`backend_dawn.cpp`); `CTS_BACKEND=dawn` links the monolithic static
+  `libwebgpu_dawn.a`; backend-aware `cts/webgpu.h` include (`<webgpu/webgpu.h>`).
+- `expectations/dawn.txt` (empty — Dawn passes all ported files).
 
-**Exit:** Phase 1 tests green (or explicitly skipped) on wgpu-native and Dawn, triaged on yawgpu;
-CI matrix runs all three.
+**Result:** all ported files pass on Dawn (Metal) under `--isolate`, 0 crashes. The 3-way run shows
+**wgpu-native is the only backend that aborts** (F-001/F-002); **yawgpu and Dawn handle the same
+inputs gracefully**. This differential is the suite's unique value vs yawgpu's own single-backend
+Rust CTS.
+
+**Follow-up (async cleanup):** `backendSupportsTimeoutWaitAny()` is currently dead code (no
+callers); all sync wrappers use `pumpUntil` polling and `waitFuture` is an unimplemented
+placeholder. Either wire the WaitAny path (and make `waitFuture` real, gated by the flag) or drop
+the flag — reconcile [docs/03 §2](03-webgpu-c-abstraction.md) with the code.
 
 ---
 
