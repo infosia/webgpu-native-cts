@@ -16,13 +16,11 @@ target this revision.
 | Pinned commit | `b507bd117e53db86f2fb52d0d858d3ae7d684a85` |
 | Commit date | 2026-05-28 |
 | Subject | Add validation coverage for `const SHIFT override` (#4649) |
-| Local checkout used | `../webgpu-cts` |
 | Pinned on | 2026-05-30 |
 
-> A second local checkout exists at `../cts` (`16f8a068…`, 2026-05-27). It is the same upstream
-> repo at a slightly older commit. **`../webgpu-cts` @ `b507bd1` is canonical for this project**
-> (it is the checkout the user designated as the port source). Ignore `../cts` for porting unless
-> we deliberately switch.
+> The pinned revision above (`b507bd1`) is canonical for this project. Port against a local
+> `gpuweb/cts` checkout at that commit (set its location wherever you cloned it; no fixed path is
+> assumed).
 
 ## Pinned canonical WebGPU headers
 

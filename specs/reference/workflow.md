@@ -82,6 +82,13 @@ build/cts 'webgpu:api,validation,createBuffer:*'   # run a query
 ctest --test-dir build                    # if registered with CTest
 ```
 
+## Path hygiene
+
+Committed files (`docs/`, `specs/`, code) must **not** contain machine-specific paths: no absolute
+home paths (`/Users/<name>/…`, `/home/<name>/…`) and no `../<external-project>` workspace-layout
+paths. Use neutral placeholders instead (e.g. `<wgpu-native checkout>`, "your Dawn checkout"). The
+only place concrete local paths belong is `HANDOFF.md` / `REPORT.md`, which are **git-ignored**.
+
 ## Language
 
 All artifacts (docs, specs, handoff/report, code, comments, identifiers) are **English**.

@@ -65,7 +65,7 @@ $CTS_WGPU_NATIVE_DIR/
 ```
 
 ```bash
-# Build wgpu-native first (from ../wgpu-native): `cargo build --release` (or `make`),
+# Build wgpu-native first (in your wgpu-native checkout): `cargo build --release` (or `make`),
 # then point CTS at a dir laid out as above (header dir + lib dir).
 cmake -S . -B build \
       -DCTS_BACKEND=wgpu-native \
