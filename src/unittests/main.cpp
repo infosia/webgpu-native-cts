@@ -14,6 +14,15 @@ void require(bool condition, const std::string& message) {
     }
 }
 
+bool containsRegularTextureFormat(WGPUTextureFormat format) {
+    for (WGPUTextureFormat regularFormat : cts::kRegularTextureFormats) {
+        if (regularFormat == format) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 int main() {
@@ -85,8 +94,18 @@ int main() {
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
         require(!cts::kUncompressedTextureFormats.empty(), "uncompressed texture formats non-empty");
         require(cts::kUncompressedTextureFormats.size() == 49, "uncompressed texture format count");
+        require(cts::kRegularTextureFormats.size() == 43, "regular texture format count");
         require(cts::kCompressedTextureFormats.size() == 52, "compressed texture format count");
         require(cts::kAllTextureFormats.size() == 101, "all texture format count");
+        for (WGPUTextureFormat format : cts::kRegularTextureFormats) {
+            const cts::TextureFormatInfo& info = cts::textureFormatInfo(format);
+            require(info.formatClass == cts::TextureFormatClass::Uncompressed, "regular texture format class");
+            require(!info.hasDepth, "regular texture format has no depth");
+            require(!info.hasStencil, "regular texture format has no stencil");
+        }
+        require(containsRegularTextureFormat(WGPUTextureFormat_RGBA8Unorm), "regular contains rgba8unorm");
+        require(!containsRegularTextureFormat(WGPUTextureFormat_Depth16Unorm), "regular excludes depth16unorm");
+        require(!containsRegularTextureFormat(WGPUTextureFormat_BC1RGBAUnorm), "regular excludes bc1-rgba-unorm");
         size_t multisampleCount = 0;
         for (WGPUTextureFormat format : cts::kAllTextureFormats) {
             if (cts::textureFormatInfo(format).multisample) {

@@ -1,5 +1,10 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/createTexture.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 #include "cts/gpu.h"
 #include "cts/test.h"
 #include "webgpu/texture_format.h"
@@ -12,6 +17,9 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpu
     "api,validation,createTexture",
     "createTexture validation tests.");
 
+// Size variant params keep the upstream key names but encode unsupported array/object values as integer indexes:
+// widthVariant 0..2 maps to offsets -1..+1; sizeVariant 0..8 maps to dimension=index/3 and offset=index%3-1.
+
 std::vector<Value> textureDimensionValuesWithUndefined() {
     std::vector<Value> values;
     values.reserve(kTextureDimensions.size() + 1);
@@ -22,13 +30,26 @@ std::vector<Value> textureDimensionValuesWithUndefined() {
     return values;
 }
 
-std::vector<Value> allTextureFormatValues() {
+template <std::size_t N>
+std::vector<Value> textureFormatValues(const std::array<WGPUTextureFormat, N>& formats) {
     std::vector<Value> values;
-    values.reserve(kAllTextureFormats.size());
-    for (WGPUTextureFormat format : kAllTextureFormats) {
+    values.reserve(formats.size());
+    for (WGPUTextureFormat format : formats) {
         values.emplace_back(static_cast<int64_t>(format));
     }
     return values;
+}
+
+std::vector<Value> allTextureFormatValues() {
+    return textureFormatValues(kAllTextureFormats);
+}
+
+std::vector<Value> uncompressedTextureFormatValues() {
+    return textureFormatValues(kUncompressedTextureFormats);
+}
+
+std::vector<Value> regularTextureFormatValues() {
+    return textureFormatValues(kRegularTextureFormats);
 }
 
 std::vector<Value> sampleCountValues() {
@@ -42,6 +63,24 @@ std::vector<Value> sampleCountValues() {
         Value(32),
         Value(256),
     };
+}
+
+std::vector<Value> sizeVariantValues() {
+    return {
+        Value(0),
+        Value(1),
+        Value(2),
+        Value(3),
+        Value(4),
+        Value(5),
+        Value(6),
+        Value(7),
+        Value(8),
+    };
+}
+
+uint32_t limitWithOffset(uint32_t limit, int offset) {
+    return static_cast<uint32_t>(static_cast<int64_t>(limit) + offset);
 }
 
 bool valueIsUndefined(const Value& value) {
@@ -356,6 +395,123 @@ CTS_TEST(g, "mipLevelCount,bound_check,bigger_than_integer_bit_width")
         t.expectValidationError([&] {
             t.createTextureTracked(desc);
         }, true);
+    });
+
+CTS_TEST(g, "texture_size,1d_texture")
+    .desc("Test upper-bound texture size validation for 1D regular textures.")
+    .params([](ParamsBuilder u) {
+        return u.combine("format", regularTextureFormatValues())
+            .beginSubcases()
+            .combine("widthVariant", {Value(0), Value(1), Value(2)})
+            .combine("height", {Value(1), Value(2)})
+            .combine("depthOrArrayLayers", {Value(1), Value(2)});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const int widthVariant = t.param<int>("widthVariant");
+        const uint32_t height = static_cast<uint32_t>(t.param<int>("height"));
+        const uint32_t depthOrArrayLayers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+        const WGPULimits limits = t.getLimits();
+
+        t.skipIfTextureFormatNotSupported(format);
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size.width = limitWithOffset(limits.maxTextureDimension1D, widthVariant - 1);
+        desc.size.height = height;
+        desc.size.depthOrArrayLayers = depthOrArrayLayers;
+        desc.dimension = WGPUTextureDimension_1D;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_TextureBinding;
+
+        const bool success = desc.size.width <= limits.maxTextureDimension1D && height == 1 && depthOrArrayLayers == 1;
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_size,2d_texture,uncompressed_format")
+    .desc("Test upper-bound texture size validation for 2D uncompressed textures.")
+    .params([](ParamsBuilder u) {
+        return u.combine("dimension", {Value::undef(), Value(static_cast<int64_t>(WGPUTextureDimension_2D))})
+            .combine("format", uncompressedTextureFormatValues())
+            .combine("sizeVariant", sizeVariantValues());
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension dimension = dimensionParam(t);
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const int sizeVariant = t.param<int>("sizeVariant");
+        const int testedDim = sizeVariant / 3;
+        const int offset = sizeVariant % 3 - 1;
+        const WGPULimits limits = t.getLimits();
+        const std::array<uint32_t, 3> dimensionLimits = {
+            limits.maxTextureDimension2D,
+            limits.maxTextureDimension2D,
+            limits.maxTextureArrayLayers,
+        };
+
+        t.skipIfTextureFormatNotSupported(format);
+
+        WGPUExtent3D size = {1, 1, 1};
+        if (testedDim == 0) {
+            size.width = limitWithOffset(dimensionLimits[0], offset);
+        } else if (testedDim == 1) {
+            size.height = limitWithOffset(dimensionLimits[1], offset);
+        } else {
+            size.depthOrArrayLayers = limitWithOffset(dimensionLimits[2], offset);
+        }
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size = size;
+        desc.dimension = dimension;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_TextureBinding;
+
+        const bool success = size.width <= limits.maxTextureDimension2D
+            && size.height <= limits.maxTextureDimension2D
+            && size.depthOrArrayLayers <= limits.maxTextureArrayLayers;
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_size,3d_texture,uncompressed_format")
+    .desc("Test upper-bound texture size validation for 3D regular textures.")
+    .params([](ParamsBuilder u) {
+        return u.combine("format", regularTextureFormatValues())
+            .beginSubcases()
+            .combine("sizeVariant", sizeVariantValues());
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const int sizeVariant = t.param<int>("sizeVariant");
+        const int testedDim = sizeVariant / 3;
+        const int offset = sizeVariant % 3 - 1;
+        const WGPULimits limits = t.getLimits();
+
+        t.skipIfTextureFormatNotSupported(format);
+        t.skipIfTextureFormatAndDimensionNotCompatible(format, WGPUTextureDimension_3D);
+
+        WGPUExtent3D size = {1, 1, 1};
+        if (testedDim == 0) {
+            size.width = limitWithOffset(limits.maxTextureDimension3D, offset);
+        } else if (testedDim == 1) {
+            size.height = limitWithOffset(limits.maxTextureDimension3D, offset);
+        } else {
+            size.depthOrArrayLayers = limitWithOffset(limits.maxTextureDimension3D, offset);
+        }
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size = size;
+        desc.dimension = WGPUTextureDimension_3D;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_TextureBinding;
+
+        const bool success = size.width <= limits.maxTextureDimension3D
+            && size.height <= limits.maxTextureDimension3D
+            && size.depthOrArrayLayers <= limits.maxTextureDimension3D;
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
     });
 
 } // namespace
