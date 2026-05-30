@@ -84,22 +84,27 @@ the local checkout is pinned in the Phase 0 task spec, `specs/phase0-build-skele
 (`crate-type = ["cdylib", "staticlib", "rlib"]`) that, like wgpu-native, exposes the canonical
 `webgpu.h` plus a vendor header `yawgpu.h`. Build it with cargo, selecting a GPU backend feature:
 
+`CTS_YAWGPU_DIR` points at the yawgpu checkout root; CMake resolves the header and library inside
+it:
+
 ```
-$CTS_YAWGPU_DIR/
-  include/webgpu-headers/webgpu.h   # canonical C API   (yawgpu/ffi/webgpu-headers/webgpu.h)
-  include/webgpu-headers/yawgpu.h   # vendor extensions
-  lib/libyawgpu.a  (or .dylib/.so)  # from cargo build
+$CTS_YAWGPU_DIR/                       # yawgpu checkout root
+  yawgpu/ffi/webgpu-headers/webgpu.h   # canonical C API (the header tests compile against)
+  yawgpu/ffi/webgpu-headers/yawgpu.h   # vendor extensions
+  target/release/libyawgpu.a           # from cargo build (also target-metal/release, etc.)
 ```
 
 ```bash
 # In the yawgpu checkout (macOS → metal; Linux → vulkan):
 cargo build --release --features metal        # produces target/release/libyawgpu.{a,dylib}
-# Point CTS at a dir laid out as above:
-cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=/abs/path/to/yawgpu/dist
+# Point CTS at the checkout root:
+cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=/abs/path/to/yawgpu
 ```
 
-The runner exposes `--yawgpu-backend metal|vulkan` to select the GPU backend at runtime via
-`YaWGPUInstanceBackendSelect` (ignored by the other backends).
+`cts::createInstance()` **must** chain `YaWGPUInstanceBackendSelect` to get a real GPU backend — an
+unchained yawgpu instance returns a Noop. Phase 2 pins Metal at the chain and builds yawgpu with
+`--features metal`; a runtime `--yawgpu-backend metal|vulkan` option is deferred until more than one
+backend is compiled in.
 
 For **Dawn** (added after yawgpu): it exposes a `webgpu_dawn` / `dawn::webgpu_dawn` CMake target
 and `include/webgpu/webgpu.h`; the `find_library`/header paths differ accordingly and are captured
@@ -161,11 +166,11 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 | `--verbose` / `--quiet` | log level |
 | `--power-preference {low,high}` | adapter selection |
 | `--force-fallback-adapter` | request the fallback adapter |
-| `--yawgpu-backend {metal,vulkan}` | (yawgpu only) select its GPU backend at runtime; ignored otherwise |
+| `--expectations <file>` | known-failure list (case-query lines); matching fails → `xfail`, matching passes → `xpass`; run fails only on an unexpected fail |
+| `--yawgpu-backend {metal,vulkan}` | (deferred — planned) select yawgpu's GPU backend at runtime once multiple are compiled in |
 | `--adapter-name <substr>` | pick an adapter by name substring |
 | `--enable-feature <name>` | request an optional feature for device creation |
 | `--future-timeout-ms <n>` | timeout for async-wait wrappers (default 5000) |
-| `--expectations <file>` | known-failure list; listed cases may fail without failing the run |
 | `--format {text,json}` | report format (json = one result object per line) |
 | `--seed <n>` | seed for any randomized helpers (kept deterministic by default) |
 

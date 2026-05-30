@@ -274,7 +274,7 @@ All three backends implement the canonical `webgpu.h`, but a few things differ a
 | Concern | wgpu-native | yawgpu | Dawn | Shim approach |
 |---------|-------------|--------|------|---------------|
 | Canonical header | `ffi/webgpu-headers/webgpu.h` | `ffi/webgpu-headers/webgpu.h` | `include/webgpu/webgpu.h` (generated) | `cts/webgpu.h` includes the active backend's canonical header via an include path chosen by CMake |
-| Instance creation extras | `wgpuCreateInstance` (+ `wgpu.h` native extensions) | `wgpuCreateInstance` (+ `yawgpu.h`: chain `YaWGPUInstanceBackendSelect` on the instance descriptor to pick Metal/Vulkan/GLES) | `wgpuCreateInstance` / `dawnProcSetProcs` proc table | `cts::createInstance()` wraps creation; yawgpu path optionally chains the backend-select struct; Dawn path sets the proc table if required |
+| Instance creation extras | `wgpuCreateInstance` (+ `wgpu.h` native extensions) | `wgpuCreateInstance` (+ `yawgpu.h`: chain `YaWGPUInstanceBackendSelect` on the instance descriptor to pick Metal/Vulkan/GLES) | `wgpuCreateInstance` / `dawnProcSetProcs` proc table | `cts::createInstance()` wraps creation; the yawgpu path **must** chain `YaWGPUInstanceBackendSelect` (an *unchained* yawgpu instance returns a **Noop** backend — confirmed in Phase 2); Dawn path sets the proc table if required |
 | Native feature / vendor enums | `WGPUNativeFeature` (`wgpu.h`) | `YAWGPU_*` / `YAWGPU_STYPE_*` (`yawgpu.h`) | C++-only native extensions | Vendor-only features accessed through optional `cts/backend_wgpu.h` / `cts/backend_yawgpu.h` / `cts/backend_dawn.h`; portable tests avoid them |
 | Logging/callbacks setup | `wgpuSetLogCallback` (native) | impl-specific | Dawn toggles | Optional, behind the backend header |
 | Adapter enumeration nuances | impl-specific defaults | impl-specific defaults | impl-specific defaults | normalized in `cts::requestAdapterSync` defaults |
@@ -290,9 +290,11 @@ Design:
   vendor extension includes the backend-specific header and is compiled only for that backend
   (guarded by `#ifdef CTS_BACKEND_WGPU` / `CTS_BACKEND_YAWGPU` / `CTS_BACKEND_DAWN`). Such tests are
   excluded from the other backends' runs and reported as N/A.
-- yawgpu selects its GPU backend (Metal/Vulkan) at its own build time (cargo features) and/or at
-  runtime via `YaWGPUInstanceBackendSelect`; the runner exposes `--yawgpu-backend metal|vulkan` for
-  the latter (a no-op for the other backends).
+- yawgpu requires `cts::createInstance()` to chain `YaWGPUInstanceBackendSelect` to choose a real
+  GPU backend (Metal/Vulkan/GLES); **without the chain it returns a Noop instance**. The compiled-in
+  backend is also gated by yawgpu's cargo features (`metal`/`vulkan`). Phase 2 pins Metal at the
+  chain (and builds yawgpu with `--features metal`); a runtime `--yawgpu-backend metal|vulkan`
+  option is deferred until more than one backend is compiled in.
 
 ### Conformance philosophy regarding backend differences
 

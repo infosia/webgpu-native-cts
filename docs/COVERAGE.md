@@ -64,7 +64,7 @@ that are no longer `todo` (the area summary covers the rest).
 
 | File | Status | Tests ported / total | Skipped / N/A tests | Notes |
 |------|--------|----------------------|---------------------|-------|
-| `api/validation/buffer/create.spec.ts` | partial | 2 / 5 (`limit`, `new_usages`) | `size` (shouldThrow RangeError — no C analog), `usage` (needs `.filter`), `createBuffer_invalid_and_oom` (needs `.combineWithParams` + OOM) | green on wgpu-native: `limit`=3 cases, `new_usages`=10 subcases; fixture deviation `GpuTest` |
+| `api/validation/buffer/create.spec.ts` | partial | 2 / 5 (`limit`, `new_usages`) | `size` (shouldThrow RangeError — no C analog), `usage` (needs `.filter`), `createBuffer_invalid_and_oom` (needs `.combineWithParams` + OOM) | green on wgpu-native **and yawgpu**: `limit`=3 cases, `new_usages`=10 subcases; fixture deviation `GpuTest` |
 
 ## Maintenance
 
