@@ -1,0 +1,18 @@
+# wgpu-native expectations captured for Phase 4 crash isolation.
+# F-001: wgpu-native aborts on bogus buffer usage bits before validation can be observed.
+webgpu:api,validation,buffer,create:usage:usage1=0;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=1;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=2;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=4;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=8;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=16;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=32;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=64;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=128;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=256;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=512;usage2=1073741824
+webgpu:api,validation,buffer,create:usage:usage1=1073741824;usage2=1073741824
+
+# F-002: wgpu-native aborts on invalid clearBuffer sizes at encode time.
+webgpu:api,validation,encoding,cmds,clearBuffer:size_alignment:*
+webgpu:api,validation,encoding,cmds,clearBuffer:out_of_bounds:*

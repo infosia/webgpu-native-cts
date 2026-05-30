@@ -63,7 +63,7 @@ const char* adapterTypeName(WGPUAdapterType type) {
 }
 
 void printUsage() {
-    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--expectations <file>] <query>...\n"
+    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--isolate] [--run-case <case>] [--expectations <file>] <query>...\n"
               << "\n"
               << "Without arguments, creates a WebGPU instance, requests an adapter,\n"
               << "prints adapter information, and exits.\n";
@@ -130,18 +130,34 @@ int main(int argc, char** argv) {
 
     if (argc > 1) {
         cts::RunOptions options;
+        options.executablePath = argv[0];
         for (int i = 1; i < argc; ++i) {
             const std::string arg = argv[i];
             if (arg == "--list") {
                 options.list = true;
             } else if (arg == "--list-cases") {
                 options.listCases = true;
+            } else if (arg == "--isolate") {
+                options.isolate = true;
+            } else if (arg == "--run-case") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --run-case\n";
+                    return EXIT_FAILURE;
+                }
+                options.runCaseQuery = argv[++i];
             } else if (arg == "--expectations") {
                 if (i + 1 >= argc) {
                     std::cerr << "missing value for --expectations\n";
                     return EXIT_FAILURE;
                 }
                 options.expectationsPath = argv[++i];
+            } else if (arg == "--yawgpu-backend" || arg == "--future-timeout-ms") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for " << arg << "\n";
+                    return EXIT_FAILURE;
+                }
+                options.forwardedArgs.push_back(arg);
+                options.forwardedArgs.push_back(argv[++i]);
             } else if (arg.starts_with("--")) {
                 std::cerr << "unknown option: " << arg << "\n";
                 printUsage();
@@ -150,7 +166,7 @@ int main(int argc, char** argv) {
                 options.queries.push_back(arg);
             }
         }
-        if (options.queries.empty()) {
+        if (options.runCaseQuery.empty() && options.queries.empty()) {
             std::cerr << "missing query\n";
             return EXIT_FAILURE;
         }

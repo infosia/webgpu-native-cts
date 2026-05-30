@@ -134,6 +134,7 @@ enum class TestStatus {
     Skip,
     Warn,
     Fail,
+    Crash,
 };
 
 struct SubcaseResult {
@@ -240,7 +241,11 @@ TestBuilder<F> makeTestBuilder(TestGroup<F>& group, std::string name) {
 struct RunOptions {
     bool list = false;
     bool listCases = false;
+    bool isolate = false;
+    std::string runCaseQuery;
     std::string expectationsPath;
+    std::string executablePath;
+    std::vector<std::string> forwardedArgs;
     std::vector<std::string> queries;
 };
 
