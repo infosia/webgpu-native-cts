@@ -47,6 +47,35 @@ int main() {
         require(combined[0].subcases.size() == 2, "subcase filter count");
         require(cts::findParam(combined[0].params, "a") != nullptr, "combineWithParams record key");
 
+        auto caseAwareSubcases = cts::ParamsBuilder()
+            .combine("x", {1, 2})
+            .beginSubcases()
+            .combine("y", {1, 2, 3})
+            .filter([](const cts::ParamRecord& params) {
+                return cts::valueAs<int>(*cts::findParam(params, "y"))
+                    > cts::valueAs<int>(*cts::findParam(params, "x"));
+            })
+            .expand();
+        require(caseAwareSubcases.size() == 2, "case-aware subcase case count");
+        require(caseAwareSubcases[0].subcases.size() == 2, "case-aware subcase filter x=1");
+        require(caseAwareSubcases[1].subcases.size() == 1, "case-aware subcase filter x=2");
+        require(cts::findParam(caseAwareSubcases[0].subcases[0], "x") == nullptr, "subcase omits case key");
+        require(cts::findParam(caseAwareSubcases[0].subcases[0], "y") != nullptr, "subcase keeps subcase key");
+
+        auto omittedCase = cts::ParamsBuilder()
+            .combine("x", {1, 2})
+            .beginSubcases()
+            .combine("y", {1})
+            .filter([](const cts::ParamRecord& params) {
+                return cts::valueAs<int>(*cts::findParam(params, "y"))
+                    >= cts::valueAs<int>(*cts::findParam(params, "x"));
+            })
+            .expand();
+        require(omittedCase.size() == 1, "empty-subcase case omission count");
+        require(cts::valueAs<int>(*cts::findParam(omittedCase[0].params, "x")) == 1,
+                "empty-subcase case omission survivor");
+        require(omittedCase[0].subcases.size() == 1, "empty-subcase survivor subcase count");
+
         require(cts::stringifyValue(cts::Value(1)) == "1", "int stringify");
         require(cts::stringifyValue(cts::Value(true)) == "true", "bool stringify");
         require(cts::stringifyValue(cts::Value(0.5)) == "0.5", "double stringify");
@@ -80,6 +109,21 @@ int main() {
         require(cts::isBCTextureFormat(WGPUTextureFormat_BC7RGBAUnorm), "bc predicate");
         require(cts::isASTCTextureFormat(WGPUTextureFormat_ASTC4x4Unorm), "astc predicate");
         require(!cts::isCompressedTextureFormat(WGPUTextureFormat_RGBA8Unorm), "compressed predicate false");
+        require(cts::maxMipLevelCount(WGPUExtent3D{32, 32, 1}, WGPUTextureDimension_2D) == 6,
+                "2d max mip level count");
+        require(cts::maxMipLevelCount(WGPUExtent3D{31, 1, 1}, WGPUTextureDimension_1D) == 1,
+                "1d max mip level count");
+        require(cts::maxMipLevelCount(WGPUExtent3D{32, 32, 64}, WGPUTextureDimension_3D) == 7,
+                "3d max mip level count");
+        require(cts::textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension_3D,
+                                                                 WGPUTextureFormat_BC1RGBAUnorm),
+                "3d bc possible compatibility");
+        require(!cts::textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension_1D,
+                                                                  WGPUTextureFormat_BC1RGBAUnorm),
+                "1d bc possible compatibility");
+        require(!cts::textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension_1D,
+                                                                  WGPUTextureFormat_Depth16Unorm),
+                "1d depth possible compatibility");
 
         cts::Fixture fixture;
         fixture.setParams({{"x", cts::Value::undef()}, {"y", 1}});

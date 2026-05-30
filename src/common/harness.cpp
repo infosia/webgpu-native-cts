@@ -426,6 +426,12 @@ void GpuTest::skipIfTextureFormatNotSupported(WGPUTextureFormat format) {
     }
 }
 
+void GpuTest::skipIfTextureFormatAndDimensionNotCompatible(WGPUTextureFormat format, WGPUTextureDimension dimension) {
+    if (!textureDimensionAndFormatCompatibleForDevice(dimension, format)) {
+        skip("format does not support dimension");
+    }
+}
+
 bool GpuTest::textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format) {
     if (dimension == WGPUTextureDimension_3D
         && ((isBCTextureFormat(format) && wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureCompressionBCSliced3D))

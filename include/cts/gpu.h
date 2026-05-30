@@ -46,6 +46,7 @@ class GpuTest : public Fixture {
                         size_t offset = 0,
                         size_t size = WGPU_WHOLE_MAP_SIZE);
     void skipIfTextureFormatNotSupported(WGPUTextureFormat format);
+    void skipIfTextureFormatAndDimensionNotCompatible(WGPUTextureFormat format, WGPUTextureDimension dimension);
     bool textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format);
     bool isTextureFormatMultisampled(WGPUTextureFormat format);
 

@@ -2,8 +2,9 @@
 
 #include <array>
 #include <charconv>
-#include <system_error>
+#include <cstdlib>
 #include <sstream>
+#include <system_error>
 
 namespace cts {
 namespace {
@@ -18,6 +19,16 @@ std::string jsonQuote(const std::string& value) {
     }
     quoted.push_back('"');
     return quoted;
+}
+
+bool recordHasKey(const ParamRecord& record, std::string_view key) {
+    return findParam(record, key) != nullptr;
+}
+
+void abortOnCaseKeyCollision(const ParamRecord& caseRecord, std::string_view key) {
+    if (recordHasKey(caseRecord, key)) {
+        std::abort();
+    }
 }
 
 } // namespace
@@ -162,46 +173,109 @@ ParamsBuilder ParamsBuilder::beginSubcases() const {
 
 std::vector<ParamsBuilder::ExpandedCase> ParamsBuilder::expand() const {
     std::vector<ParamRecord> cases(1);
-    std::vector<ParamRecord> subcases(1);
     bool hasSubcaseOps = false;
 
     for (const Op& op : ops_) {
-        hasSubcaseOps = hasSubcaseOps || op.subcase;
-        std::vector<ParamRecord>& target = op.subcase ? subcases : cases;
+        if (op.subcase) {
+            hasSubcaseOps = true;
+            continue;
+        }
         if (op.kind == Op::Kind::Filter) {
             std::vector<ParamRecord> next;
-            for (const ParamRecord& record : target) {
+            for (const ParamRecord& record : cases) {
                 if (op.predicate(record)) {
                     next.push_back(record);
                 }
             }
-            target = std::move(next);
+            cases = std::move(next);
         } else if (op.kind == Op::Kind::CombineWithParams) {
             std::vector<ParamRecord> next;
-            for (const ParamRecord& record : target) {
+            for (const ParamRecord& record : cases) {
                 for (const ParamRecord& additions : op.records) {
                     ParamRecord copy = record;
                     copy.insert(copy.end(), additions.begin(), additions.end());
                     next.push_back(std::move(copy));
                 }
             }
-            target = std::move(next);
+            cases = std::move(next);
         } else {
             std::vector<ParamRecord> next;
-            for (const ParamRecord& record : target) {
+            for (const ParamRecord& record : cases) {
                 for (const Value& value : op.values) {
                     ParamRecord copy = record;
                     copy.emplace_back(op.key, value);
                     next.push_back(std::move(copy));
                 }
             }
-            target = std::move(next);
+            cases = std::move(next);
         }
     }
 
     std::vector<ExpandedCase> expanded;
-    for (const ParamRecord& record : cases) {
-        expanded.push_back(ExpandedCase{record, hasSubcaseOps ? subcases : std::vector<ParamRecord>()});
+    for (const ParamRecord& caseRecord : cases) {
+        if (!hasSubcaseOps) {
+            expanded.push_back(ExpandedCase{caseRecord, {}});
+            continue;
+        }
+
+        std::vector<ParamRecord> subcases(1, caseRecord);
+        for (const Op& op : ops_) {
+            if (!op.subcase) {
+                continue;
+            }
+            if (op.kind == Op::Kind::Filter) {
+                std::vector<ParamRecord> next;
+                for (const ParamRecord& record : subcases) {
+                    if (op.predicate(record)) {
+                        next.push_back(record);
+                    }
+                }
+                subcases = std::move(next);
+            } else if (op.kind == Op::Kind::CombineWithParams) {
+                for (const ParamRecord& additions : op.records) {
+                    for (const auto& addition : additions) {
+                        abortOnCaseKeyCollision(caseRecord, addition.first);
+                    }
+                }
+                std::vector<ParamRecord> next;
+                for (const ParamRecord& record : subcases) {
+                    for (const ParamRecord& additions : op.records) {
+                        ParamRecord copy = record;
+                        copy.insert(copy.end(), additions.begin(), additions.end());
+                        next.push_back(std::move(copy));
+                    }
+                }
+                subcases = std::move(next);
+            } else {
+                abortOnCaseKeyCollision(caseRecord, op.key);
+                std::vector<ParamRecord> next;
+                for (const ParamRecord& record : subcases) {
+                    for (const Value& value : op.values) {
+                        ParamRecord copy = record;
+                        copy.emplace_back(op.key, value);
+                        next.push_back(std::move(copy));
+                    }
+                }
+                subcases = std::move(next);
+            }
+        }
+
+        if (subcases.empty()) {
+            continue;
+        }
+
+        std::vector<ParamRecord> subcaseOnlyRecords;
+        subcaseOnlyRecords.reserve(subcases.size());
+        for (const ParamRecord& subcase : subcases) {
+            ParamRecord subcaseOnly;
+            for (const auto& param : subcase) {
+                if (!recordHasKey(caseRecord, param.first)) {
+                    subcaseOnly.push_back(param);
+                }
+            }
+            subcaseOnlyRecords.push_back(std::move(subcaseOnly));
+        }
+        expanded.push_back(ExpandedCase{caseRecord, std::move(subcaseOnlyRecords)});
     }
     return expanded;
 }

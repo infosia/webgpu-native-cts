@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -251,6 +252,22 @@ inline TextureBlockInfo getBlockInfoForTextureFormat(WGPUTextureFormat format) {
     return TextureBlockInfo{info.blockWidth, info.blockHeight, info.bytesPerBlock};
 }
 
+inline uint32_t maxMipLevelCount(const WGPUExtent3D& size, WGPUTextureDimension dimension) {
+    uint32_t maxMippedDimension = std::max(size.width, size.height);
+    if (dimension == WGPUTextureDimension_1D) {
+        maxMippedDimension = 1;
+    } else if (dimension == WGPUTextureDimension_3D) {
+        maxMippedDimension = std::max(maxMippedDimension, size.depthOrArrayLayers);
+    }
+
+    uint32_t mipLevels = 1;
+    while (maxMippedDimension > 1) {
+        maxMippedDimension >>= 1;
+        ++mipLevels;
+    }
+    return mipLevels;
+}
+
 inline bool isBCTextureFormat(WGPUTextureFormat format) {
     return textureFormatInfo(format).formatClass == TextureFormatClass::BC;
 }
@@ -265,6 +282,15 @@ inline bool isETC2TextureFormat(WGPUTextureFormat format) {
 
 inline bool isCompressedTextureFormat(WGPUTextureFormat format) {
     return textureFormatInfo(format).formatClass != TextureFormatClass::Uncompressed;
+}
+
+inline bool textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension dimension, WGPUTextureFormat format) {
+    if (dimension == WGPUTextureDimension_3D && (isBCTextureFormat(format) || isASTCTextureFormat(format))) {
+        return true;
+    }
+    const TextureFormatInfo& info = textureFormatInfo(format);
+    const bool restrictedDimension = dimension == WGPUTextureDimension_1D || dimension == WGPUTextureDimension_3D;
+    return !(restrictedDimension && (info.blockWidth > 1 || info.hasDepth || info.hasStencil));
 }
 
 inline bool isTier1BlendableMultisampleTextureFormat(WGPUTextureFormat format) {

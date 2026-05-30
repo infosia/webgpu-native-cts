@@ -184,8 +184,13 @@ u.combine("usage", {WGPUBufferUsage_MapRead, WGPUBufferUsage_MapWrite})
  .combine("offset", {0, 4, 8})
 ```
 
-The builder records operations and expands them lazily into the cartesian product (cases ×
-subcases), exactly like upstream. `expand`/`filter` receive the partial record.
+The builder records operations and expands them lazily, exactly like upstream
+(`SubcaseParamsBuilder.iterateCasesWithSubcases`): case ops form the cases, then **subcases are
+generated per case** — each subcase op is seeded with that case's params, so a subcase `filter()` /
+`combine()` predicate sees the **merged** case+subcase record (case-level `filter`/`expand` see the
+case record). The stored subcase record holds **only** subcase keys (case keys are stripped), and a
+case whose subcases are all filtered out is **omitted** entirely (matching upstream
+`if (subcases.length)`). A subcase op may not re-introduce a case key.
 
 ### Reading params
 
