@@ -64,4 +64,27 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
+## F-003 — wgpu-native diverges on mapAsync validation (aborts + escapes error scope)
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu or Dawn.
+- **Found by:** `webgpu:api,validation,buffer,mapping:mapAsync,*` (Phase 3f). **yawgpu and Dawn pass
+  all four ported mapAsync tests with the exact same harness code; wgpu-native diverges on 3 of 4**,
+  which is what isolates the behavior to the backend.
+- **Observed on wgpu-native:**
+  - `mapAsync,usage` — **aborts** (panic / `signal 6`) on an invalid map usage (mapping a buffer
+    that lacks `MAP_READ`/`MAP_WRITE`), instead of returning a non-success `WGPUMapAsyncStatus`
+    (same eager-panic class as F-001/F-002).
+  - `mapAsync,state,mapped` and `mapAsync,state,mappedAtCreation` — mapping an already-mapped buffer
+    produces an **uncaptured** device validation error (it escapes the `Validation` error scope the
+    test pushes around the call), so the harness's uncaptured-error routing fails the case. yawgpu
+    and Dawn keep that validation error **inside** the scope, so the same code passes.
+- **Expected (WebGPU):** invalid mapAsync → a validation error observable by an active error scope
+  (and a rejected map), never a process abort or an out-of-scope uncaptured error.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
+  `expectations/wgpu-native.txt` (the `usage` case as a contained crash, the two map-state cases as
+  expected fails), so a `--isolate --expectations` run exits 0 on wgpu-native; yawgpu and Dawn need
+  no entries.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
