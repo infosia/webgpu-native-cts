@@ -167,7 +167,7 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 | `--power-preference {low,high}` | adapter selection |
 | `--force-fallback-adapter` | request the fallback adapter |
 | `--expectations <file>` | known-failure list (case-query lines, `#` comments); matching fails/crashes → `xfail`, matching passes → `xpass`; run fails only on an unexpected fail/crash. A line ending in `:*` is a **prefix** match — it covers every case of a test in one line (used when a whole test crashes a backend, e.g. wgpu-native on `texture_usage`); a pass under such a prefix shows as `xpass`, flagging that the wildcard can be tightened |
-| `--isolate` | run each case in a child process (fork+exec `--run-case`); a backend abort becomes a contained `crash` result instead of killing the run (POSIX only; sequential) |
+| `--isolate` | run each case in a child process (`--run-case`); a backend abort becomes a contained `crash` result instead of killing the run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess` (a Rust abort shows as a non-zero child exit, e.g. `0xC0000409`). Sequential on both |
 | `--run-case <case-query>` | (internal, used by `--isolate`) run exactly one case in-process and print `RESULT\t<status>\t<message>` |
 | `--yawgpu-backend {metal,vulkan}` | (deferred — planned) select yawgpu's GPU backend at runtime once multiple are compiled in |
 | `--adapter-name <substr>` | pick an adapter by name substring |

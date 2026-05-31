@@ -19,6 +19,12 @@
 #include <unistd.h>
 #endif
 
+#if defined(_WIN32)
+#include <array>
+#include <string>
+#include <windows.h>
+#endif
+
 namespace cts {
 namespace {
 
@@ -300,6 +306,48 @@ std::optional<SubcaseResult> parseResultLine(const std::string& query, const std
     return std::nullopt;
 }
 
+#if defined(_WIN32)
+std::string windowsErrorMessage(const char* operation, DWORD error) {
+    return std::string(operation) + " failed: Windows error " + std::to_string(error);
+}
+
+std::string windowsExitMessage(DWORD exitCode) {
+    std::ostringstream message;
+    message << "child exited 0x" << std::hex << std::uppercase << exitCode;
+    if (exitCode == 0xC0000005) {
+        message << " (access violation)";
+    } else if (exitCode == 0xC0000409) {
+        message << " (stack buffer overrun/fast fail)";
+    }
+    return message.str();
+}
+
+std::string quoteWindowsArg(const std::string& arg) {
+    std::string quoted;
+    quoted.reserve(arg.size() + 2);
+    quoted.push_back('"');
+    size_t backslashes = 0;
+    for (const char ch : arg) {
+        if (ch == '\\') {
+            ++backslashes;
+            continue;
+        }
+        if (ch == '"') {
+            quoted.append(backslashes * 2 + 1, '\\');
+            quoted.push_back('"');
+            backslashes = 0;
+            continue;
+        }
+        quoted.append(backslashes, '\\');
+        backslashes = 0;
+        quoted.push_back(ch);
+    }
+    quoted.append(backslashes * 2, '\\');
+    quoted.push_back('"');
+    return quoted;
+}
+#endif
+
 std::string signalMessage(int signal) {
 #if !defined(_WIN32)
     const char* name = strsignal(signal);
@@ -312,8 +360,126 @@ std::string signalMessage(int signal) {
 
 SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& query) {
 #if defined(_WIN32)
-    (void)options;
-    return SubcaseResult{query, TestStatus::Crash, "isolation is not supported on this platform"};
+    SECURITY_ATTRIBUTES inheritable{};
+    inheritable.nLength = sizeof(inheritable);
+    inheritable.bInheritHandle = TRUE;
+
+    HANDLE stdoutRead = INVALID_HANDLE_VALUE;
+    HANDLE stdoutWrite = INVALID_HANDLE_VALUE;
+    if (!CreatePipe(&stdoutRead, &stdoutWrite, &inheritable, 0)) {
+        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreatePipe", GetLastError())};
+    }
+    if (!SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0)) {
+        const DWORD error = GetLastError();
+        CloseHandle(stdoutRead);
+        CloseHandle(stdoutWrite);
+        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("SetHandleInformation", error)};
+    }
+
+    HANDLE nulHandle = CreateFileA(
+        "NUL",
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &inheritable,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (nulHandle == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        CloseHandle(stdoutRead);
+        CloseHandle(stdoutWrite);
+        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreateFileA(NUL)", error)};
+    }
+
+    std::vector<std::string> args;
+    args.push_back(options.executablePath);
+    for (const std::string& arg : options.forwardedArgs) {
+        args.push_back(arg);
+    }
+    args.push_back("--run-case");
+    args.push_back(query);
+
+    std::string commandLine;
+    for (const std::string& arg : args) {
+        if (!commandLine.empty()) {
+            commandLine.push_back(' ');
+        }
+        commandLine += quoteWindowsArg(arg);
+    }
+
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = stdoutWrite;
+    startup.hStdError = nulHandle;
+
+    PROCESS_INFORMATION process{};
+    BOOL created = CreateProcessA(
+        options.executablePath.c_str(),
+        commandLine.data(),
+        nullptr,
+        nullptr,
+        TRUE,
+        0,
+        nullptr,
+        nullptr,
+        &startup,
+        &process);
+    if (!created) {
+        const DWORD error = GetLastError();
+        CloseHandle(stdoutRead);
+        CloseHandle(stdoutWrite);
+        CloseHandle(nulHandle);
+        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreateProcessA", error)};
+    }
+
+    CloseHandle(stdoutWrite);
+    CloseHandle(nulHandle);
+
+    std::string output;
+    std::array<char, 4096> buffer{};
+    while (true) {
+        DWORD bytesRead = 0;
+        if (ReadFile(stdoutRead, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr)) {
+            if (bytesRead == 0) {
+                break;
+            }
+            output.append(buffer.data(), bytesRead);
+            continue;
+        }
+        const DWORD error = GetLastError();
+        if (error == ERROR_BROKEN_PIPE) {
+            break;
+        }
+        CloseHandle(stdoutRead);
+        WaitForSingleObject(process.hProcess, INFINITE);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("ReadFile", error)};
+    }
+    CloseHandle(stdoutRead);
+
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    if (!GetExitCodeProcess(process.hProcess, &exitCode)) {
+        const DWORD error = GetLastError();
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("GetExitCodeProcess", error)};
+    }
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+
+    if (exitCode != 0) {
+        return SubcaseResult{query, TestStatus::Crash, windowsExitMessage(exitCode)};
+    }
+
+    std::optional<SubcaseResult> parsed = parseResultLine(query, output);
+    if (!parsed) {
+        return SubcaseResult{query, TestStatus::Crash, "no RESULT line"};
+    }
+    return *parsed;
 #else
     std::array<int, 2> stdoutPipe{};
     if (pipe(stdoutPipe.data()) != 0) {
