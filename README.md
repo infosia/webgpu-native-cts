@@ -62,7 +62,7 @@ yawgpu's `YaWGPUInstanceBackendSelect`) are isolated behind a thin backend shim.
 ```
 webgpu-native-cts/
 ├── README.md  CLAUDE.md  LICENSE  CMakeLists.txt
-├── docs/                  # Design docs + UPSTREAM / COVERAGE / FINDINGS / PRIVACY-AUDIT
+├── docs/                  # Design docs + UPSTREAM / COVERAGE / FINDINGS
 ├── specs/                 # Per-slice task specs + reference/ (workflow, templates)
 ├── include/cts/           # Public C++ test-author API (gpu.h, test.h, webgpu.h)
 ├── src/
