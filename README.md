@@ -94,27 +94,27 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 - Ported so far: 9 `api/validation` files, including a fully worked `createTexture` (16 tests with the
   uncompressed + compressed format-capability tables). See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 10 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
-Acting on them, **yawgpu — the primary conformance subject — now passes every ported `api,validation`
-test on real-GPU Metal and on Windows/Vulkan** (all of its findings F-005/006/008/009/010 were reported
-here, fixed upstream, and confirmed resolved). Dawn passes everything; wgpu-native's eager-panic findings
-(F-001–F-004, F-007) remain open. This is the suite working as intended: report a divergence → fix
-upstream → confirm on hardware.
+**Conformance outcome.** The suite has surfaced 12 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
+Acting on them, **yawgpu — the primary conformance subject — passes every ported `api,validation`
+test on real-GPU Metal** (all of its findings F-005/006/008/009/010/011 were reported here, fixed
+upstream, and confirmed resolved). Dawn passes everything; wgpu-native's findings remain open
+(F-001–F-004, F-007 eager-panics, and F-012 — rejecting `createView` on a destroyed texture). This is
+the suite working as intended: report a divergence → fix upstream → confirm on hardware.
 
 ### Test results
 
-Over the ported `api,validation` surface — **2610 cases**, each case in its own subprocess
+Over the ported `api,validation` surface — **2986 cases**, each case in its own subprocess
 (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 
 **Real-GPU Metal** (Apple Silicon):
 
 | Backend | pass | skip | fail | crash | |
 |---------|-----:|-----:|-----:|------:|--|
-| **Dawn** | 2594 | 16 | 0 | 0 | C++ reference implementation |
-| **yawgpu** | 2594 | 16 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
-| **wgpu-native** | 2036 | 231 | 2 | 341 | crashes are eager-panics on invalid input (F-001–F-004, F-007) |
+| **Dawn** | 2970 | 16 | 0 | 0 | C++ reference implementation |
+| **yawgpu** | 2970 | 16 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
+| **wgpu-native** | 2387 | 255 | 3 | 341 | 341 crashes are eager-panics on invalid input (F-001–F-004, F-007); 3 fails incl. F-012 |
 
-**Real-GPU Vulkan** (Windows 11, NVIDIA; `--isolate --expectations`, exit 0):
+**Real-GPU Vulkan** (Windows 11, NVIDIA; `--isolate --expectations`, exit 0; over the 2610-case surface, before the createView tests were added):
 
 | Backend | pass | skip | xfail | fail | crash |
 |---------|-----:|-----:|------:|-----:|------:|

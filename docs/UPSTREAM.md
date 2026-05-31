@@ -48,7 +48,7 @@ set (e.g. in an `--expectations` file header).
 | Backend | Repo | Version observed (local) | License | Notes |
 |---------|------|--------------------------|---------|-------|
 | wgpu-native | github.com/gfx-rs/wgpu-native | `v29.0.0.0-8-g9176708` | MIT / Apache-2.0 | harness bring-up reference |
-| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `92db06260b86b117d33758b171b63203e25746d9` (2026-05-31) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h`. At this revision yawgpu **passes every ported `api,validation` test** (`expectations/yawgpu.txt` has no expected failures) — all of F-005/006/008/009/010 fixed; see [FINDINGS](FINDINGS.md) |
+| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `41e007b46ddd7d84701633aed5356330ea2deb72` (2026-05-31) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h`. At this revision yawgpu **passes every ported `api,validation` test** (`pass=2970 skip=16 fail=0 crash=0`; `expectations/yawgpu.txt` has no expected failures) — all of F-005/006/008/009/010/011 fixed; see [FINDINGS](FINDINGS.md) |
 | Dawn | dawn.googlesource.com/dawn | `802f147f1fb7ab972f87f3e9f95098e0f4b5077b` (2026-05-15) | BSD-3-Clause / Apache-2.0 | C++ reference impl |
 
 ## Re-baselining process

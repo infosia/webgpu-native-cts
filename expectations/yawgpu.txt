@@ -1,22 +1,9 @@
-# yawgpu expectations — captured against commit 92db06260b86b117d33758b171b63203e25746d9 (2026-05-31).
+# yawgpu expectations — captured against commit 41e007b46ddd7d84701633aed5356330ea2deb72 (2026-05-31).
 # One full case query per line (# comments allowed; a line ending ':*' is a test-prefix match).
 #
 # NO expected failures: yawgpu passes every ported api,validation test on real-GPU Metal
-# (pass=2594 skip=16 fail=0 crash=0). The findings this suite surfaced were all fixed upstream:
+# (pass=2970 skip=16 fail=0 crash=0). Every finding this suite surfaced was fixed upstream:
 #   F-005 (format rejection + Depth24PlusStencil8 abort), F-006 (multisample), F-008 (transient usage),
-#   F-009 (render-attachment dimension + RGBA8Snorm storage), F-010 (compressed texture_size alignment).
+#   F-009 (render-attachment dimension + RGBA8Snorm storage), F-010 (compressed texture_size alignment),
+#   F-011 (createView view-dimension: 2D-multilayer / Cube / CubeArray square).
 # See docs/FINDINGS.md. Add a query line here only if a future test surfaces a new yawgpu defect.
-
-# T9: yawgpu createView dimension/cube validation diverges from upstream expectations.
-webgpu:api,validation,createView:dimension:textureDimension=2;viewDimension=2
-webgpu:api,validation,createView:dimension:textureDimension=2;viewDimension=4
-webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=4;h=4;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=5;h=5;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=4;h=5;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=4;h=8;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=8;h=4;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=4;w=4;h=4;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=4;w=5;h=5;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=5;w=4;h=5;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=5;w=4;h=8;d=6
-webgpu:api,validation,createView:cube_faces_square:viewDimension=5;w=8;h=4;d=6

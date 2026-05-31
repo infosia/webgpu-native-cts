@@ -48,8 +48,11 @@ this suite had surfaced **as of `92db062`** is now **resolved** (see each entry'
 full intended cycle: the suite reports a divergence, it is fixed in yawgpu, and the fix is confirmed on
 real hardware. Tests ported **after** that milestone continue to find new ones — `createView` (T9)
 surfaced [F-011](#f-011--yawgpu-createview-view-dimension-gaps-2d-multilayer-cube-cube-array-square)
-(yawgpu) and [F-012](#f-012--wgpu-native-rejects-createview-on-a-destroyed-texture) (wgpu-native). Open
-findings: wgpu-native F-001–F-004, F-007, F-012; yawgpu F-011.
+(yawgpu) and [F-012](#f-012--wgpu-native-rejects-createview-on-a-destroyed-texture) (wgpu-native). yawgpu
+fixed F-011 in `41e007b`, so it again passes **every** ported `api,validation` test
+(`pass=2970 skip=16 fail=0 crash=0`, the surface having grown to 2986 cases with createView). **All
+yawgpu findings (F-005/006/008/009/010/011) are resolved; the open findings are all wgpu-native's
+(F-001–F-004, F-007, F-012).**
 
 ---
 
@@ -324,9 +327,11 @@ findings: wgpu-native F-001–F-004, F-007, F-012; yawgpu F-011.
     (`cube_faces_square` non-square `cube-array` cases `4×5`, `4×8`, `8×4`.)
 - **Expected (WebGPU):** a `2D` view of a multi-layer texture is valid (single-layer default); `Cube`
   views are supported; cube/cube-array faces must be square. Dawn enforces all of this.
-- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 12 cases are in
-  `expectations/yawgpu.txt` (per-case — yawgpu passes most createView cases); wgpu-native and Dawn need
-  no entries.
+- **Status:** **RESOLVED** on yawgpu `41e007b` (re-test 2026-05-31) — *"cts-findings: fix createView
+  view-dimension gaps (F-011)"*. All 12 cases now pass (`xpass`); `dimension` and `cube_faces_square`
+  are 21/15 green, and yawgpu again passes **every** ported `api,validation` test
+  (`pass=2970 skip=16 fail=0 crash=0`). Removed from `expectations/yawgpu.txt`. wgpu-native and Dawn
+  always passed.
 
 ---
 
