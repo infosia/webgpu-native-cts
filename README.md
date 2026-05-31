@@ -48,41 +48,59 @@ yawgpu's `YaWGPUInstanceBackendSelect`) are isolated behind a thin backend shim.
 - Tests call the WebGPU **C** API (`webgpu.h`) directly; they do not depend on any C++ wrapper
   for WebGPU itself.
 - The harness is a **custom C++ framework that mirrors the upstream CTS framework 1:1**
-  (`makeTestGroup` / `g.test().desc().params().fn()`, fluent parameter builders, lambda test
-  bodies, `expectValidationError([&]{ ... }, shouldError)`). It is **not** built on GoogleTest,
-  Catch2, doctest, or Criterion — those impose a test model that conflicts with the CTS
-  case/subcase split and query-string identity. Existing frameworks are reused only for the
-  harness's own self-tests (doctest) and for standard CI output (JUnit/JSON).
+  (`MakeTestGroup` / `g.test().desc().params().fn()`, fluent parameter builders —
+  `combine`/`combineWithParams`/`filter`/`expand`/`beginSubcases` with per-case subcase expansion —
+  lambda test bodies, `expectValidationError([&]{ ... }, shouldError)`, the `suite:file:test:params`
+  query system, and a case/subcase tree). It is **not** built on GoogleTest, Catch2, doctest, or
+  Criterion — those impose a test model that conflicts with the CTS case/subcase split and
+  query-string identity. The harness's own logic (params expansion, query parsing, format tables,
+  expectation matching) is checked by a small self-test binary, `cts_unittests`, with no third-party
+  test framework.
 
-## Repository layout (planned)
+## Repository layout
 
 ```
 webgpu-native-cts/
-├── README.md
-├── docs/                     # Design documents (this is where the plan lives)
-│   ├── 00-overview.md
-│   ├── 01-architecture.md
-│   ├── 02-harness.md
-│   ├── 03-webgpu-c-abstraction.md
-│   ├── 04-authoring-tests.md
-│   ├── 05-porting-guide.md
-│   ├── 06-build-and-run.md
-│   └── 07-roadmap.md
-├── include/cts/              # Public C++ test-author API (headers)
+├── README.md  CLAUDE.md  LICENSE  CMakeLists.txt
+├── docs/                  # Design docs + UPSTREAM / COVERAGE / FINDINGS / PRIVACY-AUDIT
+├── specs/                 # Per-slice task specs + reference/ (workflow, templates)
+├── include/cts/           # Public C++ test-author API (gpu.h, test.h, webgpu.h)
 ├── src/
-│   ├── common/               # Harness: registry, params, query, tree, runner (C++)
-│   └── webgpu/               # Ported tests (.spec.cpp), mirrors upstream src/webgpu/ layout
-├── third_party/
-│   └── webgpu-headers/       # Canonical webgpu.h (vendored or submodule)
-├── tools/
-│   └── gen_listings/         # Listing generator (mirrors upstream gen_listings)
-└── CMakeLists.txt
+│   ├── common/            # Harness: registry, params, query, runner, runtime, webgpu/ (async→sync, backend shim)
+│   ├── webgpu/            # Ported tests (.spec.cpp) + capability_info / texture_format tables + listing.json
+│   └── unittests/         # Harness self-tests (cts_unittests)
+├── expectations/          # Per-backend known-failure lists ({wgpu-native,yawgpu,dawn}.txt)
+└── tools/gen_listings/    # Listing generator → src/webgpu/listing.json
 ```
+
+The build directories (`build-*/`) are git-ignored. The canonical `webgpu.h` is **not** vendored —
+each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated header), selected by
+`CTS_BACKEND` at configure time.
 
 ## Status
 
-**Planning / documentation phase.** No implementation has started yet. The design is captured
-in [`docs/`](docs/). Start with [`docs/00-overview.md`](docs/00-overview.md).
+**Active — the harness runs and is porting tests across all three backends on real hardware
+(Apple Metal).** What works today:
+
+- A complete custom harness: registry, fluent params (`combine`/`combineWithParams`/`filter`/`expand`
+  with per-case subcase expansion), the `suite:file:test:params` query system, fixtures, error scopes,
+  async→sync helpers, a listing generator, and `cts_unittests` self-tests.
+- **Per-case crash isolation** (`--isolate` forks a subprocess per case, so a backend that *aborts*
+  becomes a contained `crash` result instead of killing the run) and a **per-backend expectations**
+  file (`--expectations`, with `:*` test-prefix lines) so a run with known divergences still exits 0.
+- All three backends — **wgpu-native, yawgpu, Dawn** — build link-agnostically and run on a real GPU.
+- Ported so far: 9 `api/validation` files, including a fully worked `createTexture` (16 tests with the
+  uncompressed + compressed format-capability tables). See [COVERAGE](docs/COVERAGE.md).
+
+**Conformance outcome.** The suite has surfaced 10 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
+Acting on them, **yawgpu — the primary conformance subject — now passes every ported `api,validation`
+test on real-GPU Metal** (all of its findings F-005/006/008/009/010 were reported here, fixed upstream,
+and confirmed resolved). Dawn passes everything; wgpu-native's eager-panic findings (F-001–F-004, F-007)
+remain open. This is the suite working as intended: report a divergence → fix upstream → confirm on
+hardware.
+
+Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
+and [`docs/07-roadmap.md`](docs/07-roadmap.md).
 
 ## Documentation map
 
