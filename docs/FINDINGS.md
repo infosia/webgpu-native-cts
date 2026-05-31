@@ -19,33 +19,32 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
-## Re-test — yawgpu `2667b0a` (2026-05-31, vs the `55ac04d` baseline these entries were captured on)
+## Re-test — yawgpu `92db062` (2026-05-31): **all yawgpu findings resolved**
 
-yawgpu commit `2667b0a` — *"fix(core): createTexture format/usage conformance defects (external CTS
-F-005/006/008/009/010)"* — was built and re-run over `api,validation:*`. **It resolves the large
-majority of the yawgpu findings: 420 cases that were expected to fail now pass (`xpass`)**; raw failures
-dropped from ~625 to ~169, and the only remaining crashes are the one `Depth24PlusStencil8` abort
-(below). This is the suite working as intended — findings reported, fixed upstream, and confirmed
-resolved. (An earlier WIP build `e39f57f` first added the compression/tier1/depth features — collapsing
-skips from several hundred to 16; `2667b0a` then fixed the validation on top of that.)
+yawgpu fixed every defect this suite surfaced, across two commits driven by these findings:
+`2667b0a` (*"fix(core): createTexture format/usage conformance defects (external CTS
+F-005/006/008/009/010)"*) and `92db062` (*"cts-findings: fix Depth24PlusStencil8 abort + RGBA8Snorm
+tier1 storage + compressed size alignment"*). At `92db062`, yawgpu **passes every ported `api,validation`
+test on real-GPU Metal**: `pass=2594 skip=16 fail=0 crash=0` — **0 failures, 0 crashes**, and
+`expectations/yawgpu.txt` now has no expected-failure lines.
 
-Status after `2667b0a` (still measured against the `55ac04d`-era `expectations/yawgpu.txt`):
+Resolution timeline (against the `55ac04d`-era baseline these entries were captured on):
 
-| | cases | meaning |
-|--|------:|---------|
-| `xpass` | **420** | findings **resolved** — F-005 (format rejection), F-006, F-008, and most of F-009 |
-| `xfail` | **23** | findings **still open** — 19 are the `Depth24PlusStencil8` abort (F-005), 4 are an `RGBA8Snorm` storage rejection (F-009) |
-| `fail` (new, untriaged) | **146** | F-010, now narrowed to **compressed `texture_size`** block-alignment validation |
+| yawgpu | what changed | yawgpu fail/crash over `api,validation:*` |
+|--------|--------------|-------------------------------------------:|
+| `55ac04d` | baseline — findings captured | ~625 (+ hundreds of feature-skips) |
+| `e39f57f` | added compression / tier1 / depth32fs8 features (skips → 16) | ~625 |
+| `2667b0a` | fixed F-005 rejection, F-006, F-008, most of F-009 (420 `xpass`) | ~169 |
+| `92db062` | fixed the Depth24PlusStencil8 abort (F-005), RGBA8Snorm storage (F-009), compressed `texture_size` alignment (F-010) | **0** |
 
-Per-finding detail is in each entry's **Status**. See [F-005](#f-005--yawgpu-mishandles-several-valid-uncompressed-texture-formats),
+Every yawgpu finding — [F-005](#f-005--yawgpu-mishandles-several-valid-uncompressed-texture-formats),
 [F-006](#f-006--yawgpu-disagrees-on-which-texture-formats-are-multisampleable),
 [F-008](#f-008--yawgpu-under-validates-transient-texture-usage-combinations),
 [F-009](#f-009--yawgpu-over-restricts-render-attachment-dimension-and-under-validates-storage-usage),
-[F-010](#f-010--yawgpus-newly-enabled-compressed--feature-gated-formats-have-validation-gaps).
-
-> `expectations/yawgpu.txt` and the pinned [UPSTREAM.md](UPSTREAM.md) yawgpu revision are **not yet
-> re-baselined** to `2667b0a`. When re-baselining: drop the 420 now-passing lines, keep the 23 still-open
-> ones, and triage the 146 compressed-`texture_size` cases (F-010).
+[F-010](#f-010--yawgpus-newly-enabled-compressed--feature-gated-formats-have-validation-gaps) — is now
+**resolved** (see each entry's Status). The open findings are all wgpu-native's (F-001–F-004, F-007).
+This is the full intended cycle: the suite reports a divergence, it is fixed in yawgpu, and the fix is
+confirmed on real hardware.
 
 ---
 
@@ -168,13 +167,10 @@ Per-finding detail is in each entry's **Status**. See [F-005](#f-005--yawgpu-mis
   wgpu-native and yawgpu `webgpu-headers/webgpu.h` (verified by diff), so the same `format=N` value
   denotes the same format on both — this is a genuine format-handling gap in yawgpu, not an
   enum/ABI mismatch in how the suite passes the value.
-- **Status:** **format-rejection resolved** on yawgpu `2667b0a` (re-test 2026-05-31) — the 12
-  reject-as-`Undefined` color formats now create successfully across `dimension_type`, `mipLevelCount`,
-  `texture_size`, `texture_usage`, `viewFormats`, etc. (the bulk of the 420 `xpass`). **Still open:** the
-  `Depth24PlusStencil8` (`enum 47`) **abort** persists (19 `xfail` — it aborts in every test that
-  creates it at a compatible `undefined`/`2d` dimension). Originally captured on `55ac04d`; recorded in
-  `expectations/yawgpu.txt` (the now-passing lines are stale, drop them when re-baselining); wgpu-native
-  and Dawn need no entries.
+- **Status:** **RESOLVED** on yawgpu `92db062` (re-test 2026-05-31). `2667b0a` fixed the 12
+  reject-as-`Undefined` color formats; `92db062` then fixed the `Depth24PlusStencil8` (`enum 47`) abort.
+  All cases now pass; the lines were captured on `55ac04d` and removed from `expectations/yawgpu.txt`.
+  wgpu-native and Dawn always passed.
 
 ---
 
@@ -274,13 +270,10 @@ Per-finding detail is in each entry's **Status**. See [F-005](#f-005--yawgpu-mis
 - **Expected (WebGPU):** render-attachment is dimension-invalid only for 1D; storage-binding validity
   follows the format's storage capability (with `texture-formats-tier1` enabled on the all-features
   device). Dawn matches.
-- **Status:** **largely resolved** on yawgpu `2667b0a` (re-test 2026-05-31) — 107 `texture_usage` cases
-  are `xpass`, including the 3D-render-attachment over-restriction. **Still open:** a storage gap — yawgpu
-  rejects `STORAGE_BINDING` on `RGBA8Snorm` (`enum 24`) with *"StorageBinding texture format must support
-  storage usage"*, but `RGBA8Snorm` **is** storage-capable (Dawn accepts it) — 4 `xfail` (dims
-  `undefined`/`1d`/`2d`/`3d`). (The `Depth24PlusStencil8` abort also recurs here, tracked under F-005.)
-  Originally captured on `55ac04d`; drop the resolved lines when re-baselining; wgpu-native and Dawn need
-  no entries.
+- **Status:** **RESOLVED** on yawgpu `92db062` (re-test 2026-05-31). `2667b0a` fixed the
+  3D-render-attachment over-restriction; `92db062` then fixed the `RGBA8Snorm` (`enum 24`) tier1-storage
+  rejection. All cases now pass; the lines were captured on `55ac04d` and removed from
+  `expectations/yawgpu.txt`. wgpu-native and Dawn always passed.
 
 ---
 
@@ -300,10 +293,10 @@ Per-finding detail is in each entry's **Status**. See [F-005](#f-005--yawgpu-mis
   format block size** (or exceeds the dimension limit). Dawn rejects these.
 - **Expected (WebGPU):** a compressed texture's width/height must be a multiple of its block dimensions
   and within the dimension limits. Dawn enforces this.
-- **Status:** open; **new yawgpu defect** exposed by the capability gain (the suite's intended signal —
-  more features covered means more validation surface to check). Not yet triaged into
-  `expectations/yawgpu.txt` (pending a re-baseline); a `--isolate --expectations` run currently exits 1
-  on these 146 cases.
+- **Status:** **RESOLVED** on yawgpu `92db062` (re-test 2026-05-31) — yawgpu now validates compressed
+  texture block alignment and size limits; all 146 cases pass. This finding was surfaced *and* fixed
+  within the re-test cycle once yawgpu enabled compression. wgpu-native (skips ETC2/ASTC differently) and
+  Dawn always passed; removed from `expectations/yawgpu.txt`.
 
 ---
 
