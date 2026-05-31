@@ -117,7 +117,6 @@ and [`docs/07-roadmap.md`](docs/07-roadmap.md).
 | [UPSTREAM](docs/UPSTREAM.md) | Pinned upstream CTS / header / backend revisions |
 | [COVERAGE](docs/COVERAGE.md) | Per-area / per-file port status |
 | [FINDINGS](docs/FINDINGS.md) | Per-backend conformance defects the suite surfaced |
-| [PRIVACY-AUDIT](docs/PRIVACY-AUDIT.md) | Runbook: check the repo + git history for leaked paths / secrets / PII |
 
 ## License
 
