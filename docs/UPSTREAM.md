@@ -48,7 +48,7 @@ set (e.g. in an `--expectations` file header).
 | Backend | Repo | Version observed (local) | License | Notes |
 |---------|------|--------------------------|---------|-------|
 | wgpu-native | github.com/gfx-rs/wgpu-native | `v29.0.0.0-8-g9176708` | MIT / Apache-2.0 | harness bring-up reference |
-| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `7ac36c61aa44b34fab1db0ae4672b10f70982ff0` (2026-05-30) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h` |
+| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `2667b0aa3538ee3a34d025c84eba5e86f103ebf2` (2026-05-31) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h`. `expectations/yawgpu.txt` is captured against this revision (fixed F-005/006/008/009 vs the earlier `55ac04d`; see [FINDINGS](FINDINGS.md)) |
 | Dawn | dawn.googlesource.com/dawn | `802f147f1fb7ab972f87f3e9f95098e0f4b5077b` (2026-05-15) | BSD-3-Clause / Apache-2.0 | C++ reference impl |
 
 ## Re-baselining process
