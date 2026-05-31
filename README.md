@@ -31,13 +31,17 @@ the implementation under test.
 Tests are written against the **canonical** `webgpu.h` from
 [webgpu-native/webgpu-headers](https://github.com/webgpu-native/webgpu-headers), which all of the
 target backends implement. The suite is **link-agnostic**: a build-time option (`CTS_BACKEND`)
-selects which implementation to link against. The three initial targets:
+selects which implementation to link against. Three backends are targeted, each playing a distinct
+role in the cross-implementation comparison:
 
-- **wgpu-native** — mature Rust implementation; used as the harness bring-up reference.
 - **yawgpu** ([github.com/infosia/yawgpu](https://github.com/infosia/yawgpu)) — a from-scratch
   Rust implementation of `webgpu.h` (Metal/Vulkan backends; vendor extensions in a companion
-  `yawgpu.h`); the primary conformance subject this suite is built to validate.
-- **Dawn** — the C++ reference implementation; added after the vertical slice.
+  `yawgpu.h`). The **primary conformance subject** — the implementation this suite exists to validate.
+- **Dawn** — Google's C++ reference implementation. It passes the ported suite, so it serves as the
+  **conformance oracle**: the ground-truth behaviour against which any backend disagreement is judged.
+- **wgpu-native** — the mature Rust implementation (`wgpu_core`); the backend the harness was first
+  brought up against, and a third independent data point that keeps the comparison from being a
+  two-way tie.
 
 Implementation-specific differences (native feature enums, instance-creation extras like
 yawgpu's `YaWGPUInstanceBackendSelect`) are isolated behind a thin backend shim.
@@ -91,28 +95,31 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   test-prefix lines) so a run with known divergences still exits 0.
 - All three backends — **wgpu-native, yawgpu, Dawn** — build link-agnostically and run on a real GPU.
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
-- Ported so far: 9 `api/validation` files, including a fully worked `createTexture` (16 tests with the
-  uncompressed + compressed format-capability tables). See [COVERAGE](docs/COVERAGE.md).
+- Ported so far: 10 `api/validation` files, including a fully worked `createTexture` (16 tests) and a
+  **complete `createView`** (all 10 tests) backed by the uncompressed + compressed format-capability
+  tables. See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 12 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
+**Conformance outcome.** The suite has surfaced 15 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
 Acting on them, **yawgpu — the primary conformance subject — passes every ported `api,validation`
-test on real-GPU Metal** (all of its findings F-005/006/008/009/010/011 were reported here, fixed
-upstream, and confirmed resolved). Dawn passes everything; wgpu-native's findings remain open
-(F-001–F-004, F-007 eager-panics, and F-012 — rejecting `createView` on a destroyed texture). This is
-the suite working as intended: report a divergence → fix upstream → confirm on hardware.
+test on real-GPU Metal** (`pass=3777 skip=200 fail=0 crash=0`, identical to Dawn): all seven of its
+findings (F-005/006/008/009/010/011/014) were reported here, fixed upstream, and confirmed resolved.
+Dawn — the oracle — passes everything. wgpu-native's findings remain open: eager-panics on invalid
+input (F-001–F-004, F-007, F-013) and missing validation (F-012 — `createView` on a destroyed texture;
+F-015 — the view-usage subset rule). This is the suite working as intended: report a divergence → fix
+upstream → confirm on hardware.
 
 ### Test results
 
-Over the ported `api,validation` surface — **2986 cases**, each case in its own subprocess
-(`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
+Over the ported `api,validation` surface — **3977 cases** across 10 files, each case in its own
+subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 
 **Real-GPU Metal** (Apple Silicon):
 
 | Backend | pass | skip | fail | crash | |
 |---------|-----:|-----:|-----:|------:|--|
-| **Dawn** | 2970 | 16 | 0 | 0 | C++ reference implementation |
-| **yawgpu** | 2970 | 16 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
-| **wgpu-native** | 2387 | 255 | 3 | 341 | 341 crashes are eager-panics on invalid input (F-001–F-004, F-007); 3 fails incl. F-012 |
+| **Dawn** | 3777 | 200 | 0 | 0 | C++ reference implementation — the conformance oracle |
+| **yawgpu** | 3777 | 200 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
+| **wgpu-native** | 3064 | 541 | 327 | 45 | 45 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
 
 **Real-GPU Vulkan** (Windows 11, NVIDIA; `--isolate --expectations`, exit 0; over the 2610-case surface, before the createView tests were added):
 
