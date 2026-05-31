@@ -191,7 +191,7 @@ endif()
 function(cts_configure_target target)
     target_compile_options(${target} PRIVATE
         $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wall -Wextra -Werror>
-        $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /utf-8>
     )
 endfunction()
 
