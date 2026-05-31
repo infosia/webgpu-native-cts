@@ -35,6 +35,7 @@ class GpuTest : public Fixture {
     WGPUBuffer getErrorBuffer();
     WGPUSampler createSamplerTracked(const WGPUSamplerDescriptor& desc);
     WGPUTexture createTextureTracked(const WGPUTextureDescriptor& desc);
+    WGPUTexture createTextureWithState(ResourceState state, const WGPUTextureDescriptor& desc);
     WGPUTextureView createViewTracked(WGPUTexture texture, const WGPUTextureViewDescriptor& desc);
     WGPUBindGroupLayout createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc);
     WGPUPipelineLayout createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc);
@@ -49,6 +50,7 @@ class GpuTest : public Fixture {
     void skipIfTransientAttachmentNotSupported();
     void skipIfTextureFormatNotSupported(WGPUTextureFormat format);
     void skipIfTextureFormatAndDimensionNotCompatible(WGPUTextureFormat format, WGPUTextureDimension dimension);
+    void skipIfTextureViewDimensionNotSupported(WGPUTextureViewDimension dimension);
     bool textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format);
     bool isTextureFormatColorRenderable(WGPUTextureFormat format);
     bool isTextureFormatUsableAsWriteOnlyStorageTexture(WGPUTextureFormat format);

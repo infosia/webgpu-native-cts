@@ -6,3 +6,17 @@
 #   F-005 (format rejection + Depth24PlusStencil8 abort), F-006 (multisample), F-008 (transient usage),
 #   F-009 (render-attachment dimension + RGBA8Snorm storage), F-010 (compressed texture_size alignment).
 # See docs/FINDINGS.md. Add a query line here only if a future test surfaces a new yawgpu defect.
+
+# T9: yawgpu createView dimension/cube validation diverges from upstream expectations.
+webgpu:api,validation,createView:dimension:textureDimension=2;viewDimension=2
+webgpu:api,validation,createView:dimension:textureDimension=2;viewDimension=4
+webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=4;h=4;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=5;h=5;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=4;h=5;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=4;h=8;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=2;w=8;h=4;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=4;w=4;h=4;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=4;w=5;h=5;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=5;w=4;h=5;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=5;w=4;h=8;d=6
+webgpu:api,validation,createView:cube_faces_square:viewDimension=5;w=8;h=4;d=6

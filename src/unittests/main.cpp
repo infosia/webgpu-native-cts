@@ -164,6 +164,15 @@ int main() {
         require(cts::kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly.size() == 17,
                 "tier1 storage texture format count");
         require(cts::kTextureAspects.size() == 3, "texture aspect count");
+        require(cts::kTextureViewDimensions.size() == 6, "texture view dimension count");
+        require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_Cube) == WGPUTextureDimension_2D,
+                "cube view dimension maps to 2d");
+        require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_2DArray) == WGPUTextureDimension_2D,
+                "2d-array view dimension maps to 2d");
+        require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_1D) == WGPUTextureDimension_1D,
+                "1d view dimension maps to 1d");
+        require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_3D) == WGPUTextureDimension_3D,
+                "3d view dimension maps to 3d");
         require(cts::isDepthTextureFormat(WGPUTextureFormat_Depth24Plus), "depth24plus depth format");
         require(cts::isStencilTextureFormat(WGPUTextureFormat_Stencil8), "stencil8 stencil format");
         require(cts::isDepthTextureFormat(WGPUTextureFormat_Depth24PlusStencil8),

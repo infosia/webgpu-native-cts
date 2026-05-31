@@ -42,6 +42,42 @@ std::vector<Value> textureAspectValues() {
     return values;
 }
 
+std::vector<Value> textureDimensionValues() {
+    std::vector<Value> values;
+    values.reserve(kTextureDimensions.size());
+    for (WGPUTextureDimension dimension : kTextureDimensions) {
+        values.emplace_back(static_cast<int64_t>(dimension));
+    }
+    return values;
+}
+
+std::vector<Value> textureViewDimensionValuesWithUndefined() {
+    std::vector<Value> values;
+    values.reserve(kTextureViewDimensions.size() + 1);
+    for (WGPUTextureViewDimension dimension : kTextureViewDimensions) {
+        values.emplace_back(static_cast<int64_t>(dimension));
+    }
+    values.push_back(Value::undef());
+    return values;
+}
+
+std::vector<Value> textureViewCubeDimensionValues() {
+    return {
+        Value(static_cast<int64_t>(WGPUTextureViewDimension_2D)),
+        Value(static_cast<int64_t>(WGPUTextureViewDimension_Cube)),
+        Value(static_cast<int64_t>(WGPUTextureViewDimension_CubeArray)),
+    };
+}
+
+std::vector<Value> resourceStateValues() {
+    std::vector<Value> values;
+    values.reserve(kResourceStates.size());
+    for (ResourceState state : kResourceStates) {
+        values.emplace_back(static_cast<int64_t>(state));
+    }
+    return values;
+}
+
 std::vector<Value> textureFormatFeatureValues() {
     std::vector<Value> values;
     values.reserve(kFeaturesForFormats.size());
@@ -170,6 +206,107 @@ CTS_TEST(g, "format")
         t.expectValidationError([&] {
             t.createViewTracked(texture, viewDesc);
         }, !success);
+    });
+
+CTS_TEST(g, "dimension")
+    .desc("Test texture view dimension compatibility validation.")
+    .params([](ParamsBuilder u) {
+        return u.combine("textureDimension", textureDimensionValues())
+            .combine("viewDimension", textureViewDimensionValuesWithUndefined());
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension textureDimension =
+            static_cast<WGPUTextureDimension>(t.param<int64_t>("textureDimension"));
+        const bool viewDimensionIsUndefined = t.paramIsUndefined("viewDimension");
+        const WGPUTextureViewDimension viewDimension = viewDimensionIsUndefined
+            ? WGPUTextureViewDimension_Undefined
+            : static_cast<WGPUTextureViewDimension>(t.param<int64_t>("viewDimension"));
+
+        if (!viewDimensionIsUndefined) {
+            t.skipIfTextureViewDimensionNotSupported(viewDimension);
+        }
+
+        const WGPUExtent3D size = textureDimension == WGPUTextureDimension_1D
+            ? WGPUExtent3D{4, 1, 1}
+            : WGPUExtent3D{4, 4, 6};
+
+        WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        textureDesc.size = size;
+        textureDesc.dimension = textureDimension;
+        textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        textureDesc.usage = WGPUTextureUsage_TextureBinding;
+        WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+        const bool success = viewDimensionIsUndefined
+            || getTextureDimensionFromView(viewDimension) == textureDimension;
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        viewDesc.dimension = viewDimension;
+
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, viewDesc);
+        }, !success);
+    });
+
+CTS_TEST(g, "cube_faces_square")
+    .desc("Test cube texture views require square faces.")
+    .params([](ParamsBuilder u) {
+        return u.combine("viewDimension", textureViewCubeDimensionValues())
+            .combineWithParams({
+                ParamRecord{{"w", 4}, {"h", 4}, {"d", 6}},
+                ParamRecord{{"w", 5}, {"h", 5}, {"d", 6}},
+                ParamRecord{{"w", 4}, {"h", 5}, {"d", 6}},
+                ParamRecord{{"w", 4}, {"h", 8}, {"d", 6}},
+                ParamRecord{{"w", 8}, {"h", 4}, {"d", 6}},
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureViewDimension viewDimension =
+            static_cast<WGPUTextureViewDimension>(t.param<int64_t>("viewDimension"));
+        const uint32_t width = static_cast<uint32_t>(t.param<int>("w"));
+        const uint32_t height = static_cast<uint32_t>(t.param<int>("h"));
+        const uint32_t depthOrArrayLayers = static_cast<uint32_t>(t.param<int>("d"));
+
+        t.skipIfTextureViewDimensionNotSupported(viewDimension);
+
+        WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        textureDesc.size.width = width;
+        textureDesc.size.height = height;
+        textureDesc.size.depthOrArrayLayers = depthOrArrayLayers;
+        textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        textureDesc.usage = WGPUTextureUsage_TextureBinding;
+        WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+        const bool success = viewDimension == WGPUTextureViewDimension_2D || width == height;
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        viewDesc.dimension = viewDimension;
+
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, viewDesc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_state")
+    .desc("Test createView validation for texture state.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combine("state", resourceStateValues());
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const ResourceState state = static_cast<ResourceState>(t.param<int64_t>("state"));
+
+        WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        textureDesc.size.width = 1;
+        textureDesc.size.height = 1;
+        textureDesc.size.depthOrArrayLayers = 1;
+        textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        textureDesc.usage = WGPUTextureUsage_TextureBinding;
+        WGPUTexture texture = t.createTextureWithState(state, textureDesc);
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, viewDesc);
+        }, state == ResourceState::Invalid);
     });
 
 } // namespace

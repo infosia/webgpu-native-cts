@@ -43,10 +43,13 @@ Every yawgpu finding — [F-005](#f-005--yawgpu-mishandles-several-valid-uncompr
 [F-006](#f-006--yawgpu-disagrees-on-which-texture-formats-are-multisampleable),
 [F-008](#f-008--yawgpu-under-validates-transient-texture-usage-combinations),
 [F-009](#f-009--yawgpu-over-restricts-render-attachment-dimension-and-under-validates-storage-usage),
-[F-010](#f-010--yawgpus-newly-enabled-compressed--feature-gated-formats-have-validation-gaps) — is now
-**resolved** (see each entry's Status). The open findings are all wgpu-native's (F-001–F-004, F-007).
-This is the full intended cycle: the suite reports a divergence, it is fixed in yawgpu, and the fix is
-confirmed on real hardware.
+[F-010](#f-010--yawgpus-newly-enabled-compressed--feature-gated-formats-have-validation-gaps) — that
+this suite had surfaced **as of `92db062`** is now **resolved** (see each entry's Status). This is the
+full intended cycle: the suite reports a divergence, it is fixed in yawgpu, and the fix is confirmed on
+real hardware. Tests ported **after** that milestone continue to find new ones — `createView` (T9)
+surfaced [F-011](#f-011--yawgpu-createview-view-dimension-gaps-2d-multilayer-cube-cube-array-square)
+(yawgpu) and [F-012](#f-012--wgpu-native-rejects-createview-on-a-destroyed-texture) (wgpu-native). Open
+findings: wgpu-native F-001–F-004, F-007, F-012; yawgpu F-011.
 
 ---
 
@@ -299,6 +302,47 @@ confirmed on real hardware.
   texture block alignment and size limits; all 146 cases pass. This finding was surfaced *and* fixed
   within the re-test cycle once yawgpu enabled compression. wgpu-native (skips ETC2/ASTC differently) and
   Dawn always passed; removed from `expectations/yawgpu.txt`.
+
+---
+
+## F-011 — yawgpu createView view-dimension gaps (2D-multilayer, cube, cube-array square)
+
+- **Backend:** yawgpu (`92db062`). **Not** present in wgpu-native or Dawn.
+- **Found by:** `webgpu:api,validation,createView:{dimension,cube_faces_square}` (Texture T9). **Dawn
+  passes all 36 of these cases (the reference) and so does wgpu-native; yawgpu fails 12**, isolating the
+  gaps to yawgpu.
+- **Observed on yawgpu (three distinct view-dimension defects):**
+  - **Rejects a `2D` view of a 2D texture with >1 array layer.** Creating a `2D` view (which defaults to
+    `arrayLayerCount = 1`, viewing layer 0) of a 2D texture that has multiple layers should **succeed**;
+    yawgpu raises a validation error (it does not apply the default-single-layer rule). (`dimension`
+    `textureDimension=2d;viewDimension=2d`; every `cube_faces_square` `viewDimension=2d` control case.)
+  - **Rejects `Cube` views outright.** A `Cube` view of a square 2D texture with 6 layers should
+    **succeed**; yawgpu rejects it (cube view dimension appears unsupported). (`dimension`
+    `…;viewDimension=cube`; `cube_faces_square` square `cube` cases `4×4`, `5×5`.)
+  - **Does not enforce the square-face requirement for `CubeArray`.** A cube/cube-array view requires
+    `width == height`; yawgpu **accepts** non-square `CubeArray` views that should be a validation error.
+    (`cube_faces_square` non-square `cube-array` cases `4×5`, `4×8`, `8×4`.)
+- **Expected (WebGPU):** a `2D` view of a multi-layer texture is valid (single-layer default); `Cube`
+  views are supported; cube/cube-array faces must be square. Dawn enforces all of this.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 12 cases are in
+  `expectations/yawgpu.txt` (per-case — yawgpu passes most createView cases); wgpu-native and Dawn need
+  no entries.
+
+---
+
+## F-012 — wgpu-native rejects createView on a destroyed texture
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu or Dawn.
+- **Found by:** `webgpu:api,validation,createView:texture_state` (Texture T9), which creates a view on a
+  `valid` / `invalid` / `destroyed` texture. **yawgpu and Dawn pass (destroyed → success, invalid →
+  error); wgpu-native fails** the destroyed case.
+- **Observed on wgpu-native:** `createView` on a **destroyed** texture raises a validation error.
+- **Expected (WebGPU):** `createView` on a *destroyed* texture **succeeds** (the view is created; using
+  it later is the error); only an *invalid* (error) texture makes `createView` fail. Dawn and yawgpu do
+  this.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
+  `expectations/wgpu-native.txt` as a `createView:texture_state:*` prefix line (the test is a single
+  case); yawgpu and Dawn need no entries.
 
 ---
 

@@ -51,3 +51,6 @@ webgpu:api,validation,createTexture:new_usages:usage=48
 # F-007: wgpu-native eager-panics on transient/storage texture usage; every compatible
 # texture_usage case crashes (only feature-skips do not). See docs/FINDINGS.md.
 webgpu:api,validation,createTexture:texture_usage:*
+
+# T9: wgpu-native rejects createView on a destroyed texture under the aggregate texture_state case.
+webgpu:api,validation,createView:texture_state:*

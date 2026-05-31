@@ -352,6 +352,29 @@ WGPUTexture GpuTest::createTextureTracked(const WGPUTextureDescriptor& desc) {
     return texture;
 }
 
+WGPUTexture GpuTest::createTextureWithState(ResourceState state, const WGPUTextureDescriptor& desc) {
+    if (state == ResourceState::Valid) {
+        return createTextureTracked(desc);
+    }
+
+    if (state == ResourceState::Invalid) {
+        WGPUTextureDescriptor invalidDesc = desc;
+        invalidDesc.usage = WGPUTextureUsage_None;
+
+        wgpuDevicePushErrorScope(device(), WGPUErrorFilter_Validation);
+        WGPUTexture texture = createTextureTracked(invalidDesc);
+        ScopeResult result = popErrorScopeSync(cache().instance, device());
+        if (result.status != WGPUPopErrorScopeStatus_Success) {
+            fail("popErrorScope failed: " + result.message);
+        }
+        return texture;
+    }
+
+    WGPUTexture texture = createTextureTracked(desc);
+    wgpuTextureDestroy(texture);
+    return texture;
+}
+
 WGPUTextureView GpuTest::createViewTracked(WGPUTexture texture, const WGPUTextureViewDescriptor& desc) {
     WGPUTextureView textureView = wgpuTextureCreateView(texture, &desc);
     if (textureView != nullptr) {
@@ -446,6 +469,10 @@ void GpuTest::skipIfTextureFormatAndDimensionNotCompatible(WGPUTextureFormat for
     if (!textureDimensionAndFormatCompatibleForDevice(dimension, format)) {
         skip("format does not support dimension");
     }
+}
+
+void GpuTest::skipIfTextureViewDimensionNotSupported(WGPUTextureViewDimension) {
+    // Compatibility mode may restrict cube-array views upstream; this port never runs compatibility mode.
 }
 
 bool GpuTest::textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format) {

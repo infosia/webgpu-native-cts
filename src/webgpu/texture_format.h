@@ -58,6 +58,15 @@ inline constexpr std::array<WGPUTextureAspect, 3> kTextureAspects = {
     WGPUTextureAspect_StencilOnly,
 };
 
+inline constexpr std::array<WGPUTextureViewDimension, 6> kTextureViewDimensions = {
+    WGPUTextureViewDimension_1D,
+    WGPUTextureViewDimension_2D,
+    WGPUTextureViewDimension_2DArray,
+    WGPUTextureViewDimension_Cube,
+    WGPUTextureViewDimension_CubeArray,
+    WGPUTextureViewDimension_3D,
+};
+
 inline constexpr std::array<TextureFormatInfo, 49> kUncompressedTextureFormatInfos = {{
     {WGPUTextureFormat_R8Unorm, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
     {WGPUTextureFormat_R8Snorm, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
@@ -481,6 +490,22 @@ inline bool isDepthTextureFormat(WGPUTextureFormat format) {
 
 inline bool isStencilTextureFormat(WGPUTextureFormat format) {
     return textureFormatInfo(format).hasStencil;
+}
+
+inline WGPUTextureDimension getTextureDimensionFromView(WGPUTextureViewDimension dimension) {
+    switch (dimension) {
+        case WGPUTextureViewDimension_1D:
+            return WGPUTextureDimension_1D;
+        case WGPUTextureViewDimension_2D:
+        case WGPUTextureViewDimension_2DArray:
+        case WGPUTextureViewDimension_Cube:
+        case WGPUTextureViewDimension_CubeArray:
+            return WGPUTextureDimension_2D;
+        case WGPUTextureViewDimension_3D:
+            return WGPUTextureDimension_3D;
+        default:
+            std::abort();
+    }
 }
 
 inline WGPUTextureFormat baseFormat(WGPUTextureFormat format) {
