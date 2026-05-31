@@ -67,6 +67,8 @@ inline constexpr std::array<WGPUTextureViewDimension, 6> kTextureViewDimensions 
     WGPUTextureViewDimension_3D,
 };
 
+inline constexpr uint32_t kLevels = 6;
+
 inline constexpr std::array<TextureFormatInfo, 49> kUncompressedTextureFormatInfos = {{
     {WGPUTextureFormat_R8Unorm, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
     {WGPUTextureFormat_R8Snorm, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
@@ -506,6 +508,138 @@ inline WGPUTextureDimension getTextureDimensionFromView(WGPUTextureViewDimension
         default:
             std::abort();
     }
+}
+
+inline std::vector<WGPUTextureViewDimension> viewDimensionsForTextureDimension(WGPUTextureDimension dimension) {
+    switch (dimension) {
+        case WGPUTextureDimension_1D:
+            return {WGPUTextureViewDimension_1D};
+        case WGPUTextureDimension_2D:
+            return {
+                WGPUTextureViewDimension_2D,
+                WGPUTextureViewDimension_2DArray,
+                WGPUTextureViewDimension_Cube,
+                WGPUTextureViewDimension_CubeArray,
+            };
+        case WGPUTextureDimension_3D:
+            return {WGPUTextureViewDimension_3D};
+        default:
+            std::abort();
+    }
+}
+
+inline WGPUTextureViewDimension effectiveViewDimensionForDimension(
+    WGPUTextureViewDimension dimension,
+    WGPUTextureDimension textureDimension,
+    uint32_t depthOrArrayLayers) {
+    if (dimension != WGPUTextureViewDimension_Undefined) {
+        return dimension;
+    }
+
+    switch (textureDimension) {
+        case WGPUTextureDimension_1D:
+            return WGPUTextureViewDimension_1D;
+        case WGPUTextureDimension_2D:
+            return depthOrArrayLayers > 1 ? WGPUTextureViewDimension_2DArray : WGPUTextureViewDimension_2D;
+        case WGPUTextureDimension_3D:
+            return WGPUTextureViewDimension_3D;
+        default:
+            std::abort();
+    }
+}
+
+struct ReifiedTextureView {
+    WGPUTextureViewDimension dimension;
+    uint32_t baseMipLevel;
+    uint32_t mipLevelCount;
+    uint32_t baseArrayLayer;
+    uint32_t arrayLayerCount;
+};
+
+inline uint32_t textureMipLevelCountOrDefault(const WGPUTextureDescriptor& texture) {
+    return texture.mipLevelCount == 0 ? 1 : texture.mipLevelCount;
+}
+
+inline ReifiedTextureView reifyTextureViewDescriptor(
+    const WGPUTextureDescriptor& texture,
+    const WGPUTextureViewDescriptor& view,
+    bool dimensionGiven,
+    bool baseMipLevelGiven,
+    bool mipLevelCountGiven,
+    bool baseArrayLayerGiven,
+    bool arrayLayerCountGiven) {
+    const uint32_t textureLevels = textureMipLevelCountOrDefault(texture);
+    const uint32_t baseMipLevel = baseMipLevelGiven ? view.baseMipLevel : 0;
+    const uint32_t baseArrayLayer = baseArrayLayerGiven ? view.baseArrayLayer : 0;
+    const WGPUTextureViewDimension dimension = effectiveViewDimensionForDimension(
+        dimensionGiven ? view.dimension : WGPUTextureViewDimension_Undefined,
+        texture.dimension,
+        texture.size.depthOrArrayLayers);
+
+    uint32_t arrayLayerCount = 1;
+    if (arrayLayerCountGiven) {
+        arrayLayerCount = view.arrayLayerCount;
+    } else if (dimension == WGPUTextureViewDimension_2DArray || dimension == WGPUTextureViewDimension_CubeArray) {
+        arrayLayerCount = texture.size.depthOrArrayLayers - baseArrayLayer;
+    } else if (dimension == WGPUTextureViewDimension_Cube) {
+        arrayLayerCount = 6;
+    }
+
+    return ReifiedTextureView{
+        dimension,
+        baseMipLevel,
+        mipLevelCountGiven ? view.mipLevelCount : textureLevels - baseMipLevel,
+        baseArrayLayer,
+        arrayLayerCount,
+    };
+}
+
+inline bool validateCreateViewLayersLevels(
+    const WGPUTextureDescriptor& texture,
+    const WGPUTextureViewDescriptor& view,
+    bool dimensionGiven,
+    bool baseMipLevelGiven,
+    bool mipLevelCountGiven,
+    bool baseArrayLayerGiven,
+    bool arrayLayerCountGiven) {
+    const uint32_t textureLevels = textureMipLevelCountOrDefault(texture);
+    const uint32_t textureLayers =
+        texture.dimension == WGPUTextureDimension_2D ? texture.size.depthOrArrayLayers : 1;
+    const ReifiedTextureView reified = reifyTextureViewDescriptor(
+        texture,
+        view,
+        dimensionGiven,
+        baseMipLevelGiven,
+        mipLevelCountGiven,
+        baseArrayLayerGiven,
+        arrayLayerCountGiven);
+
+    bool success = reified.mipLevelCount > 0
+        && reified.baseMipLevel < textureLevels
+        && static_cast<uint64_t>(reified.baseMipLevel) + reified.mipLevelCount <= textureLevels
+        && reified.arrayLayerCount > 0
+        && reified.baseArrayLayer < textureLayers
+        && static_cast<uint64_t>(reified.baseArrayLayer) + reified.arrayLayerCount <= textureLayers;
+
+    switch (reified.dimension) {
+        case WGPUTextureViewDimension_1D:
+        case WGPUTextureViewDimension_2D:
+        case WGPUTextureViewDimension_3D:
+            success = success && reified.arrayLayerCount == 1;
+            break;
+        case WGPUTextureViewDimension_Cube:
+            success = success && reified.arrayLayerCount == 6;
+            break;
+        case WGPUTextureViewDimension_CubeArray:
+            success = success && reified.arrayLayerCount % 6 == 0;
+            break;
+        case WGPUTextureViewDimension_2DArray:
+            break;
+        default:
+            std::abort();
+    }
+
+    return success;
 }
 
 inline WGPUTextureFormat baseFormat(WGPUTextureFormat format) {

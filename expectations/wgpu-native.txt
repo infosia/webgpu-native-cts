@@ -54,3 +54,7 @@ webgpu:api,validation,createTexture:texture_usage:*
 
 # T9: wgpu-native rejects createView on a destroyed texture under the aggregate texture_state case.
 webgpu:api,validation,createView:texture_state:*
+
+# T10: wgpu-native aborts while validating createView layer/level range cases.
+webgpu:api,validation,createView:array_layers:*
+webgpu:api,validation,createView:mip_levels:*

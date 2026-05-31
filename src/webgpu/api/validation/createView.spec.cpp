@@ -61,6 +61,24 @@ std::vector<Value> textureViewDimensionValuesWithUndefined() {
     return values;
 }
 
+ParamsBuilder combineTextureAndViewDimensions(ParamsBuilder u) {
+    return u.combine("textureDimension", textureDimensionValues())
+        .expand("viewDimension", [](const ParamRecord& params) {
+            const WGPUTextureDimension textureDimension =
+                static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "textureDimension")));
+            const std::vector<WGPUTextureViewDimension> dimensions =
+                viewDimensionsForTextureDimension(textureDimension);
+
+            std::vector<Value> values;
+            values.reserve(dimensions.size() + 1);
+            values.push_back(Value::undef());
+            for (WGPUTextureViewDimension dimension : dimensions) {
+                values.emplace_back(static_cast<int64_t>(dimension));
+            }
+            return values;
+        });
+}
+
 std::vector<Value> textureViewCubeDimensionValues() {
     return {
         Value(static_cast<int64_t>(WGPUTextureViewDimension_2D)),
@@ -115,6 +133,104 @@ std::vector<Value> viewFormatsForFeatureParam(const ParamRecord& params) {
     std::vector<Value> formats = textureFormatsForFeatureParam(params, "viewFormatFeature");
     values.insert(values.end(), formats.begin(), formats.end());
     return values;
+}
+
+bool isUndefinedValue(const Value& value) {
+    return std::holds_alternative<Value::Undefined>(value.data());
+}
+
+uint32_t uint32Param(const ParamRecord& params, std::string_view key) {
+    return static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, key)));
+}
+
+bool paramRecordValueIsUndefined(const ParamRecord& params, std::string_view key) {
+    return isUndefinedValue(*findParam(params, key));
+}
+
+std::vector<uint32_t> dedupedBoundaryValues(uint32_t limit) {
+    const std::array<uint32_t, 8> candidates = {0, 1, 5, 6, 7, limit - 1, limit, limit + 1};
+    std::vector<uint32_t> values;
+    for (uint32_t candidate : candidates) {
+        if (std::find(values.begin(), values.end(), candidate) == values.end()) {
+            values.push_back(candidate);
+        }
+    }
+    return values;
+}
+
+std::vector<Value> optionalBoundaryValues(uint32_t limit) {
+    std::vector<Value> values;
+    values.push_back(Value::undef());
+    for (uint32_t value : dedupedBoundaryValues(limit)) {
+        values.emplace_back(static_cast<uint64_t>(value));
+    }
+    return values;
+}
+
+std::vector<Value> layerCountValues(const ParamRecord& params) {
+    const uint32_t textureLayers = uint32Param(params, "textureLayers");
+    const uint32_t baseArrayLayer = paramRecordValueIsUndefined(params, "baseArrayLayer")
+        ? 0
+        : uint32Param(params, "baseArrayLayer");
+
+    std::vector<Value> values;
+    values.push_back(Value::undef());
+    for (uint32_t last : dedupedBoundaryValues(textureLayers)) {
+        if (baseArrayLayer <= last) {
+            values.emplace_back(static_cast<uint64_t>(last - baseArrayLayer));
+        }
+    }
+    return values;
+}
+
+std::vector<Value> mipLevelCountValues(const ParamRecord& params) {
+    const uint32_t textureLevels = uint32Param(params, "textureLevels");
+    const uint32_t baseMipLevel = paramRecordValueIsUndefined(params, "baseMipLevel")
+        ? 0
+        : uint32Param(params, "baseMipLevel");
+
+    std::vector<Value> values;
+    values.push_back(Value::undef());
+    for (uint32_t last : dedupedBoundaryValues(textureLevels)) {
+        if (baseMipLevel <= last) {
+            values.emplace_back(static_cast<uint64_t>(last - baseMipLevel));
+        }
+    }
+    return values;
+}
+
+WGPUTextureViewDimension viewDimensionParam(AllFeaturesMaxLimitsGpuTest& t) {
+    return t.paramIsUndefined("viewDimension")
+        ? WGPUTextureViewDimension_Undefined
+        : static_cast<WGPUTextureViewDimension>(t.param<int64_t>("viewDimension"));
+}
+
+void setViewDimensionIfGiven(AllFeaturesMaxLimitsGpuTest& t, WGPUTextureViewDescriptor& viewDesc) {
+    if (!t.paramIsUndefined("viewDimension")) {
+        viewDesc.dimension = static_cast<WGPUTextureViewDimension>(t.param<int64_t>("viewDimension"));
+    }
+}
+
+void setUint32FieldIfGiven(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTextureViewDescriptor& viewDesc,
+    std::string_view key) {
+    if (t.paramIsUndefined(key)) {
+        return;
+    }
+
+    const uint32_t value = static_cast<uint32_t>(t.param<int64_t>(key));
+    if (key == "baseArrayLayer") {
+        viewDesc.baseArrayLayer = value;
+    } else if (key == "arrayLayerCount") {
+        viewDesc.arrayLayerCount = value;
+    } else if (key == "baseMipLevel") {
+        viewDesc.baseMipLevel = value;
+    } else if (key == "mipLevelCount") {
+        viewDesc.mipLevelCount = value;
+    } else {
+        std::abort();
+    }
 }
 
 CTS_TEST(g, "aspect")
@@ -307,6 +423,141 @@ CTS_TEST(g, "texture_state")
         t.expectValidationError([&] {
             t.createViewTracked(texture, viewDesc);
         }, state == ResourceState::Invalid);
+    });
+
+CTS_TEST(g, "array_layers")
+    .desc("Test texture view array layer range validation.")
+    .params([](ParamsBuilder u) {
+        return combineTextureAndViewDimensions(u)
+            .beginSubcases()
+            .expand("textureLayers", [](const ParamRecord& params) {
+                const WGPUTextureDimension textureDimension =
+                    static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "textureDimension")));
+                if (textureDimension == WGPUTextureDimension_2D) {
+                    return std::vector<Value>{1, 6, 18};
+                }
+                return std::vector<Value>{1};
+            })
+            .combine("textureLevels", {1, static_cast<int64_t>(kLevels)})
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureDimension textureDimension =
+                    static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "textureDimension")));
+                const uint32_t textureLevels = uint32Param(params, "textureLevels");
+                return !(textureDimension == WGPUTextureDimension_1D && textureLevels != 1);
+            })
+            .expand("baseArrayLayer", [](const ParamRecord& params) {
+                return optionalBoundaryValues(uint32Param(params, "textureLayers"));
+            })
+            .expand("arrayLayerCount", [](const ParamRecord& params) {
+                return layerCountValues(params);
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension textureDimension =
+            static_cast<WGPUTextureDimension>(t.param<int64_t>("textureDimension"));
+        const WGPUTextureViewDimension viewDimension = viewDimensionParam(t);
+        const uint32_t textureLayers = static_cast<uint32_t>(t.param<int64_t>("textureLayers"));
+        const uint32_t textureLevels = static_cast<uint32_t>(t.param<int64_t>("textureLevels"));
+
+        if (viewDimension != WGPUTextureViewDimension_Undefined) {
+            t.skipIfTextureViewDimensionNotSupported(viewDimension);
+        }
+
+        const uint32_t kWidth = 1u << (kLevels - 1);
+        WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        if (textureDimension == WGPUTextureDimension_1D) {
+            textureDesc.size = WGPUExtent3D{kWidth, 1, 1};
+        } else if (textureDimension == WGPUTextureDimension_2D) {
+            textureDesc.size = WGPUExtent3D{kWidth, kWidth, textureLayers};
+        } else {
+            textureDesc.size = WGPUExtent3D{kWidth, kWidth, kWidth};
+        }
+        textureDesc.dimension = textureDimension;
+        textureDesc.mipLevelCount = textureLevels;
+        textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        textureDesc.usage = WGPUTextureUsage_TextureBinding;
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        setViewDimensionIfGiven(t, viewDesc);
+        setUint32FieldIfGiven(t, viewDesc, "baseArrayLayer");
+        setUint32FieldIfGiven(t, viewDesc, "arrayLayerCount");
+
+        const bool success = validateCreateViewLayersLevels(
+            textureDesc,
+            viewDesc,
+            !t.paramIsUndefined("viewDimension"),
+            false,
+            false,
+            !t.paramIsUndefined("baseArrayLayer"),
+            !t.paramIsUndefined("arrayLayerCount"));
+
+        WGPUTexture texture = t.createTextureTracked(textureDesc);
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, viewDesc);
+        }, !success);
+    });
+
+CTS_TEST(g, "mip_levels")
+    .desc("Test texture view mip level range validation.")
+    .params([](ParamsBuilder u) {
+        return combineTextureAndViewDimensions(u)
+            .beginSubcases()
+            .combine("textureLevels", {1, static_cast<int64_t>(kLevels - 2), static_cast<int64_t>(kLevels)})
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureDimension textureDimension =
+                    static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "textureDimension")));
+                const uint32_t textureLevels = uint32Param(params, "textureLevels");
+                return !(textureDimension == WGPUTextureDimension_1D && textureLevels != 1);
+            })
+            .expand("baseMipLevel", [](const ParamRecord& params) {
+                return optionalBoundaryValues(uint32Param(params, "textureLevels"));
+            })
+            .expand("mipLevelCount", [](const ParamRecord& params) {
+                return mipLevelCountValues(params);
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension textureDimension =
+            static_cast<WGPUTextureDimension>(t.param<int64_t>("textureDimension"));
+        const WGPUTextureViewDimension viewDimension = viewDimensionParam(t);
+        const uint32_t textureLevels = static_cast<uint32_t>(t.param<int64_t>("textureLevels"));
+
+        if (viewDimension != WGPUTextureViewDimension_Undefined) {
+            t.skipIfTextureViewDimensionNotSupported(viewDimension);
+        }
+
+        const uint32_t kWidth = 1u << (kLevels - 1);
+        WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        if (textureDimension == WGPUTextureDimension_1D) {
+            textureDesc.size = WGPUExtent3D{kWidth, 1, 1};
+        } else if (textureDimension == WGPUTextureDimension_3D) {
+            textureDesc.size = WGPUExtent3D{kWidth, kWidth, kWidth};
+        } else {
+            textureDesc.size = WGPUExtent3D{kWidth, kWidth, 18};
+        }
+        textureDesc.dimension = textureDimension;
+        textureDesc.mipLevelCount = textureLevels;
+        textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        textureDesc.usage = WGPUTextureUsage_TextureBinding;
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        setViewDimensionIfGiven(t, viewDesc);
+        setUint32FieldIfGiven(t, viewDesc, "baseMipLevel");
+        setUint32FieldIfGiven(t, viewDesc, "mipLevelCount");
+
+        const bool success = validateCreateViewLayersLevels(
+            textureDesc,
+            viewDesc,
+            !t.paramIsUndefined("viewDimension"),
+            !t.paramIsUndefined("baseMipLevel"),
+            !t.paramIsUndefined("mipLevelCount"),
+            false,
+            false);
+
+        WGPUTexture texture = t.createTextureTracked(textureDesc);
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, viewDesc);
+        }, !success);
     });
 
 } // namespace

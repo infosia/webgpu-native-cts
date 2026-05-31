@@ -7,3 +7,7 @@
 #   F-009 (render-attachment dimension + RGBA8Snorm storage), F-010 (compressed texture_size alignment),
 #   F-011 (createView view-dimension: 2D-multilayer / Cube / CubeArray square).
 # See docs/FINDINGS.md. Add a query line here only if a future test surfaces a new yawgpu defect.
+
+# T10: yawgpu accepts invalid array layer ranges on 3D texture views.
+webgpu:api,validation,createView:array_layers:textureDimension=3;viewDimension=_undef_
+webgpu:api,validation,createView:array_layers:textureDimension=3;viewDimension=6

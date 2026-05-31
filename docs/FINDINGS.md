@@ -49,10 +49,11 @@ full intended cycle: the suite reports a divergence, it is fixed in yawgpu, and 
 real hardware. Tests ported **after** that milestone continue to find new ones — `createView` (T9)
 surfaced [F-011](#f-011--yawgpu-createview-view-dimension-gaps-2d-multilayer-cube-cube-array-square)
 (yawgpu) and [F-012](#f-012--wgpu-native-rejects-createview-on-a-destroyed-texture) (wgpu-native). yawgpu
-fixed F-011 in `41e007b`, so it again passes **every** ported `api,validation` test
-(`pass=2970 skip=16 fail=0 crash=0`, the surface having grown to 2986 cases with createView). **All
-yawgpu findings (F-005/006/008/009/010/011) are resolved; the open findings are all wgpu-native's
-(F-001–F-004, F-007, F-012).**
+fixed F-011 in `41e007b`. The next slice (T10, `createView` `array_layers`/`mip_levels`) then surfaced
+[F-013](#f-013--wgpu-native-aborts-on-createview-layerlevel-range-validation) (wgpu-native) and
+[F-014](#f-014--yawgpu-under-validates-3d-texture-view-array-layer-ranges) (yawgpu) — the cycle
+continues. **Resolved yawgpu findings: F-005/006/008/009/010/011. Open: yawgpu F-014; wgpu-native
+F-001–F-004, F-007, F-012, F-013.**
 
 ---
 
@@ -348,6 +349,42 @@ yawgpu findings (F-005/006/008/009/010/011) are resolved; the open findings are 
 - **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
   `expectations/wgpu-native.txt` as a `createView:texture_state:*` prefix line (the test is a single
   case); yawgpu and Dawn need no entries.
+
+---
+
+## F-013 — wgpu-native aborts on createView layer/level range validation
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu or Dawn. Same eager-panic
+  class as [F-001](#f-001--wgpu-native-aborts-on-an-invalid-buffer-usage-bit)/[F-007](#f-007--wgpu-native-aborts-on-bogus-and-transient-texture-usage-bits).
+- **Found by:** `webgpu:api,validation,createView:{array_layers,mip_levels}` (Texture T10), which vary the
+  view's `baseArrayLayer`/`arrayLayerCount`/`baseMipLevel`/`mipLevelCount` across in- and out-of-range
+  values. **Dawn passes all 18 cases (the reference) and yawgpu nearly so; wgpu-native crashes all 18**.
+- **Observed on wgpu-native:** an out-of-range mip/array view range makes `createView` **panic and abort**
+  the process instead of returning a validation error. Under `--isolate` every `array_layers`/`mip_levels`
+  case crashes (each case's subcases include an out-of-range value that triggers the abort).
+- **Expected (WebGPU):** an out-of-range view (`baseMipLevel + mipLevelCount > texture levels`, a wrong
+  per-dimension `arrayLayerCount`, etc.) is a **validation error**, never a process abort. Dawn and yawgpu
+  do this.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
+  `expectations/wgpu-native.txt` as `createView:array_layers:*` + `createView:mip_levels:*` prefix lines
+  (the whole tests crash); yawgpu and Dawn need no entries.
+
+---
+
+## F-014 — yawgpu under-validates 3D-texture view array-layer ranges
+
+- **Backend:** yawgpu (`41e007b`). **Not** present in wgpu-native (which aborts, F-013) or Dawn.
+- **Found by:** `webgpu:api,validation,createView:array_layers` (Texture T10). **Dawn passes all 9 cases
+  (the reference); yawgpu fails 2** — the 3D-texture cases (`textureDimension=3d`,
+  `viewDimension=undefined` and `=3d`).
+- **Observed on yawgpu:** for a **3D** texture (which has exactly one array layer), yawgpu **accepts**
+  views with an out-of-range `baseArrayLayer`/`arrayLayerCount` (e.g. `arrayLayerCount != 1` or
+  `baseArrayLayer + arrayLayerCount > 1`) that should be a validation error. (yawgpu validates the 1D/2D
+  array-layer cases correctly — only the 3D view path under-validates.)
+- **Expected (WebGPU):** a 3D-texture view must have `arrayLayerCount == 1` and stay within the single
+  layer; an out-of-range layer range is a validation error. Dawn enforces this.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 2 cases are in
+  `expectations/yawgpu.txt`; wgpu-native and Dawn need no entries.
 
 ---
 

@@ -173,6 +173,54 @@ int main() {
                 "1d view dimension maps to 1d");
         require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_3D) == WGPUTextureDimension_3D,
                 "3d view dimension maps to 3d");
+        require(cts::kLevels == 6, "texture createView range level count");
+        const std::vector<WGPUTextureViewDimension> viewDimensions2D =
+            cts::viewDimensionsForTextureDimension(WGPUTextureDimension_2D);
+        require(viewDimensions2D.size() == 4, "2d texture view dimension count");
+        require(viewDimensions2D[0] == WGPUTextureViewDimension_2D, "2d view dimension first");
+        require(viewDimensions2D[1] == WGPUTextureViewDimension_2DArray, "2d-array view dimension second");
+        require(viewDimensions2D[2] == WGPUTextureViewDimension_Cube, "cube view dimension third");
+        require(viewDimensions2D[3] == WGPUTextureViewDimension_CubeArray, "cube-array view dimension fourth");
+        require(cts::effectiveViewDimensionForDimension(WGPUTextureViewDimension_Undefined,
+                                                        WGPUTextureDimension_2D, 6)
+                    == WGPUTextureViewDimension_2DArray,
+                "2d multilayer default view dimension");
+        require(cts::effectiveViewDimensionForDimension(WGPUTextureViewDimension_Undefined,
+                                                        WGPUTextureDimension_2D, 1)
+                    == WGPUTextureViewDimension_2D,
+                "2d single-layer default view dimension");
+        require(cts::effectiveViewDimensionForDimension(WGPUTextureViewDimension_Undefined,
+                                                        WGPUTextureDimension_1D, 1)
+                    == WGPUTextureViewDimension_1D,
+                "1d default view dimension");
+        require(cts::effectiveViewDimensionForDimension(WGPUTextureViewDimension_Undefined,
+                                                        WGPUTextureDimension_3D, 32)
+                    == WGPUTextureViewDimension_3D,
+                "3d default view dimension");
+        WGPUTextureDescriptor rangeTextureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        rangeTextureDesc.size = WGPUExtent3D{32, 32, 6};
+        rangeTextureDesc.dimension = WGPUTextureDimension_2D;
+        rangeTextureDesc.mipLevelCount = 6;
+        rangeTextureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        rangeTextureDesc.usage = WGPUTextureUsage_TextureBinding;
+        WGPUTextureViewDescriptor rangeViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        rangeViewDesc.dimension = WGPUTextureViewDimension_2D;
+        rangeViewDesc.baseArrayLayer = 0;
+        rangeViewDesc.arrayLayerCount = 1;
+        rangeViewDesc.baseMipLevel = 0;
+        rangeViewDesc.mipLevelCount = 6;
+        require(cts::validateCreateViewLayersLevels(rangeTextureDesc, rangeViewDesc, true, true, true, true, true),
+                "2d view one array layer valid");
+        rangeViewDesc.arrayLayerCount = 2;
+        require(!cts::validateCreateViewLayersLevels(rangeTextureDesc, rangeViewDesc, true, true, true, true, true),
+                "2d view two array layers invalid");
+        rangeViewDesc.dimension = WGPUTextureViewDimension_Cube;
+        rangeViewDesc.arrayLayerCount = 6;
+        require(cts::validateCreateViewLayersLevels(rangeTextureDesc, rangeViewDesc, true, true, true, true, true),
+                "cube view six array layers valid");
+        rangeViewDesc.arrayLayerCount = 3;
+        require(!cts::validateCreateViewLayersLevels(rangeTextureDesc, rangeViewDesc, true, true, true, true, true),
+                "cube view three array layers invalid");
         require(cts::isDepthTextureFormat(WGPUTextureFormat_Depth24Plus), "depth24plus depth format");
         require(cts::isStencilTextureFormat(WGPUTextureFormat_Stencil8), "stencil8 stencil format");
         require(cts::isDepthTextureFormat(WGPUTextureFormat_Depth24PlusStencil8),
