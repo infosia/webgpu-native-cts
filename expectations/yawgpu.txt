@@ -1,13 +1,12 @@
-# yawgpu expectations — captured against commit 41e007b46ddd7d84701633aed5356330ea2deb72 (2026-05-31).
+# yawgpu expectations — captured against commit 4689cbd741ed8b415cdd41fcd6ac7d2e1b0624c4 (2026-05-31).
 # One full case query per line (# comments allowed; a line ending ':*' is a test-prefix match).
 #
-# NO expected failures: yawgpu passes every ported api,validation test on real-GPU Metal
-# (pass=2970 skip=16 fail=0 crash=0). Every finding this suite surfaced was fixed upstream:
-#   F-005 (format rejection + Depth24PlusStencil8 abort), F-006 (multisample), F-008 (transient usage),
-#   F-009 (render-attachment dimension + RGBA8Snorm storage), F-010 (compressed texture_size alignment),
-#   F-011 (createView view-dimension: 2D-multilayer / Cube / CubeArray square).
+# yawgpu passes every ported api,validation test on real-GPU Metal EXCEPT the two F-014 cases below
+# (full suite: pass=3775 skip=200 fail=0 crash=0 xfail=2 xpass=0). Findings F-005/006/008/009/010/011
+# were all fixed upstream (41e007b and earlier); F-015 (view-usage subset) is wgpu-native-only — yawgpu
+# enforces it. Only F-014 (3D-texture view array-layer ranges) remains open for yawgpu.
 # See docs/FINDINGS.md. Add a query line here only if a future test surfaces a new yawgpu defect.
 
-# T10: yawgpu accepts invalid array layer ranges on 3D texture views.
+# F-014 (T10): yawgpu accepts invalid array layer ranges on 3D texture views. Still open at 4689cbd.
 webgpu:api,validation,createView:array_layers:textureDimension=3;viewDimension=_undef_
 webgpu:api,validation,createView:array_layers:textureDimension=3;viewDimension=6

@@ -377,7 +377,8 @@ F-007, F-012, F-013, F-015.**
 
 ## F-014 — yawgpu under-validates 3D-texture view array-layer ranges
 
-- **Backend:** yawgpu (`41e007b`). **Not** present in wgpu-native (which aborts, F-013) or Dawn.
+- **Backend:** yawgpu (`41e007b`; **re-confirmed still open at `4689cbd`**, 2026-05-31). **Not** present
+  in wgpu-native (which aborts, F-013) or Dawn.
 - **Found by:** `webgpu:api,validation,createView:array_layers` (Texture T10). **Dawn passes all 9 cases
   (the reference); yawgpu fails 2** — the 3D-texture cases (`textureDimension=3d`,
   `viewDimension=undefined` and `=3d`).
