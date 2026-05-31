@@ -55,9 +55,11 @@ fixed F-011 in `41e007b`. The next slice (T10, `createView` `array_layers`/`mip_
 createView slice (T11 — the three `texture_view_usage` tests) **completes `createView` 10/10** and
 surfaced [F-015](#f-015--wgpu-native-does-not-enforce-the-createview-view-usage-subset-rule)
 (wgpu-native does not enforce the view-usage subset rule); **yawgpu passes all of T11** (it correctly
-enforces the subset rule, identical to Dawn), so T11 added **no** yawgpu finding. The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011. Open: yawgpu F-014; wgpu-native F-001–F-004,
-F-007, F-012, F-013, F-015.**
+enforces the subset rule, identical to Dawn), so T11 added **no** yawgpu finding. **yawgpu then fixed
+F-014 in `baa78cb`** — so once again **yawgpu passes every ported `api,validation` test**
+(`pass=3777 skip=200 fail=0 crash=0`) with no expected-failure lines. The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014. Open yawgpu findings: none. Open
+wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015.**
 
 ---
 
@@ -377,8 +379,7 @@ F-007, F-012, F-013, F-015.**
 
 ## F-014 — yawgpu under-validates 3D-texture view array-layer ranges
 
-- **Backend:** yawgpu (`41e007b`; **re-confirmed still open at `4689cbd`**, 2026-05-31). **Not** present
-  in wgpu-native (which aborts, F-013) or Dawn.
+- **Backend:** yawgpu (found on `41e007b`). **Not** present in wgpu-native (which aborts, F-013) or Dawn.
 - **Found by:** `webgpu:api,validation,createView:array_layers` (Texture T10). **Dawn passes all 9 cases
   (the reference); yawgpu fails 2** — the 3D-texture cases (`textureDimension=3d`,
   `viewDimension=undefined` and `=3d`).
@@ -388,8 +389,10 @@ F-007, F-012, F-013, F-015.**
   array-layer cases correctly — only the 3D view path under-validates.)
 - **Expected (WebGPU):** a 3D-texture view must have `arrayLayerCount == 1` and stay within the single
   layer; an out-of-range layer range is a validation error. Dawn enforces this.
-- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 2 cases are in
-  `expectations/yawgpu.txt`; wgpu-native and Dawn need no entries.
+- **Status:** **RESOLVED** on yawgpu `baa78cb` (re-test 2026-05-31) — *"cts-findings: validate
+  3D-texture view array-layer ranges (F-014)"*. yawgpu now enforces `arrayLayerCount == 1` and the layer
+  range for 3D-texture views; both `array_layers` 3D cases pass and the full ported suite is clean
+  (`pass=3777 skip=200 fail=0 crash=0`). The two lines were removed from `expectations/yawgpu.txt`.
 
 ---
 

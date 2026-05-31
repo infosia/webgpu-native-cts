@@ -48,7 +48,7 @@ set (e.g. in an `--expectations` file header).
 | Backend | Repo | Version observed (local) | License | Notes |
 |---------|------|--------------------------|---------|-------|
 | wgpu-native | github.com/gfx-rs/wgpu-native | `v29.0.0.0-8-g9176708` | MIT / Apache-2.0 | harness bring-up reference |
-| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `4689cbd741ed8b415cdd41fcd6ac7d2e1b0624c4` (2026-05-31) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h`. At this revision yawgpu passes every ported `api,validation` test **except the 2 [F-014](FINDINGS.md) cases** (full suite real-GPU Metal: `pass=3775 skip=200 fail=0 crash=0 xfail=2 xpass=0`; `expectations/yawgpu.txt` lists only those 2). F-005/006/008/009/010/011 all fixed; F-014 (3D-view array-layer ranges) still open; F-015 is wgpu-native-only. See [FINDINGS](FINDINGS.md) |
+| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `baa78cb61a3a02acaa1eb9787cf58d8d1388cc24` (2026-05-31) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h`. At this revision yawgpu **passes every ported `api,validation` test** (full suite real-GPU Metal: `pass=3777 skip=200 fail=0 crash=0 xfail=0 xpass=0`; `expectations/yawgpu.txt` has no expected failures). All yawgpu findings F-005/006/008/009/010/011/014 fixed; F-015 (view-usage subset) is wgpu-native-only. See [FINDINGS](FINDINGS.md) |
 | Dawn | dawn.googlesource.com/dawn | `802f147f1fb7ab972f87f3e9f95098e0f4b5077b` (2026-05-15) | BSD-3-Clause / Apache-2.0 | C++ reference impl |
 
 ## Re-baselining process
