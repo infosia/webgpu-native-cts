@@ -1,6 +1,7 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/createView.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -9,6 +10,7 @@
 
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
 
 using namespace cts;
@@ -58,6 +60,15 @@ std::vector<Value> textureViewDimensionValuesWithUndefined() {
         values.emplace_back(static_cast<int64_t>(dimension));
     }
     values.push_back(Value::undef());
+    return values;
+}
+
+std::vector<Value> textureUsageValues() {
+    std::vector<Value> values;
+    values.reserve(kTextureUsages.size());
+    for (WGPUTextureUsage usage : kTextureUsages) {
+        values.emplace_back(static_cast<uint64_t>(usage));
+    }
     return values;
 }
 
@@ -194,6 +205,26 @@ std::vector<Value> mipLevelCountValues(const ParamRecord& params) {
     for (uint32_t last : dedupedBoundaryValues(textureLevels)) {
         if (baseMipLevel <= last) {
             values.emplace_back(static_cast<uint64_t>(last - baseMipLevel));
+        }
+    }
+    return values;
+}
+
+WGPUTextureUsage textureUsageParam(const ParamRecord& params, std::string_view key) {
+    return static_cast<WGPUTextureUsage>(valueAs<uint64_t>(*findParam(params, key)));
+}
+
+std::vector<Value> dedupedViewUsageValues(const ParamRecord& params) {
+    const WGPUTextureUsage usage1 = textureUsageParam(params, "usage1");
+    const WGPUTextureUsage usage2 = textureUsageParam(params, "usage2");
+    const std::array<WGPUTextureUsage, 4> candidates = {0, usage1, usage2, usage1 | usage2};
+
+    std::vector<WGPUTextureUsage> seen;
+    std::vector<Value> values;
+    for (WGPUTextureUsage candidate : candidates) {
+        if (std::find(seen.begin(), seen.end(), candidate) == seen.end()) {
+            seen.push_back(candidate);
+            values.emplace_back(static_cast<uint64_t>(candidate));
         }
     }
     return values;
@@ -557,6 +588,159 @@ CTS_TEST(g, "mip_levels")
         WGPUTexture texture = t.createTextureTracked(textureDesc);
         t.expectValidationError([&] {
             t.createViewTracked(texture, viewDesc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_view_usage")
+    .desc("Test texture view usage subset validation.")
+    .params([](ParamsBuilder u) {
+        return u.combine("format", allTextureFormatValues())
+            .combine("textureUsage", textureUsageValues())
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureFormat format =
+                    static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                const WGPUTextureUsage textureUsage = textureUsageParam(params, "textureUsage");
+                return (textureUsage & WGPUTextureUsage_RenderAttachment) == 0
+                    || isTextureFormatPossiblyUsableAsRenderAttachment(format);
+            })
+            .beginSubcases()
+            .combine("textureViewUsage", textureUsageValues())
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureUsage textureUsage = textureUsageParam(params, "textureUsage");
+                const WGPUTextureUsage textureViewUsage = textureUsageParam(params, "textureViewUsage");
+                return textureUsage != WGPUTextureUsage_TransientAttachment
+                    && textureViewUsage != WGPUTextureUsage_TransientAttachment;
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureUsage textureUsage = t.param<WGPUTextureUsage>("textureUsage");
+        const WGPUTextureUsage textureViewUsage = t.param<WGPUTextureUsage>("textureViewUsage");
+
+        t.skipIfTextureFormatNotSupported(format);
+        t.skipIfTextureFormatDoesNotSupportUsage(textureUsage, format);
+
+        const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+        WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        textureDesc.size = WGPUExtent3D{info.blockWidth, info.blockHeight, 1};
+        textureDesc.format = format;
+        textureDesc.usage = textureUsage;
+        WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+        const bool success = (textureViewUsage & ~textureUsage) == 0;
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        viewDesc.usage = textureViewUsage;
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, viewDesc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_view_usage_of_multiple_usages")
+    .desc("Test texture view usage validation for multi-usage textures.")
+    .params([](ParamsBuilder u) {
+        return u.combine("usage1", textureUsageValues())
+            .combine("usage2", textureUsageValues())
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureUsage usage1 = textureUsageParam(params, "usage1");
+                const WGPUTextureUsage usage2 = textureUsageParam(params, "usage2");
+                return usage1 <= usage2;
+            })
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureUsage usage1 = textureUsageParam(params, "usage1");
+                const WGPUTextureUsage usage2 = textureUsageParam(params, "usage2");
+                return isValidTextureUsageCombination(usage1 | usage2);
+            })
+            .beginSubcases()
+            .expand("viewUsage", [](const ParamRecord& params) {
+                return dedupedViewUsageValues(params);
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureUsage usage1 = t.param<WGPUTextureUsage>("usage1");
+        const WGPUTextureUsage usage2 = t.param<WGPUTextureUsage>("usage2");
+        const WGPUTextureUsage usage = usage1 | usage2;
+        const WGPUTextureUsage viewUsage = t.param<WGPUTextureUsage>("viewUsage");
+
+        if (usage & WGPUTextureUsage_TransientAttachment) {
+            t.skipIfTransientAttachmentNotSupported();
+        }
+
+        bool success = true;
+        if (usage & WGPUTextureUsage_TransientAttachment) {
+            success = success && (viewUsage == usage);
+        }
+
+        WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        textureDesc.size = WGPUExtent3D{1, 1, 1};
+        textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        textureDesc.usage = usage;
+        WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        viewDesc.usage = viewUsage;
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, viewDesc);
+        }, !success);
+    });
+
+CTS_TEST(g, "texture_view_usage_with_view_format")
+    .desc("Test texture view usage validation against the view format.")
+    .params([](ParamsBuilder u) {
+        return u.combine("textureFormat", allTextureFormatValues())
+            .combine("usage", textureUsageValues())
+            .beginSubcases()
+            .combine("viewFormat", allTextureFormatValues())
+            .filter([](const ParamRecord& params) {
+                return textureUsageParam(params, "usage") != WGPUTextureUsage_TransientAttachment;
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat textureFormat =
+            static_cast<WGPUTextureFormat>(t.param<int64_t>("textureFormat"));
+        const WGPUTextureUsage usage = t.param<WGPUTextureUsage>("usage");
+        const WGPUTextureFormat viewFormat =
+            static_cast<WGPUTextureFormat>(t.param<int64_t>("viewFormat"));
+
+        t.skipIfTextureFormatNotSupported(textureFormat);
+        t.skipIfTextureFormatNotSupported(viewFormat);
+        t.skipIfTextureFormatDoesNotSupportUsage(usage, textureFormat);
+        if (!textureFormatsAreViewCompatible(textureFormat, viewFormat)) {
+            t.skip("texture formats are not view-compatible");
+        }
+
+        bool success = true;
+        if ((usage & WGPUTextureUsage_StorageBinding)
+            && !t.isTextureFormatUsableAsWriteOnlyStorageTexture(viewFormat)) {
+            success = false;
+        }
+        if ((usage & WGPUTextureUsage_RenderAttachment)
+            && isColorTextureFormat(viewFormat)
+            && !t.isTextureFormatColorRenderable(viewFormat)) {
+            success = false;
+        }
+
+        const TextureBlockInfo info = getBlockInfoForTextureFormat(textureFormat);
+        const WGPUTextureFormat viewFormats[] = {viewFormat};
+        WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        textureDesc.size = WGPUExtent3D{info.blockWidth, info.blockHeight, 1};
+        textureDesc.format = textureFormat;
+        textureDesc.usage = usage;
+        textureDesc.viewFormatCount = 1;
+        textureDesc.viewFormats = viewFormats;
+        WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+        WGPUTextureViewDescriptor explicitUsageViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        explicitUsageViewDesc.format = viewFormat;
+        explicitUsageViewDesc.usage = usage;
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, explicitUsageViewDesc);
+        }, !success);
+
+        WGPUTextureViewDescriptor inheritedUsageViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        inheritedUsageViewDesc.format = viewFormat;
+        t.expectValidationError([&] {
+            t.createViewTracked(texture, inheritedUsageViewDesc);
         }, !success);
     });
 

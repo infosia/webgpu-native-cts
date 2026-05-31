@@ -455,7 +455,9 @@ void GpuTest::expectMapAsync(WGPUBuffer buffer, WGPUMapMode mode, bool expectSuc
 }
 
 void GpuTest::skipIfTransientAttachmentNotSupported() {
-    // The C headers expose WGPUTextureUsage_TransientAttachment on all supported backends.
+    // TRANSIENT_ATTACHMENT is a non-standard native extension, outside the conformance scope.
+    // Upstream skips these cases in standard environments; do the same here.
+    skip("TRANSIENT_ATTACHMENT is not supported");
 }
 
 void GpuTest::skipIfTextureFormatNotSupported(WGPUTextureFormat format) {
@@ -473,6 +475,22 @@ void GpuTest::skipIfTextureFormatAndDimensionNotCompatible(WGPUTextureFormat for
 
 void GpuTest::skipIfTextureViewDimensionNotSupported(WGPUTextureViewDimension) {
     // Compatibility mode may restrict cube-array views upstream; this port never runs compatibility mode.
+}
+
+void GpuTest::skipIfTextureFormatNotUsableAsRenderAttachment(WGPUTextureFormat format) {
+    if (!isTextureFormatUsableAsRenderAttachment(format)) {
+        skip("texture format is not usable as render attachment");
+    }
+}
+
+void GpuTest::skipIfTextureFormatDoesNotSupportUsage(WGPUTextureUsage usage, WGPUTextureFormat format) {
+    if (usage & WGPUTextureUsage_RenderAttachment) {
+        skipIfTextureFormatNotUsableAsRenderAttachment(format);
+    }
+    if ((usage & WGPUTextureUsage_StorageBinding)
+        && !isTextureFormatUsableAsWriteOnlyStorageTexture(format)) {
+        skip("texture format is not usable as write-only storage texture");
+    }
 }
 
 bool GpuTest::textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format) {
@@ -497,6 +515,17 @@ bool GpuTest::isTextureFormatColorRenderable(WGPUTextureFormat format) {
         return wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureFormatsTier1);
     }
     return textureFormatInList(format, kColorRenderableTextureFormats);
+}
+
+bool GpuTest::isTextureFormatUsableAsRenderAttachment(WGPUTextureFormat format) {
+    if (format == WGPUTextureFormat_RG11B10Ufloat) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_RG11B10UfloatRenderable);
+    }
+    if (isTier1BlendableMultisampleTextureFormat(format)) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureFormatsTier1);
+    }
+    return textureFormatInList(format, kColorRenderableTextureFormats)
+        || isDepthOrStencilTextureFormat(format);
 }
 
 bool GpuTest::isTextureFormatUsableAsWriteOnlyStorageTexture(WGPUTextureFormat format) {

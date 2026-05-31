@@ -51,9 +51,13 @@ surfaced [F-011](#f-011--yawgpu-createview-view-dimension-gaps-2d-multilayer-cub
 (yawgpu) and [F-012](#f-012--wgpu-native-rejects-createview-on-a-destroyed-texture) (wgpu-native). yawgpu
 fixed F-011 in `41e007b`. The next slice (T10, `createView` `array_layers`/`mip_levels`) then surfaced
 [F-013](#f-013--wgpu-native-aborts-on-createview-layerlevel-range-validation) (wgpu-native) and
-[F-014](#f-014--yawgpu-under-validates-3d-texture-view-array-layer-ranges) (yawgpu) — the cycle
-continues. **Resolved yawgpu findings: F-005/006/008/009/010/011. Open: yawgpu F-014; wgpu-native
-F-001–F-004, F-007, F-012, F-013.**
+[F-014](#f-014--yawgpu-under-validates-3d-texture-view-array-layer-ranges) (yawgpu). The **final**
+createView slice (T11 — the three `texture_view_usage` tests) **completes `createView` 10/10** and
+surfaced [F-015](#f-015--wgpu-native-does-not-enforce-the-createview-view-usage-subset-rule)
+(wgpu-native does not enforce the view-usage subset rule); **yawgpu passes all of T11** (it correctly
+enforces the subset rule, identical to Dawn), so T11 added **no** yawgpu finding. The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011. Open: yawgpu F-014; wgpu-native F-001–F-004,
+F-007, F-012, F-013, F-015.**
 
 ---
 
@@ -385,6 +389,34 @@ F-001–F-004, F-007, F-012, F-013.**
   layer; an out-of-range layer range is a validation error. Dawn enforces this.
 - **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 2 cases are in
   `expectations/yawgpu.txt`; wgpu-native and Dawn need no entries.
+
+---
+
+## F-015 — wgpu-native does not enforce the createView view-usage subset rule
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu or Dawn (both enforce it).
+  Unlike [F-013](#f-013--wgpu-native-aborts-on-createview-layerlevel-range-validation) this is a
+  **missing-validation** gap, not an abort.
+- **Found by:** `webgpu:api,validation,createView:texture_view_usage` (Texture T11), which sets the view's
+  `usage` to each texture-usage bit and checks the subset rule. **Dawn passes 391 / skips 61 (the
+  reference) and yawgpu is identical (clean); wgpu-native fails 324 of 452** (`pass=16 skip=112 fail=324`
+  under `--isolate`).
+- **Observed on wgpu-native:** when a view requests a `usage` bit the texture does **not** have,
+  `createView` returns **no validation error** — all 324 failures are *"expected validation error, got
+  none."* wgpu-native does not validate that the view usage is a subset of the texture usage.
+- **Expected (WebGPU):** a texture view's `usage` must be a subset of the texture's usage; a superset is a
+  validation error. Dawn and yawgpu both enforce this.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
+  `expectations/wgpu-native.txt` as a `createView:texture_view_usage:*` prefix line (yields ~16 `xpass`
+  for the cases that need no error — acceptable for the bring-up reference). yawgpu and Dawn need no
+  entries.
+
+> **Scope note (TRANSIENT_ATTACHMENT).** T11's three `texture_view_usage` tests include one
+> `TRANSIENT_ATTACHMENT` case. `TRANSIENT_ATTACHMENT` is a non-standard native extension; upstream gates
+> every transient case behind `skipIfTransientAttachmentNotSupported` (skipped in standard environments).
+> This port treats it as **out of conformance scope** — `skipIfTransientAttachmentNotSupported()` skips
+> it on all backends — so it is not asserted cross-backend. (It is why the otherwise-clean run shows one
+> `skip` in `texture_view_usage_of_multiple_usages`.)
 
 ---
 

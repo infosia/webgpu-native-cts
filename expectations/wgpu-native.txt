@@ -58,3 +58,6 @@ webgpu:api,validation,createView:texture_state:*
 # T10: wgpu-native aborts while validating createView layer/level range cases.
 webgpu:api,validation,createView:array_layers:*
 webgpu:api,validation,createView:mip_levels:*
+
+# T11: wgpu-native does not enforce the view-usage subset rule.
+webgpu:api,validation,createView:texture_view_usage:*

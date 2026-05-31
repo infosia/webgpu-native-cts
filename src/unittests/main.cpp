@@ -231,6 +231,18 @@ int main() {
         require(!cts::isStencilTextureFormat(WGPUTextureFormat_RGBA8Unorm), "rgba8unorm not stencil format");
         require(!cts::isDepthTextureFormat(WGPUTextureFormat_BC1RGBAUnorm), "bc1 not depth format");
         require(!cts::isStencilTextureFormat(WGPUTextureFormat_BC1RGBAUnorm), "bc1 not stencil format");
+        require(cts::isDepthOrStencilTextureFormat(WGPUTextureFormat_Depth24Plus),
+                "depth24plus depth-or-stencil format");
+        require(!cts::isDepthOrStencilTextureFormat(WGPUTextureFormat_RGBA8Unorm),
+                "rgba8unorm not depth-or-stencil format");
+        require(cts::isTextureFormatPossiblyUsableAsRenderAttachment(WGPUTextureFormat_RGBA8Unorm),
+                "rgba8unorm possibly render attachment");
+        require(cts::isTextureFormatPossiblyUsableAsRenderAttachment(WGPUTextureFormat_Depth24Plus),
+                "depth24plus possibly render attachment");
+        require(cts::isTextureFormatPossiblyUsableAsRenderAttachment(WGPUTextureFormat_RG11B10Ufloat),
+                "rg11b10ufloat possibly render attachment");
+        require(!cts::isTextureFormatPossiblyUsableAsRenderAttachment(WGPUTextureFormat_BC1RGBAUnorm),
+                "bc1 not possibly render attachment");
         require(cts::baseFormat(WGPUTextureFormat_RGBA8UnormSrgb) == WGPUTextureFormat_RGBA8Unorm,
                 "rgba8unorm-srgb base format");
         require(cts::baseFormat(WGPUTextureFormat_RGBA8Unorm) == WGPUTextureFormat_RGBA8Unorm,

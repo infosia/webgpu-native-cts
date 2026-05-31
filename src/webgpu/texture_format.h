@@ -494,6 +494,10 @@ inline bool isStencilTextureFormat(WGPUTextureFormat format) {
     return textureFormatInfo(format).hasStencil;
 }
 
+inline bool isDepthOrStencilTextureFormat(WGPUTextureFormat format) {
+    return isDepthTextureFormat(format) || isStencilTextureFormat(format);
+}
+
 inline WGPUTextureDimension getTextureDimensionFromView(WGPUTextureViewDimension dimension) {
     switch (dimension) {
         case WGPUTextureViewDimension_1D:
@@ -735,6 +739,12 @@ inline bool textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension dim
 
 inline bool isTier1BlendableMultisampleTextureFormat(WGPUTextureFormat format) {
     return textureFormatInList(format, kTextureFormatTier1AllowsRenderAttachmentBlendableMultisample);
+}
+
+inline bool isTextureFormatPossiblyUsableAsRenderAttachment(WGPUTextureFormat format) {
+    return isDepthOrStencilTextureFormat(format)
+        || textureFormatInList(format, kColorRenderableTextureFormats)
+        || isTier1BlendableMultisampleTextureFormat(format);
 }
 
 } // namespace cts

@@ -51,8 +51,11 @@ class GpuTest : public Fixture {
     void skipIfTextureFormatNotSupported(WGPUTextureFormat format);
     void skipIfTextureFormatAndDimensionNotCompatible(WGPUTextureFormat format, WGPUTextureDimension dimension);
     void skipIfTextureViewDimensionNotSupported(WGPUTextureViewDimension dimension);
+    void skipIfTextureFormatNotUsableAsRenderAttachment(WGPUTextureFormat format);
+    void skipIfTextureFormatDoesNotSupportUsage(WGPUTextureUsage usage, WGPUTextureFormat format);
     bool textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format);
     bool isTextureFormatColorRenderable(WGPUTextureFormat format);
+    bool isTextureFormatUsableAsRenderAttachment(WGPUTextureFormat format);
     bool isTextureFormatUsableAsWriteOnlyStorageTexture(WGPUTextureFormat format);
     bool isTextureFormatMultisampled(WGPUTextureFormat format);
 
