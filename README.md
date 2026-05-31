@@ -110,16 +110,16 @@ upstream → confirm on hardware.
 
 ### Test results
 
-Over the ported `api,validation` surface — **3977 cases** across 10 files, each case in its own
+Over the ported `api,validation` surface — **4307 cases** across 10 files, each case in its own
 subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 
 **Real-GPU Metal** (Apple Silicon):
 
 | Backend | pass | skip | fail | crash | |
 |---------|-----:|-----:|-----:|------:|--|
-| **Dawn** | 3777 | 200 | 0 | 0 | C++ reference implementation — the conformance oracle |
-| **yawgpu** | 3777 | 200 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
-| **wgpu-native** | 3064 | 541 | 327 | 45 | 45 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
+| **Dawn** | 4107 | 200 | 0 | 0 | C++ reference implementation — the conformance oracle |
+| **yawgpu** | 4107 | 200 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
+| **wgpu-native** | 3370 | 565 | 327 | 45 | 45 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
 
 **Real-GPU Vulkan** (Windows 11, NVIDIA; `--isolate --expectations`, exit 0; over the 2610-case surface, before the createView tests were added):
 

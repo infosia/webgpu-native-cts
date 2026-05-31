@@ -747,4 +747,14 @@ inline bool isTextureFormatPossiblyUsableAsRenderAttachment(WGPUTextureFormat fo
         || isTier1BlendableMultisampleTextureFormat(format);
 }
 
+inline bool isTextureFormatPossiblyUsableAsColorRenderAttachment(WGPUTextureFormat format) {
+    return textureFormatInList(format, kColorRenderableTextureFormats)
+        || isTier1BlendableMultisampleTextureFormat(format);
+}
+
+inline bool isTextureFormatPossiblyStorageReadable(WGPUTextureFormat format) {
+    return textureFormatInList(format, kStorageTextureFormats)
+        || textureFormatInList(format, kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly);
+}
+
 } // namespace cts

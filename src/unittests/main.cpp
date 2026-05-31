@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <cstddef>
 #include <string>
@@ -154,6 +155,34 @@ int main() {
                                                     WGPUTextureUsage_RenderAttachment),
                 "copy-src render attachment texture usage valid");
         require(!cts::isValidTextureUsageCombination(cts::kSomeBogusTextureUsage), "bogus texture usage invalid");
+        for (WGPUTextureUsage usage : cts::kValidCombinationsOfOneOrTwoTextureUsages) {
+            require(cts::isValidTextureUsageCombination(usage), "one-or-two texture usage combination valid");
+        }
+        require(std::find(cts::kValidCombinationsOfOneOrTwoTextureUsages.begin(),
+                          cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                          WGPUTextureUsage_TextureBinding)
+                    != cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                "one-or-two texture usage combinations include texture binding");
+        require(std::find(cts::kValidCombinationsOfOneOrTwoTextureUsages.begin(),
+                          cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                          WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst)
+                    != cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                "one-or-two texture usage combinations include copy src dst");
+        require(std::find(cts::kValidCombinationsOfOneOrTwoTextureUsages.begin(),
+                          cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                          WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TransientAttachment)
+                    != cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                "one-or-two texture usage combinations include transient render attachment");
+        require(std::find(cts::kValidCombinationsOfOneOrTwoTextureUsages.begin(),
+                          cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                          WGPUTextureUsage_TransientAttachment)
+                    == cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                "one-or-two texture usage combinations exclude transient alone");
+        require(std::find(cts::kValidCombinationsOfOneOrTwoTextureUsages.begin(),
+                          cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                          WGPUTextureUsage_TransientAttachment | WGPUTextureUsage_CopySrc)
+                    == cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
+                "one-or-two texture usage combinations exclude transient copy src");
         require(!cts::kUncompressedTextureFormats.empty(), "uncompressed texture formats non-empty");
         require(cts::kUncompressedTextureFormats.size() == 49, "uncompressed texture format count");
         require(cts::kRegularTextureFormats.size() == 43, "regular texture format count");
@@ -243,6 +272,20 @@ int main() {
                 "rg11b10ufloat possibly render attachment");
         require(!cts::isTextureFormatPossiblyUsableAsRenderAttachment(WGPUTextureFormat_BC1RGBAUnorm),
                 "bc1 not possibly render attachment");
+        require(cts::isTextureFormatPossiblyUsableAsColorRenderAttachment(WGPUTextureFormat_RGBA8Unorm),
+                "rgba8unorm possibly color render attachment");
+        require(!cts::isTextureFormatPossiblyUsableAsColorRenderAttachment(WGPUTextureFormat_Depth24Plus),
+                "depth24plus not possibly color render attachment");
+        require(cts::isTextureFormatPossiblyUsableAsColorRenderAttachment(WGPUTextureFormat_RG11B10Ufloat),
+                "rg11b10ufloat possibly color render attachment");
+        require(!cts::isTextureFormatPossiblyUsableAsColorRenderAttachment(WGPUTextureFormat_BC1RGBAUnorm),
+                "bc1 not possibly color render attachment");
+        require(cts::isTextureFormatPossiblyStorageReadable(WGPUTextureFormat_RGBA8Unorm),
+                "rgba8unorm possibly storage readable");
+        require(!cts::isTextureFormatPossiblyStorageReadable(WGPUTextureFormat_Depth24Plus),
+                "depth24plus not possibly storage readable");
+        require(!cts::isTextureFormatPossiblyStorageReadable(WGPUTextureFormat_BC1RGBAUnorm),
+                "bc1 not possibly storage readable");
         require(cts::baseFormat(WGPUTextureFormat_RGBA8UnormSrgb) == WGPUTextureFormat_RGBA8Unorm,
                 "rgba8unorm-srgb base format");
         require(cts::baseFormat(WGPUTextureFormat_RGBA8Unorm) == WGPUTextureFormat_RGBA8Unorm,

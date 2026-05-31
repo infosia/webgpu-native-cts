@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 #include "cts/webgpu.h"
 
@@ -57,5 +58,21 @@ constexpr bool isValidTextureUsageCombination(WGPUTextureUsage usage) {
         return usage == (WGPUTextureUsage_TransientAttachment | WGPUTextureUsage_RenderAttachment);
     return (usage & ~kAllTextureUsages) == 0;
 }
+
+inline const std::vector<WGPUTextureUsage> kValidCombinationsOfOneOrTwoTextureUsages = [] {
+    std::vector<WGPUTextureUsage> combinations;
+    for (WGPUTextureUsage usage0 : kTextureUsages) {
+        for (WGPUTextureUsage usage1 : kTextureUsages) {
+            if (usage0 > usage1) {
+                continue;
+            }
+            const WGPUTextureUsage usage = usage0 | usage1;
+            if (isValidTextureUsageCombination(usage)) {
+                combinations.push_back(usage);
+            }
+        }
+    }
+    return combinations;
+}();
 
 } // namespace cts

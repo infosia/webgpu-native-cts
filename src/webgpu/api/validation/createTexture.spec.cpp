@@ -123,6 +123,15 @@ std::vector<Value> newTextureUsageValues() {
     return values;
 }
 
+std::vector<Value> validCombinationsOfOneOrTwoTextureUsageValues() {
+    std::vector<Value> values;
+    values.reserve(kValidCombinationsOfOneOrTwoTextureUsages.size());
+    for (WGPUTextureUsage usage : kValidCombinationsOfOneOrTwoTextureUsages) {
+        values.emplace_back(static_cast<uint64_t>(usage));
+    }
+    return values;
+}
+
 std::vector<Value> sampleCountValues() {
     return {
         Value(0),
@@ -472,6 +481,110 @@ CTS_TEST(g, "sampleCount,various_sampleCount_with_all_formats")
         }
 
         const bool success = sampleCount == 1 || (sampleCount == 4 && t.isTextureFormatMultisampled(format));
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "sampleCount,valid_sampleCount_with_other_parameter_varies")
+    .desc("Test valid sampleCount values while other texture parameters vary.")
+    .params([](ParamsBuilder u) {
+        return u.combine("dimension", textureDimensionValuesWithUndefined())
+            .combine("format", allTextureFormatValues())
+            .beginSubcases()
+            .combine("sampleCount", {Value(1), Value(4)})
+            .combine("arrayLayerCount", {Value(1), Value(2)})
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureDimension dimension = dimensionFromParams(params);
+                const uint32_t arrayLayerCount =
+                    static_cast<uint32_t>(valueAs<int>(*findParam(params, "arrayLayerCount")));
+                return !(arrayLayerCount == 2
+                         && dimension != WGPUTextureDimension_2D
+                         && dimension != WGPUTextureDimension_Undefined);
+            })
+            .combine("mipLevelCount", {Value(1), Value(2)})
+            .combine("usage", validCombinationsOfOneOrTwoTextureUsageValues())
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureDimension dimension = dimensionFromParams(params);
+                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                return textureFormatAndDimensionPossiblyCompatible(dimension, format);
+            })
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureDimension dimension = dimensionFromParams(params);
+                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                const uint32_t mipLevelCount =
+                    static_cast<uint32_t>(valueAs<int>(*findParam(params, "mipLevelCount")));
+                const uint32_t arrayLayerCount =
+                    static_cast<uint32_t>(valueAs<int>(*findParam(params, "arrayLayerCount")));
+                const WGPUTextureUsage usage =
+                    static_cast<WGPUTextureUsage>(valueAs<uint64_t>(*findParam(params, "usage")));
+
+                const bool excluded =
+                    ((usage & WGPUTextureUsage_RenderAttachment)
+                     && (!isTextureFormatPossiblyUsableAsColorRenderAttachment(format)
+                         || dimension != WGPUTextureDimension_2D))
+                    || ((usage & WGPUTextureUsage_StorageBinding)
+                        && !isTextureFormatPossiblyStorageReadable(format))
+                    || (mipLevelCount != 1 && dimension == WGPUTextureDimension_1D)
+                    || ((usage & WGPUTextureUsage_TransientAttachment)
+                        && (usage != (WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TransientAttachment)
+                            || mipLevelCount != 1
+                            || arrayLayerCount != 1));
+                return !excluded;
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const bool dimensionIsUndefined = t.paramIsUndefined("dimension");
+        const WGPUTextureDimension dimension = dimensionIsUndefined
+            ? WGPUTextureDimension_Undefined
+            : static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const uint32_t sampleCount = static_cast<uint32_t>(t.param<int>("sampleCount"));
+        const uint32_t arrayLayerCount = static_cast<uint32_t>(t.param<int>("arrayLayerCount"));
+        const uint32_t mipLevelCount = static_cast<uint32_t>(t.param<int>("mipLevelCount"));
+        const WGPUTextureUsage usage = t.param<WGPUTextureUsage>("usage");
+
+        t.skipIfTextureFormatNotSupported(format);
+        t.skipIfTextureFormatAndDimensionNotCompatible(format, dimension);
+        if (usage & WGPUTextureUsage_RenderAttachment) {
+            t.skipIfTextureFormatNotUsableAsRenderAttachment(format);
+        }
+        if (usage & WGPUTextureUsage_TransientAttachment) {
+            t.skipIfTransientAttachmentNotSupported();
+        }
+
+        const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+        WGPUExtent3D size = {};
+        if (dimension == WGPUTextureDimension_1D) {
+            size = {32 * info.blockWidth, 1 * info.blockHeight, 1};
+        } else if (dimension == WGPUTextureDimension_2D || dimensionIsUndefined) {
+            size = {32 * info.blockWidth, 32 * info.blockHeight, arrayLayerCount};
+        } else {
+            size = {32 * info.blockWidth, 32 * info.blockHeight, 32};
+        }
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size = size;
+        desc.mipLevelCount = mipLevelCount;
+        desc.sampleCount = sampleCount;
+        if (!dimensionIsUndefined) {
+            desc.dimension = dimension;
+        }
+        desc.format = format;
+        desc.usage = usage;
+
+        const bool satisfyStorage = !(usage & WGPUTextureUsage_StorageBinding)
+            || t.isTextureFormatUsableAsWriteOnlyStorageTexture(format);
+        const bool success =
+            (sampleCount == 1 && satisfyStorage)
+            || (sampleCount == 4
+                && t.isTextureFormatMultisampled(format)
+                && (dimension == WGPUTextureDimension_2D || dimensionIsUndefined)
+                && mipLevelCount == 1
+                && arrayLayerCount == 1
+                && (usage & WGPUTextureUsage_RenderAttachment)
+                && !(usage & WGPUTextureUsage_StorageBinding));
+
         t.expectValidationError([&] {
             t.createTextureTracked(desc);
         }, !success);
