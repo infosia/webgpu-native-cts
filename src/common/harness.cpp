@@ -259,6 +259,10 @@ void GpuTest::finalize() {
         wgpuSamplerRelease(sampler);
     }
     samplers_.clear();
+    for (WGPUTextureView textureView : textureViews_) {
+        wgpuTextureViewRelease(textureView);
+    }
+    textureViews_.clear();
     for (WGPUTexture texture : textures_) {
         wgpuTextureRelease(texture);
     }
@@ -346,6 +350,14 @@ WGPUTexture GpuTest::createTextureTracked(const WGPUTextureDescriptor& desc) {
         textures_.push_back(texture);
     }
     return texture;
+}
+
+WGPUTextureView GpuTest::createViewTracked(WGPUTexture texture, const WGPUTextureViewDescriptor& desc) {
+    WGPUTextureView textureView = wgpuTextureCreateView(texture, &desc);
+    if (textureView != nullptr) {
+        textureViews_.push_back(textureView);
+    }
+    return textureView;
 }
 
 WGPUBindGroupLayout GpuTest::createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc) {

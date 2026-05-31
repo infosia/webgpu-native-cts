@@ -163,6 +163,17 @@ int main() {
         require(cts::kStorageTextureFormats.size() == 22, "storage texture format count");
         require(cts::kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly.size() == 17,
                 "tier1 storage texture format count");
+        require(cts::kTextureAspects.size() == 3, "texture aspect count");
+        require(cts::isDepthTextureFormat(WGPUTextureFormat_Depth24Plus), "depth24plus depth format");
+        require(cts::isStencilTextureFormat(WGPUTextureFormat_Stencil8), "stencil8 stencil format");
+        require(cts::isDepthTextureFormat(WGPUTextureFormat_Depth24PlusStencil8),
+                "depth24plus-stencil8 depth format");
+        require(cts::isStencilTextureFormat(WGPUTextureFormat_Depth24PlusStencil8),
+                "depth24plus-stencil8 stencil format");
+        require(!cts::isDepthTextureFormat(WGPUTextureFormat_RGBA8Unorm), "rgba8unorm not depth format");
+        require(!cts::isStencilTextureFormat(WGPUTextureFormat_RGBA8Unorm), "rgba8unorm not stencil format");
+        require(!cts::isDepthTextureFormat(WGPUTextureFormat_BC1RGBAUnorm), "bc1 not depth format");
+        require(!cts::isStencilTextureFormat(WGPUTextureFormat_BC1RGBAUnorm), "bc1 not stencil format");
         require(cts::baseFormat(WGPUTextureFormat_RGBA8UnormSrgb) == WGPUTextureFormat_RGBA8Unorm,
                 "rgba8unorm-srgb base format");
         require(cts::baseFormat(WGPUTextureFormat_RGBA8Unorm) == WGPUTextureFormat_RGBA8Unorm,

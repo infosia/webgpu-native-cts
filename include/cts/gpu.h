@@ -35,6 +35,7 @@ class GpuTest : public Fixture {
     WGPUBuffer getErrorBuffer();
     WGPUSampler createSamplerTracked(const WGPUSamplerDescriptor& desc);
     WGPUTexture createTextureTracked(const WGPUTextureDescriptor& desc);
+    WGPUTextureView createViewTracked(WGPUTexture texture, const WGPUTextureViewDescriptor& desc);
     WGPUBindGroupLayout createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc);
     WGPUPipelineLayout createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc);
     WGPUCommandEncoder createCommandEncoderTracked();
@@ -57,6 +58,7 @@ class GpuTest : public Fixture {
     std::vector<WGPUBuffer> buffers_;
     std::vector<WGPUSampler> samplers_;
     std::vector<WGPUTexture> textures_;
+    std::vector<WGPUTextureView> textureViews_;
     std::vector<WGPUBindGroupLayout> bindGroupLayouts_;
     std::vector<WGPUPipelineLayout> pipelineLayouts_;
     std::vector<WGPUCommandEncoder> encoders_;

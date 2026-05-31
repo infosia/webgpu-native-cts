@@ -52,6 +52,12 @@ constexpr std::array<WGPUTextureDimension, 3> kTextureDimensions = {
     WGPUTextureDimension_3D,
 };
 
+inline constexpr std::array<WGPUTextureAspect, 3> kTextureAspects = {
+    WGPUTextureAspect_All,
+    WGPUTextureAspect_DepthOnly,
+    WGPUTextureAspect_StencilOnly,
+};
+
 inline constexpr std::array<TextureFormatInfo, 49> kUncompressedTextureFormatInfos = {{
     {WGPUTextureFormat_R8Unorm, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
     {WGPUTextureFormat_R8Snorm, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
@@ -467,6 +473,14 @@ inline bool isCompressedTextureFormat(WGPUTextureFormat format) {
 inline bool isColorTextureFormat(WGPUTextureFormat format) {
     const TextureFormatInfo& info = textureFormatInfo(format);
     return !info.hasDepth && !info.hasStencil;
+}
+
+inline bool isDepthTextureFormat(WGPUTextureFormat format) {
+    return textureFormatInfo(format).hasDepth;
+}
+
+inline bool isStencilTextureFormat(WGPUTextureFormat format) {
+    return textureFormatInfo(format).hasStencil;
 }
 
 inline WGPUTextureFormat baseFormat(WGPUTextureFormat format) {
