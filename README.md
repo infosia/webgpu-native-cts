@@ -99,6 +99,21 @@ and confirmed resolved). Dawn passes everything; wgpu-native's eager-panic findi
 remain open. This is the suite working as intended: report a divergence → fix upstream → confirm on
 hardware.
 
+### Test results
+
+Snapshot over the ported `api,validation` surface — **2610 cases**, real-GPU **Metal** (Apple Silicon),
+each case in its own subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md):
+
+| Backend | pass | skip | fail | crash | |
+|---------|-----:|-----:|-----:|------:|--|
+| **Dawn** | 2594 | 16 | 0 | 0 | C++ reference implementation |
+| **yawgpu** | 2594 | 16 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
+| **wgpu-native** | 2036 | 231 | 2 | 341 | crashes are eager-panics on invalid input (F-001–F-004, F-007) |
+
+`skip` counts differ because each backend's adapter exposes a different set of optional features
+(feature-gated formats skip where unsupported). The `wgpu-native` crashes are contained by `--isolate`
+and marked expected in `expectations/wgpu-native.txt`, so an `--isolate --expectations` run still exits 0.
+
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
 
