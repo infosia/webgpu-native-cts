@@ -145,6 +145,17 @@ ParamsBuilder ParamsBuilder::combine(std::string key, std::vector<Value> values)
     return copy;
 }
 
+ParamsBuilder ParamsBuilder::expand(std::string key, std::function<std::vector<Value>(const ParamRecord&)> expander) const {
+    ParamsBuilder copy = *this;
+    Op op;
+    op.kind = Op::Kind::Expand;
+    op.subcase = copy.inSubcases_;
+    op.key = std::move(key);
+    op.expander = std::move(expander);
+    copy.ops_.push_back(std::move(op));
+    return copy;
+}
+
 ParamsBuilder ParamsBuilder::combineWithParams(std::vector<ParamRecord> records) const {
     ParamsBuilder copy = *this;
     Op op;
@@ -198,6 +209,17 @@ std::vector<ParamsBuilder::ExpandedCase> ParamsBuilder::expand() const {
                 }
             }
             cases = std::move(next);
+        } else if (op.kind == Op::Kind::Expand) {
+            std::vector<ParamRecord> next;
+            for (const ParamRecord& record : cases) {
+                const std::vector<Value> values = op.expander(record);
+                for (const Value& value : values) {
+                    ParamRecord copy = record;
+                    copy.emplace_back(op.key, value);
+                    next.push_back(std::move(copy));
+                }
+            }
+            cases = std::move(next);
         } else {
             std::vector<ParamRecord> next;
             for (const ParamRecord& record : cases) {
@@ -242,6 +264,18 @@ std::vector<ParamsBuilder::ExpandedCase> ParamsBuilder::expand() const {
                     for (const ParamRecord& additions : op.records) {
                         ParamRecord copy = record;
                         copy.insert(copy.end(), additions.begin(), additions.end());
+                        next.push_back(std::move(copy));
+                    }
+                }
+                subcases = std::move(next);
+            } else if (op.kind == Op::Kind::Expand) {
+                abortOnCaseKeyCollision(caseRecord, op.key);
+                std::vector<ParamRecord> next;
+                for (const ParamRecord& record : subcases) {
+                    const std::vector<Value> values = op.expander(record);
+                    for (const Value& value : values) {
+                        ParamRecord copy = record;
+                        copy.emplace_back(op.key, value);
                         next.push_back(std::move(copy));
                     }
                 }

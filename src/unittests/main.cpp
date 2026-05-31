@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstddef>
 #include <string>
+#include <vector>
 
 #include "common/query.h"
 #include "cts/test.h"
@@ -82,6 +83,28 @@ int main() {
         require(cts::findParam(caseAwareSubcases[0].subcases[0], "x") == nullptr, "subcase omits case key");
         require(cts::findParam(caseAwareSubcases[0].subcases[0], "y") != nullptr, "subcase keeps subcase key");
 
+        auto expandedSubcases = cts::ParamsBuilder()
+            .combine("x", {1, 2})
+            .beginSubcases()
+            .expand("y", [](const cts::ParamRecord& params) {
+                const int x = cts::valueAs<int>(*cts::findParam(params, "x"));
+                return std::vector<cts::Value>{cts::Value(x), cts::Value(x * 10)};
+            })
+            .expand();
+        require(expandedSubcases.size() == 2, "subcase expand case count");
+        require(expandedSubcases[0].subcases.size() == 2, "subcase expand x=1 count");
+        require(expandedSubcases[1].subcases.size() == 2, "subcase expand x=2 count");
+        require(cts::findParam(expandedSubcases[0].subcases[0], "x") == nullptr,
+                "subcase expand omits case key");
+        require(cts::valueAs<int>(*cts::findParam(expandedSubcases[0].subcases[0], "y")) == 1,
+                "subcase expand x=1 first");
+        require(cts::valueAs<int>(*cts::findParam(expandedSubcases[0].subcases[1], "y")) == 10,
+                "subcase expand x=1 second");
+        require(cts::valueAs<int>(*cts::findParam(expandedSubcases[1].subcases[0], "y")) == 2,
+                "subcase expand x=2 first");
+        require(cts::valueAs<int>(*cts::findParam(expandedSubcases[1].subcases[1], "y")) == 20,
+                "subcase expand x=2 second");
+
         auto omittedCase = cts::ParamsBuilder()
             .combine("x", {1, 2})
             .beginSubcases()
@@ -140,6 +163,26 @@ int main() {
         require(cts::kStorageTextureFormats.size() == 22, "storage texture format count");
         require(cts::kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly.size() == 17,
                 "tier1 storage texture format count");
+        require(cts::baseFormat(WGPUTextureFormat_RGBA8UnormSrgb) == WGPUTextureFormat_RGBA8Unorm,
+                "rgba8unorm-srgb base format");
+        require(cts::baseFormat(WGPUTextureFormat_RGBA8Unorm) == WGPUTextureFormat_RGBA8Unorm,
+                "rgba8unorm base format identity");
+        require(cts::baseFormat(WGPUTextureFormat_RGBA8Snorm) == WGPUTextureFormat_RGBA8Snorm,
+                "rgba8snorm base format identity");
+        require(cts::textureFormatsAreViewCompatible(WGPUTextureFormat_RGBA8Unorm,
+                                                     WGPUTextureFormat_RGBA8UnormSrgb),
+                "rgba8unorm srgb view compatible");
+        require(!cts::textureFormatsAreViewCompatible(WGPUTextureFormat_RGBA8Unorm,
+                                                      WGPUTextureFormat_RGBA8Snorm),
+                "rgba8unorm rgba8snorm not view compatible");
+        require(cts::textureFormatsAreViewCompatible(WGPUTextureFormat_BC1RGBAUnorm,
+                                                     WGPUTextureFormat_BC1RGBAUnormSrgb),
+                "bc1 srgb view compatible");
+        require(cts::kFeaturesForFormats.size() == 6, "format feature count");
+        require(cts::filterFormatsByFeature(WGPUFeatureName_Force32).size() == 42,
+                "no-feature texture format count");
+        require(cts::filterFormatsByFeature(WGPUFeatureName_TextureCompressionBC).size() == 14,
+                "bc feature texture format count");
         for (WGPUTextureFormat format : cts::kRegularTextureFormats) {
             const cts::TextureFormatInfo& info = cts::textureFormatInfo(format);
             require(info.formatClass == cts::TextureFormatClass::Uncompressed, "regular texture format class");

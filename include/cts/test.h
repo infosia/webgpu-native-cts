@@ -53,6 +53,7 @@ class ParamsBuilder {
   public:
     ParamsBuilder combine(std::string key, std::initializer_list<Value> values) const;
     ParamsBuilder combine(std::string key, std::vector<Value> values) const;
+    ParamsBuilder expand(std::string key, std::function<std::vector<Value>(const ParamRecord&)> expander) const;
     ParamsBuilder combineWithParams(std::vector<ParamRecord> records) const;
     ParamsBuilder filter(std::function<bool(const ParamRecord&)> predicate) const;
     ParamsBuilder beginSubcases() const;
@@ -68,6 +69,7 @@ class ParamsBuilder {
     struct Op {
         enum class Kind {
             Combine,
+            Expand,
             CombineWithParams,
             Filter,
         };
@@ -77,6 +79,7 @@ class ParamsBuilder {
         std::string key;
         std::vector<Value> values;
         std::vector<ParamRecord> records;
+        std::function<std::vector<Value>(const ParamRecord&)> expander;
         std::function<bool(const ParamRecord&)> predicate;
     };
 

@@ -457,3 +457,9 @@ webgpu:api,validation,createTexture:texture_usage:dimension=3;format=41
 webgpu:api,validation,createTexture:texture_usage:dimension=3;format=29
 webgpu:api,validation,createTexture:texture_usage:dimension=3;format=30
 webgpu:api,validation,createTexture:texture_usage:dimension=3;format=31
+
+# T7: yawgpu crashes or misvalidates no-feature/tier1 viewFormats cases.
+webgpu:api,validation,createTexture:viewFormats:formatFeature=_undef_;viewFormatFeature=_undef_
+webgpu:api,validation,createTexture:viewFormats:formatFeature=_undef_;viewFormatFeature=19
+webgpu:api,validation,createTexture:viewFormats:formatFeature=19;viewFormatFeature=_undef_
+webgpu:api,validation,createTexture:viewFormats:formatFeature=19;viewFormatFeature=19

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <vector>
 
 #include "cts/webgpu.h"
 
@@ -344,6 +345,15 @@ inline constexpr std::array<WGPUTextureFormat, 17> kTextureFormatsTier1EnablesSt
     WGPUTextureFormat_RG11B10Ufloat,
 };
 
+inline constexpr std::array<WGPUFeatureName, 6> kFeaturesForFormats = {
+    WGPUFeatureName_Force32,
+    WGPUFeatureName_TextureFormatsTier1,
+    WGPUFeatureName_Depth32FloatStencil8,
+    WGPUFeatureName_TextureCompressionBC,
+    WGPUFeatureName_TextureCompressionETC2,
+    WGPUFeatureName_TextureCompressionASTC,
+};
+
 inline constexpr std::array<SizeVariant, 28> kCompressedTextureSizeVariants = {{
     {{{1, -1, 0, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}}},
     {{{1, 0, -1, 0}, {0, 1, 0, 0}, {0, 1, 0, 0}}},
@@ -457,6 +467,78 @@ inline bool isCompressedTextureFormat(WGPUTextureFormat format) {
 inline bool isColorTextureFormat(WGPUTextureFormat format) {
     const TextureFormatInfo& info = textureFormatInfo(format);
     return !info.hasDepth && !info.hasStencil;
+}
+
+inline WGPUTextureFormat baseFormat(WGPUTextureFormat format) {
+    switch (format) {
+        case WGPUTextureFormat_RGBA8UnormSrgb:
+            return WGPUTextureFormat_RGBA8Unorm;
+        case WGPUTextureFormat_BGRA8UnormSrgb:
+            return WGPUTextureFormat_BGRA8Unorm;
+        case WGPUTextureFormat_BC1RGBAUnormSrgb:
+            return WGPUTextureFormat_BC1RGBAUnorm;
+        case WGPUTextureFormat_BC2RGBAUnormSrgb:
+            return WGPUTextureFormat_BC2RGBAUnorm;
+        case WGPUTextureFormat_BC3RGBAUnormSrgb:
+            return WGPUTextureFormat_BC3RGBAUnorm;
+        case WGPUTextureFormat_BC7RGBAUnormSrgb:
+            return WGPUTextureFormat_BC7RGBAUnorm;
+        case WGPUTextureFormat_ETC2RGB8UnormSrgb:
+            return WGPUTextureFormat_ETC2RGB8Unorm;
+        case WGPUTextureFormat_ETC2RGB8A1UnormSrgb:
+            return WGPUTextureFormat_ETC2RGB8A1Unorm;
+        case WGPUTextureFormat_ETC2RGBA8UnormSrgb:
+            return WGPUTextureFormat_ETC2RGBA8Unorm;
+        case WGPUTextureFormat_ASTC4x4UnormSrgb:
+            return WGPUTextureFormat_ASTC4x4Unorm;
+        case WGPUTextureFormat_ASTC5x4UnormSrgb:
+            return WGPUTextureFormat_ASTC5x4Unorm;
+        case WGPUTextureFormat_ASTC5x5UnormSrgb:
+            return WGPUTextureFormat_ASTC5x5Unorm;
+        case WGPUTextureFormat_ASTC6x5UnormSrgb:
+            return WGPUTextureFormat_ASTC6x5Unorm;
+        case WGPUTextureFormat_ASTC6x6UnormSrgb:
+            return WGPUTextureFormat_ASTC6x6Unorm;
+        case WGPUTextureFormat_ASTC8x5UnormSrgb:
+            return WGPUTextureFormat_ASTC8x5Unorm;
+        case WGPUTextureFormat_ASTC8x6UnormSrgb:
+            return WGPUTextureFormat_ASTC8x6Unorm;
+        case WGPUTextureFormat_ASTC8x8UnormSrgb:
+            return WGPUTextureFormat_ASTC8x8Unorm;
+        case WGPUTextureFormat_ASTC10x5UnormSrgb:
+            return WGPUTextureFormat_ASTC10x5Unorm;
+        case WGPUTextureFormat_ASTC10x6UnormSrgb:
+            return WGPUTextureFormat_ASTC10x6Unorm;
+        case WGPUTextureFormat_ASTC10x8UnormSrgb:
+            return WGPUTextureFormat_ASTC10x8Unorm;
+        case WGPUTextureFormat_ASTC10x10UnormSrgb:
+            return WGPUTextureFormat_ASTC10x10Unorm;
+        case WGPUTextureFormat_ASTC12x10UnormSrgb:
+            return WGPUTextureFormat_ASTC12x10Unorm;
+        case WGPUTextureFormat_ASTC12x12UnormSrgb:
+            return WGPUTextureFormat_ASTC12x12Unorm;
+        default:
+            return format;
+    }
+}
+
+inline bool textureFormatsAreViewCompatible(WGPUTextureFormat a, WGPUTextureFormat b) {
+    return baseFormat(a) == baseFormat(b);
+}
+
+inline WGPUFeatureName textureFormatFeature(WGPUTextureFormat format) {
+    const TextureFormatInfo& info = textureFormatInfo(format);
+    return info.hasRequiredFeature ? info.requiredFeature : WGPUFeatureName_Force32;
+}
+
+inline std::vector<WGPUTextureFormat> filterFormatsByFeature(WGPUFeatureName feature) {
+    std::vector<WGPUTextureFormat> formats;
+    for (WGPUTextureFormat format : kAllTextureFormats) {
+        if (textureFormatFeature(format) == feature) {
+            formats.push_back(format);
+        }
+    }
+    return formats;
 }
 
 template <std::size_t N>

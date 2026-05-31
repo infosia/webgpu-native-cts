@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
+#include <variant>
 #include <vector>
 
 #include "cts/gpu.h"
@@ -45,6 +47,37 @@ std::vector<Value> textureFormatValues(const std::array<WGPUTextureFormat, N>& f
 
 std::vector<Value> allTextureFormatValues() {
     return textureFormatValues(kAllTextureFormats);
+}
+
+std::vector<Value> textureFormatFeatureValues() {
+    std::vector<Value> values;
+    values.reserve(kFeaturesForFormats.size());
+    for (WGPUFeatureName feature : kFeaturesForFormats) {
+        if (feature == WGPUFeatureName_Force32) {
+            values.push_back(Value::undef());
+        } else {
+            values.emplace_back(static_cast<int64_t>(feature));
+        }
+    }
+    return values;
+}
+
+WGPUFeatureName textureFormatFeatureFromValue(const Value& value) {
+    if (std::holds_alternative<Value::Undefined>(value.data())) {
+        return WGPUFeatureName_Force32;
+    }
+    return static_cast<WGPUFeatureName>(valueAs<int64_t>(value));
+}
+
+std::vector<Value> textureFormatsForFeatureParam(const ParamRecord& params, std::string_view key) {
+    const WGPUFeatureName feature = textureFormatFeatureFromValue(*findParam(params, key));
+    const std::vector<WGPUTextureFormat> formats = filterFormatsByFeature(feature);
+    std::vector<Value> values;
+    values.reserve(formats.size());
+    for (WGPUTextureFormat format : formats) {
+        values.emplace_back(static_cast<int64_t>(format));
+    }
+    return values;
 }
 
 std::vector<Value> uncompressedTextureFormatValues() {
@@ -302,6 +335,56 @@ CTS_TEST(g, "texture_usage")
         t.expectValidationError([&] {
             t.createTextureTracked(desc);
         }, !success);
+    });
+
+CTS_TEST(g, "viewFormats")
+    .desc("Test view format compatibility validation.")
+    .params([](ParamsBuilder u) {
+        const std::vector<Value> features = textureFormatFeatureValues();
+        return u.combine("formatFeature", features)
+            .combine("viewFormatFeature", features)
+            .beginSubcases()
+            .expand("format", [](const ParamRecord& params) {
+                return textureFormatsForFeatureParam(params, "formatFeature");
+            })
+            .expand("viewFormat", [](const ParamRecord& params) {
+                return textureFormatsForFeatureParam(params, "viewFormatFeature");
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat viewFormat = static_cast<WGPUTextureFormat>(t.param<int64_t>("viewFormat"));
+
+        t.skipIfTextureFormatNotSupported(format);
+        t.skipIfTextureFormatNotSupported(viewFormat);
+        const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+        const bool compatible = textureFormatsAreViewCompatible(format, viewFormat);
+
+        const WGPUTextureFormat vf1[] = {viewFormat};
+        const WGPUTextureFormat vf2[] = {viewFormat, format};
+        const WGPUTextureFormat vf3[] = {viewFormat, viewFormat};
+
+        const auto createWithViewFormats = [&](const WGPUTextureFormat* viewFormats, size_t count) {
+            WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+            desc.size.width = info.blockWidth;
+            desc.size.height = info.blockHeight;
+            desc.size.depthOrArrayLayers = 1;
+            desc.format = format;
+            desc.usage = WGPUTextureUsage_TextureBinding;
+            desc.viewFormatCount = count;
+            desc.viewFormats = viewFormats;
+            t.createTextureTracked(desc);
+        };
+
+        t.expectValidationError([&] {
+            createWithViewFormats(vf1, sizeof(vf1) / sizeof(vf1[0]));
+        }, !compatible);
+        t.expectValidationError([&] {
+            createWithViewFormats(vf2, sizeof(vf2) / sizeof(vf2[0]));
+        }, !compatible);
+        t.expectValidationError([&] {
+            createWithViewFormats(vf3, sizeof(vf3) / sizeof(vf3[0]));
+        }, !compatible);
     });
 
 CTS_TEST(g, "sample_count,1d_2d_array_3d")

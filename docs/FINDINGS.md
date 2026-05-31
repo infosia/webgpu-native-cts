@@ -129,10 +129,11 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
     (depth/stencil is incompatible with those dimensions) *before* reaching the crash path.
 - **Expected (WebGPU):** all of these are valid formats; `createTexture` with `TEXTURE_BINDING` on a
   compatible dimension must **succeed** (no validation error, no abort). wgpu-native and Dawn do.
-- **Also seen in (T3):** the same rejections recur wherever these formats are created —
-  `zero_size_and_usage` (e.g. `format=30`) and `mipLevelCount,format` (`format=5,6,7,8,9,17,18,19,20,21,
-  29,30`), plus the `Depth24PlusStencil8` abort — confirming the defect is in yawgpu's format decoding,
-  independent of the specific createTexture test.
+- **Also seen in (T3–T7):** the same rejections recur wherever these formats are created —
+  `zero_size_and_usage` (e.g. `format=30`), `mipLevelCount,format` (`format=5,6,7,8,9,17,18,19,20,21,
+  29,30`), `texture_size,*`, `texture_usage`, and `viewFormats` (where they poison every runnable
+  feature-pair case, so yawgpu has **zero** passing `viewFormats` cases) — plus the `Depth24PlusStencil8`
+  abort. The defect is in yawgpu's format decoding, independent of the specific createTexture test.
 - **Not an ABI artifact:** the `WGPUTextureFormat` enum mapping is **byte-identical** between the
   wgpu-native and yawgpu `webgpu-headers/webgpu.h` (verified by diff), so the same `format=N` value
   denotes the same format on both — this is a genuine format-handling gap in yawgpu, not an
