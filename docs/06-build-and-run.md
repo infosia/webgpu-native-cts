@@ -95,16 +95,18 @@ $CTS_YAWGPU_DIR/                       # yawgpu checkout root
 ```
 
 ```bash
-# In the yawgpu checkout (macOS → metal; Linux → vulkan):
+# In the yawgpu checkout (macOS → metal; Windows/Linux → vulkan):
 cargo build --release --features metal        # produces target/release/libyawgpu.{a,dylib}
+#   (Windows/Linux: --features vulkan; e.g. --target-dir target-vulkan → target-vulkan/release/)
 # Point CTS at the checkout root:
 cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=/abs/path/to/yawgpu
 ```
 
 `cts::createInstance()` **must** chain `YaWGPUInstanceBackendSelect` to get a real GPU backend — an
-unchained yawgpu instance returns a Noop. Phase 2 pins Metal at the chain and builds yawgpu with
-`--features metal`; a runtime `--yawgpu-backend metal|vulkan` option is deferred until more than one
-backend is compiled in.
+unchained yawgpu instance returns a Noop. The shim selects a platform default — Metal on Apple,
+Vulkan elsewhere (Windows/Linux) — and yawgpu must be built with the matching cargo feature
+(`--features metal` / `--features vulkan`). A runtime `--yawgpu-backend metal|vulkan` option is
+deferred until more than one backend is compiled into a single library.
 
 For **Dawn** (added after yawgpu): it exposes a `webgpu_dawn` / `dawn::webgpu_dawn` CMake target
 and `include/webgpu/webgpu.h`; the `find_library`/header paths differ accordingly and are captured
@@ -210,7 +212,7 @@ self-tests include the **param-stringification parity** table against upstream-d
 ## 7. CI shape (later)
 
 - Matrix over `CTS_BACKEND ∈ {wgpu-native, yawgpu, dawn}` and OS (yawgpu: Metal on macOS, Vulkan on
-  Linux).
+  Windows/Linux).
 - Build, run `cts_unittests`, then run the suite with an `--expectations` file capturing known
   failures/skips per backend.
 - `--format json` output merged across shards (the result model is merge-able).
@@ -225,11 +227,21 @@ selection options exist to make CI deterministic where a software adapter is ava
 
 ## 8. Platform notes
 
-- **macOS** (this workspace): Metal backend on any of the three implementations (yawgpu via its
-  `metal` feature); link against the backend's `.dylib`/`.a`. The async wrappers use
+- **macOS**: Metal backend on any of the three implementations (yawgpu via its `metal` feature);
+  link against the backend's `.dylib`/`.a`. The async wrappers use
   `wgpuInstanceWaitAny`/`ProcessEvents`; verify timeout support on Metal for each backend (see
   [03 §8](03-webgpu-c-abstraction.md)).
-- **Linux/Windows**: same CMake flow; backend libraries differ. MSVC is a supported compiler;
-  compiling the `.spec.cpp` files directly into the executable keeps their static initializers on
-  every compiler without `--whole-archive`/`/WHOLEARCHIVE` tricks (see
-  [02-harness §1](02-harness.md)).
+- **Windows** (verified — MSVC + Vulkan, for wgpu-native and yawgpu): same CMake flow with the
+  `Visual Studio 17 2022` generator. MSVC is a supported compiler; compiling the `.spec.cpp` files
+  directly into the executable keeps their static initializers on every compiler without
+  `--whole-archive`/`/WHOLEARCHIVE` tricks (see [02-harness §1](02-harness.md)). Practical notes:
+  - Build the backend as a Rust library and pass the **import lib** (`*.dll.lib`) via
+    `CTS_WGPU_NATIVE_LIB` / `CTS_YAWGPU_LIB`; `find_library` otherwise picks the large static `.lib`,
+    whose Rust→MSVC link pulls in many unlisted system libraries. Copy the backend `.dll` next to
+    `build/<config>/cts.exe` (the build does not auto-copy).
+  - yawgpu must be built with `--features vulkan`; the shim selects Vulkan on non-Apple platforms
+    automatically (see [03 §6](03-webgpu-c-abstraction.md)).
+  - The build compiles with `/utf-8` so MSVC accepts the UTF-8 backend headers under `/WX` regardless
+    of the system code page (otherwise C4819).
+  - `--isolate` uses `CreateProcess` on Windows (see §4), so per-case crash isolation works here too.
+- **Linux**: same CMake flow; backend libraries differ (yawgpu via its `vulkan` feature).

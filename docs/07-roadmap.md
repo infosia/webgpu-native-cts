@@ -165,12 +165,13 @@ Re-planned when Phases 1–5 are solid. May remain partial indefinitely (it is e
 - **Upstream tracking**: pin a CTS revision in `docs/UPSTREAM.md`; periodically re-baseline.
 - **Coverage reporting**: `docs/COVERAGE.md` + a diff tool vs the upstream listing.
 - **Findings**: `docs/FINDINGS.md` records per-backend conformance defects the suite surfaces.
-- **Crash isolation** — **done** (Phase 4): `--isolate` runs each case in a child process
-  (fork+exec `--run-case`), so a backend that *aborts* (panics across the FFI — see
-  [FINDINGS F-001/F-002](FINDINGS.md)) yields a contained `crash` status instead of killing the run.
-  `--expectations` covers crashes (→ `xfail`); `expectations/wgpu-native.txt` lists the known
-  crashers so a triaged wgpu-native run exits 0. Children run sequentially for now; concurrent
-  children (parallelism) and a longer-lived worker/chunk model are the next steps here.
+- **Crash isolation** — **done** (Phase 4; Windows in phaseW2): `--isolate` runs each case in a child
+  process (`fork`+`exec` on POSIX, `CreateProcess` on Windows — both via `--run-case`), so a backend
+  that *aborts* (panics across the FFI — see [FINDINGS F-001/F-002](FINDINGS.md)) yields a contained
+  `crash` status instead of killing the run. `--expectations` covers crashes (→ `xfail`);
+  `expectations/wgpu-native.txt` lists the known crashers so a triaged wgpu-native run exits 0 on both
+  macOS/Metal and Windows/Vulkan. Children run sequentially for now; concurrent children (parallelism)
+  and a longer-lived worker/chunk model are the next steps here.
 - **CI**: backend × OS matrix; listing-freshness check; expectations files.
 - **Performance**: case-level parallelism (worker processes) once the suite is large enough to
   need it; the result model is already designed to merge shards.

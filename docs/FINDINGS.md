@@ -26,7 +26,9 @@ yawgpu fixed every defect this suite surfaced, across two commits driven by thes
 F-005/006/008/009/010)"*) and `92db062` (*"cts-findings: fix Depth24PlusStencil8 abort + RGBA8Snorm
 tier1 storage + compressed size alignment"*). At `92db062`, yawgpu **passes every ported `api,validation`
 test on real-GPU Metal**: `pass=2594 skip=16 fail=0 crash=0` — **0 failures, 0 crashes**, and
-`expectations/yawgpu.txt` now has no expected-failure lines.
+`expectations/yawgpu.txt` now has no expected-failure lines. The same `pass=2594 skip=16 fail=0 crash=0`
+result is confirmed on **Windows/Vulkan** (NVIDIA), via `--features vulkan` and the `--isolate`
+`CreateProcess` path.
 
 Resolution timeline (against the `55ac04d`-era baseline these entries were captured on):
 

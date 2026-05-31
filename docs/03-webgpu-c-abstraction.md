@@ -272,9 +272,10 @@ Design:
   excluded from the other backends' runs and reported as N/A.
 - yawgpu requires `cts::createInstance()` to chain `YaWGPUInstanceBackendSelect` to choose a real
   GPU backend (Metal/Vulkan/GLES); **without the chain it returns a Noop instance**. The compiled-in
-  backend is also gated by yawgpu's cargo features (`metal`/`vulkan`). Phase 2 pins Metal at the
-  chain (and builds yawgpu with `--features metal`); a runtime `--yawgpu-backend metal|vulkan`
-  option is deferred until more than one backend is compiled in.
+  backend is also gated by yawgpu's cargo features (`metal`/`vulkan`). The shim picks a **platform
+  default** — `YAWGPU_INSTANCE_BACKEND_METAL` on Apple, `YAWGPU_INSTANCE_BACKEND_VULKAN` elsewhere
+  (Windows/Linux) — so yawgpu must be built with the matching feature. A runtime
+  `--yawgpu-backend metal|vulkan` option is deferred until more than one backend is compiled in.
 
 ### Conformance philosophy regarding backend differences
 
