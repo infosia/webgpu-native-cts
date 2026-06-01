@@ -276,6 +276,10 @@ uint32_t getBindingLimitForBindingType(
     const Test& t,
     WGPUShaderStage visibility,
     std::string_view key) {
+    if (visibility == WGPUShaderStage_None) {
+        return 0;
+    }
+
     const WGPULimits limits = t.getLimits();
     const WGPUCompatibilityModeLimits compatibilityLimits = t.getCompatibilityModeLimits();
     const BGLPerStageLimitClass limitClass = bglEntryPerStageLimitClass(key);
