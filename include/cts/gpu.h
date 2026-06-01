@@ -28,6 +28,7 @@ class GpuTest : public Fixture {
     void finalize() override;
 
     virtual WGPUDevice device() const;
+    WGPUDevice mismatchedDevice();
     virtual WGPUQueue queue() const;
     WGPULimits getLimits() const;
     WGPUCompatibilityModeLimits getCompatibilityModeLimits() const;
@@ -39,6 +40,7 @@ class GpuTest : public Fixture {
     WGPUTexture createTextureWithState(ResourceState state, const WGPUTextureDescriptor& desc);
     WGPUTextureView createViewTracked(WGPUTexture texture, const WGPUTextureViewDescriptor& desc);
     WGPUBindGroupLayout createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc);
+    WGPUBindGroupLayout createBindGroupLayoutOnMismatchedDevice(const WGPUBindGroupLayoutDescriptor& desc);
     WGPUPipelineLayout createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc);
     WGPUCommandEncoder createCommandEncoderTracked();
     WGPUCommandBuffer finishTracked(WGPUCommandEncoder encoder);
@@ -69,9 +71,12 @@ class GpuTest : public Fixture {
     std::vector<WGPUTexture> textures_;
     std::vector<WGPUTextureView> textureViews_;
     std::vector<WGPUBindGroupLayout> bindGroupLayouts_;
+    std::vector<WGPUBindGroupLayout> mismatchedDeviceBindGroupLayouts_;
     std::vector<WGPUPipelineLayout> pipelineLayouts_;
     std::vector<WGPUCommandEncoder> encoders_;
     std::vector<WGPUCommandBuffer> commandBuffers_;
+    WGPUAdapter mismatchedAdapter_ = nullptr;
+    WGPUDevice mismatchedDevice_ = nullptr;
 };
 
 class AllFeaturesMaxLimitsGpuTest : public GpuTest {

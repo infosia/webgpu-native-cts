@@ -69,11 +69,14 @@ Windows/Vulkan (NVIDIA RTX 5060 Ti) — the same `pass=4131 skip=200` on each. T
 [F-018](#f-018--yawgpu-over-restricts-bindgrouplayout-storage-texture-bindings) (yawgpu over-restricts
 BGL storage-texture bindings — 1D view dimension + `rgba8snorm` format) and
 [F-019](#f-019--wgpu-native-aborts-on-an-undefined-view-dimension-in-a-bindgrouplayout-entry)
-(wgpu-native aborts on an undefined BGL view dimension). **yawgpu fixed F-018 in `925520a`** — so once
-again **yawgpu passes every ported `api,validation` test** (`pass=4271 skip=377 fail=0 crash=0`,
-identical to Dawn) with no expected-failure lines. The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018. Open yawgpu findings: none. Open
-wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019.**
+(wgpu-native aborts on an undefined BGL view dimension). **yawgpu fixed F-018 in `925520a`**. The
+createPipelineLayout T18 slice then surfaced
+[F-020](#f-020--yawgpu-rejects-null-bind-group-layout-slots-in-createpipelinelayout) (yawgpu doesn't yet
+implement null bind-group-layout slots) and
+[F-021](#f-021--wgpu-native-aborts-on-null-bind-group-layout-slots-in-createpipelinelayout) (wgpu-native
+aborts on them). The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018. Open yawgpu findings: F-020. Open
+wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
 
@@ -527,6 +530,46 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019.**
   yawgpu pass all 11 of each (yawgpu correctly enforces the per-stage limits).** So `conv.rs:1669` is a
   broader BGL-entry-conversion abort than just the undefined view dimension; recorded as 16 exact
   `max_resources_per_stage,{in_bind_group_layout,in_pipeline_layout}:maxedEntry=…` lines.
+
+---
+
+## F-020 — yawgpu rejects null bind-group-layout slots in createPipelineLayout
+
+- **Backend:** yawgpu (`925520a`). **Not** present in Dawn (accepts) or wgpu-native (which aborts, F-021).
+  This is the **"null bind group layouts"** feature — a pipeline layout may have null (unused) BGL slots.
+- **Found by:** `webgpu:api,validation,createPipelineLayout:bind_group_layouts,null_bind_group_layouts`
+  (createPipelineLayout T18). The test builds a pipeline layout with exactly one `null`/`undefined`/`empty`
+  slot among 1–4 BGLs and asserts it is **valid**. **Dawn passes (the reference); yawgpu fails** the
+  `null`/`undefined` subcases (it accepts the `empty`-BGL subcases).
+- **Observed on yawgpu:** `createPipelineLayout` with a `NULL` `WGPUBindGroupLayout` element raises
+  *"pipeline layout bindGroupLayouts elements must not be null"* — yawgpu does not implement null BGL
+  slots. (In C, the test's `Null` and `Undefined` param values both map to a `NULL` handle.)
+- **Expected (WebGPU):** a null bind-group-layout slot in a pipeline layout is valid (the slot is unused).
+  Dawn enforces this.
+- **Status:** open; tracked as a **yawgpu gap** (feature not yet implemented; 3-way confirmed). Not masked;
+  recorded in `expectations/yawgpu.txt` as a `createPipelineLayout:bind_group_layouts,null_bind_group_layouts:*`
+  prefix line; wgpu-native and Dawn need no entries.
+
+---
+
+## F-021 — wgpu-native aborts on null bind-group-layout slots in createPipelineLayout
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu (which rejects gracefully,
+  F-020) or Dawn. Eager-panic class (`src/conv.rs:506`), same family as
+  [F-001](#f-001--wgpu-native-aborts-on-an-invalid-buffer-usage-bit)/[F-017](#f-017--wgpu-native-aborts-on-storage-texture-bindgrouplayout-entries)/[F-019](#f-019--wgpu-native-aborts-on-an-undefined-view-dimension-in-a-bindgrouplayout-entry).
+- **Found by:** `webgpu:api,validation,createPipelineLayout:bind_group_layouts,null_bind_group_layouts`
+  (createPipelineLayout T18). **Dawn passes (the reference); wgpu-native crashes** the whole test.
+- **Observed on wgpu-native:** a `NULL` `WGPUBindGroupLayout` element makes `createPipelineLayout`
+  **panic and abort** (`src/conv.rs:506`) instead of accepting it (or returning a validation error).
+- **Expected (WebGPU):** a null BGL slot is valid, never a process abort. Dawn accepts it.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
+  `expectations/wgpu-native.txt` as a `createPipelineLayout:bind_group_layouts,null_bind_group_layouts:*`
+  prefix line.
+
+> **Note (immediate data).** T18's `immediate_data_size` test runs **only on yawgpu** — yawgpu reports
+> `maxImmediateSize=64` (immediate data supported) while Dawn and wgpu-native report `0` and skip. yawgpu
+> passes all 8 cases (it validates the `% 4` / `<= maxImmediateSize` rules correctly), so it is **not** a
+> finding — yawgpu is simply ahead of Dawn/wgpu-native on this feature, with no cross-backend oracle here.
 
 ---
 

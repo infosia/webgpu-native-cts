@@ -100,31 +100,32 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   format-capability tables and the BindGroupLayout binding-entry / per-stage-limit taxonomies. See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 19 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 21 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes every ported `api,validation` test, **identical
-  to Dawn, with zero open findings**.
+- **yawgpu** — the primary conformance subject — matches Dawn except for one open finding, **F-020**
+  (null bind-group-layout slots in `createPipelineLayout`, not yet implemented; 1 case). (It also
+  *supports* immediate data, which Dawn/wgpu-native skip.)
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
-  F-019) and missing validation (F-012 — `createView` on a destroyed texture; F-015 — the view-usage
-  subset rule).
+  F-019, F-021) and missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
+  view-usage subset rule).
 
 Every divergence the suite surfaces is reported, fixed upstream, and re-confirmed on hardware.
 
 ### Test results
 
-Over the ported `api,validation` surface — **4673 cases** across 10 files, each case in its own
+Over the ported `api,validation` surface — **4684 cases** across 10 files, each case in its own
 subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 
 **Real-GPU Metal** (Apple Silicon):
 
 | Backend | pass | skip | fail | crash | |
 |---------|-----:|-----:|-----:|------:|--|
-| **Dawn** | 4296 | 377 | 0 | 0 | C++ reference implementation — the conformance oracle |
-| **yawgpu** | 4296 | 377 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
-| **wgpu-native** | 3399 | 742 | 327 | 205 | 205 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017, F-019); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
+| **Dawn** | 4299 | 385 | 0 | 0 | C++ reference implementation — the conformance oracle |
+| **yawgpu** | 4306 | 377 | 1 | 0 | primary subject — 1 fail is the open **F-020** (null BGL slots); also runs the 8 `immediate_data_size` cases Dawn skips |
+| **wgpu-native** | 3401 | 750 | 327 | 206 | 206 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017, F-019, F-021); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
 
 **Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti; `--isolate --expectations`, exit 0;
 the 4331-case surface as of T13, before the T14 BGL storage/multisampled tests, 2026-06-01):

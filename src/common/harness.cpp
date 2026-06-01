@@ -275,14 +275,51 @@ void GpuTest::finalize() {
         wgpuBindGroupLayoutRelease(bindGroupLayout);
     }
     bindGroupLayouts_.clear();
+    for (WGPUBindGroupLayout bindGroupLayout : mismatchedDeviceBindGroupLayouts_) {
+        wgpuBindGroupLayoutRelease(bindGroupLayout);
+    }
+    mismatchedDeviceBindGroupLayouts_.clear();
     for (WGPUBuffer buffer : buffers_) {
         wgpuBufferRelease(buffer);
     }
     buffers_.clear();
+    if (mismatchedDevice_ != nullptr) {
+        wgpuDeviceRelease(mismatchedDevice_);
+        mismatchedDevice_ = nullptr;
+    }
+    if (mismatchedAdapter_ != nullptr) {
+        wgpuAdapterRelease(mismatchedAdapter_);
+        mismatchedAdapter_ = nullptr;
+    }
 }
 
 WGPUDevice GpuTest::device() const {
     return getDevice();
+}
+
+WGPUDevice GpuTest::mismatchedDevice() {
+    if (mismatchedDevice_ != nullptr) {
+        return mismatchedDevice_;
+    }
+
+    DeviceCache& c = cache();
+    ensureAdapter(c);
+    if (mismatchedAdapter_ == nullptr) {
+        AdapterResult adapter = requestAdapterSync(c.instance, nullptr);
+        if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
+            fail("failed to request mismatched adapter: " + adapter.message);
+        }
+        mismatchedAdapter_ = adapter.adapter;
+    }
+
+    WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
+    descriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
+    DeviceResult device = requestDeviceSync(c.instance, mismatchedAdapter_, &descriptor);
+    if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
+        fail("failed to request mismatched device: " + device.message);
+    }
+    mismatchedDevice_ = device.device;
+    return mismatchedDevice_;
 }
 
 WGPUQueue GpuTest::queue() const {
@@ -397,6 +434,14 @@ WGPUBindGroupLayout GpuTest::createBindGroupLayoutTracked(const WGPUBindGroupLay
     WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(device(), &desc);
     if (layout != nullptr) {
         bindGroupLayouts_.push_back(layout);
+    }
+    return layout;
+}
+
+WGPUBindGroupLayout GpuTest::createBindGroupLayoutOnMismatchedDevice(const WGPUBindGroupLayoutDescriptor& desc) {
+    WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(mismatchedDevice(), &desc);
+    if (layout != nullptr) {
+        mismatchedDeviceBindGroupLayouts_.push_back(layout);
     }
     return layout;
 }
