@@ -125,10 +125,10 @@ subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 **Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti; `--isolate --expectations`, exit 0;
 full 4331-case surface, 2026-06-01):
 
-| Backend | pass | skip | xfail | fail | crash |
-|---------|-----:|-----:|------:|-----:|------:|
-| **yawgpu** | 4131 | 200 | 0 | 0 | 0 |
-| **wgpu-native** | 2478 | 1579 | 274 | 0 | 0 |
+| Backend | pass | skip | xfail | xpass | fail | crash |
+|---------|-----:|-----:|------:|------:|-----:|------:|
+| **yawgpu** | 4131 | 200 | 0 | 0 | 0 | 0 |
+| **wgpu-native** | 2260 | 1579 | 274 | 218 | 0 | 0 |
 
 **yawgpu posts the same `pass=4131 skip=200`, zero failures, on both platforms** (and matches Dawn) —
 a clean cross-platform result. (Dawn is not yet built on Windows.) The `wgpu-native` row differs from
