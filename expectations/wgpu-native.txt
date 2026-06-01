@@ -70,3 +70,21 @@ webgpu:api,validation,createBindGroupLayout:visibility,VERTEX_shader_stage_stora
 webgpu:api,validation,createBindGroupLayout:multisampled_validation:viewDimension=_undef_
 webgpu:api,validation,createBindGroupLayout:storage_texture,layout_dimension:viewDimension=_undef_
 webgpu:api,validation,createBindGroupLayout:storage_texture,formats:*
+
+# T16: wgpu-native aborts while validating max per-stage BGL resources for sampler/texture/storage-texture entries.
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_bind_group_layout:maxedEntry="sampler_comparison"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_bind_group_layout:maxedEntry="sampler_filtering"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_bind_group_layout:maxedEntry="sampler_non-filtering"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_bind_group_layout:maxedEntry="texture_ms-false"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_bind_group_layout:maxedEntry="texture_ms-true"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_bind_group_layout:maxedEntry="storageTexture_write-only"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_bind_group_layout:maxedEntry="storageTexture_read-only"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_bind_group_layout:maxedEntry="storageTexture_read-write"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_layout:maxedEntry="sampler_comparison"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_layout:maxedEntry="sampler_filtering"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_layout:maxedEntry="sampler_non-filtering"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_layout:maxedEntry="texture_ms-false"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_layout:maxedEntry="texture_ms-true"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_layout:maxedEntry="storageTexture_write-only"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_layout:maxedEntry="storageTexture_read-only"
+webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_layout:maxedEntry="storageTexture_read-write"

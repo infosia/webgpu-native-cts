@@ -249,6 +249,46 @@ int main() {
                 "storage per-stage compute buffer limit");
         require(cts::bufferTypePerStageComputeLimit(bglLimitProbe, WGPUBufferBindingType_ReadOnlyStorage) == 14,
                 "read-only-storage per-stage compute buffer limit");
+        require(cts::bglEntryPerStageLimitClass("buffer_uniform") == cts::BGLPerStageLimitClass::UniformBuffer,
+                "buffer uniform per-stage limit class");
+        require(cts::bglEntryPerStageLimitClass("buffer_storage") == cts::BGLPerStageLimitClass::StorageBuffer,
+                "buffer storage per-stage limit class");
+        require(cts::bglEntryPerStageLimitClass("buffer_read-only-storage")
+                    == cts::BGLPerStageLimitClass::StorageBuffer,
+                "buffer read-only-storage per-stage limit class");
+        require(cts::bglEntryPerStageLimitClass("sampler_filtering") == cts::BGLPerStageLimitClass::Sampler,
+                "sampler per-stage limit class");
+        require(cts::bglEntryPerStageLimitClass("texture_ms-false")
+                    == cts::BGLPerStageLimitClass::SampledTexture,
+                "sampled texture per-stage limit class");
+        require(cts::bglEntryPerStageLimitClass("storageTexture_read-only")
+                    == cts::BGLPerStageLimitClass::ReadOnlyStorageTexture,
+                "read-only storage texture per-stage limit class");
+        require(cts::bglEntryPerStageLimitClass("storageTexture_write-only")
+                    == cts::BGLPerStageLimitClass::WriteOnlyStorageTexture,
+                "write-only storage texture per-stage limit class");
+        require(cts::bglEntryPerStageLimitClass("storageTexture_read-write")
+                    == cts::BGLPerStageLimitClass::ReadWriteStorageTexture,
+                "read-write storage texture per-stage limit class");
+        const std::vector<std::string_view> sameStorageClass =
+            cts::pickExtraBindingTypesForPerStage("buffer_storage", true);
+        require(std::find(sameStorageClass.begin(), sameStorageClass.end(), "buffer_storage")
+                    != sameStorageClass.end(),
+                "same storage class includes storage buffer");
+        require(std::find(sameStorageClass.begin(), sameStorageClass.end(), "buffer_read-only-storage")
+                    != sameStorageClass.end(),
+                "same storage class includes read-only-storage buffer");
+        require(std::find(sameStorageClass.begin(), sameStorageClass.end(), "buffer_uniform")
+                    == sameStorageClass.end(),
+                "same storage class excludes uniform buffer");
+        const std::vector<std::string_view> differentStorageClass =
+            cts::pickExtraBindingTypesForPerStage("buffer_storage", false);
+        require(differentStorageClass.size() == 1, "different storage class count");
+        require(differentStorageClass[0].starts_with("sampler_"), "different storage class picks sampler");
+        require(cts::kShaderStages.size() == 3, "individual shader stage count");
+        require(cts::kShaderStages[0] == WGPUShaderStage_Vertex, "individual shader stage vertex");
+        require(cts::kShaderStages[1] == WGPUShaderStage_Fragment, "individual shader stage fragment");
+        require(cts::kShaderStages[2] == WGPUShaderStage_Compute, "individual shader stage compute");
         require(!cts::kUncompressedTextureFormats.empty(), "uncompressed texture formats non-empty");
         require(cts::kUncompressedTextureFormats.size() == 49, "uncompressed texture format count");
         require(cts::kRegularTextureFormats.size() == 43, "regular texture format count");

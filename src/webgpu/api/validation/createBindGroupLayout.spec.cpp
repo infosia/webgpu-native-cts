@@ -49,6 +49,15 @@ std::vector<Value> shaderStageCombinationValues() {
     return values;
 }
 
+std::vector<Value> shaderStageValues() {
+    std::vector<Value> values;
+    values.reserve(kShaderStages.size());
+    for (WGPUShaderStage stage : kShaderStages) {
+        values.emplace_back(static_cast<uint64_t>(stage));
+    }
+    return values;
+}
+
 std::vector<Value> bufferBindingTypeValues() {
     std::vector<Value> values;
     values.reserve(kBufferBindingTypes.size());
@@ -58,14 +67,17 @@ std::vector<Value> bufferBindingTypeValues() {
     return values;
 }
 
-std::vector<Value> bindingEntryKeyValues() {
+std::vector<Value> bindingEntryKeyValues(std::vector<std::string_view> entries) {
     std::vector<Value> values;
-    const std::vector<std::string_view> entries = allBindingEntries(false);
     values.reserve(entries.size());
     for (std::string_view key : entries) {
         values.emplace_back(std::string(key));
     }
     return values;
+}
+
+std::vector<Value> bindingEntryKeyValues() {
+    return bindingEntryKeyValues(allBindingEntries(false));
 }
 
 std::vector<Value> storageTextureAccessValuesWithUndefined() {
@@ -159,6 +171,67 @@ bool isValidBGLEntryForStages(
         return isValidBufferTypeForStages(compat, visibility, entryKeyBufferType(entryKey));
     }
     return true;
+}
+
+std::vector<WGPUBindGroupLayoutEntry> makeEntries(
+    std::string_view entryKey,
+    WGPUShaderStage visibility,
+    uint32_t count,
+    uint32_t firstBinding = 0) {
+    std::vector<WGPUBindGroupLayoutEntry> entries;
+    entries.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        WGPUBindGroupLayoutEntry entry = bglEntryFromKey(entryKey);
+        entry.binding = firstBinding + i;
+        entry.visibility = visibility;
+        entries.push_back(entry);
+    }
+    return entries;
+}
+
+WGPUBindGroupLayout createBindGroupLayoutWithEntries(
+    GpuTest& t,
+    const std::vector<WGPUBindGroupLayoutEntry>& entries) {
+    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    desc.entryCount = entries.size();
+    desc.entries = entries.data();
+    return t.createBindGroupLayoutTracked(desc);
+}
+
+void createPipelineLayoutWithBindGroupLayouts(
+    GpuTest& t,
+    const std::vector<WGPUBindGroupLayout>& layouts) {
+    WGPUPipelineLayoutDescriptor desc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    desc.bindGroupLayoutCount = layouts.size();
+    desc.bindGroupLayouts = layouts.data();
+    t.createPipelineLayoutTracked(desc);
+}
+
+ParamsBuilder kMaxResourcesCases(ParamsBuilder u) {
+    return u.combine("maxedEntry", bindingEntryKeyValues())
+        .beginSubcases()
+        .combine("maxedVisibility", shaderStageValues())
+        .filter([](const ParamRecord& params) {
+            const std::string maxedEntry = valueAs<std::string>(*findParam(params, "maxedEntry"));
+            const WGPUShaderStage maxedVisibility =
+                static_cast<WGPUShaderStage>(valueAs<uint64_t>(*findParam(params, "maxedVisibility")));
+            return (validStagesForEntryKey(maxedEntry) & maxedVisibility) != 0;
+        })
+        .expand("extraEntry", [](const ParamRecord& params) {
+            const std::string maxedEntry = valueAs<std::string>(*findParam(params, "maxedEntry"));
+            std::vector<std::string_view> extraEntries = pickExtraBindingTypesForPerStage(maxedEntry, true);
+            std::vector<std::string_view> differentClassEntries =
+                pickExtraBindingTypesForPerStage(maxedEntry, false);
+            extraEntries.insert(extraEntries.end(), differentClassEntries.begin(), differentClassEntries.end());
+            return bindingEntryKeyValues(extraEntries);
+        })
+        .combine("extraVisibility", shaderStageValues())
+        .filter([](const ParamRecord& params) {
+            const std::string extraEntry = valueAs<std::string>(*findParam(params, "extraEntry"));
+            const WGPUShaderStage extraVisibility =
+                static_cast<WGPUShaderStage>(valueAs<uint64_t>(*findParam(params, "extraVisibility")));
+            return (validStagesForEntryKey(extraEntry) & extraVisibility) != 0;
+        });
 }
 
 CTS_TEST(g, "duplicate_bindings")
@@ -448,6 +521,72 @@ CTS_TEST(g, "max_dynamic_buffers")
         t.expectValidationError([&] {
             t.createBindGroupLayoutTracked(desc);
         }, shouldError);
+    });
+
+CTS_TEST(g, "max_resources_per_stage,in_bind_group_layout")
+    .desc("Test per-stage binding resource limits in one bind group layout.")
+    .params(kMaxResourcesCases)
+    .fn([](GpuTest& t) {
+        const std::string maxedEntry = t.param<std::string>("maxedEntry");
+        const WGPUShaderStage maxedVisibility =
+            static_cast<WGPUShaderStage>(t.param<uint64_t>("maxedVisibility"));
+        const std::string extraEntry = t.param<std::string>("extraEntry");
+        const WGPUShaderStage extraVisibility =
+            static_cast<WGPUShaderStage>(t.param<uint64_t>("extraVisibility"));
+        const WGPUCompatibilityModeLimits compat = t.getCompatibilityModeLimits();
+
+        if (!isValidBGLEntryForStages(compat, extraVisibility, extraEntry)) {
+            t.skip("extra entry is not valid for the requested shader stage");
+        }
+
+        const uint32_t maxedCount = getBindingLimitForBindingType(t, maxedVisibility, maxedEntry);
+        std::vector<WGPUBindGroupLayoutEntry> entries =
+            makeEntries(maxedEntry, maxedVisibility, maxedCount);
+        createBindGroupLayoutWithEntries(t, entries);
+
+        WGPUBindGroupLayoutEntry extra = bglEntryFromKey(extraEntry);
+        extra.binding = maxedCount;
+        extra.visibility = extraVisibility;
+        entries.push_back(extra);
+
+        const bool sameLimit = (maxedVisibility & extraVisibility) != 0
+            && bglEntryPerStageLimitClass(maxedEntry) == bglEntryPerStageLimitClass(extraEntry);
+        t.expectValidationError([&] {
+            createBindGroupLayoutWithEntries(t, entries);
+        }, sameLimit);
+    });
+
+CTS_TEST(g, "max_resources_per_stage,in_pipeline_layout")
+    .desc("Test per-stage binding resource limits across pipeline layout bind group layouts.")
+    .params(kMaxResourcesCases)
+    .fn([](GpuTest& t) {
+        const std::string maxedEntry = t.param<std::string>("maxedEntry");
+        const WGPUShaderStage maxedVisibility =
+            static_cast<WGPUShaderStage>(t.param<uint64_t>("maxedVisibility"));
+        const std::string extraEntry = t.param<std::string>("extraEntry");
+        const WGPUShaderStage extraVisibility =
+            static_cast<WGPUShaderStage>(t.param<uint64_t>("extraVisibility"));
+        const WGPUCompatibilityModeLimits compat = t.getCompatibilityModeLimits();
+
+        if (!isValidBGLEntryForStages(compat, extraVisibility, extraEntry)) {
+            t.skip("extra entry is not valid for the requested shader stage");
+        }
+
+        const uint32_t maxedCount = getBindingLimitForBindingType(t, maxedVisibility, maxedEntry);
+        const std::vector<WGPUBindGroupLayoutEntry> maxedEntries =
+            makeEntries(maxedEntry, maxedVisibility, maxedCount);
+        WGPUBindGroupLayout goodLayout = createBindGroupLayoutWithEntries(t, maxedEntries);
+        createPipelineLayoutWithBindGroupLayouts(t, {goodLayout});
+
+        const std::vector<WGPUBindGroupLayoutEntry> extraEntries =
+            makeEntries(extraEntry, extraVisibility, 1);
+        WGPUBindGroupLayout extraLayout = createBindGroupLayoutWithEntries(t, extraEntries);
+
+        const bool sameLimit = (maxedVisibility & extraVisibility) != 0
+            && bglEntryPerStageLimitClass(maxedEntry) == bglEntryPerStageLimitClass(extraEntry);
+        t.expectValidationError([&] {
+            createPipelineLayoutWithBindGroupLayouts(t, {goodLayout, extraLayout});
+        }, sameLimit);
     });
 
 } // namespace

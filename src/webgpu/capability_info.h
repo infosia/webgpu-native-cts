@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstdint>
@@ -91,6 +92,12 @@ inline constexpr std::array<WGPUShaderStage, 8> kShaderStageCombinations = {
     WGPUShaderStage_Vertex | WGPUShaderStage_Compute,
     WGPUShaderStage_Fragment | WGPUShaderStage_Compute,
     WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute,
+};
+
+inline constexpr std::array<WGPUShaderStage, 3> kShaderStages = {
+    WGPUShaderStage_Vertex,
+    WGPUShaderStage_Fragment,
+    WGPUShaderStage_Compute,
 };
 
 inline constexpr std::array<WGPUBufferBindingType, 3> kBufferBindingTypes = {
@@ -188,6 +195,119 @@ inline WGPUShaderStage validStagesForEntryKey(std::string_view key) {
         return kValidStagesStorageWrite;
     }
     return kValidStagesAll;
+}
+
+enum class BGLPerStageLimitClass {
+    UniformBuffer,
+    StorageBuffer,
+    Sampler,
+    SampledTexture,
+    ReadOnlyStorageTexture,
+    WriteOnlyStorageTexture,
+    ReadWriteStorageTexture,
+};
+
+inline BGLPerStageLimitClass bglEntryPerStageLimitClass(std::string_view key) {
+    if (key == "buffer_uniform") return BGLPerStageLimitClass::UniformBuffer;
+    if (key == "buffer_storage" || key == "buffer_read-only-storage") {
+        return BGLPerStageLimitClass::StorageBuffer;
+    }
+    if (key == "sampler_comparison" || key == "sampler_filtering" || key == "sampler_non-filtering") {
+        return BGLPerStageLimitClass::Sampler;
+    }
+    if (key == "texture_ms-false" || key == "texture_ms-true") {
+        return BGLPerStageLimitClass::SampledTexture;
+    }
+    if (key == "storageTexture_read-only") return BGLPerStageLimitClass::ReadOnlyStorageTexture;
+    if (key == "storageTexture_write-only") return BGLPerStageLimitClass::WriteOnlyStorageTexture;
+    if (key == "storageTexture_read-write") return BGLPerStageLimitClass::ReadWriteStorageTexture;
+    std::abort();
+}
+
+inline uint32_t compatibilityLimitOrFallback(uint32_t compatibilityLimit, uint32_t fallback) {
+    return compatibilityLimit == WGPU_LIMIT_U32_UNDEFINED ? fallback : compatibilityLimit;
+}
+
+inline uint32_t getBindingLimitForClassAndStage(
+    const WGPULimits& limits,
+    const WGPUCompatibilityModeLimits& compatibilityLimits,
+    BGLPerStageLimitClass limitClass,
+    WGPUShaderStage stage) {
+    switch (limitClass) {
+        case BGLPerStageLimitClass::UniformBuffer:
+            return limits.maxUniformBuffersPerShaderStage;
+        case BGLPerStageLimitClass::Sampler:
+            return limits.maxSamplersPerShaderStage;
+        case BGLPerStageLimitClass::SampledTexture:
+            return limits.maxSampledTexturesPerShaderStage;
+        case BGLPerStageLimitClass::StorageBuffer:
+            if (stage == WGPUShaderStage_Vertex) {
+                return compatibilityLimitOrFallback(
+                    compatibilityLimits.maxStorageBuffersInVertexStage,
+                    limits.maxStorageBuffersPerShaderStage);
+            }
+            if (stage == WGPUShaderStage_Fragment) {
+                return compatibilityLimitOrFallback(
+                    compatibilityLimits.maxStorageBuffersInFragmentStage,
+                    limits.maxStorageBuffersPerShaderStage);
+            }
+            return limits.maxStorageBuffersPerShaderStage;
+        case BGLPerStageLimitClass::ReadOnlyStorageTexture:
+        case BGLPerStageLimitClass::WriteOnlyStorageTexture:
+        case BGLPerStageLimitClass::ReadWriteStorageTexture:
+            if (stage == WGPUShaderStage_Vertex) {
+                return compatibilityLimitOrFallback(
+                    compatibilityLimits.maxStorageTexturesInVertexStage,
+                    limits.maxStorageTexturesPerShaderStage);
+            }
+            if (stage == WGPUShaderStage_Fragment) {
+                return compatibilityLimitOrFallback(
+                    compatibilityLimits.maxStorageTexturesInFragmentStage,
+                    limits.maxStorageTexturesPerShaderStage);
+            }
+            return limits.maxStorageTexturesPerShaderStage;
+        default:
+            std::abort();
+    }
+}
+
+template <class Test>
+uint32_t getBindingLimitForBindingType(
+    const Test& t,
+    WGPUShaderStage visibility,
+    std::string_view key) {
+    const WGPULimits limits = t.getLimits();
+    const WGPUCompatibilityModeLimits compatibilityLimits = t.getCompatibilityModeLimits();
+    const BGLPerStageLimitClass limitClass = bglEntryPerStageLimitClass(key);
+
+    uint32_t result = WGPU_LIMIT_U32_UNDEFINED;
+    for (WGPUShaderStage stage : kShaderStages) {
+        if ((visibility & stage) == 0) {
+            continue;
+        }
+        result = std::min(result, getBindingLimitForClassAndStage(limits, compatibilityLimits, limitClass, stage));
+    }
+    return result;
+}
+
+inline std::vector<std::string_view> pickExtraBindingTypesForPerStage(
+    std::string_view maxedKey,
+    bool extraTypeSame) {
+    std::vector<std::string_view> result;
+    const BGLPerStageLimitClass maxedClass = bglEntryPerStageLimitClass(maxedKey);
+    if (extraTypeSame) {
+        for (std::string_view key : allBindingEntries(false)) {
+            if (bglEntryPerStageLimitClass(key) == maxedClass) {
+                result.push_back(key);
+            }
+        }
+        return result;
+    }
+
+    result.push_back(maxedClass == BGLPerStageLimitClass::Sampler
+        ? std::string_view("texture_ms-false")
+        : std::string_view("sampler_filtering"));
+    return result;
 }
 
 inline WGPUBindGroupLayoutEntry bglEntryFromKey(std::string_view key) {

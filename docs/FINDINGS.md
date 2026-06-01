@@ -521,6 +521,12 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019.**
   default it correctly.
 - **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
   `expectations/wgpu-native.txt` as the two `…:viewDimension=_undef_` exact lines.
+- **Update (T16):** the same `src/conv.rs:1669` panic site is hit by `max_resources_per_stage,*` for
+  **sampler / sampled-texture / storage-texture** `maxedEntry` cases (8 per test × 2 tests) — wgpu-native
+  cannot build a near-limit count of those binding types, while it handles the buffer cases. **Dawn and
+  yawgpu pass all 11 of each (yawgpu correctly enforces the per-stage limits).** So `conv.rs:1669` is a
+  broader BGL-entry-conversion abort than just the undefined view dimension; recorded as 16 exact
+  `max_resources_per_stage,{in_bind_group_layout,in_pipeline_layout}:maxedEntry=…` lines.
 
 ---
 
