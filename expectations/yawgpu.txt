@@ -1,18 +1,12 @@
-# yawgpu expectations — captured against commit baa78cb61a3a02acaa1eb9787cf58d8d1388cc24 (2026-05-31).
+# yawgpu expectations — captured against commit 4292f76170d3526d19804cebe6eeedc4cf8c941a (2026-06-01).
 # One full case query per line (# comments allowed; a line ending ':*' is a test-prefix match).
 #
-# One OPEN yawgpu finding: F-016 (the 8 lines below). Earlier findings F-005/006/008/009/010/011/014
-# were all fixed upstream; F-015 (createView view-usage subset) is wgpu-native-only — yawgpu enforces it.
-#   F-016 (BGL T13): yawgpu rejects read-write storage textures on the core r32uint/r32sint/r32float
-#   read-write-capable formats; "storage texture binding format must support read-write storage access".
+# NO expected failures: yawgpu passes every ported api,validation test on real-GPU Metal
+# (full suite: pass=4131 skip=200 fail=0 crash=0 xfail=0 xpass=0 — identical to Dawn). Every finding this
+# suite surfaced for yawgpu has been fixed upstream:
+#   F-005 (format rejection + Depth24PlusStencil8 abort), F-006 (multisample), F-008 (transient usage),
+#   F-009 (render-attachment dimension + RGBA8Snorm storage), F-010 (compressed texture_size alignment),
+#   F-011 (createView view-dimension), F-014 (createView 3D-texture view array-layer ranges),
+#   F-016 (BGL read-write storage on r32* formats).
+# F-015 (createView view-usage subset) is wgpu-native-only — yawgpu enforces it.
 # See docs/FINDINGS.md. Add a query line here only if a future test surfaces a new yawgpu defect.
-
-# T13: yawgpu rejects read-write storage texture BGL entries with r32float/r32uint where Dawn accepts them.
-webgpu:api,validation,createBindGroupLayout:visibility:visibility=0
-webgpu:api,validation,createBindGroupLayout:visibility:visibility=2
-webgpu:api,validation,createBindGroupLayout:visibility:visibility=4
-webgpu:api,validation,createBindGroupLayout:visibility:visibility=6
-webgpu:api,validation,createBindGroupLayout:visibility,VERTEX_shader_stage_storage_texture_access:shaderStage=0
-webgpu:api,validation,createBindGroupLayout:visibility,VERTEX_shader_stage_storage_texture_access:shaderStage=2
-webgpu:api,validation,createBindGroupLayout:visibility,VERTEX_shader_stage_storage_texture_access:shaderStage=4
-webgpu:api,validation,createBindGroupLayout:visibility,VERTEX_shader_stage_storage_texture_access:shaderStage=6

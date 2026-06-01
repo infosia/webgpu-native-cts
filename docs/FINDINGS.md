@@ -61,8 +61,10 @@ builds the BGL binding-entry taxonomy) then surfaced
 [F-016](#f-016--yawgpu-rejects-read-write-storage-textures-on-read-write-capable-formats) (yawgpu rejects
 read-write storage textures on the core `r32*` read-write formats) and
 [F-017](#f-017--wgpu-native-aborts-on-storage-texture-bindgrouplayout-entries) (wgpu-native aborts on
-storage-texture BGL entries). The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014. Open yawgpu findings: F-016. Open
+storage-texture BGL entries). **yawgpu fixed F-016 in `4292f76`** — so once again **yawgpu passes every
+ported `api,validation` test** (`pass=4131 skip=200 fail=0 crash=0`, identical to Dawn) with no
+expected-failure lines. The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016. Open yawgpu findings: none. Open
 wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017.**
 
 ---
@@ -440,10 +442,11 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017.**
   yawgpu's read-write-capable format set is missing the core `r32uint`/`r32sint`/`r32float`.
 - **Expected (WebGPU):** `r32uint`, `r32sint`, `r32float` support `read-write` (and `read-only`) storage
   access with no feature gate (`kTextureFormatInfo[f].color.readWriteStorage`). Dawn enforces this.
-- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 8 cases are in
-  `expectations/yawgpu.txt` (`visibility:visibility={0,2,4,6}` +
-  `visibility,VERTEX_shader_stage_storage_texture_access:shaderStage={0,2,4,6}`); wgpu-native and Dawn
-  need no entries.
+- **Status:** **RESOLVED** on yawgpu `4292f76` (re-test 2026-06-01) — *"cts-findings: r32uint/r32sint/
+  r32float support read-write storage (F-016)"*. yawgpu now accepts read-write storage textures on the
+  core `r32*` formats; all 16 cases pass and the full ported suite is clean again
+  (`pass=4131 skip=200 fail=0 crash=0`, identical to Dawn). The 8 lines were removed from
+  `expectations/yawgpu.txt`.
 
 ---
 
