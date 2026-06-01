@@ -33,6 +33,12 @@ class GpuTest : public Fixture {
     virtual WGPUQueue queue() const;
     WGPULimits getLimits() const;
     WGPUCompatibilityModeLimits getCompatibilityModeLimits() const;
+    WGPUBuffer makeBufferWithContents(const void* data, size_t size, WGPUBufferUsage usage);
+    void expectGPUBufferValuesEqual(
+        WGPUBuffer src,
+        const void* expected,
+        size_t size,
+        uint64_t srcByteOffset = 0);
     WGPUBuffer createBufferTracked(const WGPUBufferDescriptor& desc);
     WGPUBuffer createBufferOnMismatchedDevice(const WGPUBufferDescriptor& desc);
     WGPUBuffer createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc);

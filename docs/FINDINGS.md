@@ -82,9 +82,13 @@ which complete `createPipelineLayout`) then surfaced
 (yawgpu rejects `minBindingSize = 0` at pipeline creation instead of deferring) and extended F-021
 (wgpu-native aborts on null BGL in pipeline creation/use). **yawgpu fixed F-022 in `798fc6a`** — so
 again **yawgpu passes every ported `api,validation` test** (`pass=4332 skip=383 fail=0 crash=0`; it runs
-the 8 `immediate_data_size` cases Dawn skips). The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022. Open yawgpu findings: none.
-Open wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
+the 8 `immediate_data_size` cases Dawn skips). Opening **`api/operation` (Phase 4, T22)** then surfaced
+the first **execution** finding,
+[F-023](#f-023--yawgpu-aborts-on-a-0-size-clearbuffer--copybuffertobuffer-un-ended-metal-blit-encoder)
+(yawgpu aborts on a 0-size buffer clear/copy — an un-ended Metal blit encoder). The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022. Open yawgpu findings: F-023
+(api/operation). yawgpu still passes every ported `api,validation` test. Open wgpu-native: F-001–F-004,
+F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
 
@@ -130,6 +134,10 @@ Open wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021
   Not masked. Avoid running `…clearBuffer:size_alignment:*` / `:out_of_bounds:*` against
   wgpu-native; they run fine on yawgpu. Reinforces the need for crash isolation (see
   [07-roadmap](07-roadmap.md)).
+- **Update (T22 — api/operation).** The operation test `api,operation,command_buffer,clearBuffer:clear`
+  also hits this `src/lib.rs:1294` panic — its `size=0` subcase (a valid no-op clear) makes wgpu-native
+  treat the size as invalid and abort, where Dawn and yawgpu accept it. Recorded as a
+  `api,operation,command_buffer,clearBuffer:clear:*` prefix.
 
 ---
 
@@ -611,6 +619,28 @@ Open wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021
   minBindingSize=0 to bind time in createPipelineLayout compat (F-022)"*. yawgpu now defers the
   `minBindingSize=0` check to bind time; both tests pass and the full ported suite is clean again
   (`pass=4332 skip=383 fail=0 crash=0`). The 2 lines were removed from `expectations/yawgpu.txt`.
+
+---
+
+## F-023 — yawgpu aborts on a 0-size clearBuffer / copyBufferToBuffer (un-ended Metal blit encoder)
+
+- **Backend:** yawgpu (`798fc6a`, Metal). **Not** present in Dawn (handles 0-size ops). wgpu-native hits a
+  *different* abort on the clearBuffer case (F-002); it passes the 0-size copy.
+- **Found by:** the first `api/operation` tests (T22) —
+  `api,operation,command_buffer,clearBuffer:clear` (its `size=0` subcase) and
+  `api,operation,command_buffer,copyBufferToBuffer:single` (its `copySize=0` subcases). **Dawn passes all
+  5 operation cases (the reference); yawgpu aborts the two tests that contain a 0-size op** and passes
+  `state_transitions`/`copy_order` (which have no 0-size op).
+- **Observed on yawgpu:** a **0-byte** `clearBuffer`/`copyBufferToBuffer` (a valid no-op) makes the Metal
+  validation layer abort with *"-[_MTLCommandEncoder dealloc]: failed assertion `Command encoder released
+  without endEncoding'"* — yawgpu's Metal backend creates a blit command encoder for the no-op and
+  releases it without `endEncoding`. (The bug is in execution, not validation; the readback infra itself
+  is sound — Dawn and the non-zero yawgpu cases pass.)
+- **Expected (WebGPU):** a 0-size buffer clear/copy is a **valid no-op**, never a process abort. Dawn
+  executes it cleanly.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; recorded in
+  `expectations/yawgpu.txt` as `api,operation,command_buffer,{clearBuffer:clear,copyBufferToBuffer:single}:*`
+  prefix lines; wgpu-native and Dawn need no entries (wgpu-native's clearBuffer abort is F-002).
 
 ---
 

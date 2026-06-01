@@ -96,6 +96,9 @@ webgpu:api,validation,createPipelineLayout:bind_group_layouts,null_bind_group_la
 webgpu:api,validation,createPipelineLayout:bind_group_layouts,create_pipeline_with_null_bind_group_layouts:*
 webgpu:api,validation,createPipelineLayout:bind_group_layouts,set_pipeline_with_null_bind_group_layouts:*
 
+# T22: wgpu-native aborts in the operation clearBuffer readback surface; Dawn passes.
+webgpu:api,operation,command_buffer,clearBuffer:clear:*
+
 # T19: wgpu-native surfaces uncaptured errors or aborts on the completed buffer mapping surface.
 webgpu:api,validation,buffer,mapping:mapAsync,sizeUnspecifiedOOB:*
 webgpu:api,validation,buffer,mapping:getMappedRange,state,mapped:*

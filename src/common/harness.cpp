@@ -1,6 +1,8 @@
 #include "cts/gpu.h"
 
 #include <array>
+#include <cstring>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -363,6 +365,70 @@ WGPUCompatibilityModeLimits GpuTest::getCompatibilityModeLimits() const {
         fail("failed to get device limits");
     }
     return compat;
+}
+
+WGPUBuffer GpuTest::makeBufferWithContents(const void* data, size_t size, WGPUBufferUsage usage) {
+    WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    desc.size = size;
+    desc.usage = usage;
+    desc.mappedAtCreation = WGPU_TRUE;
+    WGPUBuffer buffer = createBufferTracked(desc);
+
+    void* mapped = wgpuBufferGetMappedRange(buffer, 0, size);
+    if (size > 0 && mapped == nullptr) {
+        fail("failed to get mapped range for initial buffer contents");
+    }
+    if (size > 0) {
+        std::memcpy(mapped, data, size);
+    }
+    wgpuBufferUnmap(buffer);
+    return buffer;
+}
+
+void GpuTest::expectGPUBufferValuesEqual(
+    WGPUBuffer src,
+    const void* expected,
+    size_t size,
+    uint64_t srcByteOffset) {
+    WGPUBufferDescriptor stagingDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    stagingDesc.size = size;
+    stagingDesc.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+    WGPUBuffer staging = createBufferTracked(stagingDesc);
+
+    WGPUCommandEncoder encoder = createCommandEncoderTracked();
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, src, srcByteOffset, staging, 0, size);
+    WGPUCommandBuffer commandBuffer = finishTracked(encoder);
+    wgpuQueueSubmit(queue(), 1, &commandBuffer);
+
+    expectMapAsync(staging, WGPUMapMode_Read, true, 0, size);
+    const void* actual = wgpuBufferGetConstMappedRange(staging, 0, size);
+    if (size > 0 && actual == nullptr) {
+        wgpuBufferUnmap(staging);
+        fail("failed to get mapped range for GPU buffer readback");
+    }
+
+    const auto* actualBytes = static_cast<const uint8_t*>(actual);
+    const auto* expectedBytes = static_cast<const uint8_t*>(expected);
+    size_t mismatchIndex = size;
+    uint8_t mismatchExpected = 0;
+    uint8_t mismatchActual = 0;
+    for (size_t i = 0; i < size; ++i) {
+        if (actualBytes[i] != expectedBytes[i]) {
+            mismatchIndex = i;
+            mismatchExpected = expectedBytes[i];
+            mismatchActual = actualBytes[i];
+            break;
+        }
+    }
+    wgpuBufferUnmap(staging);
+
+    if (mismatchIndex != size) {
+        std::ostringstream message;
+        message << "GPU buffer mismatch at byte " << mismatchIndex
+                << ": expected " << static_cast<int>(mismatchExpected)
+                << ", got " << static_cast<int>(mismatchActual);
+        fail(message.str());
+    }
 }
 
 WGPUBuffer GpuTest::createBufferTracked(const WGPUBufferDescriptor& desc) {

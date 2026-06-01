@@ -95,18 +95,20 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   test-prefix lines) so a run with known divergences still exits 0.
 - All three backends — **wgpu-native, yawgpu, Dawn** — build link-agnostically and run on a real GPU.
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
-- Ported so far: 10 `api/validation` files — **5 complete** (`createTexture`, `createView`,
-  `createBindGroupLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a maximally-ported `buffer/mapping`
-  — backed by the format-capability tables and the BindGroupLayout binding-entry / per-stage-limit
-  taxonomies. See [COVERAGE](docs/COVERAGE.md).
+- Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
+  `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
+  maximally-ported `buffer/mapping` — and the first **`api/operation` (Phase 4)** tests, which add the
+  buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`) on top of the
+  shader/pipeline/pass infra. See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 22 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 23 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes every ported `api,validation` test, **with zero
-  open findings**. (It also *runs* the `immediate_data_size` cases that Dawn/wgpu-native skip — yawgpu
-  supports immediate data; they report `maxImmediateSize=0`.)
+- **yawgpu** — the primary conformance subject — passes **every ported `api,validation` test** (zero open
+  validation findings); the just-opened `api/operation` surfaced one open finding, **F-023** (aborts on a
+  0-size buffer clear/copy — an un-ended Metal blit encoder). (It also *runs* the `immediate_data_size`
+  cases that Dawn/wgpu-native skip.)
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021) and missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
