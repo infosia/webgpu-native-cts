@@ -26,6 +26,20 @@ WGPUBindGroupLayoutEntry storageBufferEntry(uint32_t binding) {
     return entry;
 }
 
+WGPUBindGroupLayoutEntry bufferEntry(
+    uint32_t binding,
+    WGPUShaderStage visibility,
+    WGPUBufferBindingType type,
+    bool hasDynamicOffset) {
+    WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+    entry.binding = binding;
+    entry.visibility = visibility;
+    entry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entry.buffer.type = type;
+    entry.buffer.hasDynamicOffset = hasDynamicOffset ? WGPU_TRUE : WGPU_FALSE;
+    return entry;
+}
+
 std::vector<Value> shaderStageCombinationValues() {
     std::vector<Value> values;
     values.reserve(kShaderStageCombinations.size());
@@ -398,6 +412,42 @@ CTS_TEST(g, "storage_texture,formats")
         t.expectValidationError([&] {
             t.createBindGroupLayoutTracked(desc);
         }, !success);
+    });
+
+CTS_TEST(g, "max_dynamic_buffers")
+    .desc("Test dynamic-offset buffer count limits.")
+    .params([](ParamsBuilder u) {
+        return u.combine("type", bufferBindingTypeValues())
+            .beginSubcases()
+            .combine("extraDynamicBuffers", {Value(0), Value(1)})
+            .combine("staticBuffers", {Value(0), Value(1)});
+    })
+    .fn([](GpuTest& t) {
+        const WGPUBufferBindingType type = static_cast<WGPUBufferBindingType>(t.param<uint64_t>("type"));
+        const uint32_t extraDynamicBuffers = static_cast<uint32_t>(t.param<int>("extraDynamicBuffers"));
+        const uint32_t staticBuffers = static_cast<uint32_t>(t.param<int>("staticBuffers"));
+        const WGPULimits limits = t.getLimits();
+        const uint32_t maxDynamic = bufferTypeMaxDynamicBuffersLimit(limits, type);
+        const uint32_t dynamicBufferCount = maxDynamic + extraDynamicBuffers;
+        const uint32_t perStageLimit = bufferTypePerStageComputeLimit(limits, type);
+
+        std::vector<WGPUBindGroupLayoutEntry> entries;
+        entries.reserve(static_cast<size_t>(dynamicBufferCount) + staticBuffers);
+        for (uint32_t i = 0; i < dynamicBufferCount; ++i) {
+            entries.push_back(bufferEntry(i, WGPUShaderStage_Compute, type, true));
+        }
+        for (uint32_t i = dynamicBufferCount; i < dynamicBufferCount + staticBuffers; ++i) {
+            entries.push_back(bufferEntry(i, WGPUShaderStage_Compute, type, false));
+        }
+
+        WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        desc.entryCount = entries.size();
+        desc.entries = entries.data();
+
+        const bool shouldError = extraDynamicBuffers > 0 || entries.size() > perStageLimit;
+        t.expectValidationError([&] {
+            t.createBindGroupLayoutTracked(desc);
+        }, shouldError);
     });
 
 } // namespace

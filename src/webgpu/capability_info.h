@@ -99,6 +99,30 @@ inline constexpr std::array<WGPUBufferBindingType, 3> kBufferBindingTypes = {
     WGPUBufferBindingType_ReadOnlyStorage,
 };
 
+inline uint32_t bufferTypeMaxDynamicBuffersLimit(const WGPULimits& limits, WGPUBufferBindingType type) {
+    switch (type) {
+        case WGPUBufferBindingType_Uniform:
+            return limits.maxDynamicUniformBuffersPerPipelineLayout;
+        case WGPUBufferBindingType_Storage:
+        case WGPUBufferBindingType_ReadOnlyStorage:
+            return limits.maxDynamicStorageBuffersPerPipelineLayout;
+        default:
+            std::abort();
+    }
+}
+
+inline uint32_t bufferTypePerStageComputeLimit(const WGPULimits& limits, WGPUBufferBindingType type) {
+    switch (type) {
+        case WGPUBufferBindingType_Uniform:
+            return limits.maxUniformBuffersPerShaderStage;
+        case WGPUBufferBindingType_Storage:
+        case WGPUBufferBindingType_ReadOnlyStorage:
+            return limits.maxStorageBuffersPerShaderStage;
+        default:
+            std::abort();
+    }
+}
+
 inline constexpr std::array<WGPUSamplerBindingType, 3> kSamplerBindingTypes = {
     WGPUSamplerBindingType_Filtering,
     WGPUSamplerBindingType_NonFiltering,

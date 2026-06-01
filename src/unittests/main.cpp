@@ -232,6 +232,23 @@ int main() {
                 "storage texture read-only entry access");
         require(bglStorageTexture.storageTexture.format == WGPUTextureFormat_R32Float,
                 "storage texture read-only entry format");
+        WGPULimits bglLimitProbe = WGPU_LIMITS_INIT;
+        bglLimitProbe.maxDynamicUniformBuffersPerPipelineLayout = 11;
+        bglLimitProbe.maxDynamicStorageBuffersPerPipelineLayout = 12;
+        bglLimitProbe.maxUniformBuffersPerShaderStage = 13;
+        bglLimitProbe.maxStorageBuffersPerShaderStage = 14;
+        require(cts::bufferTypeMaxDynamicBuffersLimit(bglLimitProbe, WGPUBufferBindingType_Uniform) == 11,
+                "uniform max dynamic buffer limit");
+        require(cts::bufferTypeMaxDynamicBuffersLimit(bglLimitProbe, WGPUBufferBindingType_Storage) == 12,
+                "storage max dynamic buffer limit");
+        require(cts::bufferTypeMaxDynamicBuffersLimit(bglLimitProbe, WGPUBufferBindingType_ReadOnlyStorage) == 12,
+                "read-only-storage max dynamic buffer limit");
+        require(cts::bufferTypePerStageComputeLimit(bglLimitProbe, WGPUBufferBindingType_Uniform) == 13,
+                "uniform per-stage compute buffer limit");
+        require(cts::bufferTypePerStageComputeLimit(bglLimitProbe, WGPUBufferBindingType_Storage) == 14,
+                "storage per-stage compute buffer limit");
+        require(cts::bufferTypePerStageComputeLimit(bglLimitProbe, WGPUBufferBindingType_ReadOnlyStorage) == 14,
+                "read-only-storage per-stage compute buffer limit");
         require(!cts::kUncompressedTextureFormats.empty(), "uncompressed texture formats non-empty");
         require(cts::kUncompressedTextureFormats.size() == 49, "uncompressed texture format count");
         require(cts::kRegularTextureFormats.size() == 43, "regular texture format count");
