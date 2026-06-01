@@ -80,9 +80,11 @@ Dawn skips). The shader/pipeline/pass-foundation slice (T21 — the two `…_pip
 which complete `createPipelineLayout`) then surfaced
 [F-022](#f-022--yawgpu-does-not-defer-minbindingsize-validation-rejects-minbindingsize--0-at-pipeline-creation)
 (yawgpu rejects `minBindingSize = 0` at pipeline creation instead of deferring) and extended F-021
-(wgpu-native aborts on null BGL in pipeline creation/use). The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020. Open yawgpu findings: F-022. Open
-wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
+(wgpu-native aborts on null BGL in pipeline creation/use). **yawgpu fixed F-022 in `798fc6a`** — so
+again **yawgpu passes every ported `api,validation` test** (`pass=4332 skip=383 fail=0 crash=0`; it runs
+the 8 `immediate_data_size` cases Dawn skips). The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022. Open yawgpu findings: none.
+Open wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
 
@@ -605,9 +607,10 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 - **Expected (WebGPU):** `minBindingSize = 0` means *unspecified* — the size check is **deferred to bind
   time** (the bound buffer range must be large enough), and pipeline creation must **not** reject it. Dawn
   implements this; our BGL deliberately leaves `minBindingSize` at its `INIT` default of 0.
-- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; recorded in
-  `expectations/yawgpu.txt` as `createPipelineLayout:{create,set}_pipeline_with_null_bind_group_layouts:*`
-  prefix lines; wgpu-native and Dawn need no entries.
+- **Status:** **RESOLVED** on yawgpu `798fc6a` (re-test 2026-06-01) — *"cts-findings: defer
+  minBindingSize=0 to bind time in createPipelineLayout compat (F-022)"*. yawgpu now defers the
+  `minBindingSize=0` check to bind time; both tests pass and the full ported suite is clean again
+  (`pass=4332 skip=383 fail=0 crash=0`). The 2 lines were removed from `expectations/yawgpu.txt`.
 
 ---
 

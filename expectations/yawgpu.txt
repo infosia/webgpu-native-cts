@@ -1,15 +1,10 @@
-# yawgpu expectations — captured against commit f75fc0ac04e8395afbe81778bab0a451040170f2 (2026-06-01).
+# yawgpu expectations — captured against commit 798fc6acfbebd763a3acc798ee587f75c4ce0df5 (2026-06-01).
 # One full case query per line (# comments allowed; a line ending ':*' is a test-prefix match).
 #
-# One OPEN yawgpu finding: F-022 (the 2 lines below). Earlier findings
-# F-005/006/008/009/010/011/014/016/018/020 were all fixed upstream; F-015 (createView view-usage subset)
-# is wgpu-native-only — yawgpu enforces it. yawgpu also runs the 8 immediate_data_size cases Dawn skips
-# (yawgpu reports maxImmediateSize=64; Dawn/wgpu-native report 0).
-#   F-022 (createPipelineLayout T21): yawgpu rejects pipeline creation when a shader-visible uniform
-#   buffer binding has the default minBindingSize=0 ("buffer minBindingSize is too small"); Dawn defers
-#   the size check to bind-group usage and accepts it.
+# NO expected failures: yawgpu passes every ported api,validation test on real-GPU Metal
+# (full suite: pass=4332 skip=383 fail=0 crash=0 xfail=0 xpass=0). It passes every test it runs and
+# additionally runs the 8 immediate_data_size cases that Dawn skips (yawgpu reports maxImmediateSize=64;
+# Dawn/wgpu-native report 0). Every finding this suite surfaced for yawgpu has been fixed upstream:
+#   F-005, F-006, F-008, F-009, F-010, F-011, F-014, F-016, F-018, F-020, F-022.
+# F-015 (createView view-usage subset) is wgpu-native-only — yawgpu enforces it.
 # See docs/FINDINGS.md. Add a query line here only if a future test surfaces a new yawgpu defect.
-
-# F-022: minBindingSize=0 not deferred at pipeline creation (yawgpu rejects; Dawn accepts).
-webgpu:api,validation,createPipelineLayout:bind_group_layouts,create_pipeline_with_null_bind_group_layouts:*
-webgpu:api,validation,createPipelineLayout:bind_group_layouts,set_pipeline_with_null_bind_group_layouts:*
