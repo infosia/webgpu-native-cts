@@ -99,16 +99,18 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   **complete `createView`** (all 10 tests) backed by the uncompressed + compressed format-capability
   tables, plus the BindGroupLayout binding-entry taxonomy. See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 19 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
-yawgpu — the primary conformance subject — was at full parity with Dawn on **both** Metal and
-Windows/Vulkan through T13's fixes; the second `createBindGroupLayout` slice (T14) then surfaced
-**F-018** (yawgpu over-restricts BGL storage-texture bindings — the 1D view dimension + the `rgba8snorm`
-format; 3 cases, currently open). Its eight earlier findings (F-005/006/008/009/010/011/014/016) were
-all reported here, fixed upstream, and confirmed resolved — the established cycle, which F-018 re-enters.
-Dawn — the oracle — passes everything. wgpu-native's findings remain open: eager-panics on invalid input
-(F-001–F-004, F-007, F-013, F-017, F-019) and missing validation (F-012 — `createView` on a destroyed
-texture; F-015 — the view-usage subset rule). This is the suite working as intended: report a divergence
-→ fix upstream → confirm on hardware.
+**Conformance outcome.** The suite has surfaced 19 cross-backend findings to date; the full per-finding
+record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
+real-GPU Metal:
+
+- **yawgpu** — the primary conformance subject — passes every ported `api,validation` test, **identical
+  to Dawn, with zero open findings**.
+- **Dawn** — the oracle — passes everything.
+- **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
+  F-019) and missing validation (F-012 — `createView` on a destroyed texture; F-015 — the view-usage
+  subset rule).
+
+Every divergence the suite surfaces is reported, fixed upstream, and re-confirmed on hardware.
 
 ### Test results
 
@@ -120,7 +122,7 @@ subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 | Backend | pass | skip | fail | crash | |
 |---------|-----:|-----:|-----:|------:|--|
 | **Dawn** | 4271 | 377 | 0 | 0 | C++ reference implementation — the conformance oracle |
-| **yawgpu** | 4268 | 377 | 3 | 0 | primary subject — 3 fails are the open **F-018** (BGL storage texture: 1D + `rgba8snorm`); all earlier findings fixed |
+| **yawgpu** | 4271 | 377 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
 | **wgpu-native** | 3390 | 742 | 327 | 189 | 189 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017, F-019); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
 
 **Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti; `--isolate --expectations`, exit 0;

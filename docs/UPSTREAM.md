@@ -48,7 +48,7 @@ set (e.g. in an `--expectations` file header).
 | Backend | Repo | Version observed (local) | License | Notes |
 |---------|------|--------------------------|---------|-------|
 | wgpu-native | github.com/gfx-rs/wgpu-native | `v29.0.0.0-8-g9176708` | MIT / Apache-2.0 | harness bring-up reference |
-| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `4292f76170d3526d19804cebe6eeedc4cf8c941a` (2026-06-01) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h`. At this revision yawgpu **passes every ported `api,validation` test** (full suite real-GPU Metal: `pass=4131 skip=200 fail=0 crash=0 xfail=0 xpass=0` — identical to Dawn; `expectations/yawgpu.txt` has no expected failures). All yawgpu findings F-005/006/008/009/010/011/014/016 fixed; F-015 (view-usage subset) is wgpu-native-only. See [FINDINGS](FINDINGS.md) |
+| yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `925520adf6ec7238679f5eb074090cfb37ecbd0c` (2026-06-01) | MIT / Apache-2.0 | **primary conformance subject**; Metal/Vulkan; vendor header `yawgpu.h`. At this revision yawgpu **passes every ported `api,validation` test** (full suite real-GPU Metal: `pass=4271 skip=377 fail=0 crash=0 xfail=0 xpass=0` — identical to Dawn; `expectations/yawgpu.txt` has no expected failures). All yawgpu findings F-005/006/008/009/010/011/014/016/018 fixed; F-015 (view-usage subset) is wgpu-native-only. See [FINDINGS](FINDINGS.md) |
 | Dawn | dawn.googlesource.com/dawn | `802f147f1fb7ab972f87f3e9f95098e0f4b5077b` (2026-05-15) | BSD-3-Clause / Apache-2.0 | C++ reference impl |
 
 ## Re-baselining process

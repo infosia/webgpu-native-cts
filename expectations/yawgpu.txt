@@ -1,15 +1,9 @@
-# yawgpu expectations — captured against commit 4292f76170d3526d19804cebe6eeedc4cf8c941a (2026-06-01).
+# yawgpu expectations — captured against commit 925520adf6ec7238679f5eb074090cfb37ecbd0c (2026-06-01).
 # One full case query per line (# comments allowed; a line ending ':*' is a test-prefix match).
 #
-# One OPEN yawgpu finding: F-018 (the 3 lines below). Earlier findings
-# F-005/006/008/009/010/011/014/016 were all fixed upstream; F-015 (createView view-usage subset) is
-# wgpu-native-only — yawgpu enforces it.
-#   F-018 (BGL T14): yawgpu over-restricts BGL storage-texture bindings — it rejects the 1D storage
-#   view dimension and the core rgba8snorm format (write-only/read-only) where Dawn accepts them.
+# NO expected failures: yawgpu passes every ported api,validation test on real-GPU Metal
+# (full suite: pass=4271 skip=377 fail=0 crash=0 xfail=0 xpass=0 — identical to Dawn). Every finding this
+# suite surfaced for yawgpu has been fixed upstream:
+#   F-005, F-006, F-008, F-009, F-010, F-011, F-014, F-016, F-018.
+# F-015 (createView view-usage subset) is wgpu-native-only — yawgpu enforces it.
 # See docs/FINDINGS.md. Add a query line here only if a future test surfaces a new yawgpu defect.
-
-# F-018: 1D storage view dimension (storage texture bindings must not use 1D — yawgpu over-restricts).
-webgpu:api,validation,createBindGroupLayout:storage_texture,layout_dimension:viewDimension=1
-# F-018: rgba8snorm (format=24) write-only (access=2) + read-only (access=3) storage — core storage format.
-webgpu:api,validation,createBindGroupLayout:storage_texture,formats:format=24;access=2
-webgpu:api,validation,createBindGroupLayout:storage_texture,formats:format=24;access=3

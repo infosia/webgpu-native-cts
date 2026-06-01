@@ -69,8 +69,10 @@ Windows/Vulkan (NVIDIA RTX 5060 Ti) — the same `pass=4131 skip=200` on each. T
 [F-018](#f-018--yawgpu-over-restricts-bindgrouplayout-storage-texture-bindings) (yawgpu over-restricts
 BGL storage-texture bindings — 1D view dimension + `rgba8snorm` format) and
 [F-019](#f-019--wgpu-native-aborts-on-an-undefined-view-dimension-in-a-bindgrouplayout-entry)
-(wgpu-native aborts on an undefined BGL view dimension). The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016. Open yawgpu findings: F-018. Open
+(wgpu-native aborts on an undefined BGL view dimension). **yawgpu fixed F-018 in `925520a`** — so once
+again **yawgpu passes every ported `api,validation` test** (`pass=4271 skip=377 fail=0 crash=0`,
+identical to Dawn) with no expected-failure lines. The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018. Open yawgpu findings: none. Open
 wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019.**
 
 ---
@@ -497,8 +499,11 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019.**
   same 177 feature-gated `formats` cases, so this is a behavioural divergence, not a feature difference.
 - **Expected (WebGPU):** a `1d` storage-texture view dimension is valid; `rgba8snorm` supports write-only
   and read-only storage with no feature. Dawn enforces both.
-- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 3 cases are in
-  `expectations/yawgpu.txt`; wgpu-native and Dawn need no entries.
+- **Status:** **RESOLVED** on yawgpu `925520a` (re-test 2026-06-01) — *"cts-findings: BGL storage-texture
+  1D view dim + rgba8snorm base storage (F-018)"*. yawgpu now accepts the 1D storage view dimension and
+  `rgba8snorm` storage on the BGL path; all 3 cases pass and the full ported suite is clean again
+  (`pass=4271 skip=377 fail=0 crash=0`, identical to Dawn). The 3 lines were removed from
+  `expectations/yawgpu.txt`.
 
 ---
 
