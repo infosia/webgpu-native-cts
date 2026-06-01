@@ -105,10 +105,12 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes **every ported `api,validation` test** (zero open
-  validation findings); the just-opened `api/operation` surfaced one open finding, **F-023** (aborts on a
-  0-size buffer clear/copy — an un-ended Metal blit encoder). (It also *runs* the `immediate_data_size`
-  cases that Dawn/wgpu-native skip.)
+- **yawgpu** — the primary conformance subject — passes **every ported test, both `api,validation` and
+  `api,operation`** (zero open findings). The just-opened `api/operation` surfaced **F-023** (a 0-size
+  buffer clear/copy aborted on an un-ended Metal blit encoder, and the fix then exposed a `clearBuffer`
+  zero-fill / `WGPU_WHOLE_SIZE` bug); yawgpu fixed it (`e56f30a`), and `api,operation,command_buffer` is
+  now Dawn-equal (`pass=5 fail=0 crash=0`). (It also *runs* the `immediate_data_size` cases that
+  Dawn/wgpu-native skip.)
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021) and missing validation (F-012 — `createView` on a destroyed texture; F-015 — the

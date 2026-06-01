@@ -85,9 +85,13 @@ again **yawgpu passes every ported `api,validation` test** (`pass=4332 skip=383 
 the 8 `immediate_data_size` cases Dawn skips). Opening **`api/operation` (Phase 4, T22)** then surfaced
 the first **execution** finding,
 [F-023](#f-023--yawgpu-aborts-on-a-0-size-clearbuffer--copybuffertobuffer-un-ended-metal-blit-encoder)
-(yawgpu aborts on a 0-size buffer clear/copy — an un-ended Metal blit encoder). The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022. Open yawgpu findings: F-023
-(api/operation). yawgpu still passes every ported `api,validation` test. Open wgpu-native: F-001–F-004,
+(yawgpu aborts on a 0-size buffer clear/copy — an un-ended Metal blit encoder), whose multi-stage fix
+also surfaced and resolved a `clearBuffer` zero-fill / `WGPU_WHOLE_SIZE` bug. **yawgpu fixed F-023 in
+`e56f30a`** — so `api,operation,command_buffer` is now `pass=5 fail=0 crash=0` (Dawn-equal) and yawgpu
+**passes every ported test, both `api,validation` and `api,operation`** (`api,validation` unchanged at
+`pass=4332 skip=383 fail=0 crash=0`). The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022/023. No open yawgpu findings —
+`expectations/yawgpu.txt` has no expected failures. Open wgpu-native: F-001–F-004,
 F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
@@ -638,9 +642,23 @@ F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
   is sound — Dawn and the non-zero yawgpu cases pass.)
 - **Expected (WebGPU):** a 0-size buffer clear/copy is a **valid no-op**, never a process abort. Dawn
   executes it cleanly.
-- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; recorded in
-  `expectations/yawgpu.txt` as `api,operation,command_buffer,{clearBuffer:clear,copyBufferToBuffer:single}:*`
-  prefix lines; wgpu-native and Dawn need no entries (wgpu-native's clearBuffer abort is F-002).
+- **Status:** **RESOLVED** in yawgpu at `e56f30a` (*"resolve WGPU_WHOLE_SIZE in clearBuffer — F-023
+  fully complete"*). The fix landed in stages, each re-verified on real-GPU Metal:
+  - `8646e5f` ended the Metal blit encoder for 0-size ops, killing the abort — `copyBufferToBuffer:single`
+    went green (`pass=2`) — but **exposed that yawgpu's `clearBuffer` never actually zeroed** the buffer
+    (`GPU buffer mismatch at byte 0: expected 0, got 1` — the crash had been masking it).
+  - `a344faf` began implementing the zero-fill but still left an **off-by-one-dword at the range start**:
+    the first `u32` at the clear `offset` kept its original value (`got 1/5/9/17` at byte `0/4/8/16`,
+    `pass=40 fail=10`).
+  - `e56f30a` resolved the `WGPU_WHOLE_SIZE` length handling and that start-of-range word, completing
+    the fix.
+  - At `e56f30a`: `api,operation,command_buffer,*` is `pass=5 fail=0 crash=0` (Dawn-equal) and the full
+    `api,validation` surface is unchanged (`pass=4332 skip=383 fail=0 crash=0`). The
+    `expectations/yawgpu.txt` entries were removed; the file now has **no** expected failures.
+  - wgpu-native still aborts the `clearBuffer:clear` case — that is the distinct **F-002**, not this.
+  - *(Diagnosis note: this real-GPU verification must run with the Bash sandbox disabled. Under the macOS
+    sandbox, Metal `enumerate_adapters` returns no adapters and every case false-fails with "failed to
+    create WebGPU instance" — a harness/environment artifact, not a backend defect.)*
 
 ---
 
