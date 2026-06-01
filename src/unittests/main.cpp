@@ -382,6 +382,21 @@ int main() {
         require(containsTextureFormat(cts::kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly,
                                       WGPUTextureFormat_R8Unorm),
                 "r8unorm tier1 storage");
+        require(cts::kReadWriteStorageTextureFormats.size() == 3, "read-write storage format count");
+        require(containsTextureFormat(cts::kReadWriteStorageTextureFormats, WGPUTextureFormat_R32Float),
+                "read-write storage contains r32float");
+        require(containsTextureFormat(cts::kReadWriteStorageTextureFormats, WGPUTextureFormat_R32Uint),
+                "read-write storage contains r32uint");
+        require(containsTextureFormat(cts::kReadWriteStorageTextureFormats, WGPUTextureFormat_R32Sint),
+                "read-write storage contains r32sint");
+        require(!containsTextureFormat(cts::kReadWriteStorageTextureFormats, WGPUTextureFormat_RGBA8Unorm),
+                "read-write storage excludes rgba8unorm");
+        require(containsTextureFormat(cts::kStorageTextureFormats, WGPUTextureFormat_RGBA8Unorm),
+                "rgba8unorm read-only storage base usable");
+        require(!containsTextureFormat(cts::kStorageTextureFormats, WGPUTextureFormat_BGRA8Unorm),
+                "bgra8unorm read-only storage base unusable");
+        require(!containsTextureFormat(cts::kStorageTextureFormats, WGPUTextureFormat_BC1RGBAUnorm),
+                "bc1 read-only storage base unusable");
         size_t multisampleCount = 0;
         for (WGPUTextureFormat format : cts::kAllTextureFormats) {
             if (cts::textureFormatInfo(format).multisample) {

@@ -58,6 +58,9 @@ class GpuTest : public Fixture {
     bool isTextureFormatColorRenderable(WGPUTextureFormat format);
     bool isTextureFormatUsableAsRenderAttachment(WGPUTextureFormat format);
     bool isTextureFormatUsableAsWriteOnlyStorageTexture(WGPUTextureFormat format);
+    bool isTextureFormatUsableAsReadOnlyStorageTexture(WGPUTextureFormat format);
+    bool isTextureFormatUsableAsReadWriteStorageTexture(WGPUTextureFormat format);
+    bool isTextureFormatUsableWithStorageAccessMode(WGPUTextureFormat format, WGPUStorageTextureAccess access);
     bool isTextureFormatMultisampled(WGPUTextureFormat format);
 
   private:

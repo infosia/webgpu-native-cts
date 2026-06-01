@@ -7,6 +7,7 @@
 #include "cts/gpu.h"
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
+#include "webgpu/texture_format.h"
 
 using namespace cts;
 
@@ -59,6 +60,44 @@ std::vector<Value> storageTextureAccessValuesWithUndefined() {
     values.push_back(Value::undef());
     for (WGPUStorageTextureAccess access : kStorageTextureAccessValues) {
         values.emplace_back(static_cast<uint64_t>(access));
+    }
+    return values;
+}
+
+std::vector<Value> storageTextureAccessValues() {
+    std::vector<Value> values;
+    values.reserve(kStorageTextureAccessValues.size());
+    for (WGPUStorageTextureAccess access : kStorageTextureAccessValues) {
+        values.emplace_back(static_cast<uint64_t>(access));
+    }
+    return values;
+}
+
+std::vector<Value> textureSampleTypeValuesWithUndefined() {
+    std::vector<Value> values;
+    values.reserve(kTextureSampleTypes.size() + 1);
+    values.push_back(Value::undef());
+    for (WGPUTextureSampleType sampleType : kTextureSampleTypes) {
+        values.emplace_back(static_cast<uint64_t>(sampleType));
+    }
+    return values;
+}
+
+std::vector<Value> textureViewDimensionValuesWithUndefined() {
+    std::vector<Value> values;
+    values.reserve(kTextureViewDimensions.size() + 1);
+    values.push_back(Value::undef());
+    for (WGPUTextureViewDimension dimension : kTextureViewDimensions) {
+        values.emplace_back(static_cast<int64_t>(dimension));
+    }
+    return values;
+}
+
+std::vector<Value> allTextureFormatValues() {
+    std::vector<Value> values;
+    values.reserve(kAllTextureFormats.size());
+    for (WGPUTextureFormat format : kAllTextureFormats) {
+        values.emplace_back(static_cast<int64_t>(format));
     }
     return values;
 }
@@ -255,6 +294,107 @@ CTS_TEST(g, "visibility,VERTEX_shader_stage_storage_texture_access")
         const bool success = !((shaderStage & WGPUShaderStage_Vertex)
                                && appliedAccess != WGPUStorageTextureAccess_ReadOnly)
             && isValidStorageTextureForStages(compat, shaderStage);
+        t.expectValidationError([&] {
+            t.createBindGroupLayoutTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "multisampled_validation")
+    .desc("Test multisampled texture binding layout validation.")
+    .params([](ParamsBuilder u) {
+        return u.combine("viewDimension", textureViewDimensionValuesWithUndefined())
+            .beginSubcases()
+            .combine("sampleType", textureSampleTypeValuesWithUndefined());
+    })
+    .fn([](GpuTest& t) {
+        const bool viewDimensionIsUndefined = t.paramIsUndefined("viewDimension");
+        const WGPUTextureViewDimension viewDimension = viewDimensionIsUndefined
+            ? WGPUTextureViewDimension_Undefined
+            : static_cast<WGPUTextureViewDimension>(t.param<int64_t>("viewDimension"));
+        const bool sampleTypeIsUndefined = t.paramIsUndefined("sampleType");
+        const WGPUTextureSampleType appliedSampleType = sampleTypeIsUndefined
+            ? WGPUTextureSampleType_Float
+            : static_cast<WGPUTextureSampleType>(t.param<uint64_t>("sampleType"));
+
+        WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        entry.binding = 0;
+        entry.visibility = WGPUShaderStage_Compute;
+        entry.texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+        entry.texture.multisampled = WGPU_TRUE;
+        if (!viewDimensionIsUndefined) {
+            entry.texture.viewDimension = viewDimension;
+        }
+        if (!sampleTypeIsUndefined) {
+            entry.texture.sampleType = appliedSampleType;
+        }
+
+        WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        desc.entryCount = 1;
+        desc.entries = &entry;
+
+        const bool success = (viewDimension == WGPUTextureViewDimension_2D || viewDimensionIsUndefined)
+            && appliedSampleType != WGPUTextureSampleType_Float;
+        t.expectValidationError([&] {
+            t.createBindGroupLayoutTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "storage_texture,layout_dimension")
+    .desc("Test storage texture binding layout view dimension validation.")
+    .params([](ParamsBuilder u) {
+        return u.combine("viewDimension", textureViewDimensionValuesWithUndefined());
+    })
+    .fn([](GpuTest& t) {
+        const bool viewDimensionIsUndefined = t.paramIsUndefined("viewDimension");
+        const WGPUTextureViewDimension viewDimension = viewDimensionIsUndefined
+            ? WGPUTextureViewDimension_Undefined
+            : static_cast<WGPUTextureViewDimension>(t.param<int64_t>("viewDimension"));
+
+        WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        entry.binding = 0;
+        entry.visibility = WGPUShaderStage_Compute;
+        entry.storageTexture = WGPU_STORAGE_TEXTURE_BINDING_LAYOUT_INIT;
+        entry.storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+        entry.storageTexture.format = WGPUTextureFormat_RGBA8Unorm;
+        if (!viewDimensionIsUndefined) {
+            entry.storageTexture.viewDimension = viewDimension;
+        }
+
+        WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        desc.entryCount = 1;
+        desc.entries = &entry;
+
+        const bool success = viewDimension != WGPUTextureViewDimension_Cube
+            && viewDimension != WGPUTextureViewDimension_CubeArray;
+        t.expectValidationError([&] {
+            t.createBindGroupLayoutTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "storage_texture,formats")
+    .desc("Test storage texture binding layout format and access validation.")
+    .params([](ParamsBuilder u) {
+        return u.combine("format", allTextureFormatValues())
+            .combine("access", storageTextureAccessValues());
+    })
+    .fn([](GpuTest& t) {
+        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUStorageTextureAccess access = static_cast<WGPUStorageTextureAccess>(t.param<uint64_t>("access"));
+
+        t.skipIfTextureFormatNotSupported(format);
+
+        WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        entry.binding = 0;
+        entry.visibility = WGPUShaderStage_Compute;
+        entry.storageTexture = WGPU_STORAGE_TEXTURE_BINDING_LAYOUT_INIT;
+        entry.storageTexture.format = format;
+        entry.storageTexture.access = access;
+
+        WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        desc.entryCount = 1;
+        desc.entries = &entry;
+
+        const bool success = t.isTextureFormatUsableWithStorageAccessMode(format, access);
         t.expectValidationError([&] {
             t.createBindGroupLayoutTracked(desc);
         }, !success);

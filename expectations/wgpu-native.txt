@@ -65,3 +65,8 @@ webgpu:api,validation,createView:texture_view_usage:*
 # T13: wgpu-native aborts while validating BGL visibility entries that include storage textures.
 webgpu:api,validation,createBindGroupLayout:visibility:*
 webgpu:api,validation,createBindGroupLayout:visibility,VERTEX_shader_stage_storage_texture_access:*
+
+# T14: wgpu-native aborts on undefined BGL texture view dimensions and storage texture format/access validation.
+webgpu:api,validation,createBindGroupLayout:multisampled_validation:viewDimension=_undef_
+webgpu:api,validation,createBindGroupLayout:storage_texture,layout_dimension:viewDimension=_undef_
+webgpu:api,validation,createBindGroupLayout:storage_texture,formats:*

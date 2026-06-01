@@ -64,9 +64,14 @@ read-write storage textures on the core `r32*` read-write formats) and
 storage-texture BGL entries). **yawgpu fixed F-016 in `4292f76`** — so once again **yawgpu passes every
 ported `api,validation` test** (`pass=4131 skip=200 fail=0 crash=0`, identical to Dawn) with no
 expected-failure lines, confirmed over the full 4331-case surface on **both** real-GPU Metal and
-Windows/Vulkan (NVIDIA RTX 5060 Ti) — the same `pass=4131 skip=200` on each. The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016. Open yawgpu findings: none. Open
-wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017.**
+Windows/Vulkan (NVIDIA RTX 5060 Ti) — the same `pass=4131 skip=200` on each. The second
+`createBindGroupLayout` slice (T14 — `storage_texture` + `multisampled`) then surfaced
+[F-018](#f-018--yawgpu-over-restricts-bindgrouplayout-storage-texture-bindings) (yawgpu over-restricts
+BGL storage-texture bindings — 1D view dimension + `rgba8snorm` format) and
+[F-019](#f-019--wgpu-native-aborts-on-an-undefined-view-dimension-in-a-bindgrouplayout-entry)
+(wgpu-native aborts on an undefined BGL view dimension). The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016. Open yawgpu findings: F-018. Open
+wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019.**
 
 ---
 
@@ -467,6 +472,50 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017.**
   `expectations/wgpu-native.txt` as `createBindGroupLayout:visibility:*` +
   `createBindGroupLayout:visibility,VERTEX_shader_stage_storage_texture_access:*` prefix lines.
   (`visibility,VERTEX_shader_stage_buffer_type` has no storage entry and passes on all three.)
+- **Update (T14):** the BGL `storage_texture,formats` test (storage-texture entries for every format ×
+  access) likewise crashes every non-skipped wgpu-native case (126/126), confirming the same defect;
+  recorded as a `createBindGroupLayout:storage_texture,formats:*` prefix.
+
+---
+
+## F-018 — yawgpu over-restricts BindGroupLayout storage-texture bindings
+
+- **Backend:** yawgpu (`4292f76`). **Not** present in Dawn (accepts both) or wgpu-native (which aborts,
+  F-017/F-019). Two distinct over-restrictions, both surfaced by BGL T14:
+  - **1D view dimension** — `storage_texture,layout_dimension:viewDimension=1d`: yawgpu raises *"storage
+    texture bindings must not use 1D view dimension"*. **Dawn accepts** (1D is a valid storage view
+    dimension — only `cube`/`cube-array` are disallowed; WGSL has `texture_storage_1d`).
+  - **`rgba8snorm` format** — `storage_texture,formats:format=rgba8snorm` with `write-only` and
+    `read-only` access: yawgpu raises *"storage texture binding format must support storage usage"*.
+    `rgba8snorm` is a **core** writable/readable storage format (no feature gate); **Dawn accepts** it,
+    and it is the only base-storage format yawgpu rejects. (Same `rgba8snorm`-storage root as the
+    texture-path [F-009](#f-009--yawgpu-over-restricts-render-attachment-dimension-and-under-validates-storage-usage),
+    which was fixed for `createTexture` but not for the BGL `storageTexture` path.)
+- **Found by:** `webgpu:api,validation,createBindGroupLayout:{storage_texture,layout_dimension,storage_texture,formats}`
+  (BGL T14). **Dawn is the reference** — it passes all of `layout_dimension` (7/7) and accepts `rgba8snorm`
+  storage; yawgpu fails 3 cases (1 × 1D + 2 × rgba8snorm write-only/read-only). Both backends skip the
+  same 177 feature-gated `formats` cases, so this is a behavioural divergence, not a feature difference.
+- **Expected (WebGPU):** a `1d` storage-texture view dimension is valid; `rgba8snorm` supports write-only
+  and read-only storage with no feature. Dawn enforces both.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 3 cases are in
+  `expectations/yawgpu.txt`; wgpu-native and Dawn need no entries.
+
+---
+
+## F-019 — wgpu-native aborts on an undefined view dimension in a BindGroupLayout entry
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu or Dawn. Same eager-panic
+  class as [F-017](#f-017--wgpu-native-aborts-on-storage-texture-bindgrouplayout-entries) (`src/conv.rs:1669`).
+- **Found by:** `webgpu:api,validation,createBindGroupLayout:{multisampled_validation,storage_texture,layout_dimension}`
+  (BGL T14), the `viewDimension=undefined` cases. **Dawn passes both (the reference); wgpu-native crashes**
+  (1 each).
+- **Observed on wgpu-native:** a BGL `texture`/`storageTexture` entry with an **omitted** `viewDimension`
+  makes `createBindGroupLayout` **panic and abort** (`src/conv.rs:1669`) instead of applying the default.
+  (Defined view dimensions do **not** crash — wgpu-native passes the other 6 `layout_dimension` cases.)
+- **Expected (WebGPU):** an omitted `viewDimension` defaults (to `2d`), never aborts. Dawn and yawgpu
+  default it correctly.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
+  `expectations/wgpu-native.txt` as the two `…:viewDimension=_undef_` exact lines.
 
 ---
 

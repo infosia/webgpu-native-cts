@@ -362,6 +362,30 @@ inline constexpr std::array<WGPUTextureFormat, 17> kTextureFormatsTier1EnablesSt
     WGPUTextureFormat_RG11B10Ufloat,
 };
 
+inline constexpr std::array<WGPUTextureFormat, 3> kReadWriteStorageTextureFormats = {
+    WGPUTextureFormat_R32Uint,
+    WGPUTextureFormat_R32Sint,
+    WGPUTextureFormat_R32Float,
+};
+
+inline constexpr std::array<WGPUTextureFormat, 15> kTextureFormatsTier2EnablesStorageReadWrite = {
+    WGPUTextureFormat_R8Unorm,
+    WGPUTextureFormat_R8Uint,
+    WGPUTextureFormat_R8Sint,
+    WGPUTextureFormat_RGBA8Unorm,
+    WGPUTextureFormat_RGBA8Uint,
+    WGPUTextureFormat_RGBA8Sint,
+    WGPUTextureFormat_R16Uint,
+    WGPUTextureFormat_R16Sint,
+    WGPUTextureFormat_R16Float,
+    WGPUTextureFormat_RGBA16Uint,
+    WGPUTextureFormat_RGBA16Sint,
+    WGPUTextureFormat_RGBA16Float,
+    WGPUTextureFormat_RGBA32Uint,
+    WGPUTextureFormat_RGBA32Sint,
+    WGPUTextureFormat_RGBA32Float,
+};
+
 inline constexpr std::array<WGPUFeatureName, 6> kFeaturesForFormats = {
     WGPUFeatureName_Force32,
     WGPUFeatureName_TextureFormatsTier1,

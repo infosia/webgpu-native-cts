@@ -550,6 +550,34 @@ bool GpuTest::isTextureFormatUsableAsWriteOnlyStorageTexture(WGPUTextureFormat f
     return textureFormatInList(format, kStorageTextureFormats);
 }
 
+bool GpuTest::isTextureFormatUsableAsReadOnlyStorageTexture(WGPUTextureFormat format) {
+    if (format == WGPUTextureFormat_BGRA8Unorm) {
+        return false;
+    }
+    return isTextureFormatUsableAsWriteOnlyStorageTexture(format);
+}
+
+bool GpuTest::isTextureFormatUsableAsReadWriteStorageTexture(WGPUTextureFormat format) {
+    return textureFormatInList(format, kReadWriteStorageTextureFormats)
+        || (wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureFormatsTier2)
+            && textureFormatInList(format, kTextureFormatsTier2EnablesStorageReadWrite));
+}
+
+bool GpuTest::isTextureFormatUsableWithStorageAccessMode(
+    WGPUTextureFormat format,
+    WGPUStorageTextureAccess access) {
+    switch (access) {
+        case WGPUStorageTextureAccess_ReadOnly:
+            return isTextureFormatUsableAsReadOnlyStorageTexture(format);
+        case WGPUStorageTextureAccess_WriteOnly:
+            return isTextureFormatUsableAsWriteOnlyStorageTexture(format);
+        case WGPUStorageTextureAccess_ReadWrite:
+            return isTextureFormatUsableAsReadWriteStorageTexture(format);
+        default:
+            return false;
+    }
+}
+
 bool GpuTest::isTextureFormatMultisampled(WGPUTextureFormat format) {
     if (format == WGPUTextureFormat_RG11B10Ufloat) {
         return wgpuDeviceHasFeature(device(), WGPUFeatureName_RG11B10UfloatRenderable);
