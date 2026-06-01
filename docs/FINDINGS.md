@@ -74,8 +74,10 @@ createPipelineLayout T18 slice then surfaced
 [F-020](#f-020--yawgpu-rejects-null-bind-group-layout-slots-in-createpipelinelayout) (yawgpu doesn't yet
 implement null bind-group-layout slots) and
 [F-021](#f-021--wgpu-native-aborts-on-null-bind-group-layout-slots-in-createpipelinelayout) (wgpu-native
-aborts on them). The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018. Open yawgpu findings: F-020. Open
+aborts on them). **yawgpu fixed F-020 in `f75fc0a`** — so again **yawgpu passes every ported
+`api,validation` test** (`pass=4307 skip=377 fail=0 crash=0`; it runs the 8 `immediate_data_size` cases
+Dawn skips). The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020. Open yawgpu findings: none. Open
 wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
@@ -546,9 +548,10 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
   slots. (In C, the test's `Null` and `Undefined` param values both map to a `NULL` handle.)
 - **Expected (WebGPU):** a null bind-group-layout slot in a pipeline layout is valid (the slot is unused).
   Dawn enforces this.
-- **Status:** open; tracked as a **yawgpu gap** (feature not yet implemented; 3-way confirmed). Not masked;
-  recorded in `expectations/yawgpu.txt` as a `createPipelineLayout:bind_group_layouts,null_bind_group_layouts:*`
-  prefix line; wgpu-native and Dawn need no entries.
+- **Status:** **RESOLVED** on yawgpu `f75fc0a` (re-test 2026-06-01) — *"cts-findings: implement null
+  bind-group-layout slots in createPipelineLayout (F-020)"*. yawgpu now accepts null/undefined BGL slots;
+  all 30 subcases pass and the full ported suite is clean again (`pass=4307 skip=377 fail=0 crash=0`).
+  The line was removed from `expectations/yawgpu.txt`.
 
 ---
 

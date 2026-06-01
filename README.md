@@ -104,9 +104,9 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — matches Dawn except for one open finding, **F-020**
-  (null bind-group-layout slots in `createPipelineLayout`, not yet implemented; 1 case). (It also
-  *supports* immediate data, which Dawn/wgpu-native skip.)
+- **yawgpu** — the primary conformance subject — passes every ported `api,validation` test, **with zero
+  open findings**. (It also *runs* the `immediate_data_size` cases that Dawn/wgpu-native skip — yawgpu
+  supports immediate data; they report `maxImmediateSize=0`.)
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021) and missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
@@ -124,7 +124,7 @@ subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 | Backend | pass | skip | fail | crash | |
 |---------|-----:|-----:|-----:|------:|--|
 | **Dawn** | 4299 | 385 | 0 | 0 | C++ reference implementation — the conformance oracle |
-| **yawgpu** | 4306 | 377 | 1 | 0 | primary subject — 1 fail is the open **F-020** (null BGL slots); also runs the 8 `immediate_data_size` cases Dawn skips |
+| **yawgpu** | 4307 | 377 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips (so +8 pass / −8 skip vs Dawn) |
 | **wgpu-native** | 3401 | 750 | 327 | 206 | 206 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017, F-019, F-021); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
 
 **Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti; `--isolate --expectations`, exit 0;
