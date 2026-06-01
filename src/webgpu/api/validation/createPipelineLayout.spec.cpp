@@ -149,6 +149,189 @@ WGPUBindGroupLayout createMaybeNullBindGroupLayout(GpuTest& t, const std::string
     t.fail("unexpected bind group layout type");
 }
 
+enum class PipelineType {
+    Render,
+    Compute,
+};
+
+std::vector<Value> pipelineTypeValues() {
+    return {Value("Render"), Value("Compute")};
+}
+
+PipelineType pipelineTypeFromParam(const std::string& type) {
+    if (type == "Render") {
+        return PipelineType::Render;
+    }
+    if (type == "Compute") {
+        return PipelineType::Compute;
+    }
+    std::abort();
+}
+
+std::vector<Value> nullBindGroupLayoutTypeValues() {
+    return {Value("Null"), Value("Undefined")};
+}
+
+WGPUStringView stringView(const char* text) {
+    return WGPUStringView{text, WGPU_STRLEN};
+}
+
+WGPUBindGroupLayoutEntry uniformBufferEntry() {
+    return bufferEntry(
+        0,
+        static_cast<WGPUShaderStage>(WGPUShaderStage_Compute | WGPUShaderStage_Fragment),
+        WGPUBufferBindingType_Uniform,
+        false);
+}
+
+std::vector<WGPUBindGroupLayout> createFourBindGroupLayoutsWithNullSlot(GpuTest& t, int emptyIndex) {
+    std::vector<WGPUBindGroupLayout> layouts;
+    layouts.reserve(4);
+    for (int i = 0; i < 4; ++i) {
+        if (i == emptyIndex) {
+            layouts.push_back(nullptr);
+        } else {
+            layouts.push_back(createBindGroupLayoutWithEntries(t, {uniformBufferEntry()}));
+        }
+    }
+    return layouts;
+}
+
+WGPUPipelineLayout createPipelineLayoutForLayouts(
+    GpuTest& t,
+    const std::vector<WGPUBindGroupLayout>& layouts) {
+    WGPUPipelineLayoutDescriptor desc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    desc.bindGroupLayoutCount = layouts.size();
+    desc.bindGroupLayouts = layouts.data();
+    return t.createPipelineLayoutTracked(desc);
+}
+
+std::string shaderSource(PipelineType type, int emptyIndex, bool emptyIndexMissedInShader) {
+    std::string declarations;
+    std::string statement = "_ = 1u";
+    for (int i = 0; i < 4; ++i) {
+        if (emptyIndexMissedInShader && i == emptyIndex) {
+            continue;
+        }
+        declarations += "@group(" + std::to_string(i)
+            + ") @binding(0) var<uniform> input" + std::to_string(i) + " : u32;\n";
+        statement += " + input" + std::to_string(i);
+    }
+    statement += ";\n";
+
+    if (type == PipelineType::Render) {
+        return declarations
+            + "@vertex fn vert_main() -> @builtin(position) vec4f {\n"
+            + "  return vec4f(0, 0, 0, 1);\n"
+            + "}\n"
+            + "@fragment fn frag_main() -> @location(0) vec4f {\n"
+            + "  " + statement
+            + "  return vec4f(0, 0, 0, 1);\n"
+            + "}\n";
+    }
+
+    return declarations
+        + "@compute @workgroup_size(1) fn cs_main() {\n"
+        + "  " + statement
+        + "}\n";
+}
+
+WGPURenderPipeline createRenderPipeline(
+    GpuTest& t,
+    WGPUPipelineLayout layout,
+    WGPUShaderModule shaderModule) {
+    WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+    colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+    colorTarget.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    fragment.module = shaderModule;
+    fragment.entryPoint = stringView("frag_main");
+    fragment.targetCount = 1;
+    fragment.targets = &colorTarget;
+
+    WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    desc.layout = layout;
+    desc.vertex.module = shaderModule;
+    desc.vertex.entryPoint = stringView("vert_main");
+    desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    desc.multisample.count = 1;
+    desc.fragment = &fragment;
+    return t.createRenderPipelineTracked(desc);
+}
+
+WGPUComputePipeline createComputePipeline(
+    GpuTest& t,
+    WGPUPipelineLayout layout,
+    WGPUShaderModule shaderModule) {
+    WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+    desc.layout = layout;
+    desc.compute.module = shaderModule;
+    desc.compute.entryPoint = stringView("cs_main");
+    return t.createComputePipelineTracked(desc);
+}
+
+WGPUBindGroup createUniformBindGroup(GpuTest& t, WGPUBindGroupLayout layout) {
+    WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
+    bufferDesc.size = 4;
+    WGPUBuffer buffer = t.createBufferTracked(bufferDesc);
+
+    WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+    entry.binding = 0;
+    entry.buffer = buffer;
+    entry.offset = 0;
+    entry.size = 4;
+
+    WGPUBindGroupDescriptor desc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    desc.layout = layout;
+    desc.entryCount = 1;
+    desc.entries = &entry;
+    return t.createBindGroupTracked(desc);
+}
+
+std::vector<WGPUBindGroup> createBindGroupsForLayouts(
+    GpuTest& t,
+    const std::vector<WGPUBindGroupLayout>& layouts,
+    int emptyIndex) {
+    std::vector<WGPUBindGroup> bindGroups;
+    bindGroups.reserve(layouts.size());
+    for (int i = 0; i < static_cast<int>(layouts.size()); ++i) {
+        if (i == emptyIndex) {
+            bindGroups.push_back(nullptr);
+        } else {
+            bindGroups.push_back(createUniformBindGroup(t, layouts[static_cast<size_t>(i)]));
+        }
+    }
+    return bindGroups;
+}
+
+void setBindGroups(
+    WGPURenderPassEncoder pass,
+    const std::vector<WGPUBindGroup>& bindGroups,
+    int emptyIndex,
+    bool setBindGroupOnEmptyIndex) {
+    for (int i = 0; i < static_cast<int>(bindGroups.size()); ++i) {
+        if (i == emptyIndex && !setBindGroupOnEmptyIndex) {
+            continue;
+        }
+        wgpuRenderPassEncoderSetBindGroup(pass, static_cast<uint32_t>(i), bindGroups[static_cast<size_t>(i)], 0, nullptr);
+    }
+}
+
+void setBindGroups(
+    WGPUComputePassEncoder pass,
+    const std::vector<WGPUBindGroup>& bindGroups,
+    int emptyIndex,
+    bool setBindGroupOnEmptyIndex) {
+    for (int i = 0; i < static_cast<int>(bindGroups.size()); ++i) {
+        if (i == emptyIndex && !setBindGroupOnEmptyIndex) {
+            continue;
+        }
+        wgpuComputePassEncoderSetBindGroup(pass, static_cast<uint32_t>(i), bindGroups[static_cast<size_t>(i)], 0, nullptr);
+    }
+}
+
 CTS_TEST(g, "number_of_bind_group_layouts_exceeds_the_maximum_value")
     .desc("Test that creating a pipeline layout fails if the number of bind group layouts exceeds the maximum value.")
     .fn([](GpuTest& t) {
@@ -304,6 +487,99 @@ CTS_TEST(g, "bind_group_layouts,device_mismatch")
         t.expectValidationError([&] {
             createPipelineLayoutWithBindGroupLayouts(t, {layout0, layout1});
         }, layout0Mismatched || layout1Mismatched);
+    });
+
+CTS_TEST(g, "bind_group_layouts,create_pipeline_with_null_bind_group_layouts")
+    .desc("Test pipeline creation with a pipeline layout that has a null bind group layout slot.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases()
+            .combine("pipelineType", pipelineTypeValues())
+            .combine("emptyBindGroupLayoutType", nullBindGroupLayoutTypeValues())
+            .combine("emptyBindGroupLayoutIndex", {0, 1, 2, 3})
+            .combine("emptyBindGroupLayoutIndexMissedInShader", {false, true});
+    })
+    .fn([](GpuTest& t) {
+        const PipelineType pipelineType = pipelineTypeFromParam(t.param<std::string>("pipelineType"));
+        (void)t.param<std::string>("emptyBindGroupLayoutType");
+        const int emptyIndex = t.param<int>("emptyBindGroupLayoutIndex");
+        const bool missedInShader = t.param<bool>("emptyBindGroupLayoutIndexMissedInShader");
+
+        t.expectValidationError([&] {
+            const std::vector<WGPUBindGroupLayout> layouts = createFourBindGroupLayoutsWithNullSlot(t, emptyIndex);
+            WGPUPipelineLayout layout = createPipelineLayoutForLayouts(t, layouts);
+            const std::string source = shaderSource(pipelineType, emptyIndex, missedInShader);
+            WGPUShaderModule shaderModule = t.createShaderModuleTracked(source);
+            if (pipelineType == PipelineType::Render) {
+                createRenderPipeline(t, layout, shaderModule);
+            } else {
+                createComputePipeline(t, layout, shaderModule);
+            }
+        }, !missedInShader);
+    });
+
+CTS_TEST(g, "bind_group_layouts,set_pipeline_with_null_bind_group_layouts")
+    .desc("Test setting a pipeline that has a null bind group layout slot.")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases()
+            .combine("pipelineType", pipelineTypeValues())
+            .combine("emptyBindGroupLayoutType", nullBindGroupLayoutTypeValues())
+            .combine("emptyBindGroupLayoutIndex", {0, 1, 2, 3})
+            .combine("setBindGroupOnEmptyBindGroupLayoutIndex", {false, true});
+    })
+    .fn([](GpuTest& t) {
+        const PipelineType pipelineType = pipelineTypeFromParam(t.param<std::string>("pipelineType"));
+        (void)t.param<std::string>("emptyBindGroupLayoutType");
+        const int emptyIndex = t.param<int>("emptyBindGroupLayoutIndex");
+        const bool setEmptyIndex = t.param<bool>("setBindGroupOnEmptyBindGroupLayoutIndex");
+
+        const std::vector<WGPUBindGroupLayout> layouts = createFourBindGroupLayoutsWithNullSlot(t, emptyIndex);
+        WGPUPipelineLayout layout = createPipelineLayoutForLayouts(t, layouts);
+        const std::string source = shaderSource(pipelineType, emptyIndex, true);
+        WGPUShaderModule shaderModule = t.createShaderModuleTracked(source);
+        std::vector<WGPUBindGroup> bindGroups = createBindGroupsForLayouts(t, layouts, emptyIndex);
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+
+        if (pipelineType == PipelineType::Render) {
+            WGPURenderPipeline pipeline = createRenderPipeline(t, layout, shaderModule);
+
+            WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+            textureDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+            textureDesc.dimension = WGPUTextureDimension_2D;
+            textureDesc.size = WGPUExtent3D{1, 1, 1};
+            textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+            WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+            WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+            WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+
+            WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+            colorAttachment.view = view;
+            colorAttachment.loadOp = WGPULoadOp_Load;
+            colorAttachment.storeOp = WGPUStoreOp_Store;
+
+            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            passDesc.colorAttachmentCount = 1;
+            passDesc.colorAttachments = &colorAttachment;
+            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            setBindGroups(pass, bindGroups, emptyIndex, setEmptyIndex);
+            wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+            wgpuRenderPassEncoderDraw(pass, 1, 1, 0, 0);
+            wgpuRenderPassEncoderEnd(pass);
+        } else {
+            WGPUComputePipeline pipeline = createComputePipeline(t, layout, shaderModule);
+
+            WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+            setBindGroups(pass, bindGroups, emptyIndex, setEmptyIndex);
+            wgpuComputePassEncoderSetPipeline(pass, pipeline);
+            wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
+            wgpuComputePassEncoderEnd(pass);
+        }
+
+        WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
+        t.expectValidationError([&] {
+            wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
+        }, false);
     });
 
 } // namespace

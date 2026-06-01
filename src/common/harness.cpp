@@ -267,6 +267,22 @@ void GpuTest::finalize() {
         wgpuTextureRelease(texture);
     }
     textures_.clear();
+    for (WGPUBindGroup bindGroup : bindGroups_) {
+        wgpuBindGroupRelease(bindGroup);
+    }
+    bindGroups_.clear();
+    for (WGPURenderPipeline pipeline : renderPipelines_) {
+        wgpuRenderPipelineRelease(pipeline);
+    }
+    renderPipelines_.clear();
+    for (WGPUComputePipeline pipeline : computePipelines_) {
+        wgpuComputePipelineRelease(pipeline);
+    }
+    computePipelines_.clear();
+    for (WGPUShaderModule shaderModule : shaderModules_) {
+        wgpuShaderModuleRelease(shaderModule);
+    }
+    shaderModules_.clear();
     for (WGPUPipelineLayout pipelineLayout : pipelineLayouts_) {
         wgpuPipelineLayoutRelease(pipelineLayout);
     }
@@ -442,6 +458,20 @@ WGPUTextureView GpuTest::createViewTracked(WGPUTexture texture, const WGPUTextur
     return textureView;
 }
 
+WGPUShaderModule GpuTest::createShaderModuleTracked(std::string_view wgsl) {
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = WGPUStringView{wgsl.data(), wgsl.size()};
+
+    WGPUShaderModuleDescriptor desc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    desc.nextInChain = &source.chain;
+
+    WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(device(), &desc);
+    if (shaderModule != nullptr) {
+        shaderModules_.push_back(shaderModule);
+    }
+    return shaderModule;
+}
+
 WGPUBindGroupLayout GpuTest::createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc) {
     WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(device(), &desc);
     if (layout != nullptr) {
@@ -458,12 +488,36 @@ WGPUBindGroupLayout GpuTest::createBindGroupLayoutOnMismatchedDevice(const WGPUB
     return layout;
 }
 
+WGPUBindGroup GpuTest::createBindGroupTracked(const WGPUBindGroupDescriptor& desc) {
+    WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(device(), &desc);
+    if (bindGroup != nullptr) {
+        bindGroups_.push_back(bindGroup);
+    }
+    return bindGroup;
+}
+
 WGPUPipelineLayout GpuTest::createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc) {
     WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(device(), &desc);
     if (layout != nullptr) {
         pipelineLayouts_.push_back(layout);
     }
     return layout;
+}
+
+WGPURenderPipeline GpuTest::createRenderPipelineTracked(const WGPURenderPipelineDescriptor& desc) {
+    WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(device(), &desc);
+    if (pipeline != nullptr) {
+        renderPipelines_.push_back(pipeline);
+    }
+    return pipeline;
+}
+
+WGPUComputePipeline GpuTest::createComputePipelineTracked(const WGPUComputePipelineDescriptor& desc) {
+    WGPUComputePipeline pipeline = wgpuDeviceCreateComputePipeline(device(), &desc);
+    if (pipeline != nullptr) {
+        computePipelines_.push_back(pipeline);
+    }
+    return pipeline;
 }
 
 WGPUCommandEncoder GpuTest::createCommandEncoderTracked() {

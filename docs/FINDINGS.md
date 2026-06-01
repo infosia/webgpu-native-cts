@@ -76,8 +76,12 @@ implement null bind-group-layout slots) and
 [F-021](#f-021--wgpu-native-aborts-on-null-bind-group-layout-slots-in-createpipelinelayout) (wgpu-native
 aborts on them). **yawgpu fixed F-020 in `f75fc0a`** — so again **yawgpu passes every ported
 `api,validation` test** (`pass=4307 skip=377 fail=0 crash=0`; it runs the 8 `immediate_data_size` cases
-Dawn skips). The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020. Open yawgpu findings: none. Open
+Dawn skips). The shader/pipeline/pass-foundation slice (T21 — the two `…_pipeline_with_null` tests,
+which complete `createPipelineLayout`) then surfaced
+[F-022](#f-022--yawgpu-does-not-defer-minbindingsize-validation-rejects-minbindingsize--0-at-pipeline-creation)
+(yawgpu rejects `minBindingSize = 0` at pipeline creation instead of deferring) and extended F-021
+(wgpu-native aborts on null BGL in pipeline creation/use). The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020. Open yawgpu findings: F-022. Open
 wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
@@ -574,11 +578,36 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 - **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
   `expectations/wgpu-native.txt` as a `createPipelineLayout:bind_group_layouts,null_bind_group_layouts:*`
   prefix line.
+- **Update (T21).** The same `src/conv.rs:506` abort fires when a null BGL slot flows into **pipeline
+  creation/use** — `createPipelineLayout:{create,set}_pipeline_with_null_bind_group_layouts` crash
+  wgpu-native (Dawn passes both). Recorded as two more `:*` prefix lines.
 
 > **Note (immediate data).** T18's `immediate_data_size` test runs **only on yawgpu** — yawgpu reports
 > `maxImmediateSize=64` (immediate data supported) while Dawn and wgpu-native report `0` and skip. yawgpu
 > passes all 8 cases (it validates the `% 4` / `<= maxImmediateSize` rules correctly), so it is **not** a
 > finding — yawgpu is simply ahead of Dawn/wgpu-native on this feature, with no cross-backend oracle here.
+
+---
+
+## F-022 — yawgpu does not defer `minBindingSize` validation (rejects `minBindingSize = 0` at pipeline creation)
+
+- **Backend:** yawgpu (`f75fc0a`). **Not** present in Dawn (defers, accepts) or wgpu-native (which aborts
+  on the null BGL first, F-021).
+- **Found by:** `webgpu:api,validation,createPipelineLayout:{create_pipeline_with_null_bind_group_layouts,
+  set_pipeline_with_null_bind_group_layouts}` (T21). The BGLs use `buffer{type:uniform}` with
+  `minBindingSize` unset (= **0**, the default); the shader declares `var<uniform> input : u32` (4 bytes).
+  **Dawn passes both tests (the reference); yawgpu fails both.**
+- **Observed on yawgpu:** `createRenderPipeline`/`createComputePipeline` raises *"compute pipeline layout
+  buffer minBindingSize is too small"* — yawgpu compares the BGL's `minBindingSize` (0) against the
+  shader's required size (4) and rejects at **pipeline-creation** time. (`set_pipeline` then fails at
+  submit — *"queue submit cannot use an error command buffer"* — a downstream consequence of the failed
+  pipeline.)
+- **Expected (WebGPU):** `minBindingSize = 0` means *unspecified* — the size check is **deferred to bind
+  time** (the bound buffer range must be large enough), and pipeline creation must **not** reject it. Dawn
+  implements this; our BGL deliberately leaves `minBindingSize` at its `INIT` default of 0.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; recorded in
+  `expectations/yawgpu.txt` as `createPipelineLayout:{create,set}_pipeline_with_null_bind_group_layouts:*`
+  prefix lines; wgpu-native and Dawn need no entries.
 
 ---
 

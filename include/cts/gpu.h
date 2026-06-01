@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <functional>
+#include <string_view>
 #include <vector>
 
 #include "cts/test.h"
@@ -40,9 +41,13 @@ class GpuTest : public Fixture {
     WGPUTexture createTextureTracked(const WGPUTextureDescriptor& desc);
     WGPUTexture createTextureWithState(ResourceState state, const WGPUTextureDescriptor& desc);
     WGPUTextureView createViewTracked(WGPUTexture texture, const WGPUTextureViewDescriptor& desc);
+    WGPUShaderModule createShaderModuleTracked(std::string_view wgsl);
     WGPUBindGroupLayout createBindGroupLayoutTracked(const WGPUBindGroupLayoutDescriptor& desc);
     WGPUBindGroupLayout createBindGroupLayoutOnMismatchedDevice(const WGPUBindGroupLayoutDescriptor& desc);
+    WGPUBindGroup createBindGroupTracked(const WGPUBindGroupDescriptor& desc);
     WGPUPipelineLayout createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc);
+    WGPURenderPipeline createRenderPipelineTracked(const WGPURenderPipelineDescriptor& desc);
+    WGPUComputePipeline createComputePipelineTracked(const WGPUComputePipelineDescriptor& desc);
     WGPUCommandEncoder createCommandEncoderTracked();
     WGPUCommandBuffer finishTracked(WGPUCommandEncoder encoder);
     void expectValidationError(const std::function<void()>& body, bool shouldError);
@@ -71,9 +76,13 @@ class GpuTest : public Fixture {
     std::vector<WGPUSampler> samplers_;
     std::vector<WGPUTexture> textures_;
     std::vector<WGPUTextureView> textureViews_;
+    std::vector<WGPUShaderModule> shaderModules_;
     std::vector<WGPUBindGroupLayout> bindGroupLayouts_;
     std::vector<WGPUBindGroupLayout> mismatchedDeviceBindGroupLayouts_;
+    std::vector<WGPUBindGroup> bindGroups_;
     std::vector<WGPUPipelineLayout> pipelineLayouts_;
+    std::vector<WGPURenderPipeline> renderPipelines_;
+    std::vector<WGPUComputePipeline> computePipelines_;
     std::vector<WGPUCommandEncoder> encoders_;
     std::vector<WGPUCommandBuffer> commandBuffers_;
     std::vector<WGPUBuffer> mismatchedDeviceBuffers_;
