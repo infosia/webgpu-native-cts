@@ -63,7 +63,8 @@ read-write storage textures on the core `r32*` read-write formats) and
 [F-017](#f-017--wgpu-native-aborts-on-storage-texture-bindgrouplayout-entries) (wgpu-native aborts on
 storage-texture BGL entries). **yawgpu fixed F-016 in `4292f76`** — so once again **yawgpu passes every
 ported `api,validation` test** (`pass=4131 skip=200 fail=0 crash=0`, identical to Dawn) with no
-expected-failure lines. The cycle continues.
+expected-failure lines, confirmed over the full 4331-case surface on **both** real-GPU Metal and
+Windows/Vulkan (NVIDIA RTX 5060 Ti) — the same `pass=4131 skip=200` on each. The cycle continues.
 **Resolved yawgpu findings: F-005/006/008/009/010/011/014/016. Open yawgpu findings: none. Open
 wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017.**
 

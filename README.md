@@ -101,7 +101,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 
 **Conformance outcome.** The suite has surfaced 17 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
 Acting on them, **yawgpu — the primary conformance subject — passes every ported `api,validation` test
-on real-GPU Metal** (`pass=4131 skip=200 fail=0 crash=0`, identical to Dawn): all eight of its findings
+on real-GPU Metal and Windows/Vulkan** (`pass=4131 skip=200 fail=0 crash=0` on both, identical to Dawn): all eight of its findings
 (F-005/006/008/009/010/011/014/016) were reported here, fixed upstream, and confirmed resolved — most
 recently F-016 (read-write storage on the core `r32*` formats), surfaced by the first
 `createBindGroupLayout` slice and fixed in `4292f76`. Dawn — the oracle — passes everything.
@@ -122,18 +122,24 @@ subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 | **yawgpu** | 4131 | 200 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
 | **wgpu-native** | 3378 | 565 | 327 | 61 | 61 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
 
-**Real-GPU Vulkan** (Windows 11, NVIDIA; `--isolate --expectations`, exit 0; over the 2610-case surface, before the createView tests were added):
+**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti; `--isolate --expectations`, exit 0;
+full 4331-case surface, 2026-06-01):
 
 | Backend | pass | skip | xfail | fail | crash |
 |---------|-----:|-----:|------:|-----:|------:|
-| **yawgpu** | 2594 | 16 | 0 | 0 | 0 |
-| **wgpu-native** | 1584 | 787 | 239 | 0 | 0 |
+| **yawgpu** | 4131 | 200 | 0 | 0 | 0 |
+| **wgpu-native** | 2478 | 1579 | 274 | 0 | 0 |
 
-(Dawn is not yet built on Windows.) `skip` / `xfail` counts differ across platforms because each
-adapter exposes a different optional-feature set (feature-gated formats skip where unsupported) and the
-crashing wgpu-native cases differ by driver. The `wgpu-native` crashes are contained by `--isolate`
-and listed in `expectations/wgpu-native.txt` (→ `xfail`), so an `--isolate --expectations` run exits 0
-on both platforms.
+**yawgpu posts the same `pass=4131 skip=200`, zero failures, on both platforms** (and matches Dawn) —
+a clean cross-platform result. (Dawn is not yet built on Windows.) The `wgpu-native` row differs from
+its Metal numbers because the expectations file (`expectations/wgpu-native.txt`) was tuned on Metal and
+this NVIDIA Vulkan driver diverges: 218 cases the file lists as failures (202 `createTexture`, 16
+`createView`) actually **pass** here (reported as `xpass`), while 274 expected divergences are still
+contained (`xfail`, dominated by 229 `createView` view-usage-subset cases — F-015 — plus the 16
+`createBindGroupLayout` storage-texture aborts — F-017); feature-gated formats also skip differently
+because each adapter exposes a different optional-feature set. All `wgpu-native` aborts are contained by
+`--isolate` and reclassified via the expectations file, so an `--isolate --expectations` run still
+exits 0 on both platforms.
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
