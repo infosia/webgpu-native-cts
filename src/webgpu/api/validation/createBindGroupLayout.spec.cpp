@@ -1,7 +1,12 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/createBindGroupLayout.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
 
+#include <string>
+#include <string_view>
+#include <vector>
+
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/capability_info.h"
 
 using namespace cts;
 
@@ -18,6 +23,89 @@ WGPUBindGroupLayoutEntry storageBufferEntry(uint32_t binding) {
     entry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
     entry.buffer.type = WGPUBufferBindingType_Storage;
     return entry;
+}
+
+std::vector<Value> shaderStageCombinationValues() {
+    std::vector<Value> values;
+    values.reserve(kShaderStageCombinations.size());
+    for (WGPUShaderStage stage : kShaderStageCombinations) {
+        values.emplace_back(static_cast<uint64_t>(stage));
+    }
+    return values;
+}
+
+std::vector<Value> bufferBindingTypeValues() {
+    std::vector<Value> values;
+    values.reserve(kBufferBindingTypes.size());
+    for (WGPUBufferBindingType type : kBufferBindingTypes) {
+        values.emplace_back(static_cast<uint64_t>(type));
+    }
+    return values;
+}
+
+std::vector<Value> bindingEntryKeyValues() {
+    std::vector<Value> values;
+    const std::vector<std::string_view> entries = allBindingEntries(false);
+    values.reserve(entries.size());
+    for (std::string_view key : entries) {
+        values.emplace_back(std::string(key));
+    }
+    return values;
+}
+
+std::vector<Value> storageTextureAccessValuesWithUndefined() {
+    std::vector<Value> values;
+    values.reserve(kStorageTextureAccessValues.size() + 1);
+    values.push_back(Value::undef());
+    for (WGPUStorageTextureAccess access : kStorageTextureAccessValues) {
+        values.emplace_back(static_cast<uint64_t>(access));
+    }
+    return values;
+}
+
+bool isValidBufferTypeForStages(
+    const WGPUCompatibilityModeLimits& compat,
+    WGPUShaderStage visibility,
+    WGPUBufferBindingType bufferType) {
+    if (bufferType == WGPUBufferBindingType_Storage
+        || bufferType == WGPUBufferBindingType_ReadOnlyStorage) {
+        if ((visibility & WGPUShaderStage_Vertex)
+            && !(compat.maxStorageBuffersInVertexStage > 0)) {
+            return false;
+        }
+        if ((visibility & WGPUShaderStage_Fragment)
+            && !(compat.maxStorageBuffersInFragmentStage > 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isValidStorageTextureForStages(
+    const WGPUCompatibilityModeLimits& compat,
+    WGPUShaderStage visibility) {
+    if ((visibility & WGPUShaderStage_Vertex)
+        && !(compat.maxStorageTexturesInVertexStage > 0)) {
+        return false;
+    }
+    if ((visibility & WGPUShaderStage_Fragment)
+        && !(compat.maxStorageTexturesInFragmentStage > 0)) {
+        return false;
+    }
+    return true;
+}
+
+bool isValidBGLEntryForStages(
+    const WGPUCompatibilityModeLimits& compat,
+    WGPUShaderStage visibility,
+    std::string_view entryKey) {
+    if (entryKeyIsStorageTexture(entryKey)) {
+        return isValidStorageTextureForStages(compat, visibility);
+    }
+    if (entryKeyIsBuffer(entryKey)) {
+        return isValidBufferTypeForStages(compat, visibility, entryKeyBufferType(entryKey));
+    }
+    return true;
 }
 
 CTS_TEST(g, "duplicate_bindings")
@@ -79,6 +167,97 @@ CTS_TEST(g, "maximum_binding_limit")
         t.expectValidationError([&] {
             t.createBindGroupLayoutTracked(desc);
         }, binding >= limits.maxBindingsPerBindGroup);
+    });
+
+CTS_TEST(g, "visibility")
+    .desc("Test shader stage visibility validation for bind group layout entries.")
+    .params([](ParamsBuilder u) {
+        return u.combine("visibility", shaderStageCombinationValues())
+            .beginSubcases()
+            .combine("entry", bindingEntryKeyValues());
+    })
+    .fn([](GpuTest& t) {
+        const WGPUShaderStage visibility = static_cast<WGPUShaderStage>(t.param<uint64_t>("visibility"));
+        const std::string entryKey = t.param<std::string>("entry");
+        const WGPUCompatibilityModeLimits compat = t.getCompatibilityModeLimits();
+
+        WGPUBindGroupLayoutEntry entry = bglEntryFromKey(entryKey);
+        entry.binding = 0;
+        entry.visibility = visibility;
+
+        WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        desc.entryCount = 1;
+        desc.entries = &entry;
+
+        const bool success = (visibility & ~validStagesForEntryKey(entryKey)) == 0
+            && isValidBGLEntryForStages(compat, visibility, entryKey);
+        t.expectValidationError([&] {
+            t.createBindGroupLayoutTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "visibility,VERTEX_shader_stage_buffer_type")
+    .desc("Test VERTEX visibility validation for buffer binding types.")
+    .params([](ParamsBuilder u) {
+        return u.combine("shaderStage", shaderStageCombinationValues())
+            .beginSubcases()
+            .combine("type", bufferBindingTypeValues());
+    })
+    .fn([](GpuTest& t) {
+        const WGPUShaderStage shaderStage = static_cast<WGPUShaderStage>(t.param<uint64_t>("shaderStage"));
+        const WGPUBufferBindingType type = static_cast<WGPUBufferBindingType>(t.param<uint64_t>("type"));
+        const WGPUCompatibilityModeLimits compat = t.getCompatibilityModeLimits();
+
+        WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        entry.binding = 0;
+        entry.visibility = shaderStage;
+        entry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+        entry.buffer.type = type;
+
+        WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        desc.entryCount = 1;
+        desc.entries = &entry;
+
+        const bool success = !(type == WGPUBufferBindingType_Storage
+                               && (shaderStage & WGPUShaderStage_Vertex))
+            && isValidBufferTypeForStages(compat, shaderStage, type);
+        t.expectValidationError([&] {
+            t.createBindGroupLayoutTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "visibility,VERTEX_shader_stage_storage_texture_access")
+    .desc("Test VERTEX visibility validation for storage texture access values.")
+    .params([](ParamsBuilder u) {
+        return u.combine("shaderStage", shaderStageCombinationValues())
+            .beginSubcases()
+            .combine("access", storageTextureAccessValuesWithUndefined());
+    })
+    .fn([](GpuTest& t) {
+        const WGPUShaderStage shaderStage = static_cast<WGPUShaderStage>(t.param<uint64_t>("shaderStage"));
+        const bool accessIsUndefined = t.paramIsUndefined("access");
+        const WGPUStorageTextureAccess appliedAccess = accessIsUndefined
+            ? WGPUStorageTextureAccess_WriteOnly
+            : static_cast<WGPUStorageTextureAccess>(t.param<uint64_t>("access"));
+        const WGPUCompatibilityModeLimits compat = t.getCompatibilityModeLimits();
+
+        WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        entry.binding = 0;
+        entry.visibility = shaderStage;
+        entry.storageTexture = WGPU_STORAGE_TEXTURE_BINDING_LAYOUT_INIT;
+        entry.storageTexture.access = appliedAccess;
+        entry.storageTexture.format = WGPUTextureFormat_R32Uint;
+
+        WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        desc.entryCount = 1;
+        desc.entries = &entry;
+
+        const bool success = !((shaderStage & WGPUShaderStage_Vertex)
+                               && appliedAccess != WGPUStorageTextureAccess_ReadOnly)
+            && isValidStorageTextureForStages(compat, shaderStage);
+        t.expectValidationError([&] {
+            t.createBindGroupLayoutTracked(desc);
+        }, !success);
     });
 
 } // namespace

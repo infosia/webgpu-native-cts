@@ -30,6 +30,7 @@ class GpuTest : public Fixture {
     virtual WGPUDevice device() const;
     virtual WGPUQueue queue() const;
     WGPULimits getLimits() const;
+    WGPUCompatibilityModeLimits getCompatibilityModeLimits() const;
     WGPUBuffer createBufferTracked(const WGPUBufferDescriptor& desc);
     WGPUBuffer createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc);
     WGPUBuffer getErrorBuffer();

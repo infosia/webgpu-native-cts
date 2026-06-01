@@ -95,31 +95,32 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   test-prefix lines) so a run with known divergences still exits 0.
 - All three backends — **wgpu-native, yawgpu, Dawn** — build link-agnostically and run on a real GPU.
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
-- Ported so far: 10 `api/validation` files, including a fully worked `createTexture` (16 tests) and a
+- Ported so far: 10 `api/validation` files, including a fully worked `createTexture` (17 tests) and a
   **complete `createView`** (all 10 tests) backed by the uncompressed + compressed format-capability
-  tables. See [COVERAGE](docs/COVERAGE.md).
+  tables, plus the BindGroupLayout binding-entry taxonomy. See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 15 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
-Acting on them, **yawgpu — the primary conformance subject — passes every ported `api,validation`
-test on real-GPU Metal** (`pass=3777 skip=200 fail=0 crash=0`, identical to Dawn): all seven of its
-findings (F-005/006/008/009/010/011/014) were reported here, fixed upstream, and confirmed resolved.
-Dawn — the oracle — passes everything. wgpu-native's findings remain open: eager-panics on invalid
-input (F-001–F-004, F-007, F-013) and missing validation (F-012 — `createView` on a destroyed texture;
-F-015 — the view-usage subset rule). This is the suite working as intended: report a divergence → fix
-upstream → confirm on hardware.
+**Conformance outcome.** The suite has surfaced 17 cross-backend findings (see [FINDINGS](docs/FINDINGS.md)).
+yawgpu — the primary conformance subject — was at full parity with Dawn through `createView`; the first
+`createBindGroupLayout` slice then surfaced **F-016** (yawgpu rejects read-write storage textures on the
+core `r32*` read-write formats — 8 cases, currently open). Its seven earlier findings
+(F-005/006/008/009/010/011/014) were all reported here, fixed upstream, and confirmed resolved — the
+established cycle, which F-016 now re-enters. Dawn — the oracle — passes everything. wgpu-native's
+findings remain open: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017) and missing
+validation (F-012 — `createView` on a destroyed texture; F-015 — the view-usage subset rule). This is
+the suite working as intended: report a divergence → fix upstream → confirm on hardware.
 
 ### Test results
 
-Over the ported `api,validation` surface — **4307 cases** across 10 files, each case in its own
+Over the ported `api,validation` surface — **4331 cases** across 10 files, each case in its own
 subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 
 **Real-GPU Metal** (Apple Silicon):
 
 | Backend | pass | skip | fail | crash | |
 |---------|-----:|-----:|-----:|------:|--|
-| **Dawn** | 4107 | 200 | 0 | 0 | C++ reference implementation — the conformance oracle |
-| **yawgpu** | 4107 | 200 | 0 | 0 | primary subject — **identical to Dawn**; all findings fixed |
-| **wgpu-native** | 3370 | 565 | 327 | 45 | 45 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
+| **Dawn** | 4131 | 200 | 0 | 0 | C++ reference implementation — the conformance oracle |
+| **yawgpu** | 4123 | 200 | 8 | 0 | primary subject — 8 fails are the open **F-016** (read-write storage on `r32*`); all earlier findings fixed |
+| **wgpu-native** | 3378 | 565 | 327 | 61 | 61 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
 
 **Real-GPU Vulkan** (Windows 11, NVIDIA; `--isolate --expectations`, exit 0; over the 2610-case surface, before the createView tests were added):
 

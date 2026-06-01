@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "common/query.h"
@@ -183,6 +184,54 @@ int main() {
                           WGPUTextureUsage_TransientAttachment | WGPUTextureUsage_CopySrc)
                     == cts::kValidCombinationsOfOneOrTwoTextureUsages.end(),
                 "one-or-two texture usage combinations exclude transient copy src");
+        require(cts::kShaderStageCombinations.size() == 8, "shader stage combination count");
+        for (size_t i = 0; i < cts::kShaderStageCombinations.size(); ++i) {
+            require(cts::kShaderStageCombinations[i] == static_cast<WGPUShaderStage>(i),
+                    "shader stage combination value");
+        }
+        require(cts::validStagesForEntryKey("buffer_storage") == cts::kValidStagesStorageWrite,
+                "buffer storage valid stages");
+        require(cts::validStagesForEntryKey("buffer_read-only-storage") == cts::kValidStagesAll,
+                "buffer read-only-storage valid stages");
+        require(cts::validStagesForEntryKey("buffer_uniform") == cts::kValidStagesAll,
+                "buffer uniform valid stages");
+        require(cts::validStagesForEntryKey("sampler_filtering") == cts::kValidStagesAll,
+                "sampler filtering valid stages");
+        require(cts::validStagesForEntryKey("texture_ms-false") == cts::kValidStagesAll,
+                "sampled texture valid stages");
+        require(cts::validStagesForEntryKey("storageTexture_write-only") == cts::kValidStagesStorageWrite,
+                "storage texture write-only valid stages");
+        require(cts::validStagesForEntryKey("storageTexture_read-only") == cts::kValidStagesAll,
+                "storage texture read-only valid stages");
+        require(cts::validStagesForEntryKey("storageTexture_read-write") == cts::kValidStagesStorageWrite,
+                "storage texture read-write valid stages");
+        const std::vector<std::string_view> bglEntries = cts::allBindingEntries(false);
+        require(bglEntries.size() == 11, "all binding entries count");
+        require(bglEntries[0] == "buffer_uniform", "all binding entries first");
+        require(bglEntries[1] == "buffer_storage", "all binding entries second");
+        require(bglEntries[2] == "buffer_read-only-storage", "all binding entries third");
+        require(bglEntries[3] == "sampler_comparison", "all binding entries fourth");
+        require(bglEntries[4] == "sampler_filtering", "all binding entries fifth");
+        require(bglEntries[5] == "sampler_non-filtering", "all binding entries sixth");
+        require(bglEntries[6] == "texture_ms-false", "all binding entries seventh");
+        require(bglEntries[7] == "texture_ms-true", "all binding entries eighth");
+        require(bglEntries[8] == "storageTexture_write-only", "all binding entries ninth");
+        require(bglEntries[9] == "storageTexture_read-only", "all binding entries tenth");
+        require(bglEntries[10] == "storageTexture_read-write", "all binding entries eleventh");
+        WGPUBindGroupLayoutEntry bglBufferStorage = cts::bglEntryFromKey("buffer_storage");
+        require(bglBufferStorage.buffer.type == WGPUBufferBindingType_Storage,
+                "buffer storage entry buffer type");
+        require(bglBufferStorage.sampler.type == WGPUSamplerBindingType_BindingNotUsed,
+                "buffer storage entry sampler unused");
+        require(bglBufferStorage.texture.sampleType == WGPUTextureSampleType_BindingNotUsed,
+                "buffer storage entry texture unused");
+        require(bglBufferStorage.storageTexture.access == WGPUStorageTextureAccess_BindingNotUsed,
+                "buffer storage entry storage texture unused");
+        WGPUBindGroupLayoutEntry bglStorageTexture = cts::bglEntryFromKey("storageTexture_read-only");
+        require(bglStorageTexture.storageTexture.access == WGPUStorageTextureAccess_ReadOnly,
+                "storage texture read-only entry access");
+        require(bglStorageTexture.storageTexture.format == WGPUTextureFormat_R32Float,
+                "storage texture read-only entry format");
         require(!cts::kUncompressedTextureFormats.empty(), "uncompressed texture formats non-empty");
         require(cts::kUncompressedTextureFormats.size() == 49, "uncompressed texture format count");
         require(cts::kRegularTextureFormats.size() == 43, "regular texture format count");

@@ -298,6 +298,16 @@ WGPULimits GpuTest::getLimits() const {
     return limits;
 }
 
+WGPUCompatibilityModeLimits GpuTest::getCompatibilityModeLimits() const {
+    WGPUCompatibilityModeLimits compat = WGPU_COMPATIBILITY_MODE_LIMITS_INIT;
+    WGPULimits limits = WGPU_LIMITS_INIT;
+    limits.nextInChain = &compat.chain;
+    if (wgpuDeviceGetLimits(device(), &limits) != WGPUStatus_Success) {
+        fail("failed to get device limits");
+    }
+    return compat;
+}
+
 WGPUBuffer GpuTest::createBufferTracked(const WGPUBufferDescriptor& desc) {
     WGPUBuffer buffer = wgpuDeviceCreateBuffer(device(), &desc);
     if (buffer != nullptr) {

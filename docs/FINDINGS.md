@@ -56,10 +56,14 @@ createView slice (T11 — the three `texture_view_usage` tests) **completes `cre
 surfaced [F-015](#f-015--wgpu-native-does-not-enforce-the-createview-view-usage-subset-rule)
 (wgpu-native does not enforce the view-usage subset rule); **yawgpu passes all of T11** (it correctly
 enforces the subset rule, identical to Dawn), so T11 added **no** yawgpu finding. **yawgpu then fixed
-F-014 in `baa78cb`** — so once again **yawgpu passes every ported `api,validation` test**
-(`pass=3777 skip=200 fail=0 crash=0`) with no expected-failure lines. The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014. Open yawgpu findings: none. Open
-wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015.**
+F-014 in `baa78cb`**. The first `createBindGroupLayout` slice (T13 — the `visibility` group, which
+builds the BGL binding-entry taxonomy) then surfaced
+[F-016](#f-016--yawgpu-rejects-read-write-storage-textures-on-read-write-capable-formats) (yawgpu rejects
+read-write storage textures on the core `r32*` read-write formats) and
+[F-017](#f-017--wgpu-native-aborts-on-storage-texture-bindgrouplayout-entries) (wgpu-native aborts on
+storage-texture BGL entries). The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014. Open yawgpu findings: F-016. Open
+wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017.**
 
 ---
 
@@ -421,6 +425,44 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015.**
 > This port treats it as **out of conformance scope** — `skipIfTransientAttachmentNotSupported()` skips
 > it on all backends — so it is not asserted cross-backend. (It is why the otherwise-clean run shows one
 > `skip` in `texture_view_usage_of_multiple_usages`.)
+
+---
+
+## F-016 — yawgpu rejects read-write storage textures on read-write-capable formats
+
+- **Backend:** yawgpu (`baa78cb`). **Not** present in Dawn (accepts) or wgpu-native (which aborts, F-017).
+- **Found by:** `webgpu:api,validation,createBindGroupLayout:{visibility,visibility,VERTEX_shader_stage_storage_texture_access}`
+  (BGL T13). A `storageTexture` BGL entry with `access: 'read-write'` and a read-write-capable format
+  (`r32float` in `visibility`, `r32uint` in the access test). **Dawn accepts all 8 cases (the reference);
+  yawgpu fails 4 of each** (the 4 visibilities/stages without VERTEX, where the entry should be valid).
+- **Observed on yawgpu:** creating the BGL raises *"storage texture binding format must support
+  read-write storage access"* for `r32float`/`r32uint` — formats that **do** support read-write storage.
+  yawgpu's read-write-capable format set is missing the core `r32uint`/`r32sint`/`r32float`.
+- **Expected (WebGPU):** `r32uint`, `r32sint`, `r32float` support `read-write` (and `read-only`) storage
+  access with no feature gate (`kTextureFormatInfo[f].color.readWriteStorage`). Dawn enforces this.
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed). Not masked; the 8 cases are in
+  `expectations/yawgpu.txt` (`visibility:visibility={0,2,4,6}` +
+  `visibility,VERTEX_shader_stage_storage_texture_access:shaderStage={0,2,4,6}`); wgpu-native and Dawn
+  need no entries.
+
+---
+
+## F-017 — wgpu-native aborts on storage-texture BindGroupLayout entries
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`). **Not** present in yawgpu or Dawn. Same eager-panic
+  class as [F-001](#f-001--wgpu-native-aborts-on-an-invalid-buffer-usage-bit)/[F-007](#f-007--wgpu-native-aborts-on-bogus-and-transient-texture-usage-bits)/[F-013](#f-013--wgpu-native-aborts-on-createview-layerlevel-range-validation).
+- **Found by:** `webgpu:api,validation,createBindGroupLayout:{visibility,visibility,VERTEX_shader_stage_storage_texture_access}`
+  (BGL T13). **Dawn passes all 8 cases of each (the reference); wgpu-native crashes all 8** under
+  `--isolate`.
+- **Observed on wgpu-native:** a `storageTexture` BGL entry makes `createBindGroupLayout` **panic and
+  abort** (`src/conv.rs` storage-texture conversion) instead of returning a validation error. Every
+  `visibility` / storage-access case includes a storage-texture entry, so the whole tests crash.
+- **Expected (WebGPU):** an invalid storage-texture binding is a **validation error**, never a process
+  abort; a valid one succeeds. Dawn and yawgpu do not abort.
+- **Status:** open; tracked as a **wgpu-native defect** (3-way confirmed). Not masked; recorded in
+  `expectations/wgpu-native.txt` as `createBindGroupLayout:visibility:*` +
+  `createBindGroupLayout:visibility,VERTEX_shader_stage_storage_texture_access:*` prefix lines.
+  (`visibility,VERTEX_shader_stage_buffer_type` has no storage entry and passes on all three.)
 
 ---
 

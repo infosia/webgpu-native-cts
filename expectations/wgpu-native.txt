@@ -61,3 +61,7 @@ webgpu:api,validation,createView:mip_levels:*
 
 # T11: wgpu-native does not enforce the view-usage subset rule.
 webgpu:api,validation,createView:texture_view_usage:*
+
+# T13: wgpu-native aborts while validating BGL visibility entries that include storage textures.
+webgpu:api,validation,createBindGroupLayout:visibility:*
+webgpu:api,validation,createBindGroupLayout:visibility,VERTEX_shader_stage_storage_texture_access:*
