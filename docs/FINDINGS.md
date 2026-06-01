@@ -147,6 +147,12 @@ wgpu-native: F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
   `expectations/wgpu-native.txt` (the `usage` case as a contained crash, the two map-state cases as
   expected fails), so a `--isolate --expectations` run exits 0 on wgpu-native; yawgpu and Dawn need
   no entries.
+- **Update (T19 — buffer/mapping completed).** The same divergence pervades the rest of the mapping
+  surface: across `getMappedRange,*` and `unmap,state,*`, **Dawn and yawgpu pass all 26 cases (identical),
+  while wgpu-native fails 13 + crashes 7** — a mix of aborts (`signal 6`, e.g. `getMappedRange,state,unmapped`)
+  and uncaptured validation errors (e.g. `unmap,state,destroyed`). Recorded as 15 prefix lines in
+  `expectations/wgpu-native.txt`. Same root class; **no yawgpu finding** — yawgpu matches Dawn on the whole
+  completed mapping file.
 
 ---
 

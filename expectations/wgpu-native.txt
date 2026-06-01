@@ -91,3 +91,20 @@ webgpu:api,validation,createBindGroupLayout:max_resources_per_stage,in_pipeline_
 
 # T18: wgpu-native aborts when createPipelineLayout receives null bind group layout slots.
 webgpu:api,validation,createPipelineLayout:bind_group_layouts,null_bind_group_layouts:*
+
+# T19: wgpu-native surfaces uncaptured errors or aborts on the completed buffer mapping surface.
+webgpu:api,validation,buffer,mapping:mapAsync,sizeUnspecifiedOOB:*
+webgpu:api,validation,buffer,mapping:getMappedRange,state,mapped:*
+webgpu:api,validation,buffer,mapping:getMappedRange,state,invalid_mappedAtCreation:*
+webgpu:api,validation,buffer,mapping:getMappedRange,state,mappedAgain:*
+webgpu:api,validation,buffer,mapping:getMappedRange,state,unmapped:*
+webgpu:api,validation,buffer,mapping:getMappedRange,state,destroyed:*
+webgpu:api,validation,buffer,mapping:getMappedRange,subrange,mapped:*
+webgpu:api,validation,buffer,mapping:getMappedRange,subrange,mappedAtCreation:*
+webgpu:api,validation,buffer,mapping:getMappedRange,offsetAndSizeAlignment,mapped:*
+webgpu:api,validation,buffer,mapping:getMappedRange,offsetAndSizeAlignment,mappedAtCreation:*
+webgpu:api,validation,buffer,mapping:getMappedRange,sizeAndOffsetOOB,mappedAtCreation:*
+webgpu:api,validation,buffer,mapping:getMappedRange,sizeAndOffsetOOB,mapped:*
+webgpu:api,validation,buffer,mapping:unmap,state,unmapped:*
+webgpu:api,validation,buffer,mapping:unmap,state,destroyed:*
+webgpu:api,validation,buffer,mapping:unmap,state,mapped:*
