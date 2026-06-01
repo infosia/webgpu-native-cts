@@ -33,6 +33,7 @@ class GpuTest : public Fixture {
     WGPULimits getLimits() const;
     WGPUCompatibilityModeLimits getCompatibilityModeLimits() const;
     WGPUBuffer createBufferTracked(const WGPUBufferDescriptor& desc);
+    WGPUBuffer createBufferOnMismatchedDevice(const WGPUBufferDescriptor& desc);
     WGPUBuffer createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc);
     WGPUBuffer getErrorBuffer();
     WGPUSampler createSamplerTracked(const WGPUSamplerDescriptor& desc);
@@ -75,6 +76,7 @@ class GpuTest : public Fixture {
     std::vector<WGPUPipelineLayout> pipelineLayouts_;
     std::vector<WGPUCommandEncoder> encoders_;
     std::vector<WGPUCommandBuffer> commandBuffers_;
+    std::vector<WGPUBuffer> mismatchedDeviceBuffers_;
     WGPUAdapter mismatchedAdapter_ = nullptr;
     WGPUDevice mismatchedDevice_ = nullptr;
 };

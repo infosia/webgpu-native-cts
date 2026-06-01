@@ -95,10 +95,10 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   test-prefix lines) so a run with known divergences still exits 0.
 - All three backends — **wgpu-native, yawgpu, Dawn** — build link-agnostically and run on a real GPU.
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
-- Ported so far: 10 `api/validation` files — including **complete `createTexture`** (17 tests),
-  **`createView`** (10), and **`createBindGroupLayout`** (11) — backed by the uncompressed + compressed
-  format-capability tables and the BindGroupLayout binding-entry / per-stage-limit taxonomies. See
-  [COVERAGE](docs/COVERAGE.md).
+- Ported so far: 10 `api/validation` files — **5 complete** (`createTexture`, `createView`,
+  `createBindGroupLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a maximally-ported `buffer/mapping`
+  — backed by the format-capability tables and the BindGroupLayout binding-entry / per-stage-limit
+  taxonomies. See [COVERAGE](docs/COVERAGE.md).
 
 **Conformance outcome.** The suite has surfaced 21 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on

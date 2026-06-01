@@ -86,7 +86,21 @@ CTS_TEST(g, "buffer_state")
 
 CTS_TEST(g, "buffer,device_mismatch")
     .desc("Tests clearBuffer cannot be called with buffer created from another device.")
-    .unimplemented("needs a second device");
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combine("mismatched", {true, false});
+    })
+    .fn([](GpuTest& t) {
+        const bool mismatched = t.param<bool>("mismatched");
+
+        WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        desc.size = 8;
+        desc.usage = WGPUBufferUsage_CopyDst;
+        WGPUBuffer buffer = mismatched
+            ? t.createBufferOnMismatchedDevice(desc)
+            : t.createBufferTracked(desc);
+
+        testClearBuffer(t, buffer, 0, 8, !mismatched);
+    });
 
 CTS_TEST(g, "default_args")
     .desc("Test that calling clearBuffer with a default offset and size is valid.")

@@ -112,7 +112,33 @@ CTS_TEST(g, "buffer_state")
 
 CTS_TEST(g, "buffer,device_mismatch")
     .desc("Tests copyBufferToBuffer cannot be called with src buffer or dst buffer created from another device.")
-    .unimplemented("needs a second device");
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases().combineWithParams({
+            ParamRecord{{"srcMismatched", false}, {"dstMismatched", false}},
+            ParamRecord{{"srcMismatched", true}, {"dstMismatched", false}},
+            ParamRecord{{"srcMismatched", false}, {"dstMismatched", true}},
+        });
+    })
+    .fn([](GpuTest& t) {
+        const bool srcMismatched = t.param<bool>("srcMismatched");
+        const bool dstMismatched = t.param<bool>("dstMismatched");
+
+        WGPUBufferDescriptor srcDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        srcDesc.size = 16;
+        srcDesc.usage = WGPUBufferUsage_CopySrc;
+        WGPUBuffer src = srcMismatched
+            ? t.createBufferOnMismatchedDevice(srcDesc)
+            : t.createBufferTracked(srcDesc);
+
+        WGPUBufferDescriptor dstDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        dstDesc.size = 16;
+        dstDesc.usage = WGPUBufferUsage_CopyDst;
+        WGPUBuffer dst = dstMismatched
+            ? t.createBufferOnMismatchedDevice(dstDesc)
+            : t.createBufferTracked(dstDesc);
+
+        testCopyBufferToBuffer(t, src, 0, dst, 0, 8, !(srcMismatched || dstMismatched));
+    });
 
 CTS_TEST(g, "buffer_usage")
     .desc("Test that source requires COPY_SRC usage and destination requires COPY_DST usage.")

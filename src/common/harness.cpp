@@ -283,6 +283,10 @@ void GpuTest::finalize() {
         wgpuBufferRelease(buffer);
     }
     buffers_.clear();
+    for (WGPUBuffer buffer : mismatchedDeviceBuffers_) {
+        wgpuBufferRelease(buffer);
+    }
+    mismatchedDeviceBuffers_.clear();
     if (mismatchedDevice_ != nullptr) {
         wgpuDeviceRelease(mismatchedDevice_);
         mismatchedDevice_ = nullptr;
@@ -349,6 +353,14 @@ WGPUBuffer GpuTest::createBufferTracked(const WGPUBufferDescriptor& desc) {
     WGPUBuffer buffer = wgpuDeviceCreateBuffer(device(), &desc);
     if (buffer != nullptr) {
         buffers_.push_back(buffer);
+    }
+    return buffer;
+}
+
+WGPUBuffer GpuTest::createBufferOnMismatchedDevice(const WGPUBufferDescriptor& desc) {
+    WGPUBuffer buffer = wgpuDeviceCreateBuffer(mismatchedDevice(), &desc);
+    if (buffer != nullptr) {
+        mismatchedDeviceBuffers_.push_back(buffer);
     }
     return buffer;
 }
