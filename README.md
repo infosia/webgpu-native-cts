@@ -116,16 +116,16 @@ Every divergence the suite surfaces is reported, fixed upstream, and re-confirme
 
 ### Test results
 
-Over the ported `api,validation` surface — **4684 cases** across 10 files, each case in its own
+Over the ported `api,validation` surface — **4713 cases** across 10 files, each case in its own
 subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 
 **Real-GPU Metal** (Apple Silicon):
 
 | Backend | pass | skip | fail | crash | |
 |---------|-----:|-----:|-----:|------:|--|
-| **Dawn** | 4299 | 385 | 0 | 0 | C++ reference implementation — the conformance oracle |
-| **yawgpu** | 4307 | 377 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips (so +8 pass / −8 skip vs Dawn) |
-| **wgpu-native** | 3401 | 750 | 327 | 206 | 206 crashes are eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017, F-019, F-021); 327 fails are missing validation (F-015 view-usage subset ≈ 324 cases, F-012) |
+| **Dawn** | 4320 | 393 | 0 | 0 | C++ reference implementation — the conformance oracle |
+| **yawgpu** | 4328 | 385 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips (so +8 pass / −8 skip vs Dawn) |
+| **wgpu-native** | 3405 | 758 | 338 | 212 | 212 crashes are eager-panics on invalid input (F-001–F-004 incl. F-003 mapping, F-007, F-013, F-017, F-019, F-021); 338 fails are missing-validation / uncaptured-error divergences (F-015 view-usage subset ≈ 324, F-012, F-003 mapping) |
 
 **Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti; `--isolate --expectations`, exit 0;
 the 4331-case surface as of T13, before the T14 BGL storage/multisampled tests, 2026-06-01):
