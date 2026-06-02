@@ -38,6 +38,33 @@ The authoritative description of how work flows between **Claude** (planner/orch
 The coding agent never advances scope on its own: anything not in the spec/handoff is out of
 scope and goes back to Claude as a question in `REPORT.md`.
 
+## Verifying against yawgpu (fast → full)
+
+yawgpu is the primary conformance subject, so most CTS work is a find→fix loop against it. To keep
+that loop tight, iterate with the **fast mode** (`cts --sample-formats`, which runs only one
+representative texture format per major decode family — see
+[`../format-sampling-mode.md`](../format-sampling-mode.md)) and switch to a **full run** only to
+finalize. Real-GPU runs use the Bash sandbox **disabled** (otherwise Metal enumerates no adapters
+and every case false-fails); the coding agent never runs GPU CTS — Claude runs all of it.
+
+1. **Port** the new or changed test (coding agent) → Claude builds the backends.
+2. **Find (fast).** `cts --sample-formats` on **Dawn** (a quick sanity that the test itself is
+   correct — Dawn is the oracle) and on **yawgpu** (surface divergences fast). Triage findings into
+   `docs/FINDINGS.md`.
+3. **Fix.** The user fixes yawgpu → re-run `cts --sample-formats` on yawgpu to confirm the
+   representative formats pass.
+4. **Finalize stats (full).** Once fast yawgpu is clean, run the **full** suite (no flag) on yawgpu
+   for the authoritative counts and to catch any non-representative-format-specific defect the
+   sample missed; run the **full** suite on **Dawn** once to lock the oracle (this Dawn-full result
+   is also the cross-backend Dawn record).
+5. **Cross-backend record.** When yawgpu is fully clean, run the **full** suite on **wgpu-native**
+   (the Dawn-full result from step 4 is reused — the test is unchanged), then update
+   `docs/FINDINGS.md` / `docs/COVERAGE.md` / `README.md`.
+
+Fast-mode counts are for iteration only — never report a `--sample-formats` summary as conformance
+coverage (its stderr notice says as much). The committed catalog (`src/webgpu/listing.json`) and the
+authoritative pass/fail counts always come from full runs.
+
 ## Spec format
 
 Every task spec follows [`task-template.md`](task-template.md):
