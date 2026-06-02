@@ -550,6 +550,22 @@ void GpuTest::queueWriteBuffer(WGPUBuffer buffer, uint64_t bufferOffset, const v
     wgpuQueueWriteBuffer(queue(), buffer, bufferOffset, data, size);
 }
 
+void GpuTest::queueWriteTexture(
+    WGPUTexture dst,
+    WGPUExtent3D copySize,
+    const WGPUTexelCopyBufferLayout& layout,
+    const void* data,
+    size_t size,
+    uint32_t mipLevel,
+    WGPUOrigin3D origin) {
+    WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    destination.texture = dst;
+    destination.mipLevel = mipLevel;
+    destination.origin = origin;
+    destination.aspect = WGPUTextureAspect_All;
+    wgpuQueueWriteTexture(queue(), &destination, data, size, &layout, &copySize);
+}
+
 void GpuTest::copyBufferToTexture(
     WGPUCommandEncoder encoder,
     WGPUBuffer src,

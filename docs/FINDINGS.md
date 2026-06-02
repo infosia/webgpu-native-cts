@@ -703,4 +703,82 @@ F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
 
+## F-025 — yawgpu `queueWriteTexture` writes zeros to color textures
+
+- **Backend:** yawgpu (`c893eac`, Metal). **Not** present in Dawn **or** wgpu-native — both pass.
+- **Found by:** `api/operation/command_buffer/image_copy` (T24b) — every case whose **init method is
+  `WriteTexture`** (`initMethod=0`, i.e. the upload goes through `wgpuQueueWriteTexture`). Spans all 5 tests
+  (`rowsPerImage_and_bytesPerRow`, `offsets_and_sizes`, `origins_and_extents`, `mip_levels`,
+  `undefined_params`).
+- **Observed on yawgpu:** the texture reads back **all zeros** after the write — `pixel mismatch at 0,0,0
+  component 0: expected 0.00392157, got 0` (the expected first texel is `1/255` of the generated `rgba8unorm`
+  data; the readback is `0`). Deterministic. Representative: `undefined_params:format=1;dimension=2;
+  initMethod=0;checkMethod=0` → `fail=4/4` (Dawn/wgpu-native `pass=4/4`).
+- **Expected (WebGPU):** `queue.writeTexture` must upload the supplied bytes to the texture; a subsequent
+  `copyTextureToBuffer` must read them back. Dawn and wgpu-native both return the written data.
+- **Scope:** affects only the `WriteTexture` init path. The simplest **`CopyB2T`** init cases (tightly-packed,
+  default layout) pass — see [F-026](FINDINGS.md) for the separate `copyBufferToTexture`/`copyTextureToBuffer`
+  layout-handling defect. Together they account for the full `image_copy` run on yawgpu: `pass=21860
+  fail=115396` (vs Dawn `pass=137256 fail=0`).
+- **Status:** **OPEN.** 3-way confirmed (Dawn + wgpu-native pass the `WriteTexture` paths; full Dawn
+  `image_copy` is `pass=137256 fail=0`). No `expectations/yawgpu.txt` entries added — surfaced for the yawgpu
+  fix (per the no-mass-masking rule; real-GPU runs use the Bash sandbox disabled — see the F-023 note).
+
+---
+
+## F-026 — yawgpu mishandles non-default buffer layout (and mip levels) in `copyBufferToTexture` / `copyTextureToBuffer`
+
+- **Backend:** yawgpu (`c893eac`, Metal). **Not** present in Dawn **or** wgpu-native — both pass.
+- **Found by:** `api/operation/command_buffer/image_copy` (T24b) — `CopyB2T`-init cases (`initMethod=1`) with a
+  **non-trivial buffer layout** (`offset` / `bytesPerRow` / `rowsPerImage`) or a **non-base mip level**.
+- **Observed on yawgpu:** the readback contains **wrong (non-zero) data** — the texels land at the wrong linear
+  offset: `pixel mismatch at 0,0,0 component 0: expected 0.00392157, got 0.705882` (`0.705882 = 180/255`, a
+  byte from elsewhere in the source buffer, not the expected `1/255`). Representative:
+  `offsets_and_sizes:format=1;dimension=2;initMethod=1;checkMethod=1` → `fail=66/66`;
+  `mip_levels:format=1;dimension=2;initMethod=1` → `fail=12/12` for **both** `FullCopyT2B` and `PartialCopyT2B`
+  — so the defect is in the **copy itself**, not the check method. Dawn passes the same cases (`66/0`, `12/0`).
+- **Expected (WebGPU):** `copyBufferToTexture`/`copyTextureToBuffer` must honour `bufferOffset`, `bytesPerRow`,
+  `rowsPerImage`, and the per-mip sub-resource size. Dawn and wgpu-native do.
+- **Scope:** the simplest `CopyB2T` cases (tightly-packed, base mip, default layout — e.g. `undefined_params`)
+  pass `4/4`; the layout/mip sweeps fail. Distinct from [F-025](FINDINGS.md) (`WriteTexture` writes zeros —
+  symptom `got 0`; here the symptom is wrong non-zero data). Contributes the bulk of the `CopyB2T`-init
+  failures in the full yawgpu `image_copy` run (`pass=21860 fail=115396`).
+- **Status:** **OPEN.** 3-way confirmed (Dawn + wgpu-native pass). No expectations added — surfaced for the
+  yawgpu fix.
+
+---
+
+## F-027 — wgpu-native diverges on a 3D whole-subresource readback after a non-zero-origin copy (FullCopyT2B)
+
+- **Backend:** wgpu-native (Metal). **Not** present in Dawn — Dawn passes the identical cases.
+- **Found by:** `api/operation/command_buffer/image_copy` (T24b) — `origins_and_extents` on a **3D** texture
+  with the **`FullCopyT2B`** check (`dimension=3;checkMethod=0`). The faithful upstream `FullCopyT2B` helper
+  snapshots the whole mip subresource, overlays the uploaded sub-box on the CPU side, then **re-reads the
+  whole subresource** (`copyTextureToBuffer` from origin `{0,0,0}` spanning every depth slice) and compares.
+- **Observed on wgpu-native:** the whole-3D-subresource readback returns wrong values when the copy targets a
+  **non-zero origin** inside a multi-slice 3D texture — `origins_and_extents:format=1;dimension=3;
+  initMethod=1;checkMethod=0` → `fail=36/144`. The **same cases with `PartialCopyT2B`** (single targeted
+  readback of the copied sub-box) **pass `144/0`**, and the other 3D `FullCopyT2B` tests pass on wgpu-native
+  (`mip_levels` 3D Full `12/0`, `offsets_and_sizes` 3D Full `198/0`) — so the divergence is specific to the
+  whole-3D-subresource re-read with a non-zero copy origin, not 3D copies in general.
+- **Expected (WebGPU):** Dawn passes all of these (`origins_and_extents` 3D Full `144/0`; full Dawn
+  `image_copy` `pass=137256 fail=0`). The whole-subresource readback must return the snapshot contents for the
+  untouched slices and the uploaded data for the copied sub-box.
+- **Scope / magnitude:** the full wgpu-native `image_copy` run is `pass=116772 skip=19152 fail=1332`. The
+  `1332` failures are exactly **37 cases × 36 subcases** — all `origins_and_extents;dimension=3;initMethod=1
+  (CopyB2T);checkMethod=0 (FullCopyT2B)`, one per 3D-compatible format (`format ∈ {1,7,8,9,10,11,12,13,…}`).
+  WriteTexture-init (`initMethod=0`) 3D `FullCopyT2B` is **not** affected.
+- **Not triaged in `expectations/wgpu-native.txt`:** each failing case is **partial** (36 of its 144 subcases
+  fail; the other 108 pass), and this harness's expectations are **case-level** — all subcases of a case share
+  the case query (`runner.cpp` runs each subcase under `c.query`), so an expectation line would flip the 108
+  passing subcases to **xpass** noise. Left **surfaced/unmasked** (same stance as the yawgpu F-025/F-026
+  findings) pending the wgpu-native fix, rather than masked imprecisely.
+- **Note (anti-masking):** an earlier T24b draft hid this by reading the copied region *before* the
+  whole-subresource snapshot; the faithful upstream order (snapshot whole → re-read whole) re-exposes it. Kept
+  faithful and surfaced as a finding rather than worked around — Dawn is the oracle and passes.
+- **Status:** **OPEN.** 3-way: Dawn passes; yawgpu fails these for the unrelated [F-025](FINDINGS.md)/[F-026](FINDINGS.md)
+  reasons; wgpu-native shows this distinct 3D whole-subresource defect.
+
+---
+
 _Add new findings as `F-00N` with the same fields._

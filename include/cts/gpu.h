@@ -54,6 +54,14 @@ class GpuTest : public Fixture {
         WGPUExtent3D size,
         TexelCopyBufferLayout dataLayout);
     void queueWriteBuffer(WGPUBuffer buffer, uint64_t bufferOffset, const void* data, size_t size);
+    void queueWriteTexture(
+        WGPUTexture dst,
+        WGPUExtent3D copySize,
+        const WGPUTexelCopyBufferLayout& layout,
+        const void* data,
+        size_t size,
+        uint32_t mipLevel = 0,
+        WGPUOrigin3D origin = WGPUOrigin3D{0, 0, 0});
     void copyBufferToTexture(
         WGPUCommandEncoder encoder,
         WGPUBuffer src,
