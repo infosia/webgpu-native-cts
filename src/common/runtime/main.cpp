@@ -63,7 +63,7 @@ const char* adapterTypeName(WGPUAdapterType type) {
 }
 
 void printUsage() {
-    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--isolate] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
+    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--isolate] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
               << "\n"
               << "Without arguments, creates a WebGPU instance, requests an adapter,\n"
               << "prints adapter information, and exits.\n";
@@ -139,6 +139,9 @@ int main(int argc, char** argv) {
                 options.listCases = true;
             } else if (arg == "--isolate") {
                 options.isolate = true;
+            } else if (arg == "--sample-formats") {
+                options.sampleFormats = true;
+                options.forwardedArgs.push_back(arg);
             } else if (arg == "--run-case") {
                 if (i + 1 >= argc) {
                     std::cerr << "missing value for --run-case\n";

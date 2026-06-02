@@ -210,6 +210,24 @@ inline constexpr std::array<WGPUTextureFormat, 43> kRegularTextureFormats = {
 
 inline constexpr std::array<WGPUTextureFormat, kRegularTextureFormats.size()> kColorTextureFormats = kRegularTextureFormats;
 
+// Representative formats for the --sample-formats fast-iteration mode (see specs/format-sampling-mode.md).
+inline constexpr std::array<WGPUTextureFormat, 12> kRepresentativeTextureFormats = {
+    WGPUTextureFormat_RGBA8Unorm,     WGPUTextureFormat_RGBA8Snorm,    WGPUTextureFormat_RGBA8Uint,
+    WGPUTextureFormat_RGBA8UnormSrgb, WGPUTextureFormat_BGRA8Unorm,    WGPUTextureFormat_RGBA16Float,
+    WGPUTextureFormat_RGBA32Float,    WGPUTextureFormat_RGB10A2Unorm,
+    WGPUTextureFormat_Depth32Float,   WGPUTextureFormat_Depth24PlusStencil8,
+    WGPUTextureFormat_BC1RGBAUnorm,   WGPUTextureFormat_ASTC4x4Unorm,
+};
+
+inline bool isRepresentativeTextureFormat(WGPUTextureFormat format) {
+    for (WGPUTextureFormat listedFormat : kRepresentativeTextureFormats) {
+        if (listedFormat == format) {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline constexpr std::array<WGPUTextureFormat, kCompressedTextureFormatInfos.size()> kCompressedTextureFormats = {
     WGPUTextureFormat_BC1RGBAUnorm, WGPUTextureFormat_BC1RGBAUnormSrgb, WGPUTextureFormat_BC2RGBAUnorm,
     WGPUTextureFormat_BC2RGBAUnormSrgb, WGPUTextureFormat_BC3RGBAUnorm, WGPUTextureFormat_BC3RGBAUnormSrgb,

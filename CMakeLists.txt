@@ -154,12 +154,14 @@ file(GLOB_RECURSE CTS_SPEC_SOURCES CONFIGURE_DEPENDS
 )
 
 add_library(cts_harness
+    src/common/format_sample.cpp
     src/common/harness.cpp
     src/common/params.cpp
     src/common/query.cpp
     src/common/runner.cpp
     ${CTS_BACKEND_SOURCE}
     src/common/webgpu/sync.cpp
+    src/webgpu/format_sample_registrar.cpp
     src/webgpu/util/texel_data.cpp
     src/webgpu/util/texel_view.cpp
     src/webgpu/util/texture_layout.cpp
@@ -202,7 +204,7 @@ endfunction()
 cts_configure_target(cts_harness)
 
 add_executable(cts src/common/runtime/main.cpp)
-target_sources(cts PRIVATE ${CTS_SPEC_SOURCES})
+target_sources(cts PRIVATE src/webgpu/format_sample_registrar.cpp ${CTS_SPEC_SOURCES})
 target_link_libraries(cts PRIVATE cts_harness)
 target_include_directories(cts PRIVATE "${PROJECT_SOURCE_DIR}/src")
 cts_configure_target(cts)

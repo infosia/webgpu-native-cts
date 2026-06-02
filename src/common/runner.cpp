@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "common/query.h"
+#include "cts/format_sample.h"
 
 #if !defined(_WIN32)
 #include <array>
@@ -95,8 +96,19 @@ std::vector<ParamsBuilder::ExpandedCase> expandedCases(const TestSpec& test) {
     return buildParams(test).expand();
 }
 
-void printTestListLine(const std::string& file, const TestSpec& test) {
-    const auto cases = expandedCases(test);
+std::vector<ParamsBuilder::ExpandedCase> sampledExpandedCases(
+    const TestSpec& test,
+    bool sampleFormats,
+    FormatSampleStats* stats) {
+    auto cases = expandedCases(test);
+    if (sampleFormats) {
+        cases = sampleFormatsInCases(std::move(cases), getFormatSampleHook(), kFormatSampleThreshold, stats);
+    }
+    return cases;
+}
+
+void printTestListLine(const std::string& file, const TestSpec& test, bool sampleFormats) {
+    const auto cases = sampledExpandedCases(test, sampleFormats, nullptr);
     size_t subcases = 0;
     for (const auto& c : cases) {
         subcases += c.subcases.size();
@@ -160,11 +172,21 @@ SubcaseResult runOne(const std::string& query, const TestSpec& test, const Param
     }
 }
 
-std::vector<SubcaseResult> collectRuns(const std::vector<Query>& queries) {
+std::vector<SubcaseResult> collectRuns(
+    const std::vector<Query>& queries,
+    bool sampleFormats,
+    FormatSampleStats* stats) {
     std::vector<SubcaseResult> results;
     for (const SpecFile& file : Registry::instance().files()) {
         for (const TestSpec& test : file.tests) {
-            const auto cases = expandedCases(test);
+            bool testSelected = false;
+            for (const Query& q : queries) {
+                testSelected = testSelected || queryMatchesTest(q, file.path, test.name);
+            }
+            if (!testSelected) {
+                continue;
+            }
+            const auto cases = sampledExpandedCases(test, sampleFormats, stats);
             for (const auto& c : cases) {
                 bool selected = false;
                 for (const Query& q : queries) {
@@ -189,11 +211,21 @@ std::vector<SubcaseResult> collectRuns(const std::vector<Query>& queries) {
     return results;
 }
 
-std::vector<CaseRun> collectCases(const std::vector<Query>& queries) {
+std::vector<CaseRun> collectCases(
+    const std::vector<Query>& queries,
+    bool sampleFormats,
+    FormatSampleStats* stats) {
     std::vector<CaseRun> runs;
     for (const SpecFile& file : Registry::instance().files()) {
         for (const TestSpec& test : file.tests) {
-            const auto cases = expandedCases(test);
+            bool testSelected = false;
+            for (const Query& q : queries) {
+                testSelected = testSelected || queryMatchesTest(q, file.path, test.name);
+            }
+            if (!testSelected) {
+                continue;
+            }
+            const auto cases = sampledExpandedCases(test, sampleFormats, stats);
             for (const auto& c : cases) {
                 bool selected = false;
                 for (const Query& q : queries) {
@@ -262,9 +294,13 @@ SubcaseResult aggregateCaseResult(const std::string& query, const std::vector<Su
     return SubcaseResult{query, TestStatus::Pass, ""};
 }
 
-int runSingleCase(const std::string& runCaseQuery) {
+int runSingleCase(const RunOptions& options) {
+    const std::string& runCaseQuery = options.runCaseQuery;
     Query query = parseQuery(runCaseQuery);
-    std::vector<CaseRun> cases = collectCases({query});
+    std::vector<CaseRun> cases = collectCases({query}, options.sampleFormats, nullptr);
+    if (cases.empty() && options.sampleFormats) {
+        cases = collectCases({query}, false, nullptr);
+    }
     if (cases.size() != 1 || cases[0].query != runCaseQuery) {
         std::cout << "RESULT\tfail\texpected exactly one full case query\n";
         return 0;
@@ -571,9 +607,12 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
 #endif
 }
 
-std::vector<SubcaseResult> collectIsolatedRuns(const RunOptions& options, const std::vector<Query>& queries) {
+std::vector<SubcaseResult> collectIsolatedRuns(
+    const RunOptions& options,
+    const std::vector<Query>& queries,
+    FormatSampleStats* stats) {
     std::vector<SubcaseResult> results;
-    for (const CaseRun& c : collectCases(queries)) {
+    for (const CaseRun& c : collectCases(queries, options.sampleFormats, stats)) {
         results.push_back(runIsolatedChild(options, c.query));
     }
     return results;
@@ -582,9 +621,10 @@ std::vector<SubcaseResult> collectIsolatedRuns(const RunOptions& options, const 
 std::vector<SubcaseResult> collectSelectiveRuns(
     const RunOptions& options,
     const std::vector<Query>& queries,
-    const ExpectationSet& crashList) {
+    const ExpectationSet& crashList,
+    FormatSampleStats* stats) {
     std::vector<SubcaseResult> results;
-    for (const CaseRun& c : collectCases(queries)) {
+    for (const CaseRun& c : collectCases(queries, options.sampleFormats, stats)) {
         if (expectationMatches(crashList, c.query)) {
             results.push_back(runIsolatedChild(options, c.query));
         } else {
@@ -671,7 +711,7 @@ std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& result
 int runQueries(const RunOptions& options) {
     if (!options.runCaseQuery.empty()) {
         try {
-            return runSingleCase(options.runCaseQuery);
+            return runSingleCase(options);
         } catch (const std::exception& e) {
             std::cout << "RESULT\tfail\t" << e.what() << "\n";
             return 0;
@@ -694,10 +734,10 @@ int runQueries(const RunOptions& options) {
                     continue;
                 }
                 if (options.list) {
-                    printTestListLine(file.path, test);
+                    printTestListLine(file.path, test, options.sampleFormats);
                 }
                 if (options.listCases) {
-                    for (const auto& c : expandedCases(test)) {
+                    for (const auto& c : sampledExpandedCases(test, options.sampleFormats, nullptr)) {
                         for (const Query& query : queries) {
                             if (queryMatchesCase(query, file.path, test.name, c.params)) {
                                 std::cout << caseQuery(file.path, test.name, c.params) << "\n";
@@ -720,6 +760,10 @@ int runQueries(const RunOptions& options) {
     }
 
     std::vector<SubcaseResult> results;
+    FormatSampleStats sampleStats;
+    if (options.sampleFormats) {
+        std::cerr << "format-sample: representative-formats mode ON - non-representative format cases are SKIPPED; this is NOT full conformance coverage.\n";
+    }
     if (!options.crashListPath.empty()) {
         ExpectationSet crashList;
         try {
@@ -728,9 +772,9 @@ int runQueries(const RunOptions& options) {
             std::cerr << e.what() << "\n";
             return 1;
         }
-        results = collectSelectiveRuns(options, queries, crashList);
+        results = collectSelectiveRuns(options, queries, crashList, &sampleStats);
     } else if (options.isolate) {
-        results = collectIsolatedRuns(options, queries);
+        results = collectIsolatedRuns(options, queries, &sampleStats);
         if (!options.emitCrashListPath.empty()) {
             try {
                 writeCrashList(options.emitCrashListPath, results);
@@ -740,7 +784,13 @@ int runQueries(const RunOptions& options) {
             }
         }
     } else {
-        results = collectRuns(queries);
+        results = collectRuns(queries, options.sampleFormats, &sampleStats);
+    }
+    if (options.sampleFormats && sampleStats.runsDropped > 0) {
+        std::cerr << "format-sample: thinned " << sampleStats.testsSampled
+                  << " tests, dropped " << sampleStats.runsDropped
+                  << " of " << (sampleStats.runsKept + sampleStats.runsDropped)
+                  << " format-swept subcases.\n";
     }
     return printRunResults(results, expectations);
 }

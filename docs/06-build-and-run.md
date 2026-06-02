@@ -165,6 +165,7 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 | Option | Effect |
 |--------|--------|
 | `--list` / `--list-cases` | print matching paths/cases; do not run |
+| `--sample-formats` | opt-in fast-iteration mode for large texture-format sweeps; keeps only representative formats, prints a stderr notice/recap, and is not full conformance coverage |
 | `--verbose` / `--quiet` | log level |
 | `--power-preference {low,high}` | adapter selection |
 | `--force-fallback-adapter` | request the fallback adapter |

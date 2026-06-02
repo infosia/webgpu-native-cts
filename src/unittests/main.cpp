@@ -3,12 +3,14 @@
 #include <iostream>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "common/query.h"
+#include "cts/format_sample.h"
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
@@ -66,6 +68,40 @@ double srgbDecode(double value) {
         return value / 12.92;
     }
     return std::pow((value + 0.055) / 1.055, 2.4);
+}
+
+cts::FormatSampleHook representativeFormatHook() {
+    return [](std::string_view key, int64_t value) -> std::optional<bool> {
+        if (key == "format" || key == "textureFormat" || key == "viewFormat") {
+            return cts::isRepresentativeTextureFormat(static_cast<WGPUTextureFormat>(value));
+        }
+        return std::nullopt;
+    };
+}
+
+std::vector<cts::Value> colorFormatValues() {
+    std::vector<cts::Value> values;
+    values.reserve(cts::kColorTextureFormats.size());
+    for (WGPUTextureFormat format : cts::kColorTextureFormats) {
+        values.push_back(static_cast<int64_t>(format));
+    }
+    return values;
+}
+
+std::size_t totalRuns(const std::vector<cts::ParamsBuilder::ExpandedCase>& cases) {
+    std::size_t count = 0;
+    for (const auto& c : cases) {
+        count += c.subcases.empty() ? 1 : c.subcases.size();
+    }
+    return count;
+}
+
+std::size_t representativeColorFormatCount() {
+    std::size_t count = 0;
+    for (WGPUTextureFormat format : cts::kColorTextureFormats) {
+        count += cts::isRepresentativeTextureFormat(format) ? 1 : 0;
+    }
+    return count;
 }
 
 } // namespace
@@ -160,6 +196,86 @@ int main() {
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
         require(cts::kColorTextureFormats.size() == 43, "color texture format count");
+        require(cts::isRepresentativeTextureFormat(WGPUTextureFormat_RGBA8Unorm),
+                "rgba8unorm is representative");
+        require(!cts::isRepresentativeTextureFormat(WGPUTextureFormat_RG16Snorm),
+                "rg16snorm is not representative");
+        require(representativeColorFormatCount() == 8, "representative color format count");
+
+        {
+            cts::FormatSampleStats stats;
+            const auto sampled = cts::sampleFormatsInCases(
+                cts::ParamsBuilder()
+                    .combine("format", colorFormatValues())
+                    .combine("mode", {1, 2, 3})
+                    .expand(),
+                representativeFormatHook(),
+                cts::kFormatSampleThreshold,
+                &stats);
+            require(sampled.size() == 8 * 3, "case-level format sampling survivor count");
+            require(totalRuns(sampled) == 8 * 3, "case-level format sampling run count");
+            require(stats.testsSampled == 1, "case-level format sampling stats tests");
+            require(stats.runsKept == 8 * 3, "case-level format sampling stats kept");
+            require(stats.runsDropped == (43 - 8) * 3, "case-level format sampling stats dropped");
+            for (const auto& c : sampled) {
+                const auto format = static_cast<WGPUTextureFormat>(
+                    cts::valueAs<int64_t>(*cts::findParam(c.params, "format")));
+                require(cts::isRepresentativeTextureFormat(format), "case-level survivor is representative");
+            }
+        }
+
+        {
+            const auto cases = cts::ParamsBuilder()
+                .combine("format", {
+                    static_cast<int64_t>(WGPUTextureFormat_R8Unorm),
+                    static_cast<int64_t>(WGPUTextureFormat_RGBA8Unorm),
+                    static_cast<int64_t>(WGPUTextureFormat_RGBA8Snorm),
+                    static_cast<int64_t>(WGPUTextureFormat_RGBA8Uint),
+                })
+                .expand();
+            const auto sampled = cts::sampleFormatsInCases(cases, representativeFormatHook());
+            require(sampled.size() == cases.size(), "small format sweep unchanged");
+        }
+
+        {
+            const auto cases = cts::ParamsBuilder()
+                .combine("format", {
+                    static_cast<int64_t>(WGPUTextureFormat_R8Unorm),
+                    static_cast<int64_t>(WGPUTextureFormat_R8Snorm),
+                    static_cast<int64_t>(WGPUTextureFormat_R8Uint),
+                    static_cast<int64_t>(WGPUTextureFormat_R8Sint),
+                    static_cast<int64_t>(WGPUTextureFormat_RG8Unorm),
+                    static_cast<int64_t>(WGPUTextureFormat_RG8Snorm),
+                    static_cast<int64_t>(WGPUTextureFormat_RG8Uint),
+                })
+                .expand();
+            const auto sampled = cts::sampleFormatsInCases(cases, representativeFormatHook());
+            require(sampled.size() == cases.size(), "zero-survivor format sweep unchanged");
+        }
+
+        {
+            const auto cases = cts::ParamsBuilder().combine("dimension", {1, 2, 3, 4, 5, 6, 7}).expand();
+            const auto sampled = cts::sampleFormatsInCases(cases, representativeFormatHook());
+            require(sampled.size() == cases.size(), "no format-like param unchanged");
+        }
+
+        {
+            const auto sampled = cts::sampleFormatsInCases(
+                cts::ParamsBuilder()
+                    .combine("case", {1})
+                    .beginSubcases()
+                    .combine("format", colorFormatValues())
+                    .expand(),
+                representativeFormatHook());
+            require(sampled.size() == 1, "subcase-level format sampling keeps case");
+            require(sampled[0].subcases.size() == 8, "subcase-level format sampling survivor count");
+            for (const cts::ParamRecord& subcase : sampled[0].subcases) {
+                const auto format = static_cast<WGPUTextureFormat>(
+                    cts::valueAs<int64_t>(*cts::findParam(subcase, "format")));
+                require(cts::isRepresentativeTextureFormat(format), "subcase-level survivor is representative");
+            }
+        }
+
         for (WGPUTextureFormat format : cts::kColorTextureFormats) {
             const cts::TexelRepresentation& repr = cts::texelRepresentation(format);
             const std::vector<uint8_t> bytes = sampleBytesForFormat(format);

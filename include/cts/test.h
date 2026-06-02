@@ -253,6 +253,7 @@ struct RunOptions {
     bool list = false;
     bool listCases = false;
     bool isolate = false;
+    bool sampleFormats = false;
     std::string runCaseQuery;
     std::string expectationsPath;
     std::string crashListPath;
