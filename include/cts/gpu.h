@@ -3,11 +3,13 @@
 #include <array>
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string_view>
 #include <vector>
 
 #include "cts/test.h"
 #include "cts/webgpu.h"
+#include "webgpu/util/texture_layout.h"
 
 namespace cts {
 
@@ -39,6 +41,18 @@ class GpuTest : public Fixture {
         const void* expected,
         size_t size,
         uint64_t srcByteOffset = 0);
+    void expectGPUBufferValuesPassCheck(
+        WGPUBuffer src,
+        const std::function<std::optional<std::string>(const uint8_t* actual, size_t len)>& check,
+        uint64_t srcByteOffset,
+        size_t byteLength);
+    void expectGPUBufferValuesEqualWhenInterpretedAsTextureFormat(
+        const uint8_t* expected,
+        size_t expectedLen,
+        WGPUBuffer buffer,
+        WGPUTextureFormat format,
+        WGPUExtent3D size,
+        TexelCopyBufferLayout dataLayout);
     void queueWriteBuffer(WGPUBuffer buffer, uint64_t bufferOffset, const void* data, size_t size);
     void copyBufferToTexture(
         WGPUCommandEncoder encoder,

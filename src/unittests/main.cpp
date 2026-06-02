@@ -1,7 +1,9 @@
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -10,6 +12,10 @@
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
+#include "webgpu/util/texel_data.h"
+#include "webgpu/util/texel_view.h"
+#include "webgpu/util/texture_layout.h"
+#include "webgpu/util/texture_ok.h"
 #include "webgpu/util/write_buffer.h"
 
 namespace {
@@ -44,6 +50,22 @@ void requireBytes(
     const std::vector<uint8_t>& expected,
     const std::string& message) {
     require(actual == expected, message);
+}
+
+std::vector<uint8_t> sampleBytesForFormat(WGPUTextureFormat format) {
+    const cts::TextureBlockInfo block = cts::getBlockInfoForTextureFormat(format);
+    std::vector<uint8_t> bytes(block.bytesPerBlock);
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        bytes[i] = static_cast<uint8_t>(0x21 + i * 17);
+    }
+    return bytes;
+}
+
+double srgbDecode(double value) {
+    if (value <= 0.04045) {
+        return value / 12.92;
+    }
+    return std::pow((value + 0.055) / 1.055, 2.4);
 }
 
 } // namespace
@@ -137,6 +159,185 @@ int main() {
         require(cts::stringifyValue(cts::Value("abc")) == "\"abc\"", "string stringify");
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
+        require(cts::kColorTextureFormats.size() == 43, "color texture format count");
+        for (WGPUTextureFormat format : cts::kColorTextureFormats) {
+            const cts::TexelRepresentation& repr = cts::texelRepresentation(format);
+            const std::vector<uint8_t> bytes = sampleBytesForFormat(format);
+            const std::vector<uint8_t> roundTrip = repr.packBits(repr.unpackBits(bytes.data(), bytes.size()));
+            requireBytes(roundTrip, bytes, "texel bits pack/unpack roundtrip format=" + std::to_string(format));
+
+            cts::TexelBits maxBits;
+            for (size_t i = 0; i < repr.bitLengths.size(); ++i) {
+                if (repr.bitLengths[i] > 0) {
+                    maxBits.values[i] = repr.bitLengths[i] == 32 ? 0xffffffffu : ((1u << repr.bitLengths[i]) - 1u);
+                }
+            }
+            const cts::TexelComponents maxNumbers = repr.bitsToNumber(maxBits);
+            if (format == WGPUTextureFormat_RGBA8Unorm) {
+                require(maxNumbers.values[0] == 1.0, "rgba8unorm max decodes to 1.0");
+            }
+            if (format == WGPUTextureFormat_R8Snorm) {
+                cts::TexelBits minSnorm;
+                minSnorm.values[0] = 0x80;
+                require(cts::texelRepresentation(format).bitsToNumber(minSnorm).values[0] == -1.0,
+                        "r8snorm min decodes to -1.0");
+            }
+            if (format == WGPUTextureFormat_R32Float) {
+                cts::TexelBits one;
+                one.values[0] = 0x3f800000;
+                require(cts::texelRepresentation(format).bitsToNumber(one).values[0] == 1.0,
+                        "r32float 1.0 bit pattern");
+            }
+        }
+
+        {
+            const cts::TexelRepresentation& r8snorm = cts::texelRepresentation(WGPUTextureFormat_R8Snorm);
+            cts::TexelBits snormBits;
+            snormBits.values[0] = 0x80;
+            require(r8snorm.bitsToNumber(snormBits).values[0] == -1.0, "r8snorm -128 clamps to -1.0");
+            snormBits.values[0] = 0x81;
+            require(r8snorm.bitsToNumber(snormBits).values[0] == -1.0, "r8snorm -127 decodes to -1.0");
+            snormBits.values[0] = 0x7f;
+            require(r8snorm.bitsToNumber(snormBits).values[0] == 1.0, "r8snorm 127 decodes to 1.0");
+
+            const cts::TexelRepresentation& r8unorm = cts::texelRepresentation(WGPUTextureFormat_R8Unorm);
+            cts::TexelBits unormBits;
+            unormBits.values[0] = 0x80;
+            require(r8unorm.bitsToNumber(unormBits).values[0] == 128.0 / 255.0,
+                    "r8unorm 128 decodes to 128/255");
+            unormBits.values[0] = 0xff;
+            require(r8unorm.bitsToNumber(unormBits).values[0] == 1.0, "r8unorm max decodes to 1.0");
+
+            cts::TexelBits integerBits;
+            integerBits.values[0] = 200;
+            require(cts::texelRepresentation(WGPUTextureFormat_R8Uint).bitsToNumber(integerBits).values[0] == 200.0,
+                    "r8uint 200 decodes to 200");
+            integerBits.values[0] = 0x80;
+            require(cts::texelRepresentation(WGPUTextureFormat_R8Sint).bitsToNumber(integerBits).values[0] == -128.0,
+                    "r8sint 0x80 decodes to -128");
+
+            cts::TexelBits srgbBits;
+            srgbBits.values[0] = 0xbc;
+            srgbBits.values[3] = 0xbc;
+            const cts::TexelComponents srgb = cts::texelRepresentation(WGPUTextureFormat_RGBA8UnormSrgb)
+                                                  .bitsToNumber(srgbBits);
+            require(srgb.values[0] == srgbDecode(188.0 / 255.0), "rgba8unorm-srgb non-alpha gamma decodes");
+            require(srgb.values[3] == 188.0 / 255.0, "rgba8unorm-srgb alpha stays linear");
+
+            cts::TexelBits f16Bits;
+            f16Bits.values[0] = 0x3c00;
+            require(cts::texelRepresentation(WGPUTextureFormat_R16Float).bitsToNumber(f16Bits).values[0] == 1.0,
+                    "r16float 0x3c00 decodes to 1.0");
+            f16Bits.values[0] = 0xc000;
+            require(cts::texelRepresentation(WGPUTextureFormat_R16Float).bitsToNumber(f16Bits).values[0] == -2.0,
+                    "r16float 0xc000 decodes to -2.0");
+
+            cts::TexelBits rg11b10Bits;
+            rg11b10Bits.values[0] = 15u << 6;
+            rg11b10Bits.values[2] = (15u << 5) | 16u;
+            const cts::TexelComponents rg11b10 = cts::texelRepresentation(WGPUTextureFormat_RG11B10Ufloat)
+                                                     .bitsToNumber(rg11b10Bits);
+            require(rg11b10.values[0] == 1.0, "rg11b10ufloat R 11-bit 1.0 pattern");
+            require(rg11b10.values[2] == 1.5, "rg11b10ufloat B 10-bit 5-mantissa pattern");
+
+            const uint32_t rgb9e5Word = 256u | (128u << 9) | (64u << 18) | (15u << 27);
+            const std::vector<uint8_t> rgb9e5Bytes = {
+                static_cast<uint8_t>(rgb9e5Word & 0xffu),
+                static_cast<uint8_t>((rgb9e5Word >> 8) & 0xffu),
+                static_cast<uint8_t>((rgb9e5Word >> 16) & 0xffu),
+                static_cast<uint8_t>((rgb9e5Word >> 24) & 0xffu),
+            };
+            const cts::TexelComponents rgb9e5 = cts::texelRepresentation(WGPUTextureFormat_RGB9E5Ufloat)
+                                                    .bitsToNumber(cts::texelRepresentation(WGPUTextureFormat_RGB9E5Ufloat)
+                                                                      .unpackBits(rgb9e5Bytes.data(), rgb9e5Bytes.size()));
+            require(rgb9e5.values[0] == 0.5, "rgb9e5 R shared-exponent decode");
+            require(rgb9e5.values[1] == 0.25, "rgb9e5 G shared-exponent decode");
+            require(rgb9e5.values[2] == 0.125, "rgb9e5 B shared-exponent decode");
+
+            bool rgb9e5EncodeThrew = false;
+            try {
+                cts::TexelComponents color;
+                color.values[0] = 0.5;
+                color.values[1] = 0.25;
+                color.values[2] = 0.125;
+                (void)cts::texelRepresentation(WGPUTextureFormat_RGB9E5Ufloat).numberToBits(color);
+            } catch (const std::runtime_error&) {
+                rgb9e5EncodeThrew = true;
+            }
+            require(rgb9e5EncodeThrew, "rgb9e5 numberToBits guard");
+        }
+
+        {
+            const std::vector<uint8_t> identical = {
+                1, 2, 3, 4, 0xee, 0xee, 0xee, 0xee,
+                5, 6, 7, 8, 0xee, 0xee, 0xee, 0xee,
+            };
+            cts::TexelViewConfig config;
+            config.bytesPerRow = 8;
+            config.rowsPerImage = 2;
+            config.subrectSize = WGPUExtent3D{1, 2, 1};
+            const cts::TexelView actual = cts::TexelView::fromTextureDataByReference(
+                WGPUTextureFormat_RGBA8Uint, identical.data(), identical.size(), config);
+            const cts::TexelView expected = cts::TexelView::fromTextureDataByReference(
+                WGPUTextureFormat_RGBA8Uint, identical.data(), identical.size(), config);
+            require(!cts::findFailedPixels(
+                        WGPUTextureFormat_RGBA8Uint, WGPUOrigin3D{0, 0, 0}, WGPUExtent3D{1, 2, 1},
+                        actual, expected, 0.0),
+                    "findFailedPixels identical padded views");
+
+            std::vector<uint8_t> changed = identical;
+            changed[8] = 9;
+            const cts::TexelView changedView = cts::TexelView::fromTextureDataByReference(
+                WGPUTextureFormat_RGBA8Uint, changed.data(), changed.size(), config);
+            require(cts::findFailedPixels(
+                        WGPUTextureFormat_RGBA8Uint, WGPUOrigin3D{0, 0, 0}, WGPUExtent3D{1, 2, 1},
+                        changedView, expected, 0.0).has_value(),
+                    "findFailedPixels detects planted diff");
+        }
+
+        {
+            require(cts::bytesInACompleteRow(3, WGPUTextureFormat_RGBA8Unorm) == 12,
+                    "rgba8unorm complete row bytes");
+            const cts::TextureCopyLayout rgbaLayout = cts::getTextureCopyLayout(
+                WGPUTextureFormat_RGBA8Unorm, WGPUTextureDimension_2D, WGPUExtent3D{3, 4, 5});
+            require(rgbaLayout.bytesPerRow == 256, "rgba8unorm layout bytesPerRow");
+            require(rgbaLayout.rowsPerImage == 4, "rgba8unorm layout rowsPerImage");
+            require(rgbaLayout.byteLength == 4876, "rgba8unorm layout byteLength");
+            const cts::TextureCopyLayout r8Layout = cts::getTextureCopyLayout(
+                WGPUTextureFormat_R8Unorm, WGPUTextureDimension_2D, WGPUExtent3D{7, 1, 1});
+            require(r8Layout.byteLength == 8, "r8unorm single row aligned byteLength");
+            require(cts::bytesInACompleteRow(1, WGPUTextureFormat_RGB10A2Unorm) == 4,
+                    "rgb10a2unorm complete row bytes");
+            require(cts::dataBytesForCopyOrFail(
+                        cts::TexelCopyBufferLayout{0, 256, 4},
+                        WGPUTextureFormat_RGBA8Unorm,
+                        WGPUExtent3D{3, 4, 5},
+                        true)
+                        == 4876,
+                    "rgba8unorm dataBytesForCopyOrFail");
+        }
+
+        {
+            std::vector<uint8_t> src = {
+                1, 2, 3, 4, 0, 0, 0, 0,
+                5, 6, 7, 8, 0, 0, 0, 0,
+            };
+            std::vector<uint8_t> dst(24, 0xff);
+            cts::LinearTextureSubBox copy;
+            copy.src = src.data();
+            copy.srcLen = src.size();
+            copy.srcLayout = cts::TexelCopyBufferLayout{0, 8, 2};
+            copy.dst = dst.data();
+            copy.dstLen = dst.size();
+            copy.dstLayout = cts::TexelCopyBufferLayout{0, 12, 2};
+            copy.dstOrigin = WGPUOrigin3D{1, 0, 0};
+            cts::updateLinearTextureDataSubBox(WGPUTextureFormat_RGBA8Uint, WGPUExtent3D{1, 2, 1}, copy);
+            require(dst[4] == 1 && dst[5] == 2 && dst[6] == 3 && dst[7] == 4,
+                    "sub-box first row update");
+            require(dst[16] == 5 && dst[17] == 6 && dst[18] == 7 && dst[19] == 8,
+                    "sub-box second row update");
+        }
+
         requireBytes(cts::encodeWriteBufferData({0, 1, 2, 3}, cts::WriteBufferArrayType::U8),
                      {0x00, 0x01, 0x02, 0x03},
                      "writeBuffer U8 encoding");

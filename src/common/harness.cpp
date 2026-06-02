@@ -8,6 +8,8 @@
 
 #include "common/webgpu/backend.h"
 #include "common/webgpu/sync.h"
+#include "webgpu/util/texel_view.h"
+#include "webgpu/util/texture_ok.h"
 #include "webgpu/texture_format.h"
 
 namespace cts {
@@ -464,6 +466,84 @@ void GpuTest::expectGPUBufferValuesEqual(
                 << ", got " << static_cast<int>(mismatchActual);
         fail(message.str());
     }
+}
+
+void GpuTest::expectGPUBufferValuesPassCheck(
+    WGPUBuffer src,
+    const std::function<std::optional<std::string>(const uint8_t* actual, size_t len)>& check,
+    uint64_t srcByteOffset,
+    size_t byteLength) {
+    WGPUBufferDescriptor stagingDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    stagingDesc.size = byteLength;
+    stagingDesc.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
+    WGPUBuffer staging = createBufferTracked(stagingDesc);
+
+    WGPUCommandEncoder encoder = createCommandEncoderTracked();
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, src, srcByteOffset, staging, 0, byteLength);
+    WGPUCommandBuffer commandBuffer = finishTracked(encoder);
+    wgpuQueueSubmit(queue(), 1, &commandBuffer);
+
+    expectMapAsync(staging, WGPUMapMode_Read, true, 0, byteLength);
+    const void* actual = wgpuBufferGetConstMappedRange(staging, 0, byteLength);
+    if (byteLength > 0 && actual == nullptr) {
+        wgpuBufferUnmap(staging);
+        fail("failed to get mapped range for GPU buffer readback");
+    }
+
+    const auto* actualBytes = static_cast<const uint8_t*>(actual);
+    const std::optional<std::string> message = check(actualBytes, byteLength);
+    wgpuBufferUnmap(staging);
+    if (message) {
+        fail(*message);
+    }
+}
+
+void GpuTest::expectGPUBufferValuesEqualWhenInterpretedAsTextureFormat(
+    const uint8_t* expected,
+    size_t expectedLen,
+    WGPUBuffer buffer,
+    WGPUTextureFormat format,
+    WGPUExtent3D size,
+    TexelCopyBufferLayout dataLayout) {
+    expectGPUBufferValuesPassCheck(buffer, [&](const uint8_t* actual, size_t actualLen) -> std::optional<std::string> {
+        TexelViewConfig config;
+        config.bytesPerRow = dataLayout.bytesPerRow;
+        config.rowsPerImage = dataLayout.rowsPerImage;
+        config.subrectOrigin = WGPUOrigin3D{0, 0, 0};
+        config.subrectSize = size;
+        const TexelView actualView = TexelView::fromTextureDataByReference(format, actual, actualLen, config);
+        const TexelView expectedView = TexelView::fromTextureDataByReference(format, expected, expectedLen, config);
+        std::optional<std::string> failedPixels = findFailedPixels(
+            format,
+            WGPUOrigin3D{0, 0, 0},
+            size,
+            actualView,
+            expectedView,
+            0.0);
+        if (failedPixels) {
+            return failedPixels;
+        }
+
+        const TextureBlockInfo block = getBlockInfoForTextureFormat(format);
+        for (uint32_t z = 0; z < size.depthOrArrayLayers; ++z) {
+            for (uint32_t y = 0; y < size.height; ++y) {
+                const uint64_t rowStart = static_cast<uint64_t>(z) * dataLayout.rowsPerImage * dataLayout.bytesPerRow
+                    + static_cast<uint64_t>(y) * dataLayout.bytesPerRow;
+                const uint64_t texelEnd = rowStart + static_cast<uint64_t>(size.width) * block.bytesPerBlock;
+                const uint64_t rowEnd = rowStart + dataLayout.bytesPerRow;
+                for (uint64_t i = texelEnd; i < rowEnd && i < actualLen && i < expectedLen; ++i) {
+                    if (actual[i] != expected[i]) {
+                        std::ostringstream message;
+                        message << "texture padding mismatch at byte " << i
+                                << ": expected " << static_cast<int>(expected[i])
+                                << ", got " << static_cast<int>(actual[i]);
+                        return message.str();
+                    }
+                }
+            }
+        }
+        return std::nullopt;
+    }, dataLayout.offset, expectedLen);
 }
 
 void GpuTest::queueWriteBuffer(WGPUBuffer buffer, uint64_t bufferOffset, const void* data, size_t size) {

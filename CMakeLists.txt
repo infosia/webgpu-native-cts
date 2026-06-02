@@ -160,6 +160,10 @@ add_library(cts_harness
     src/common/runner.cpp
     ${CTS_BACKEND_SOURCE}
     src/common/webgpu/sync.cpp
+    src/webgpu/util/texel_data.cpp
+    src/webgpu/util/texel_view.cpp
+    src/webgpu/util/texture_layout.cpp
+    src/webgpu/util/texture_ok.cpp
 )
 target_include_directories(cts_harness
     PUBLIC

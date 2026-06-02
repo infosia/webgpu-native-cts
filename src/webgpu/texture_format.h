@@ -208,6 +208,8 @@ inline constexpr std::array<WGPUTextureFormat, 43> kRegularTextureFormats = {
     WGPUTextureFormat_RGB10A2Unorm, WGPUTextureFormat_RG11B10Ufloat, WGPUTextureFormat_RGB9E5Ufloat,
 };
 
+inline constexpr std::array<WGPUTextureFormat, kRegularTextureFormats.size()> kColorTextureFormats = kRegularTextureFormats;
+
 inline constexpr std::array<WGPUTextureFormat, kCompressedTextureFormatInfos.size()> kCompressedTextureFormats = {
     WGPUTextureFormat_BC1RGBAUnorm, WGPUTextureFormat_BC1RGBAUnormSrgb, WGPUTextureFormat_BC2RGBAUnorm,
     WGPUTextureFormat_BC2RGBAUnormSrgb, WGPUTextureFormat_BC3RGBAUnorm, WGPUTextureFormat_BC3RGBAUnormSrgb,
@@ -443,6 +445,15 @@ inline const TextureFormatInfo& textureFormatInfo(WGPUTextureFormat format) {
 inline TextureBlockInfo getBlockInfoForTextureFormat(WGPUTextureFormat format) {
     const TextureFormatInfo& info = textureFormatInfo(format);
     return TextureBlockInfo{info.blockWidth, info.blockHeight, info.bytesPerBlock};
+}
+
+inline TextureBlockInfo getBlockInfoForColorTextureFormat(WGPUTextureFormat format) {
+    for (WGPUTextureFormat colorFormat : kColorTextureFormats) {
+        if (colorFormat == format) {
+            return getBlockInfoForTextureFormat(format);
+        }
+    }
+    std::abort();
 }
 
 inline uint32_t roundDown(uint32_t value, uint32_t multiple) {
