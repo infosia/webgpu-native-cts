@@ -90,12 +90,14 @@ also surfaced and resolved a `clearBuffer` zero-fill / `WGPU_WHOLE_SIZE` bug. **
 `e56f30a`** — so `api,operation,command_buffer` is now `pass=5 fail=0 crash=0` (Dawn-equal). Extending
 Phase 4 (**T23** — `queue/writeBuffer`, `command_buffer/basic`, `onSubmittedWorkDone`) then surfaced
 [F-024](#f-024--yawgpu-loses-data-in-an-rgba8uint-texture-copy-roundtrip-copybuffertotexture--copytexturetobuffer)
-(yawgpu reads back all-zeros from an `rgba8uint` `copyBufferToTexture` → `copyTextureToBuffer` roundtrip
-that Dawn **and** wgpu-native pass). `writeBuffer` (17/17) and `onSubmittedWorkDone` (5/5) are clean on
-yawgpu; `api,validation` is unchanged at `pass=4332 skip=383 fail=0 crash=0`. The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022/023. Open yawgpu findings: F-024
-(api/operation — `rgba8uint` texture-copy roundtrip loses data; `command_buffer,basic:{b2t2b,b2t2t2b}`
-triaged in `expectations/yawgpu.txt`). Open wgpu-native: F-001–F-004,
+(yawgpu read back all-zeros from an `rgba8uint` `copyBufferToTexture` → `copyTextureToBuffer` roundtrip
+that Dawn **and** wgpu-native pass — its HAL was missing `rgba8uint`). **yawgpu fixed F-024 in `c893eac`**
+(added `rgba8uint`, then expanded HAL coverage to all uncompressed color formats) — so
+`command_buffer,basic` is now `pass=3` (Dawn-equal); `writeBuffer` (17/17), `onSubmittedWorkDone` (5/5) and
+`api,validation` (`pass=4332 skip=383 fail=0 crash=0`) are unchanged. yawgpu again **passes every ported
+test, both `api,validation` and `api,operation`**. The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022/023/024. No open yawgpu findings —
+`expectations/yawgpu.txt` has no expected failures. Open wgpu-native: F-001–F-004,
 F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
@@ -686,10 +688,18 @@ F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
   buffer even though `bytesPerRow=256`: only rows *before* the last must honour the full stride, so the
   required buffer size is the 4 bytes of the last/only row. A likely yawgpu lead is over-strict
   `bytesPerRow`/required-size handling for height-1 copies, or the copy silently not writing.)
-- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed — two independent oracles agree on the
-  correct value, with the *same* harness copy helpers). Not masked; recorded in `expectations/yawgpu.txt`
-  as `api,operation,command_buffer,basic:{b2t2b,b2t2t2b}:*` prefix lines. wgpu-native and Dawn need no
-  entries. (Real-GPU verification must run with the Bash sandbox disabled — see the F-023 diagnosis note.)
+- **Root cause / fix:** yawgpu's HAL texture-format set did not include `rgba8uint` (nor several other
+  uncompressed color formats), so the copy was silently a no-op — hence the all-zeros readback. Fixed in
+  two steps: `6580617` *("add rgba8uint to the HAL texture-format set")* fixed the `basic` test, and
+  `c893eac` *("hal: expand texture-format coverage to all uncompressed color formats")* generalised it so
+  the whole uncompressed-color set is now copy-capable.
+- **Status:** **RESOLVED** in yawgpu at `c893eac`. Re-verified on real-GPU Metal (sandbox off):
+  `command_buffer,basic` `pass=3` (b2t2b/b2t2t2b now return `0x01020304`, Dawn-equal), the rest of T23 is
+  unchanged (`writeBuffer` 17/17, `onSubmittedWorkDone` 5/5), and the full `api,validation` surface is
+  unchanged (`pass=4332 skip=383 fail=0 crash=0` — the format expansion didn't shift validation). The
+  `expectations/yawgpu.txt` entries were removed; the file again has **no** expected failures. 3-way
+  confirmed throughout (Dawn + wgpu-native always passed). (Real-GPU verification must run with the Bash
+  sandbox disabled — see the F-023 diagnosis note.)
 
 ---
 
