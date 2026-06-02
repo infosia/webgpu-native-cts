@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <sstream>
 
@@ -578,6 +579,33 @@ std::vector<SubcaseResult> collectIsolatedRuns(const RunOptions& options, const 
     return results;
 }
 
+std::vector<SubcaseResult> collectSelectiveRuns(
+    const RunOptions& options,
+    const std::vector<Query>& queries,
+    const ExpectationSet& crashList) {
+    std::vector<SubcaseResult> results;
+    for (const CaseRun& c : collectCases(queries)) {
+        if (expectationMatches(crashList, c.query)) {
+            results.push_back(runIsolatedChild(options, c.query));
+        } else {
+            results.push_back(aggregateCaseResult(c.query, runCase(c)));
+        }
+    }
+    return results;
+}
+
+void writeCrashList(const std::string& path, const std::vector<SubcaseResult>& results) {
+    std::ofstream out(path);
+    if (!out) {
+        throw std::runtime_error("failed to open crash-list output file: " + path);
+    }
+    const std::vector<std::string> lines = crashListLines(results);
+    for (const std::string& line : lines) {
+        out << line << "\n";
+    }
+    std::cerr << "emitted " << lines.size() << " crashing cases to " << path << "\n";
+}
+
 int printRunResults(const std::vector<SubcaseResult>& results, const ExpectationSet& expectations) {
     size_t pass = 0;
     size_t skip = 0;
@@ -628,6 +656,16 @@ bool expectationMatches(const ExpectationSet& expectations, const std::string& q
         }
     }
     return false;
+}
+
+std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& results) {
+    std::set<std::string> lines;
+    for (const SubcaseResult& result : results) {
+        if (result.status == TestStatus::Crash) {
+            lines.insert(result.query);
+        }
+    }
+    return std::vector<std::string>(lines.begin(), lines.end());
 }
 
 int runQueries(const RunOptions& options) {
@@ -681,7 +719,29 @@ int runQueries(const RunOptions& options) {
         return 1;
     }
 
-    std::vector<SubcaseResult> results = options.isolate ? collectIsolatedRuns(options, queries) : collectRuns(queries);
+    std::vector<SubcaseResult> results;
+    if (!options.crashListPath.empty()) {
+        ExpectationSet crashList;
+        try {
+            crashList = loadExpectations(options.crashListPath);
+        } catch (const std::exception& e) {
+            std::cerr << e.what() << "\n";
+            return 1;
+        }
+        results = collectSelectiveRuns(options, queries, crashList);
+    } else if (options.isolate) {
+        results = collectIsolatedRuns(options, queries);
+        if (!options.emitCrashListPath.empty()) {
+            try {
+                writeCrashList(options.emitCrashListPath, results);
+            } catch (const std::exception& e) {
+                std::cerr << e.what() << "\n";
+                return 1;
+            }
+        }
+    } else {
+        results = collectRuns(queries);
+    }
     return printRunResults(results, expectations);
 }
 

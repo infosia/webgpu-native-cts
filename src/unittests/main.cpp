@@ -375,6 +375,24 @@ int main() {
         require(!cts::expectationMatches(expectations, "a:b:test_more:foo"), "expectation prefix avoids test_more");
         require(!cts::expectationMatches(expectations, "a:b:tes:foo"), "expectation prefix avoids shorter test");
         require(cts::expectationMatches(expectations, "a:b:test:*"), "expectation non-wildcard exact match");
+        cts::ExpectationSet crashList;
+        crashList.exact.insert("webgpu:a:b:c:x=1");
+        crashList.prefixes.push_back("webgpu:a:b:d:");
+        require(cts::expectationMatches(crashList, "webgpu:a:b:c:x=1"), "crash-list exact selects isolate");
+        require(cts::expectationMatches(crashList, "webgpu:a:b:d:x=2"), "crash-list prefix selects isolate");
+        require(!cts::expectationMatches(crashList, "webgpu:a:b:e:x=3"), "crash-list non-match stays in-process");
+        const std::vector<std::string> crashLines = cts::crashListLines({
+            cts::SubcaseResult{"webgpu:z:file:test:*", cts::TestStatus::Crash, "signal"},
+            cts::SubcaseResult{"webgpu:a:file:test:*", cts::TestStatus::Pass, ""},
+            cts::SubcaseResult{"webgpu:m:file:test:*", cts::TestStatus::Fail, "failure"},
+            cts::SubcaseResult{"webgpu:z:file:test:*", cts::TestStatus::Crash, "signal"},
+            cts::SubcaseResult{"webgpu:b:file:test:*", cts::TestStatus::Crash, "signal"},
+        });
+        require(crashLines == std::vector<std::string>({
+                    "webgpu:b:file:test:*",
+                    "webgpu:z:file:test:*",
+                }),
+                "crash-list lines sorted unique crashes");
 
         require(cts::kTextureUsages.size() == 6, "texture usages count");
         require(cts::kAllTextureUsages == 0x3F, "all texture usages bits");

@@ -255,6 +255,8 @@ struct RunOptions {
     bool isolate = false;
     std::string runCaseQuery;
     std::string expectationsPath;
+    std::string crashListPath;
+    std::string emitCrashListPath;
     std::string executablePath;
     std::vector<std::string> forwardedArgs;
     std::vector<std::string> queries;
@@ -262,6 +264,7 @@ struct RunOptions {
 
 int runQueries(const RunOptions& options);
 int writeListingJson(const std::string& path);
+std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& results);
 std::vector<SubcaseResult> runSyntheticFailureForSelfTest();
 void setCurrentTest(Fixture* fixture);
 

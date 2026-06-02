@@ -63,7 +63,7 @@ const char* adapterTypeName(WGPUAdapterType type) {
 }
 
 void printUsage() {
-    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--isolate] [--run-case <case>] [--expectations <file>] <query>...\n"
+    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--isolate] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
               << "\n"
               << "Without arguments, creates a WebGPU instance, requests an adapter,\n"
               << "prints adapter information, and exits.\n";
@@ -151,6 +151,18 @@ int main(int argc, char** argv) {
                     return EXIT_FAILURE;
                 }
                 options.expectationsPath = argv[++i];
+            } else if (arg == "--crash-list") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --crash-list\n";
+                    return EXIT_FAILURE;
+                }
+                options.crashListPath = argv[++i];
+            } else if (arg == "--emit-crash-list") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --emit-crash-list\n";
+                    return EXIT_FAILURE;
+                }
+                options.emitCrashListPath = argv[++i];
             } else if (arg == "--yawgpu-backend" || arg == "--future-timeout-ms") {
                 if (i + 1 >= argc) {
                     std::cerr << "missing value for " << arg << "\n";
