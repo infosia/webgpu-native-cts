@@ -97,28 +97,30 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **6 `api/operation` (Phase 4)** files: `command_buffer/`
-  `{clearBuffer, copyBufferToBuffer, basic, image_copy}`, `queue/writeBuffer`, and `onSubmittedWorkDone`.
+  maximally-ported `buffer/mapping` — and **7 `api/operation` (Phase 4)** files: `command_buffer/`
+  `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`, and
+  `onSubmittedWorkDone`.
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), and the **TexelView decode-value comparison stack** that
   backs the color `image_copy` port (137256 subcases). See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 27 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 28 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes **every ported test through T24b** (all
+- **yawgpu** — the primary conformance subject — passes **every ported test through T25** (all
   `api,validation` at `pass=4332`, plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone` /
-  color `image_copy` operation tests; the full color `image_copy` run is `pass=137256 fail=0`, matching the
-  Dawn oracle). Every finding it has surfaced has been fixed in yawgpu and re-confirmed on hardware —
+  color `image_copy` / color `copyTextureToTexture` operation tests; the full color `image_copy` run is
+  `pass=137256 fail=0` and `copyTextureToTexture` is `pass=30910 fail=0`, both matching the Dawn oracle). Every finding it has surfaced has been fixed in yawgpu and re-confirmed on hardware —
   `expectations/yawgpu.txt` has no expected failures. (It also *runs* the `immediate_data_size` cases that
   Dawn/wgpu-native skip.) See [FINDINGS](docs/FINDINGS.md) for the per-finding record.
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
-  view-usage subset rule), and **F-027** (a 3D whole-subresource `image_copy` readback after a
-  non-zero-origin copy — `origins_and_extents` 3D `FullCopyT2B`).
+  view-usage subset rule), and the wgpu-native 3D multi-slice copy/readback family **F-027** (a 3D
+  whole-subresource `image_copy` readback after a non-zero-origin copy) and **F-028** (3D
+  `copyTextureToTexture` leaves depth slices z≥1 zero; 2D-array copies pass).
 
 Every divergence the suite surfaces is reported, fixed upstream, and re-confirmed on hardware.
 

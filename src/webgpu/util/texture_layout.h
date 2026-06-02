@@ -39,6 +39,7 @@ struct LinearTextureSubBox {
 };
 
 uint32_t bytesInACompleteRow(uint32_t width, WGPUTextureFormat format);
+WGPUExtent3D physicalMipSize(WGPUExtent3D baseSize, WGPUTextureDimension dimension, uint32_t mipLevel);
 TextureCopyLayout getTextureCopyLayout(
     WGPUTextureFormat format,
     WGPUTextureDimension dimension,

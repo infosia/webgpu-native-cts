@@ -531,4 +531,32 @@ note; under the macOS sandbox Metal enumerates no adapters and every case false-
 
 ---
 
+## F-028 — wgpu-native loses non-zero depth slices in a 3D `copyTextureToTexture` (reads back zero)
+
+- **Backend:** wgpu-native (Metal). **Not** present in Dawn or yawgpu — both pass the identical cases.
+- **Found by:** `api/operation/command_buffer/copyTextureToTexture:color_textures,non_compressed,array`
+  (T25) — the **3D** cases (`dimension=3`). The test fills a multi-slice source via `writeTexture`,
+  `copyTextureToTexture` into a multi-slice destination, reads the whole destination level back via
+  `copyTextureToBuffer`, and compares (decoded TexelView, `maxFractionalDiff=0`).
+- **Observed on wgpu-native:** every destination texel at **depth slice z≥1 reads back zero** —
+  `pixel mismatch at 0,0,1 component 0: expected <data>, got 0` — i.e. only slice 0 receives the copy;
+  the higher 3D slices stay zero. Deterministic, across all 3D-compatible color formats.
+- **Scope / magnitude:** the full wgpu-native run is `pass=26236 skip=3942 fail=738`. The 738 failures are
+  exactly **41 cases × 18 subcases**, all `color_textures,non_compressed,array;dimension=3`. The same
+  test's **2D-array** cases (`dimension=2`, multi-*layer*) **pass 208/208**, and the `non_array` test
+  passes — so the defect is specific to **3D depth slices**, not multi-layer copies in general.
+- **Expected (WebGPU):** Dawn and yawgpu both pass all of these (`copyTextureToTexture:*`
+  `pass=30910 skip=6 fail=0` on each). A 3D `copyTextureToTexture` must populate every copied depth
+  slice, and the readback must return them.
+- **Same family as [F-027](#f-027--wgpu-native-diverges-on-a-3d-whole-subresource-readback-after-a-non-zero-origin-copy-fullcopyt2b).**
+  Both are wgpu-native 3D multi-slice copy/readback divergences surfaced by the texture-copy operation
+  ports (F-027: `image_copy` whole-3D-subresource re-read; F-028: `copyTextureToTexture` 3D slices) —
+  likely one gfx-rs 3D-texture defect.
+- **Not triaged in `expectations/wgpu-native.txt`:** the failing cases are **partial** (18 of 208 subcases
+  per case), and this harness's expectations are case-level (subcases share the case query), so a line
+  would flip the 190 passing subcases to **xpass**. Left **surfaced/unmasked** (same stance as F-027).
+- **Status:** **OPEN.** wgpu-native-only; Dawn + yawgpu clean.
+
+---
+
 _Add new findings as `F-00N` with the same fields._

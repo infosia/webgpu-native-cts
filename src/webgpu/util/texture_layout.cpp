@@ -50,6 +50,10 @@ uint32_t bytesInACompleteRow(uint32_t width, WGPUTextureFormat format) {
     return info.bytesPerBlock * width / info.blockWidth;
 }
 
+WGPUExtent3D physicalMipSize(WGPUExtent3D baseSize, WGPUTextureDimension dimension, uint32_t mipLevel) {
+    return mipSizeFor(baseSize, dimension, mipLevel);
+}
+
 TextureCopyLayout getTextureCopyLayout(
     WGPUTextureFormat format,
     WGPUTextureDimension dimension,

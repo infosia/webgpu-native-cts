@@ -9,7 +9,8 @@ namespace {
 
 const bool kRegistered = [] {
     cts::setFormatSampleHook([](std::string_view key, int64_t value) -> std::optional<bool> {
-        if (key == "format" || key == "textureFormat" || key == "viewFormat") {
+        if (key == "format" || key == "textureFormat" || key == "viewFormat"
+            || key == "srcFormat" || key == "dstFormat") {
             return cts::isRepresentativeTextureFormat(static_cast<WGPUTextureFormat>(value));
         }
         return std::nullopt;
