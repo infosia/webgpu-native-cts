@@ -720,9 +720,11 @@ F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
   default layout) pass — see [F-026](FINDINGS.md) for the separate `copyBufferToTexture`/`copyTextureToBuffer`
   layout-handling defect. Together they account for the full `image_copy` run on yawgpu: `pass=21860
   fail=115396` (vs Dawn `pass=137256 fail=0`).
-- **Status:** **OPEN.** 3-way confirmed (Dawn + wgpu-native pass the `WriteTexture` paths; full Dawn
-  `image_copy` is `pass=137256 fail=0`). No `expectations/yawgpu.txt` entries added — surfaced for the yawgpu
-  fix (per the no-mass-masking rule; real-GPU runs use the Bash sandbox disabled — see the F-023 note).
+- **Status:** **RESOLVED** on yawgpu `1e6c70b` (re-test 2026-06-03) — *"cts-findings: HAL texture
+  dimension/array/mip support + queueWriteTexture upload (F-025, F-026)"*. The `WriteTexture` init path now
+  uploads the supplied bytes; the full yawgpu `image_copy` run is `pass=137256 fail=0` (matching the Dawn
+  oracle). No `expectations/yawgpu.txt` entries were ever added — surfaced and fixed, not masked (real-GPU runs
+  use the Bash sandbox disabled — see the F-023 note).
 
 ---
 
@@ -743,8 +745,10 @@ F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
   pass `4/4`; the layout/mip sweeps fail. Distinct from [F-025](FINDINGS.md) (`WriteTexture` writes zeros —
   symptom `got 0`; here the symptom is wrong non-zero data). Contributes the bulk of the `CopyB2T`-init
   failures in the full yawgpu `image_copy` run (`pass=21860 fail=115396`).
-- **Status:** **OPEN.** 3-way confirmed (Dawn + wgpu-native pass). No expectations added — surfaced for the
-  yawgpu fix.
+- **Status:** **RESOLVED** on yawgpu `1e6c70b` (re-test 2026-06-03) — same commit as [F-025](FINDINGS.md)
+  (*"HAL texture dimension/array/mip support + queueWriteTexture upload"*). `copyBufferToTexture` /
+  `copyTextureToBuffer` now honour non-default buffer layout and per-mip sub-resource size; the full yawgpu
+  `image_copy` run is `pass=137256 fail=0`. No expectations were added — surfaced and fixed, not masked.
 
 ---
 
@@ -776,8 +780,9 @@ F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 - **Note (anti-masking):** an earlier T24b draft hid this by reading the copied region *before* the
   whole-subresource snapshot; the faithful upstream order (snapshot whole → re-read whole) re-exposes it. Kept
   faithful and surfaced as a finding rather than worked around — Dawn is the oracle and passes.
-- **Status:** **OPEN.** 3-way: Dawn passes; yawgpu fails these for the unrelated [F-025](FINDINGS.md)/[F-026](FINDINGS.md)
-  reasons; wgpu-native shows this distinct 3D whole-subresource defect.
+- **Status:** **OPEN.** 3-way: Dawn passes; yawgpu now also passes these (`image_copy` `pass=137256 fail=0`
+  since `1e6c70b`, see [F-025](FINDINGS.md)/[F-026](FINDINGS.md)); only wgpu-native shows this distinct 3D
+  whole-subresource defect.
 
 ---
 

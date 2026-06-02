@@ -108,16 +108,16 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes **every ported test through T23** (all
-  `api,validation` plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone` operation tests). Phase 4
-  surfaced two execution findings it has since fixed — **F-023** (0-size clear/copy abort + `clearBuffer`
-  zero-fill bug, fixed in `e56f30a`) and **F-024** (an `rgba8uint` texture-copy roundtrip read back zeros —
-  its HAL was missing the format; fixed in `c893eac`, which also expanded HAL coverage to all uncompressed
-  color formats). The new color `image_copy` port (T24b) then surfaced two **open** ones: **F-025**
+- **yawgpu** — the primary conformance subject — passes **every ported test through T24b** (all
+  `api,validation` plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone` / color `image_copy`
+  operation tests). Phase 4 surfaced two execution findings it has since fixed — **F-023** (0-size clear/copy
+  abort + `clearBuffer` zero-fill bug, fixed in `e56f30a`) and **F-024** (an `rgba8uint` texture-copy roundtrip
+  read back zeros — its HAL was missing the format; fixed in `c893eac`, which also expanded HAL coverage to all
+  uncompressed color formats). The color `image_copy` port (T24b) surfaced two more — **F-025**
   (`queueWriteTexture` writes zeros) and **F-026** (`copyBufferToTexture`/`copyTextureToBuffer` mishandle
-  non-default buffer layout + mip levels) — the full `image_copy` run is `pass=21860 fail=115396` pending the
-  yawgpu fix (no expectations masked). `api,validation` is unchanged at `pass=4332`. (It also *runs* the
-  `immediate_data_size` cases that Dawn/wgpu-native skip.)
+  non-default buffer layout + mip levels) — both now **fixed** in `1e6c70b`, so the full `image_copy` run is
+  `pass=137256 fail=0` (matching the Dawn oracle; no expectations were ever masked). `api,validation` is
+  unchanged at `pass=4332`. (It also *runs* the `immediate_data_size` cases that Dawn/wgpu-native skip.)
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
