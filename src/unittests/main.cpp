@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <iostream>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
+#include "webgpu/util/write_buffer.h"
 
 namespace {
 
@@ -35,6 +37,13 @@ bool containsTextureFormat(const std::array<WGPUTextureFormat, N>& formats, WGPU
         }
     }
     return false;
+}
+
+void requireBytes(
+    const std::vector<uint8_t>& actual,
+    const std::vector<uint8_t>& expected,
+    const std::string& message) {
+    require(actual == expected, message);
 }
 
 } // namespace
@@ -128,6 +137,30 @@ int main() {
         require(cts::stringifyValue(cts::Value("abc")) == "\"abc\"", "string stringify");
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
+        requireBytes(cts::encodeWriteBufferData({0, 1, 2, 3}, cts::WriteBufferArrayType::U8),
+                     {0x00, 0x01, 0x02, 0x03},
+                     "writeBuffer U8 encoding");
+        requireBytes(cts::encodeWriteBufferData({0, 1, 2, 3}, cts::WriteBufferArrayType::U16),
+                     {0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00},
+                     "writeBuffer U16 encoding");
+        requireBytes(cts::encodeWriteBufferData({0, 1}, cts::WriteBufferArrayType::U32),
+                     {0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00},
+                     "writeBuffer U32 encoding");
+        requireBytes(cts::encodeWriteBufferData({-1}, cts::WriteBufferArrayType::I8),
+                     {0xff},
+                     "writeBuffer I8 encoding");
+        requireBytes(cts::encodeWriteBufferData({-1}, cts::WriteBufferArrayType::I16),
+                     {0xff, 0xff},
+                     "writeBuffer I16 encoding");
+        requireBytes(cts::encodeWriteBufferData({-1}, cts::WriteBufferArrayType::I32),
+                     {0xff, 0xff, 0xff, 0xff},
+                     "writeBuffer I32 encoding");
+        requireBytes(cts::encodeWriteBufferData({1}, cts::WriteBufferArrayType::F32),
+                     {0x00, 0x00, 0x80, 0x3f},
+                     "writeBuffer F32 encoding");
+        requireBytes(cts::encodeWriteBufferData({1}, cts::WriteBufferArrayType::F64),
+                     {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f},
+                     "writeBuffer F64 encoding");
 
         cts::ExpectationSet expectations;
         expectations.exact.insert("a:b:exact:foo=1");

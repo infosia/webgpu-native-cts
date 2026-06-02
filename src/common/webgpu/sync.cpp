@@ -1,6 +1,7 @@
 #include "common/webgpu/sync.h"
 
 #include <chrono>
+#include <functional>
 #include <thread>
 
 namespace cts {
@@ -88,8 +89,7 @@ void onBufferMap(WGPUMapAsyncStatus status, WGPUStringView, void* userdata1, voi
     state->status = status;
 }
 
-template <class Pred>
-bool pumpUntil(WGPUInstance instance, uint64_t timeoutNs, Pred done) {
+bool pumpUntil(WGPUInstance instance, uint64_t timeoutNs, const std::function<bool()>& done) {
     const auto start = std::chrono::steady_clock::now();
     const auto timeout = std::chrono::nanoseconds(timeoutNs);
     while (!done() && std::chrono::steady_clock::now() - start < timeout) {
@@ -100,6 +100,10 @@ bool pumpUntil(WGPUInstance instance, uint64_t timeoutNs, Pred done) {
 }
 
 } // namespace
+
+bool processEventsUntil(WGPUInstance instance, const std::function<bool()>& done, uint64_t timeoutNs) {
+    return pumpUntil(instance, timeoutNs, done);
+}
 
 AdapterResult requestAdapterSync(WGPUInstance instance, const WGPURequestAdapterOptions* options) {
     RequestAdapterState state;

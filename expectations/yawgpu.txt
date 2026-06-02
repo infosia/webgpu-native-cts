@@ -1,11 +1,15 @@
 # yawgpu expectations — captured against commit e56f30a5db13d03f4ec4268b426e0c090de579b4 (2026-06-02).
 # One full case query per line (# comments allowed; a line ending ':*' is a test-prefix match).
 #
-# yawgpu passes every ported test — both api,validation and api,operation — on real-GPU Metal
-# (api,validation: pass=4332 skip=383 fail=0 crash=0; api,operation,command_buffer: pass=5 fail=0 crash=0).
-# It passes every test it runs and additionally runs the 8 immediate_data_size cases that Dawn skips
-# (yawgpu reports maxImmediateSize=64; Dawn/wgpu-native report 0). Every finding this suite surfaced
-# for yawgpu has been fixed upstream:
-#   F-005, F-006, F-008, F-009, F-010, F-011, F-014, F-016, F-018, F-020, F-022, F-023.
+# yawgpu passes all ported api,validation (pass=4332 skip=383 fail=0 crash=0) and all ported api,operation
+# EXCEPT the one open finding below. Buffer-only ops are clean: command_buffer,{clearBuffer,copyBufferToBuffer}
+# (Dawn-equal), queue,writeBuffer (17/17), onSubmittedWorkDone (5/5). It additionally runs the 8
+# immediate_data_size cases Dawn skips (yawgpu reports maxImmediateSize=64; Dawn/wgpu-native report 0).
+# Findings fixed upstream: F-005, F-006, F-008, F-009, F-010, F-011, F-014, F-016, F-018, F-020, F-022, F-023.
 # F-015 (createView view-usage subset) is wgpu-native-only — yawgpu enforces it.
-# This file therefore has NO expected failures. See docs/FINDINGS.md.
+# Open: F-024 (below). See docs/FINDINGS.md.
+
+# F-024 (T23): yawgpu reads back all-zeros from an rgba8uint copyBufferToTexture->copyTextureToBuffer
+# roundtrip (command_buffer/basic); Dawn AND wgpu-native pass. yawgpu defect, not masked — diagnosis in FINDINGS.
+webgpu:api,operation,command_buffer,basic:b2t2b:*
+webgpu:api,operation,command_buffer,basic:b2t2t2b:*

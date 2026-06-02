@@ -87,11 +87,15 @@ the first **execution** finding,
 [F-023](#f-023--yawgpu-aborts-on-a-0-size-clearbuffer--copybuffertobuffer-un-ended-metal-blit-encoder)
 (yawgpu aborts on a 0-size buffer clear/copy — an un-ended Metal blit encoder), whose multi-stage fix
 also surfaced and resolved a `clearBuffer` zero-fill / `WGPU_WHOLE_SIZE` bug. **yawgpu fixed F-023 in
-`e56f30a`** — so `api,operation,command_buffer` is now `pass=5 fail=0 crash=0` (Dawn-equal) and yawgpu
-**passes every ported test, both `api,validation` and `api,operation`** (`api,validation` unchanged at
-`pass=4332 skip=383 fail=0 crash=0`). The cycle continues.
-**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022/023. No open yawgpu findings —
-`expectations/yawgpu.txt` has no expected failures. Open wgpu-native: F-001–F-004,
+`e56f30a`** — so `api,operation,command_buffer` is now `pass=5 fail=0 crash=0` (Dawn-equal). Extending
+Phase 4 (**T23** — `queue/writeBuffer`, `command_buffer/basic`, `onSubmittedWorkDone`) then surfaced
+[F-024](#f-024--yawgpu-loses-data-in-an-rgba8uint-texture-copy-roundtrip-copybuffertotexture--copytexturetobuffer)
+(yawgpu reads back all-zeros from an `rgba8uint` `copyBufferToTexture` → `copyTextureToBuffer` roundtrip
+that Dawn **and** wgpu-native pass). `writeBuffer` (17/17) and `onSubmittedWorkDone` (5/5) are clean on
+yawgpu; `api,validation` is unchanged at `pass=4332 skip=383 fail=0 crash=0`. The cycle continues.
+**Resolved yawgpu findings: F-005/006/008/009/010/011/014/016/018/020/022/023. Open yawgpu findings: F-024
+(api/operation — `rgba8uint` texture-copy roundtrip loses data; `command_buffer,basic:{b2t2b,b2t2t2b}`
+triaged in `expectations/yawgpu.txt`). Open wgpu-native: F-001–F-004,
 F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
 
 ---
@@ -659,6 +663,33 @@ F-007, F-012, F-013, F-015, F-017, F-019, F-021.**
   - *(Diagnosis note: this real-GPU verification must run with the Bash sandbox disabled. Under the macOS
     sandbox, Metal `enumerate_adapters` returns no adapters and every case false-fails with "failed to
     create WebGPU instance" — a harness/environment artifact, not a backend defect.)*
+
+---
+
+## F-024 — yawgpu loses data in an rgba8uint texture-copy roundtrip (copyBufferToTexture → copyTextureToBuffer)
+
+- **Backend:** yawgpu (`e56f30a`, Metal). **Not** present in Dawn **or** wgpu-native — both pass.
+- **Found by:** `api/operation/command_buffer/basic` (T23) — `b2t2b` and `b2t2t2b`. Each uploads a u32
+  `0x01020304` into a `1×1×1` `rgba8uint` texture via `copyBufferToTexture` (`bytesPerRow=256`), copies it
+  back out via `copyTextureToBuffer`, and reads the destination buffer. `b2t2t2b` additionally routes
+  through a `copyTextureToTexture` between the two.
+- **Observed on yawgpu:** the destination buffer reads back **all zeros** — `GPU buffer mismatch at byte 0:
+  expected 4, got 0` (the expected first byte is `0x04`, the low byte of little-endian `0x01020304`).
+  Deterministic (2/2 runs). `b2t2b` and `b2t2t2b` fail **identically**, so the defect is in the path common
+  to both — `copyBufferToTexture` and/or `copyTextureToBuffer` for `rgba8uint` — **not** `copyTextureToTexture`
+  (which only `b2t2t2b` exercises). The `empty` test passes, so command-buffer submission itself is fine.
+- **Scope (what still works on yawgpu):** `queue,writeBuffer` (17/17, incl. all 8 TypedArray byte
+  encodings), `onSubmittedWorkDone` (5/5), and the T22 buffer-only `clearBuffer`/`copyBufferToBuffer`
+  (Dawn-equal). Only paths that move data **through a texture** regress — buffer↔buffer is clean.
+- **Expected (WebGPU):** a `copyBufferToTexture` → `copyTextureToBuffer` roundtrip must return the original
+  bytes. Dawn and wgpu-native both return `0x01020304`. (The single-row copy is valid with a 4-byte source
+  buffer even though `bytesPerRow=256`: only rows *before* the last must honour the full stride, so the
+  required buffer size is the 4 bytes of the last/only row. A likely yawgpu lead is over-strict
+  `bytesPerRow`/required-size handling for height-1 copies, or the copy silently not writing.)
+- **Status:** open; tracked as a **yawgpu defect** (3-way confirmed — two independent oracles agree on the
+  correct value, with the *same* harness copy helpers). Not masked; recorded in `expectations/yawgpu.txt`
+  as `api,operation,command_buffer,basic:{b2t2b,b2t2t2b}:*` prefix lines. wgpu-native and Dawn need no
+  entries. (Real-GPU verification must run with the Bash sandbox disabled — see the F-023 diagnosis note.)
 
 ---
 

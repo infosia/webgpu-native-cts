@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "cts/webgpu.h"
@@ -32,5 +33,6 @@ struct ScopeResult {
 
 ScopeResult popErrorScopeSync(WGPUInstance instance, WGPUDevice device);
 WGPUMapAsyncStatus bufferMapSync(WGPUInstance instance, WGPUBuffer buffer, WGPUMapMode mode, size_t offset, size_t size);
+bool processEventsUntil(WGPUInstance instance, const std::function<bool()>& done, uint64_t timeoutNs = 5'000'000'000);
 
 } // namespace cts

@@ -39,6 +39,26 @@ class GpuTest : public Fixture {
         const void* expected,
         size_t size,
         uint64_t srcByteOffset = 0);
+    void queueWriteBuffer(WGPUBuffer buffer, uint64_t bufferOffset, const void* data, size_t size);
+    void copyBufferToTexture(
+        WGPUCommandEncoder encoder,
+        WGPUBuffer src,
+        uint32_t bytesPerRow,
+        WGPUTexture dst,
+        WGPUExtent3D size);
+    void copyTextureToBuffer(
+        WGPUCommandEncoder encoder,
+        WGPUTexture src,
+        WGPUBuffer dst,
+        uint32_t bytesPerRow,
+        WGPUExtent3D size);
+    void copyTextureToTexture(
+        WGPUCommandEncoder encoder,
+        WGPUTexture src,
+        WGPUTexture dst,
+        WGPUExtent3D size);
+    void onSubmittedWorkDoneSync();
+    void onSubmittedWorkDoneMany(uint32_t n, bool checkOrder);
     WGPUBuffer createBufferTracked(const WGPUBufferDescriptor& desc);
     WGPUBuffer createBufferOnMismatchedDevice(const WGPUBufferDescriptor& desc);
     WGPUBuffer createBufferWithState(ResourceState state, const WGPUBufferDescriptor& desc);

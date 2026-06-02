@@ -97,20 +97,23 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and the first **`api/operation` (Phase 4)** tests, which add the
-  buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`) on top of the
-  shader/pipeline/pass infra. See [COVERAGE](docs/COVERAGE.md).
+  maximally-ported `buffer/mapping` — and **5 `api/operation` (Phase 4)** files: `command_buffer/`
+  `{clearBuffer, copyBufferToBuffer, basic}`, `queue/writeBuffer`, and `onSubmittedWorkDone`. These add the
+  buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the `writeBuffer`
+  upload path, and the texture-copy foundation (`copyBufferToTexture`/`copyTextureToBuffer`/
+  `copyTextureToTexture`). See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 23 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 24 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes **every ported test, both `api,validation` and
-  `api,operation`** (zero open findings). The just-opened `api/operation` surfaced **F-023** (a 0-size
-  buffer clear/copy aborted on an un-ended Metal blit encoder, and the fix then exposed a `clearBuffer`
-  zero-fill / `WGPU_WHOLE_SIZE` bug); yawgpu fixed it (`e56f30a`), and `api,operation,command_buffer` is
-  now Dawn-equal (`pass=5 fail=0 crash=0`). (It also *runs* the `immediate_data_size` cases that
-  Dawn/wgpu-native skip.)
+- **yawgpu** — the primary conformance subject — passes **all ported `api,validation`** and **all ported
+  `api,operation` except one** open finding. It cleared the earlier **F-023** (0-size clear/copy abort +
+  `clearBuffer` zero-fill bug, fixed in `e56f30a`); extending Phase 4 then surfaced **F-024** — an
+  `rgba8uint` `copyBufferToTexture`→`copyTextureToBuffer` roundtrip reads back all-zeros where Dawn **and**
+  wgpu-native return the data. Buffer-only operation tests (`writeBuffer` 17/17, `clearBuffer`,
+  `copyBufferToBuffer`) and `onSubmittedWorkDone` (5/5) are clean. (It also *runs* the `immediate_data_size`
+  cases that Dawn/wgpu-native skip.)
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021) and missing validation (F-012 — `createView` on a destroyed texture; F-015 — the

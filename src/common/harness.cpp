@@ -67,6 +67,41 @@ void onUncapturedError(WGPUDevice const*, WGPUErrorType, WGPUStringView message,
     }
 }
 
+struct QueueWorkDoneState {
+    bool completed = false;
+    WGPUQueueWorkDoneStatus status = WGPUQueueWorkDoneStatus_Error;
+    std::string message;
+};
+
+struct ManyQueueWorkDoneState {
+    uint32_t completed = 0;
+    uint32_t lastResolved = 0;
+    bool orderError = false;
+    WGPUQueueWorkDoneStatus firstErrorStatus = WGPUQueueWorkDoneStatus_Success;
+    std::string firstErrorMessage;
+};
+
+void onQueueWorkDone(WGPUQueueWorkDoneStatus status, WGPUStringView message, void* userdata1, void*) {
+    auto* state = static_cast<QueueWorkDoneState*>(userdata1);
+    state->completed = true;
+    state->status = status;
+    state->message = toString(message);
+}
+
+void onManyQueueWorkDone(WGPUQueueWorkDoneStatus status, WGPUStringView message, void* userdata1, void* userdata2) {
+    auto* state = static_cast<ManyQueueWorkDoneState*>(userdata1);
+    const uint32_t index = *static_cast<uint32_t*>(userdata2);
+    if (status != WGPUQueueWorkDoneStatus_Success && state->firstErrorStatus == WGPUQueueWorkDoneStatus_Success) {
+        state->firstErrorStatus = status;
+        state->firstErrorMessage = toString(message);
+    }
+    if (index != state->lastResolved) {
+        state->orderError = true;
+    }
+    state->lastResolved = index + 1;
+    ++state->completed;
+}
+
 void ensureAdapter(DeviceCache& c) {
     if (c.adapter != nullptr) {
         return;
@@ -428,6 +463,113 @@ void GpuTest::expectGPUBufferValuesEqual(
                 << ": expected " << static_cast<int>(mismatchExpected)
                 << ", got " << static_cast<int>(mismatchActual);
         fail(message.str());
+    }
+}
+
+void GpuTest::queueWriteBuffer(WGPUBuffer buffer, uint64_t bufferOffset, const void* data, size_t size) {
+    wgpuQueueWriteBuffer(queue(), buffer, bufferOffset, data, size);
+}
+
+void GpuTest::copyBufferToTexture(
+    WGPUCommandEncoder encoder,
+    WGPUBuffer src,
+    uint32_t bytesPerRow,
+    WGPUTexture dst,
+    WGPUExtent3D size) {
+    WGPUTexelCopyBufferInfo source = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+    source.buffer = src;
+    source.layout.offset = 0;
+    source.layout.bytesPerRow = bytesPerRow;
+    source.layout.rowsPerImage = WGPU_COPY_STRIDE_UNDEFINED;
+
+    WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    destination.texture = dst;
+    destination.mipLevel = 0;
+    destination.origin = WGPUOrigin3D{0, 0, 0};
+    destination.aspect = WGPUTextureAspect_All;
+
+    wgpuCommandEncoderCopyBufferToTexture(encoder, &source, &destination, &size);
+}
+
+void GpuTest::copyTextureToBuffer(
+    WGPUCommandEncoder encoder,
+    WGPUTexture src,
+    WGPUBuffer dst,
+    uint32_t bytesPerRow,
+    WGPUExtent3D size) {
+    WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    source.texture = src;
+    source.mipLevel = 0;
+    source.origin = WGPUOrigin3D{0, 0, 0};
+    source.aspect = WGPUTextureAspect_All;
+
+    WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+    destination.buffer = dst;
+    destination.layout.offset = 0;
+    destination.layout.bytesPerRow = bytesPerRow;
+    destination.layout.rowsPerImage = WGPU_COPY_STRIDE_UNDEFINED;
+
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &size);
+}
+
+void GpuTest::copyTextureToTexture(
+    WGPUCommandEncoder encoder,
+    WGPUTexture src,
+    WGPUTexture dst,
+    WGPUExtent3D size) {
+    WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    source.texture = src;
+    source.mipLevel = 0;
+    source.origin = WGPUOrigin3D{0, 0, 0};
+    source.aspect = WGPUTextureAspect_All;
+
+    WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    destination.texture = dst;
+    destination.mipLevel = 0;
+    destination.origin = WGPUOrigin3D{0, 0, 0};
+    destination.aspect = WGPUTextureAspect_All;
+
+    wgpuCommandEncoderCopyTextureToTexture(encoder, &source, &destination, &size);
+}
+
+void GpuTest::onSubmittedWorkDoneSync() {
+    QueueWorkDoneState state;
+    WGPUQueueWorkDoneCallbackInfo callbackInfo = WGPU_QUEUE_WORK_DONE_CALLBACK_INFO_INIT;
+    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    callbackInfo.callback = onQueueWorkDone;
+    callbackInfo.userdata1 = &state;
+
+    (void)wgpuQueueOnSubmittedWorkDone(queue(), callbackInfo);
+    if (!processEventsUntil(cache().instance, [&] { return state.completed; })) {
+        fail("onSubmittedWorkDone timed out");
+    }
+    if (state.status != WGPUQueueWorkDoneStatus_Success) {
+        fail("onSubmittedWorkDone failed: " + state.message);
+    }
+}
+
+void GpuTest::onSubmittedWorkDoneMany(uint32_t n, bool checkOrder) {
+    ManyQueueWorkDoneState state;
+    std::vector<uint32_t> indices;
+    indices.reserve(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        indices.push_back(i);
+        WGPUQueueWorkDoneCallbackInfo callbackInfo = WGPU_QUEUE_WORK_DONE_CALLBACK_INFO_INIT;
+        callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+        callbackInfo.callback = onManyQueueWorkDone;
+        callbackInfo.userdata1 = &state;
+        callbackInfo.userdata2 = &indices.back();
+        (void)wgpuQueueOnSubmittedWorkDone(queue(), callbackInfo);
+    }
+
+    if (!processEventsUntil(cache().instance, [&] { return state.completed == n; })) {
+        fail("onSubmittedWorkDone timed out");
+    }
+    if (state.firstErrorStatus != WGPUQueueWorkDoneStatus_Success) {
+        fail("onSubmittedWorkDone failed: " + state.firstErrorMessage);
+    }
+    if (checkOrder && state.orderError) {
+        fail("onSubmittedWorkDone callbacks resolved out of order");
     }
 }
 
