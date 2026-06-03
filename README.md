@@ -130,33 +130,11 @@ Every divergence the suite surfaces is reported, fixed upstream, and re-confirme
 
 ### Test results
 
-Three views, widest first: the **whole suite in one process**, then per-backend **cross-comparisons**
-that isolate each case — `api,validation`, then `api,operation`.
+Per-backend comparison, each case isolated — `--isolate` (one subprocess per case) for
+`api,validation`, in-process readback for `api,operation` — at the [pinned
+revisions](docs/UPSTREAM.md).
 
-#### 1. Whole ported suite — one process
-
-Real-GPU **Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti, 2026-06-03).
-With the two most recent yawgpu fixes — **F-029** (a cross-test Vulkan device-resource leak in
-`image_copy`) and **F-030** (an intermittent `MAP_READ` readback race) — the **entire ported suite now
-runs green in a single process**, which is what makes an accurate whole-run count possible (previously
-the leak poisoned every test that ran after `image_copy`). All 17 ported files, full coverage (no
-`--sample-formats`), no `expectations/yawgpu.txt` lines:
-
-| Backend | pass | skip | fail | crash |
-|---------|-----:|-----:|-----:|------:|
-| **yawgpu** | 214333 | 52003 | 0 | 0 |
-
-(266,336 executed case/subcase units; the skips are feature-gated or environment-gated cases.)
-
-**Update (T26, this commit):** the new `copy_depth_stencil` test surfaces **F-031** on yawgpu — its
-*depth-aspect* `copyTextureToTexture` fails 180 / 216 depth subcases on Metal (the stencil aspect
-passes; Dawn and wgpu-native pass `216/0`). The count above predates T26 and will gain those depth
-failures until F-031 is fixed.
-
-#### 2. Cross-backend comparison — `api,validation` (`--isolate`)
-
-Each case in its own subprocess, over the ported `api,validation` surface — **4715 cases** across 10
-files, at the [pinned backend revisions](docs/UPSTREAM.md).
+#### `api,validation` — 4715 cases across 10 files
 
 **Real-GPU Metal** (Apple Silicon):
 
@@ -166,9 +144,8 @@ files, at the [pinned backend revisions](docs/UPSTREAM.md).
 | **yawgpu** | 4332 | 383 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips |
 | **wgpu-native** | 3407 | 756 | 338 | 214 | 214 crashes are eager-panics on invalid input (F-001–F-004 incl. F-003 mapping, F-007, F-013, F-017, F-019, F-021); 338 fails are missing-validation / uncaptured-error divergences (F-015 view-usage subset ≈ 324, F-012, F-003 mapping) |
 
-**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti) — the earlier **T13-era `api,validation`
-snapshot** (4331 cases, 2026-06-01; the *current* whole surface is view 1 above, where the
-Vulkan-specific F-029/F-030 were found and fixed):
+**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti) — a **T13-era `api,validation` snapshot**
+(4331 cases, 2026-06-01); yawgpu is clean on the current surface here too, matching Metal:
 
 | Backend | pass | skip | xfail | xpass | fail | crash |
 |---------|-----:|-----:|------:|------:|-----:|------:|
@@ -187,7 +164,7 @@ because each adapter exposes a different optional-feature set. All `wgpu-native`
 `--isolate` and reclassified via the expectations file, so an `--isolate --expectations` run still
 exits 0 on both platforms.
 
-#### 3. Cross-backend comparison — `api,operation` (Metal, in-process readback)
+#### `api,operation` — Metal (in-process readback)
 
 The large *structural* ports, where the format axis is swept densely (cells are `pass / fail`):
 
@@ -199,8 +176,9 @@ The large *structural* ports, where the format axis is swept densely (cells are 
 
 The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,
 `onSubmittedWorkDone`) pass on Dawn and yawgpu; on wgpu-native `clearBuffer:clear`'s `size=0` subcase
-aborts (F-002, contained by `--isolate`). A **combined** whole-listing yawgpu run (all operation files
-in one process) is poison-free after the F-029 fix (`pass=32598 fail=0` in fast mode).
+aborts (F-002, contained by `--isolate`). Run in one process, the operation files show **no cross-test
+interference** — the only yawgpu failures are F-031's depth cases (`pass=32634 fail=180`); no test
+poisons another.
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
