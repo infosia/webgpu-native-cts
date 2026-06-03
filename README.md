@@ -109,16 +109,14 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes **every ported test through T25** (all
-  `api,validation` at `pass=4332`, plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone` /
-  color `image_copy` / color `copyTextureToTexture` operation tests; the full color `image_copy` run is
-  `pass=137256 fail=0` and color `copyTextureToTexture` is `pass=30910 fail=0`, both matching the Dawn
-  oracle). The T26 depth/stencil `copyTextureToTexture` port then surfaced one **open** finding —
-  **F-031** (the **depth aspect** of `copyTextureToTexture` reads back wrong; the stencil aspect is fine;
-  `copy_depth_stencil` `pass=36 fail=180` where Dawn/wgpu-native pass `216/0`). Every earlier finding was
-  fixed in yawgpu and re-confirmed on hardware; `expectations/yawgpu.txt` has no expected failures (F-031
-  surfaced, not masked). (It also *runs* the `immediate_data_size` cases that Dawn/wgpu-native skip.) See
-  [FINDINGS](docs/FINDINGS.md) for the per-finding record.
+- **yawgpu** — the primary conformance subject — passes **every ported test through T26** (all
+  `api,validation` at `pass=4332`, plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone`
+  operation tests and the full color **and** depth/stencil image-copy / `copyTextureToTexture` ports:
+  color `image_copy` `pass=137256 fail=0`, color `copyTextureToTexture` `pass=30910 fail=0`, and
+  depth/stencil `copy_depth_stencil` `pass=216 fail=0` — all matching the Dawn oracle). Every finding
+  the suite surfaced was fixed in yawgpu and re-confirmed on hardware; `expectations/yawgpu.txt` has no
+  expected failures (nothing masked). (It also *runs* the `immediate_data_size` cases that
+  Dawn/wgpu-native skip.) See [FINDINGS](docs/FINDINGS.md) for the per-finding record.
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
@@ -171,14 +169,14 @@ The large *structural* ports, where the format axis is swept densely (cells are 
 | Backend | `image_copy` (137256) | `copyTextureToTexture` color (30910) | `copy_depth_stencil` (216) | findings |
 |---------|----------------------:|-------------------------------------:|---------------------------:|----------|
 | **Dawn** (oracle) | 137256 / 0 | 30910 / 0 | 216 / 0 | — |
-| **yawgpu** | 137256 / 0 | 30910 / 0 | **36 / 180** | **F-031** (depth aspect fails; stencil passes) |
+| **yawgpu** | 137256 / 0 | 30910 / 0 | 216 / 0 | — |
 | **wgpu-native** | 116772 / 1332 | 26236 / 738 | 216 / 0 | F-027, F-028 (3D multi-slice copy/readback) |
 
 The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,
 `onSubmittedWorkDone`) pass on Dawn and yawgpu; on wgpu-native `clearBuffer:clear`'s `size=0` subcase
-aborts (F-002, contained by `--isolate`). Run in one process, the operation files show **no cross-test
-interference** — the only yawgpu failures are F-031's depth cases (`pass=32634 fail=180`); no test
-poisons another.
+aborts (F-002, contained by `--isolate`). Run in one process, the command_buffer operation files show
+**no cross-test interference** — yawgpu is clean across the combined run (`pass=32785 skip=5 fail=0`); no
+test poisons another.
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
