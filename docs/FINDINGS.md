@@ -702,10 +702,17 @@ F-023 note; under the macOS sandbox Metal enumerates no adapters and every case 
   x/y-origin while allowing layer ranges, matching WebGPU/Dawn). Re-test: `copy_depth_stencil`
   `pass=216 fail=0` (Dawn-equal, up from `pass=36 fail=180`); full `copyTextureToTexture` `pass=31126
   fail=0`; `image_copy` regression `pass=137256 fail=0`. 3-way confirmed (Dawn + wgpu-native pass all 216).
-  No `expectations/yawgpu.txt` lines were ever added (surfaced for the fix, not masked). **Note:** gap (6)'s
-  attachment mip/layer targeting is implemented for **Metal**; the Vulkan and GLES regular render paths
-  still target the base mip/layer for non-default attachment views — a follow-up to implement + verify on
-  Windows/Vulkan and Android GLES.
+  No `expectations/yawgpu.txt` lines were ever added (surfaced for the fix, not masked). **Note:** the
+  fix lands in the **Metal** HAL only. **Confirmed (2026-06-03, Mac via MoltenVK — `CTS_YAWGPU_BACKEND=vulkan`,
+  yawgpu `f3afc31` built `--features vulkan`): `copy_depth_stencil` on the Vulkan backend still
+  `pass=36 fail=180`, byte-identical to the pre-fix profile** (only `Stencil8`'s stencil-only cases pass;
+  every depth-format case fails the depth-equal re-render, leaving the read-back colour red instead of
+  green). So the depth render path is unfixed on **Vulkan** across the board — not just gap (6)'s
+  non-base mip/layer attachment targeting, but the whole depth init/verify render. (The depth-attachment +
+  `depthCompare:'equal'` operations are MoltenVK-supported and pass on the Metal HAL, so the divergence is
+  in yawgpu's **Vulkan HAL**, not MoltenVK; native-Vulkan confirmation on Windows/NVIDIA would remove any
+  residual MoltenVK doubt.) GLES is the same untested follow-up. yawgpu follow-up: port the f3afc31 depth
+  render-path support to the Vulkan (and GLES) HALs.
 
 ---
 
