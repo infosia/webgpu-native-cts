@@ -62,6 +62,9 @@ pass all 1152. **yawgpu's one open finding**; surfaced, not masked.
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028 (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
+**Tooling / environment (not a backend conformance defect):** F-033 — color `copyTextureToTexture`
+pixel mismatches when yawgpu's Vulkan HAL is run on **Mac via MoltenVK**; likely a MoltenVK translation
+artifact (native Windows/Vulkan is clean through F-031), low priority.
 
 ---
 
@@ -751,6 +754,37 @@ F-023 note; under the macOS sandbox Metal enumerates no adapters and every case 
   the Bash sandbox disabled — see the F-023 note). Surfaced only because the T27 readback buffers are
   zero-initialized (a copy that writes nothing now fails instead of being masked by a pre-filled
   expected buffer).
+
+---
+
+## F-033 — color `copyTextureToTexture` pixel mismatches on Mac via MoltenVK (likely a MoltenVK artifact, not a yawgpu defect)
+
+- **Environment finding, not a backend conformance defect.** Backend: yawgpu's **Vulkan** HAL **run on
+  macOS through MoltenVK** (`CTS_YAWGPU_BACKEND=vulkan` on a `--features vulkan` build — see
+  `docs/06-build-and-run.md`). **Not** present on yawgpu **Metal**, and **native Windows/Vulkan (NVIDIA)
+  passed everything through F-031**, which includes the T25 color `copyTextureToTexture` port — so this
+  is almost certainly a **MoltenVK (Vulkan→Metal) translation artifact**, not a yawgpu Vulkan-HAL bug.
+- **Found by:** the fast-mode (`--sample-formats`) whole-suite measurement on yawgpu-Vulkan/MoltenVK
+  (2026-06-03). `api,validation` is **fully clean** (`pass=9561 skip=816 fail=0`); the only color
+  divergence is in `copyTextureToTexture`.
+- **Observed:** `copyTextureToTexture` **color** (`color_textures,non_compressed,{non_array,array}` and
+  `zero_sized`) — `pixel mismatch … expected 0, got 1` at scattered texels, across many color formats
+  (RGBA8Unorm = `format=22`, and 23/24/25/27/30/40/41/…), ~half of the sampled color-T2T subcases
+  (≈3116 fail; e.g. one `RGBA8Unorm` case sequentially `pass=58 fail=54` vs Metal `112/0`). Color T2T is
+  a **byte-exact** copy (no format conversion), so an off-by-one byte points at the copy/blit path.
+- **Tight scope (what isolates it to MoltenVK's texture-to-texture path):** on the same MoltenVK run,
+  **buffer⇄texture** color copies are clean — `image_copy` color `pass=25824` (its only fails are the
+  depth/stencil F-032 cases), and `copyBufferToBuffer`/`writeBuffer`/`clearBuffer`/`basic` have **0**
+  fails. Only **texture→texture** color copy diverges.
+- **Depth/stencil on this run are the known findings, not F-033:** `copy_depth_stencil` `fail=180`
+  ([F-031](#f-031--yawgpu-diverges-on-the-depth-aspect-of-copytexturetotexture-copied-depth-fails-an-equality-re-render),
+  Vulkan render path unfixed) and `image_copy` depth/stencil `fail=864`
+  ([F-032](#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)).
+- **Status:** **OPEN — likely MoltenVK-only**, low priority. Authoritative Vulkan conformance is native
+  (Windows/NVIDIA, clean through F-031). To confirm attribution, re-run the failing color-T2T cases on
+  **native Vulkan**; if they pass there (as expected), this is a MoltenVK limitation and not actionable
+  for yawgpu. No `expectations/` lines added. (Recorded because the Mac→Vulkan-via-MoltenVK path is now
+  a documented diagnostic — see `docs/06-build-and-run.md` — and this is its main known caveat.)
 
 ---
 
