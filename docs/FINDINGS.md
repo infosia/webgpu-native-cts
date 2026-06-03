@@ -19,12 +19,19 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
-## Re-test summary — all yawgpu findings resolved (through T24b)
+## Re-test summary — all yawgpu findings resolved (through T25); no open yawgpu findings
 
-Every defect this suite has surfaced against **yawgpu** (the primary conformance subject) has been
-fixed in yawgpu and re-confirmed on real hardware — the full intended cycle: the suite reports a
-divergence, yawgpu fixes it, the fix is verified on real-GPU Metal (and, for `api,validation`, also
-on Windows/Vulkan, NVIDIA). `expectations/yawgpu.txt` carries **no** expected-failure lines.
+Every defect this suite has surfaced against **yawgpu** (the primary conformance subject) — both
+correctness and resource-lifetime — has been fixed in yawgpu and re-confirmed on real hardware — the
+full intended cycle: the suite reports a divergence, yawgpu fixes it, the fix is verified on real-GPU
+Metal (and, for `api,validation` and the Vulkan-specific findings, on Windows/Vulkan, NVIDIA).
+`expectations/yawgpu.txt` carries **no** expected-failure lines.
+
+The last two yawgpu findings are now resolved too, verified on real-GPU Windows/Vulkan (NVIDIA):
+[F-029](#f-029--yawgpu-leaks-vulkan-device-resources-across-image_copy-cases-later-tests-in-the-same-process-fail)
+(a **cross-test** Vulkan device-resource leak in `image_copy`) and
+[F-030](#f-030--yawgpu-map_read-readback-reads-the-buffer-before-the-gpu-copy-completes-intermittent-zeros)
+(an intermittent `MAP_READ` readback race the F-029 fix un-masked).
 
 | milestone | yawgpu fix(es) | result after fix |
 |-----------|----------------|------------------|
@@ -34,12 +41,14 @@ on Windows/Vulkan, NVIDIA). `expectations/yawgpu.txt` carries **no** expected-fa
 | `createPipelineLayout` (T18–T21) | F-020 `f75fc0a`, F-022 `798fc6a` | `pass=4332 skip=383 fail=0` |
 | `api,operation` buffer/queue (T22–T23) | F-023 `e56f30a`, F-024 `c893eac` | `command_buffer,* pass=5` (Dawn-equal) |
 | `image_copy` color (T24b) | F-025, F-026 — `1e6c70b` | `image_copy pass=137256 fail=0` |
+| `image_copy` cross-test leak + readback race | F-029 (`1e67300`), F-030 (`1297b7e`) | full `image_copy` repeatably `pass=137256 fail=0`; cross-test poison gone |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026 — **all**
-of them; each keeps a compact record below.
-**Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027
-(full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the F-023
-note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030
+— **all** of them; each keeps a compact record below.
+**Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
+F-028 (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
+F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
+**Open — yawgpu:** none — all resolved.
 
 ---
 
@@ -556,6 +565,90 @@ note; under the macOS sandbox Metal enumerates no adapters and every case false-
   per case), and this harness's expectations are case-level (subcases share the case query), so a line
   would flip the 190 passing subcases to **xpass**. Left **surfaced/unmasked** (same stance as F-027).
 - **Status:** **OPEN.** wgpu-native-only; Dawn + yawgpu clean.
+
+---
+
+## F-029 — yawgpu leaks Vulkan device resources across image_copy cases (later tests in the same process fail)
+
+- **Backend:** yawgpu (`1e6c70b`, Vulkan / Windows, NVIDIA RTX 5060 Ti). **Cross-backend not yet
+  confirmed** — only yawgpu was run; whether wgpu-native/Dawn show the same behavior on Windows/Vulkan
+  is unverified. **Distinct from** the resolved correctness findings
+  [F-025](#f-025--yawgpu-queuewritetexture-writes-zeros-to-color-textures)/[F-026](#f-026--yawgpu-mishandles-non-default-buffer-layout-and-mip-levels-in-copybuffertotexture--copytexturetobuffer):
+  `image_copy` run **alone** still passes `137256/0`; this is a *cross-test* resource leak, not a
+  copy-correctness defect.
+- **Found by:** the whole-listing fast-mode run
+  `cts --sample-formats --crash-list expectations/yawgpu.crash.txt <all file-level :* queries>`
+  → `pass=944 skip=39 fail=504 crash=0` (2026-06-03; the listing was the 16 files before T25's
+  `copyTextureToTexture` landed). The 504 failures collapse to one root cause.
+- **Observed:** every test doing GPU execution/readback that runs *after* `image_copy` in the same
+  process fails:
+  - In the combined run — `pixel mismatch … expected X, got 0` (the 8 sampled `image_copy` formats)
+    and `GPU buffer mismatch … got 0` (`clearBuffer` / `copyBufferToBuffer` operation): readback
+    returns all **zeros**.
+  - Isolated probe — `image_copy:*` then `clearBuffer:clear:*` in **one** process → clearBuffer fails
+    `failed to request device: HAL device creation failed: vulkan` (all 25585 subcases). So once
+    `image_copy` has run, yawgpu can no longer create a fresh Vulkan device.
+- **Isolation (proves cross-test, not per-test):** run on its own, each is clean —
+  `clearBuffer:clear` `pass=50/0`, `copyBufferToBuffer:single` `pass=340/0`, `writeBuffer` `pass=24/0`;
+  `clearBuffer:*` + `copyBufferToBuffer:*` together (no `image_copy`) `pass=392/0`; and `image_copy`
+  alone is `pass=137256/0` (F-025/F-026 record). Only the **sequence** `image_copy` → (any later test
+  that creates a device) fails.
+- **Diagnosis:** `image_copy` does not release device-level GPU resources per case (the device itself
+  and/or `VkDeviceMemory` / textures), so the Vulkan physical device is exhausted and the next
+  `requestDevice` fails during HAL device creation. `clearBuffer` + `copyBufferToBuffer` create
+  comparably many devices without exhausting, so the leak is specific to the **image_copy / texture**
+  path. (Each ported operation/image_copy test creates its own device.) The two combined-run signatures
+  — `got 0` readback vs. outright device-creation failure — are both consistent with device-resource
+  exhaustion (a partially-degraded device returns zeros; a fully-failed creation errors).
+- **Why it surfaces now:** the all-green combined run recorded at `e56f30a` (2026-06-02, 12 file-level
+  queries, `pass=4131/0`) did **not** include `image_copy` (T24b landed later, `c893eac`→`1e6c70b`).
+  The current listing is the first combined run to include a *passing* `image_copy`, which is what
+  exposes the leak. So this is a newly-surfaced defect, not a regression of previously-working behavior.
+- **Isolation note:** `--crash-list` (empty here) does not help — these are **fails**, not aborts, so
+  `crash=0` and nothing is forked. Per-case `--isolate` *would* sidestep the leak (each case in a fresh
+  process) at the cost of speed.
+- **Root cause (confirmed, Vulkan validation layers).** The diagnosis above was confirmed precisely:
+  yawgpu's `submit_copies` returned without keeping the resources a submission references alive, so the
+  per-case **staging buffer** (`queueWriteTexture`) and the **copy-target texture** were destroyed
+  while still in use by an executing command buffer. With `VK_LAYER_KHRONOS_validation`, a single
+  `image_copy` write case emits `VUID-vkDestroyBuffer-buffer-00922` and `VUID-vkDestroyImage-image-01000`
+  ("…currently in use by VkCommandBuffer"), and at teardown `VUID-vkDestroyDevice-device-05137`
+  (command buffers undestroyed — the retire ring failed to drain after the device was lost). Freeing the
+  image's `DEVICE_LOCAL` `VkDeviceMemory` in-flight is what loses/exhausts the device on NVIDIA, which is
+  why the texture path is fatal where the buffer-only path (same UB class, host-visible memory) survives.
+- **Resolved:** yawgpu `1e67300` (*"retain in-flight Vulkan copy resources until fence signals (F-029)"*)
+  — the Vulkan retire ring now retains the owning `Arc`s for every buffer/texture a submission references
+  and drops them only after the fence signals. Re-test on real-GPU Windows/Vulkan (NVIDIA): validation
+  layers emit **zero** of the three VUIDs; the cross-test poison is gone (`image_copy:undefined_params:*`
+  then `clearBuffer:clear:*` in one process → `clearBuffer` `pass=50/0`, no device-creation failure);
+  `image_copy` alone remains `137256/0`. No `expectations/yawgpu.txt` lines were ever added (surfaced,
+  not masked).
+
+---
+
+## F-030 — yawgpu `MAP_READ` readback reads the buffer before the GPU copy completes (intermittent zeros)
+
+- **Backend:** yawgpu (Vulkan / Windows, NVIDIA RTX 5060 Ti). Surfaced **after** the
+  [F-029](#f-029--yawgpu-leaks-vulkan-device-resources-across-image_copy-cases-later-tests-in-the-same-process-fail)
+  fix: F-029's catastrophic device loss had **masked** this entirely (whole files were failing
+  `~6191/6192`). With F-029 fixed, a small residual remained.
+- **Found by:** `api,operation,command_buffer,image_copy:*` on real-GPU Vulkan after the F-029 fix —
+  ~0.4% of cases fail `pixel mismatch … expected X, got 0`, with a **nondeterministic** count that
+  varies run to run (`image_copy:mip_levels:*` standalone gave fail counts `0, 1, 2, 0, 0` over five
+  runs). The full `image_copy:*` landed at `pass≈136684 fail≈572` instead of `137256/0`.
+- **Observed:** a `MAP_READ` of a buffer that was just filled by `copyTextureToBuffer` /
+  `copyBufferToBuffer` occasionally reads back zeros — the host read raced ahead of the GPU copy.
+- **Root cause:** the buffer-map readback had **no GPU-completion wait**. `mapAsync` set the pending
+  map's outcome to `Success` eagerly, and `resolve_pending_map` read host-visible memory without
+  waiting for the copy submission to finish (`submit_copies` is asynchronous — it registers a fence in
+  the retire ring and returns). Small/fast copies usually won the race, hence the intermittency and the
+  bias toward textures over the tiny buffer-copy tests. (Independent of F-029 — F-029 only un-masked it.)
+- **Resolved:** yawgpu `1297b7e` (*"wait for GPU completion before MAP_READ readback (F-030)"*) — added
+  `HalQueue::wait_idle` (Vulkan `queue_wait_idle`; Metal empty-commit+wait; GLES `glFinish`; Noop no-op)
+  and `Queue`/`Device::wait_idle`; a read-map now idles the device queue before exposing data (including
+  Vulkan persistently-mapped buffers). Re-test on real-GPU Windows/Vulkan: `image_copy:mip_levels:*` is
+  deterministically `pass=6192 fail=0` across repeated runs and full `image_copy:*` is back to
+  `pass=137256 fail=0`. No `expectations/yawgpu.txt` lines (surfaced, not masked).
 
 ---
 
