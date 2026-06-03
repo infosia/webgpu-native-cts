@@ -150,16 +150,20 @@ The per-backend comparison below isolates each case in its own subprocess (`--is
 | **yawgpu** | 4332 | 383 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips |
 | **wgpu-native** | 3407 | 756 | 338 | 214 | 214 crashes are eager-panics on invalid input (F-001–F-004 incl. F-003 mapping, F-007, F-013, F-017, F-019, F-021); 338 fails are missing-validation / uncaptured-error divergences (F-015 view-usage subset ≈ 324, F-012, F-003 mapping) |
 
-**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti; `--isolate --expectations`, exit 0;
-the 4331-case surface as of T13, before the T14 BGL storage/multisampled tests, 2026-06-01):
+**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti). On the **latest** code — all ported
+`api,validation` *and* `api,operation` files on yawgpu `1297b7e` — yawgpu runs **clean: zero
+failures, zero crashes** (2026-06-03, `--isolate --expectations`, exit 0), matching its Metal result;
+the two Vulkan-specific findings **F-029 / F-030** were both found *and* fixed on this platform. The
+per-case table below is the earlier **T13-era `api,validation` snapshot** (4331 cases, 2026-06-01):
 
 | Backend | pass | skip | xfail | xpass | fail | crash |
 |---------|-----:|-----:|------:|------:|-----:|------:|
 | **yawgpu** | 4131 | 200 | 0 | 0 | 0 | 0 |
 | **wgpu-native** | 2260 | 1579 | 274 | 218 | 0 | 0 |
 
-**yawgpu posts the same `pass=4131 skip=200`, zero failures, on both platforms** (and matches Dawn) —
-a clean cross-platform result. (Dawn is not yet built on Windows.) The `wgpu-native` row differs from
+**At that snapshot yawgpu posted `pass=4131 skip=200`, zero failures, on both platforms** (matching
+Dawn's Metal numbers at that surface) — a clean cross-platform result. (Dawn is not yet built on
+Windows.) The `wgpu-native` row differs from
 its Metal numbers because the expectations file (`expectations/wgpu-native.txt`) was tuned on Metal and
 this NVIDIA Vulkan driver diverges: 218 cases the file lists as failures (202 `createTexture`, 16
 `createView`) actually **pass** here (reported as `xpass`), while 274 expected divergences are still
@@ -168,6 +172,20 @@ contained (`xfail`, dominated by 229 `createView` view-usage-subset cases — F-
 because each adapter exposes a different optional-feature set. All `wgpu-native` aborts are contained by
 `--isolate` and reclassified via the expectations file, so an `--isolate --expectations` run still
 exits 0 on both platforms.
+
+Over the ported **`api,operation`** surface (7 files; execute-and-readback, run in-process on Metal) —
+the two large *structural* ports where the format axis is swept densely:
+
+| Backend | `image_copy` (137256) | `copyTextureToTexture` (30910) | operation findings |
+|---------|----------------------:|-------------------------------:|--------------------|
+| **Dawn** (oracle) | pass=137256 fail=0 | pass=30910 fail=0 | — |
+| **yawgpu** | pass=137256 fail=0 | pass=30910 fail=0 | none — F-023/024/025/026/029/030 all fixed (Metal + Vulkan) |
+| **wgpu-native** | pass=116772 fail=1332 | pass=26236 fail=738 | F-027, F-028 (3D multi-slice copy/readback; partial cases, surfaced/unmasked) |
+
+The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,
+`onSubmittedWorkDone`) pass on Dawn and yawgpu; on wgpu-native `clearBuffer:clear`'s `size=0` subcase
+aborts (F-002, contained by `--isolate`). A **combined** whole-listing yawgpu run (all operation files
+in one process) is poison-free after the F-029 fix (`pass=32598 fail=0` in fast mode).
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
