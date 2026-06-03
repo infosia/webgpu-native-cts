@@ -40,12 +40,21 @@ scope and goes back to Claude as a question in `REPORT.md`.
 
 ## Verifying against yawgpu (fast → full)
 
-yawgpu is the primary conformance subject, so most CTS work is a find→fix loop against it. To keep
-that loop tight, iterate with the **fast mode** (`cts --sample-formats`, which runs only one
-representative texture format per major decode family — see
-[`../format-sampling-mode.md`](../format-sampling-mode.md)) and switch to a **full run** only to
-finalize. Real-GPU runs use the Bash sandbox **disabled** (otherwise Metal enumerates no adapters
-and every case false-fails); the coding agent never runs GPU CTS — Claude runs all of it.
+yawgpu is the primary conformance subject, so most CTS work is a find→fix loop against it. The
+**fast mode** (`cts --sample-formats`, which runs one representative texture format per major decode
+family while keeping every *structural* axis full — see
+[`../format-sampling-mode.md`](../format-sampling-mode.md)) is the **default driver** of this loop; a
+**full run** is only for finalizing. Real-GPU runs use the Bash sandbox **disabled** (otherwise Metal
+enumerates no adapters and every case false-fails); the coding agent never runs GPU CTS — Claude runs
+all of it.
+
+**Vertical-first.** Every divergence this suite has surfaced (F-025/026/027/028) was **structural** —
+upload path, buffer layout, mip levels, 3D depth slices — **not** format-specific; one representative
+format reproduces each. So format breadth is low-yield: prefer ports/sweeps that are dense in
+*structural* patterns (dimension, mip, layer/slice, origin, partial sub-box, alignment edge cases,
+aspect) over those that mainly enumerate formats, and lean on the fast mode (rep format × full
+structural) to find them cheaply. The periodic full-format pass (step 4) still catches any truly
+format-specific defect.
 
 1. **Port** the new or changed test (coding agent) → Claude builds the backends.
 2. **Find (fast).** `cts --sample-formats` on **Dawn** (a quick sanity that the test itself is
