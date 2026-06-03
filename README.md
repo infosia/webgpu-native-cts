@@ -105,7 +105,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   `copyTextureToBuffer`/`copyTextureToTexture`), and the **TexelView decode-value comparison stack** that
   backs the color `image_copy` port (137256 subcases). See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 31 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 32 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
@@ -113,10 +113,14 @@ real-GPU Metal:
   `api,validation` at `pass=4332`, plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone`
   operation tests and the full color **and** depth/stencil image-copy / `copyTextureToTexture` ports:
   color `image_copy` `pass=137256 fail=0`, color `copyTextureToTexture` `pass=30910 fail=0`, and
-  depth/stencil `copy_depth_stencil` `pass=216 fail=0` — all matching the Dawn oracle). Every finding
-  the suite surfaced was fixed in yawgpu and re-confirmed on hardware; `expectations/yawgpu.txt` has no
-  expected failures (nothing masked). (It also *runs* the `immediate_data_size` cases that
-  Dawn/wgpu-native skip.) See [FINDINGS](docs/FINDINGS.md) for the per-finding record.
+  depth/stencil `copy_depth_stencil` `pass=216 fail=0` — all matching the Dawn oracle). The **T27**
+  image_copy depth/stencil port then surfaced one **open** finding — **F-032** (yawgpu zeros the
+  **depth aspect** of `copyTextureToBuffer` for all depth formats and the **stencil aspect** of the
+  packed depth+stencil formats; plain `Stencil8` passes — `pass=288 fail=864` where Dawn/wgpu-native
+  pass `1152/0`). Every earlier finding was fixed in yawgpu and re-confirmed on hardware;
+  `expectations/yawgpu.txt` has no expected failures (nothing masked, F-032 included). (It also *runs*
+  the `immediate_data_size` cases that Dawn/wgpu-native skip.) See [FINDINGS](docs/FINDINGS.md) for the
+  per-finding record.
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
@@ -166,11 +170,11 @@ exits 0 on both platforms.
 
 The large *structural* ports, where the format axis is swept densely (cells are `pass / fail`):
 
-| Backend | `image_copy` (137256) | `copyTextureToTexture` color (30910) | `copy_depth_stencil` (216) | findings |
-|---------|----------------------:|-------------------------------------:|---------------------------:|----------|
-| **Dawn** (oracle) | 137256 / 0 | 30910 / 0 | 216 / 0 | — |
-| **yawgpu** | 137256 / 0 | 30910 / 0 | 216 / 0 | — |
-| **wgpu-native** | 116772 / 1332 | 26236 / 738 | 216 / 0 | F-027, F-028 (3D multi-slice copy/readback) |
+| Backend | `image_copy` (137256) | `copyTextureToTexture` color (30910) | `copy_depth_stencil` (216) | `image_copy` depth/stencil (1152) | findings |
+|---------|----------------------:|-------------------------------------:|---------------------------:|----------------------------------:|----------|
+| **Dawn** (oracle) | 137256 / 0 | 30910 / 0 | 216 / 0 | 1152 / 0 | — |
+| **yawgpu** | 137256 / 0 | 30910 / 0 | 216 / 0 | **288 / 864** | **F-032** (depth/stencil aspect buffer copies) |
+| **wgpu-native** | 116772 / 1332 | 26236 / 738 | 216 / 0 | 1152 / 0 | F-027, F-028 (3D multi-slice copy/readback) |
 
 The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,
 `onSubmittedWorkDone`) pass on Dawn and yawgpu; on wgpu-native `clearBuffer:clear`'s `size=0` subcase

@@ -19,7 +19,7 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
-## Re-test summary — every yawgpu finding through T26 resolved (F-031 closed on real-GPU Metal)
+## Re-test summary — yawgpu resolved through T26 (incl. F-031); T27 surfaced one open finding (F-032)
 
 Every defect this suite surfaced against **yawgpu** (the primary conformance subject) through T26 — both
 correctness and resource-lifetime — was fixed in yawgpu and re-confirmed on real hardware (the full
@@ -38,6 +38,12 @@ The last two yawgpu findings are now resolved too, verified on real-GPU Windows/
 [F-030](#f-030--yawgpu-map_read-readback-reads-the-buffer-before-the-gpu-copy-completes-intermittent-zeros)
 (an intermittent `MAP_READ` readback race the F-029 fix un-masked).
 
+The **T27** `image_copy` depth/stencil ports then surfaced
+[F-032](#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)
+— yawgpu zeros out the **depth aspect** of `copyTextureToBuffer` (all depth formats) and the **stencil
+aspect** of the packed depth+stencil formats (plain `Stencil8` is fine), where Dawn and wgpu-native
+pass all 1152. **yawgpu's one open finding**; surfaced, not masked.
+
 | milestone | yawgpu fix(es) | result after fix |
 |-----------|----------------|------------------|
 | `api,validation` baseline (`55ac04d`→`92db062`) | F-005/006/008/009/010 — `2667b0a`, `92db062` | `pass=2594 skip=16 fail=0 crash=0` |
@@ -48,13 +54,14 @@ The last two yawgpu findings are now resolved too, verified on real-GPU Windows/
 | `image_copy` color (T24b) | F-025, F-026 — `1e6c70b` | `image_copy pass=137256 fail=0` |
 | `image_copy` cross-test leak + readback race | F-029 (`1e67300`), F-030 (`1297b7e`) | full `image_copy` repeatably `pass=137256 fail=0`; cross-test poison gone |
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
+| `image_copy` depth/stencil (T27) | **open — F-032** (depth/stencil aspect buffer copies) | Dawn + wgpu-native `pass=1152 fail=0`; yawgpu `pass=288 fail=864` |
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031
-— **all** of them; each keeps a compact record below.
+— each keeps a compact record below.
+**Open — yawgpu:** F-032 (depth/stencil aspect buffer⇄texture copies, surfaced by T27).
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028 (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
-**Open — yawgpu:** none.
 
 ---
 
@@ -699,6 +706,44 @@ F-023 note; under the macOS sandbox Metal enumerates no adapters and every case 
   attachment mip/layer targeting is implemented for **Metal**; the Vulkan and GLES regular render paths
   still target the base mip/layer for non-default attachment views — a follow-up to implement + verify on
   Windows/Vulkan and Android GLES.
+
+---
+
+## F-032 — yawgpu returns zeros for depth/stencil aspect buffer⇄texture copies (except plain Stencil8)
+
+- **Backend:** yawgpu (`f3afc31`, real-GPU Metal). **Not** present in Dawn or wgpu-native.
+- **Found by:** the T27 `image_copy` depth/stencil ports
+  (`api,operation,command_buffer,image_copy:rowsPerImage_and_bytesPerRow_depth_stencil` and
+  `:offsets_and_sizes_copy_depth_stencil`) — the suite's first image_copy depth/stencil aspect
+  coverage. **Dawn (oracle) and wgpu-native both pass all 1152** subcases with the exact same harness
+  code; **yawgpu passes 288, fails 864** (9 of the 12 case-level combos), which isolates the behavior
+  to the backend.
+- **Observed on yawgpu (every failure reads back `got 0`):**
+  - **Depth aspect** `copyTextureToBuffer` (depth-only) — **all three depth formats** zero out:
+    `Depth16Unorm` (`expected 255, got 0` at byte 0 — the `1.0`→`0xFFFF` texel), `Depth32Float` and
+    `Depth32FloatStencil8` (`expected 128, got 0` at byte 2 — the `1.0f`→`00 00 80 3F` texel). The test
+    stages depth by sampling an `r32float` source in a fragment shader that writes `@builtin(frag_depth)`,
+    then copies the depth aspect to a buffer; yawgpu yields all zeros.
+  - **Stencil aspect** of the **combined** depth+stencil formats — `Depth24PlusStencil8` and
+    `Depth32FloatStencil8` zero out for all of `WriteTexture` / `CopyB2T` / `CopyT2B` (stencil-only)
+    (`expected 1, got 0`).
+  - **Plain `Stencil8` passes** all three stencil methods (288 subcases) — a standalone single-plane
+    stencil texture copies correctly; only the **aspect extraction from a packed depth+stencil
+    texture** and the **depth plane** are broken.
+- **Expected (WebGPU):** buffer⇄texture copies of the depth aspect (`Depth16Unorm`/`Depth32Float`/
+  `Depth32FloatStencil8`) and the stencil aspect (all stencil formats) must round-trip the aspect's
+  bytes. Dawn and wgpu-native do.
+- **Scope / localization:** distinct from [F-031](#f-031--yawgpu-diverges-on-the-depth-aspect-of-copytexturetotexture-copied-depth-fails-an-equality-re-render)
+  (that was the depth aspect of *`copyTextureToTexture`*, fixed in `f3afc31`). F-032 is the depth/stencil
+  aspect of *buffer⇄texture* copies (`writeTexture` / `copyBufferToTexture` / `copyTextureToBuffer`).
+  Two sub-gaps: (a) depth-plane copy/extraction (or the frag-depth render staging not surviving a depth
+  T2B), and (b) stencil-plane extraction from a packed depth+stencil texture (plain `Stencil8` works,
+  so it is the packed-aspect path, not stencil copies in general).
+- **Status:** **OPEN** — yawgpu's only open finding. 3-way confirmed (Dawn + wgpu-native pass all
+  1152). No `expectations/yawgpu.txt` lines added (surfaced for the fix, not masked; real-GPU runs use
+  the Bash sandbox disabled — see the F-023 note). Surfaced only because the T27 readback buffers are
+  zero-initialized (a copy that writes nothing now fails instead of being masked by a pre-filled
+  expected buffer).
 
 ---
 
