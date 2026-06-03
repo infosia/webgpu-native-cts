@@ -156,6 +156,20 @@ because each adapter exposes a different optional-feature set. All `wgpu-native`
 `--isolate` and reclassified via the expectations file, so an `--isolate --expectations` run still
 exits 0 on both platforms.
 
+Over the ported **`api,operation`** surface (7 files; execute-and-readback, run in-process on Metal) —
+the two large *structural* ports where the format axis is swept densely:
+
+| Backend | `image_copy` (137256) | `copyTextureToTexture` (30910) | operation findings |
+|---------|----------------------:|-------------------------------:|--------------------|
+| **Dawn** (oracle) | pass=137256 fail=0 | pass=30910 fail=0 | — |
+| **yawgpu** | pass=137256 fail=0 | pass=30910 fail=0 | none — F-023/024/025/026/029/030 all fixed (Metal + Vulkan) |
+| **wgpu-native** | pass=116772 fail=1332 | pass=26236 fail=738 | F-027, F-028 (3D multi-slice copy/readback; partial cases, surfaced/unmasked) |
+
+The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,
+`onSubmittedWorkDone`) pass on Dawn and yawgpu; on wgpu-native `clearBuffer:clear`'s `size=0` subcase
+aborts (F-002, contained by `--isolate`). A **combined** whole-listing yawgpu run (all operation files
+in one process) is poison-free after the F-029 fix (`pass=32598 fail=0` in fast mode).
+
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
 
