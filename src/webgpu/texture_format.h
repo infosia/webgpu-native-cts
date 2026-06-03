@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <span>
 #include <vector>
 
 #include "cts/webgpu.h"
@@ -35,6 +36,12 @@ struct TextureBlockInfo {
     uint32_t blockWidth;
     uint32_t blockHeight;
     uint32_t bytesPerBlock;
+};
+
+enum class ImageCopyType {
+    WriteTexture = 0,
+    CopyB2T = 1,
+    CopyT2B = 2,
 };
 
 struct SizeVariantComponent {
@@ -571,6 +578,44 @@ inline uint32_t depthStencilFormatAspectSize(WGPUTextureFormat format, WGPUTextu
         default:
             return textureFormatInfo(format).bytesPerBlock;
     }
+}
+
+inline std::span<const WGPUTextureAspect> depthStencilFormatCopyableAspects(
+    ImageCopyType type,
+    WGPUTextureFormat format) {
+    static constexpr std::array<WGPUTextureAspect, 0> kNoAspects = {};
+    static constexpr std::array<WGPUTextureAspect, 1> kDepthOnly = {WGPUTextureAspect_DepthOnly};
+    static constexpr std::array<WGPUTextureAspect, 1> kStencilOnly = {WGPUTextureAspect_StencilOnly};
+    static constexpr std::array<WGPUTextureAspect, 2> kDepthAndStencil = {
+        WGPUTextureAspect_DepthOnly,
+        WGPUTextureAspect_StencilOnly,
+    };
+
+    const ImageCopyType appliedType = type == ImageCopyType::WriteTexture ? ImageCopyType::CopyB2T : type;
+    switch (format) {
+        case WGPUTextureFormat_Stencil8:
+            return kStencilOnly;
+        case WGPUTextureFormat_Depth16Unorm:
+            return kDepthOnly;
+        case WGPUTextureFormat_Depth32Float:
+            return appliedType == ImageCopyType::CopyT2B ? std::span<const WGPUTextureAspect>(kDepthOnly) : std::span<const WGPUTextureAspect>(kNoAspects);
+        case WGPUTextureFormat_Depth24Plus:
+            return kNoAspects;
+        case WGPUTextureFormat_Depth24PlusStencil8:
+            return kStencilOnly;
+        case WGPUTextureFormat_Depth32FloatStencil8:
+            return appliedType == ImageCopyType::CopyT2B ? std::span<const WGPUTextureAspect>(kDepthAndStencil) : std::span<const WGPUTextureAspect>(kStencilOnly);
+        default:
+            return kNoAspects;
+    }
+}
+
+inline bool depthStencilBufferTextureCopySupported(
+    ImageCopyType type,
+    WGPUTextureFormat format,
+    WGPUTextureAspect aspect) {
+    const std::span<const WGPUTextureAspect> aspects = depthStencilFormatCopyableAspects(type, format);
+    return std::find(aspects.begin(), aspects.end(), aspect) != aspects.end();
 }
 
 inline bool isDepthOrStencilTextureFormat(WGPUTextureFormat format) {
