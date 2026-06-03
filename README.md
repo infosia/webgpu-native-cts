@@ -109,16 +109,16 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes **every ported test through T26** (all
+- **yawgpu** — the primary conformance subject — passes **every ported test through T27** (all
   `api,validation` at `pass=4332`, plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone`
   operation tests and the full color **and** depth/stencil image-copy / `copyTextureToTexture` ports:
-  color `image_copy` `pass=137256 fail=0`, color `copyTextureToTexture` `pass=30910 fail=0`, and
-  depth/stencil `copy_depth_stencil` `pass=216 fail=0` — all matching the Dawn oracle). The **T27**
-  image_copy depth/stencil port then surfaced one **open** finding — **F-032** (yawgpu zeros the
-  **depth aspect** of `copyTextureToBuffer` for all depth formats and the **stencil aspect** of the
-  packed depth+stencil formats; plain `Stencil8` passes — `pass=288 fail=864` where Dawn/wgpu-native
-  pass `1152/0`). Every earlier finding was fixed in yawgpu and re-confirmed on hardware;
-  `expectations/yawgpu.txt` has no expected failures (nothing masked, F-032 included). (It also *runs*
+  `image_copy` `pass=138408 fail=0` (color + depth/stencil), color `copyTextureToTexture`
+  `pass=30910 fail=0`, and `copy_depth_stencil` `pass=216 fail=0` — all matching the Dawn oracle). The
+  **T27** image_copy depth/stencil port surfaced **F-032** (yawgpu zeroed the depth aspect of
+  `copyTextureToBuffer` and the stencil aspect of packed depth+stencil formats), now **resolved**
+  (`c8f15d5`, `af9ac5c`): `image_copy` depth/stencil `pass=1152 fail=0`. Every finding the suite
+  surfaced was fixed in yawgpu and re-confirmed on hardware; `expectations/yawgpu.txt` has no expected
+  failures (nothing masked). (It also *runs*
   the `immediate_data_size` cases that Dawn/wgpu-native skip.) See [FINDINGS](docs/FINDINGS.md) for the
   per-finding record.
 - **Dawn** — the oracle — passes everything.
@@ -173,7 +173,7 @@ The large *structural* ports, where the format axis is swept densely (cells are 
 | Backend | `image_copy` (137256) | `copyTextureToTexture` color (30910) | `copy_depth_stencil` (216) | `image_copy` depth/stencil (1152) | findings |
 |---------|----------------------:|-------------------------------------:|---------------------------:|----------------------------------:|----------|
 | **Dawn** (oracle) | 137256 / 0 | 30910 / 0 | 216 / 0 | 1152 / 0 | — |
-| **yawgpu** | 137256 / 0 | 30910 / 0 | 216 / 0 | **288 / 864** | **F-032** (depth/stencil aspect buffer copies) |
+| **yawgpu** | 137256 / 0 | 30910 / 0 | 216 / 0 | 1152 / 0 | — |
 | **wgpu-native** | 116772 / 1332 | 26236 / 738 | 216 / 0 | 1152 / 0 | F-027, F-028 (3D multi-slice copy/readback) |
 
 The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,

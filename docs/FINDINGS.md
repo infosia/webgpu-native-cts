@@ -19,7 +19,7 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
-## Re-test summary — yawgpu resolved through T26 (incl. F-031); T27 surfaced one open finding (F-032)
+## Re-test summary — every yawgpu finding through T27 resolved on Metal (incl. F-031, F-032)
 
 Every defect this suite surfaced against **yawgpu** (the primary conformance subject) through T26 — both
 correctness and resource-lifetime — was fixed in yawgpu and re-confirmed on real hardware (the full
@@ -38,11 +38,12 @@ The last two yawgpu findings are now resolved too, verified on real-GPU Windows/
 [F-030](#f-030--yawgpu-map_read-readback-reads-the-buffer-before-the-gpu-copy-completes-intermittent-zeros)
 (an intermittent `MAP_READ` readback race the F-029 fix un-masked).
 
-The **T27** `image_copy` depth/stencil ports then surfaced
+The **T27** `image_copy` depth/stencil ports surfaced
 [F-032](#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)
-— yawgpu zeros out the **depth aspect** of `copyTextureToBuffer` (all depth formats) and the **stencil
-aspect** of the packed depth+stencil formats (plain `Stencil8` is fine), where Dawn and wgpu-native
-pass all 1152. **yawgpu's one open finding**; surfaced, not masked.
+— yawgpu zeroed out the **depth aspect** of `copyTextureToBuffer` (all depth formats) and the **stencil
+aspect** of the packed depth+stencil formats (plain `Stencil8` was fine), where Dawn and wgpu-native
+pass all 1152 — now **resolved** (`c8f15d5`, `af9ac5c`): `image_copy` depth/stencil `pass=1152 fail=0`,
+full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no open Metal findings.**
 
 | milestone | yawgpu fix(es) | result after fix |
 |-----------|----------------|------------------|
@@ -54,11 +55,12 @@ pass all 1152. **yawgpu's one open finding**; surfaced, not masked.
 | `image_copy` color (T24b) | F-025, F-026 — `1e6c70b` | `image_copy pass=137256 fail=0` |
 | `image_copy` cross-test leak + readback race | F-029 (`1e67300`), F-030 (`1297b7e`) | full `image_copy` repeatably `pass=137256 fail=0`; cross-test poison gone |
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
-| `image_copy` depth/stencil (T27) | **open — F-032** (depth/stencil aspect buffer copies) | Dawn + wgpu-native `pass=1152 fail=0`; yawgpu `pass=288 fail=864` |
+| `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032
 — each keeps a compact record below.
-**Open — yawgpu:** F-032 (depth/stencil aspect buffer⇄texture copies, surfaced by T27).
+**Open — yawgpu:** none on Metal. (Follow-up: port the F-031 depth render path to the Vulkan/GLES HALs —
+see the F-031 note; and F-033 is a likely-MoltenVK-only Mac artifact, not a yawgpu defect.)
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028 (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
@@ -749,11 +751,15 @@ artifact (native Windows/Vulkan is clean through F-031), low priority.
   Two sub-gaps: (a) depth-plane copy/extraction (or the frag-depth render staging not surviving a depth
   T2B), and (b) stencil-plane extraction from a packed depth+stencil texture (plain `Stencil8` works,
   so it is the packed-aspect path, not stencil copies in general).
-- **Status:** **OPEN** — yawgpu's only open finding. 3-way confirmed (Dawn + wgpu-native pass all
-  1152). No `expectations/yawgpu.txt` lines added (surfaced for the fix, not masked; real-GPU runs use
-  the Bash sandbox disabled — see the F-023 note). Surfaced only because the T27 readback buffers are
-  zero-initialized (a copy that writes nothing now fails instead of being masked by a pre-filled
-  expected buffer).
+- **Status:** **RESOLVED** (2026-06-04, real-GPU Metal; yawgpu `c8f15d5` + `af9ac5c`). yawgpu added
+  depth/stencil aspect buffer-copy support (depth-plane copy + packed-aspect extraction) and corrected
+  the packed-depth aspect-copy buffer-size validation. Re-test: `image_copy` depth/stencil
+  `pass=1152 fail=0` (Dawn-equal, up from `pass=288 fail=864`); full `image_copy` now `pass=138408
+  fail=0` (137256 color + 1152 depth/stencil); combined `command_buffer` cross-test `pass=33937 fail=0`.
+  3-way confirmed (Dawn + wgpu-native pass all 1152). No `expectations/yawgpu.txt` lines were ever added
+  (surfaced for the fix, not masked). It was surfaced only because the T27 readback buffers are
+  zero-initialized (a copy that writes nothing fails instead of being masked by a pre-filled expected
+  buffer).
 
 ---
 
