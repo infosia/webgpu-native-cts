@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 #include <vector>
 
 #include "cts/gpu.h"
@@ -42,6 +43,15 @@ struct SizePair {
 struct ZeroSizedConfig {
     WGPUTextureDimension dimension = WGPUTextureDimension_2D;
     WGPUExtent3D textureSize = WGPUExtent3D{1, 1, 1};
+};
+
+struct DepthStencilParams {
+    WGPUTextureFormat format = WGPUTextureFormat_Undefined;
+    WGPUExtent3D srcTextureSize = WGPUExtent3D{1, 1, 1};
+    uint32_t srcCopyLevel = 0;
+    uint32_t dstCopyLevel = 0;
+    uint32_t srcCopyBaseArrayLayer = 0;
+    uint32_t dstCopyBaseArrayLayer = 0;
 };
 
 TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpuTest>(
@@ -106,8 +116,42 @@ constexpr std::array<ZeroSizedConfig, 3> kZeroSizedConfigs = {{
     {WGPUTextureDimension_3D, {32, 32, 5}},
 }};
 
+constexpr std::array<WGPUExtent3D, 3> kDepthStencilTextureSizes = {{
+    {32, 16, 1},
+    {32, 16, 4},
+    {24, 48, 5},
+}};
+
+constexpr uint32_t kDynamicUniformStride = 256;
+
+constexpr std::string_view kDepthVertexShader = R"(
+struct Params { copyLayer: f32 };
+@group(0) @binding(0) var<uniform> param: Params;
+@vertex
+fn main(@builtin(vertex_index) VertexIndex : u32)-> @builtin(position) vec4<f32> {
+  var depthValue = 0.5 + 0.2 * sin(param.copyLayer);
+  var pos : array<vec3<f32>, 6> = array<vec3<f32>, 6>(
+      vec3<f32>(-1.0,  1.0, depthValue),
+      vec3<f32>(-1.0, -1.0, 0.0),
+      vec3<f32>( 1.0,  1.0, 1.0),
+      vec3<f32>(-1.0, -1.0, 0.0),
+      vec3<f32>( 1.0,  1.0, 1.0),
+      vec3<f32>( 1.0, -1.0, depthValue));
+  return vec4<f32>(pos[VertexIndex], 1.0);
+}
+)";
+
+constexpr std::string_view kGreenFragmentShader = R"(
+@fragment
+fn main() -> @location(0) vec4<f32> { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
+)";
+
 uint64_t alignTo(uint64_t value, uint64_t alignment) {
     return (value + alignment - 1) / alignment * alignment;
+}
+
+WGPUStringView stringView(std::string_view value) {
+    return WGPUStringView{value.data(), value.size()};
 }
 
 std::vector<uint8_t> generateData(size_t size, uint32_t start = 0) {
@@ -122,6 +166,15 @@ std::vector<Value> regularTextureFormatValues() {
     std::vector<Value> values;
     values.reserve(kRegularTextureFormats.size());
     for (WGPUTextureFormat format : kRegularTextureFormats) {
+        values.push_back(static_cast<int64_t>(format));
+    }
+    return values;
+}
+
+std::vector<Value> depthStencilFormatValues() {
+    std::vector<Value> values;
+    values.reserve(kDepthStencilFormats.size());
+    for (WGPUTextureFormat format : kDepthStencilFormats) {
         values.push_back(static_cast<int64_t>(format));
     }
     return values;
@@ -185,6 +238,21 @@ WGPUTexture createTexture(
     return t.createTextureTracked(desc);
 }
 
+WGPUTexture createDepthStencilTexture(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTextureFormat format,
+    WGPUExtent3D size,
+    uint32_t mipLevelCount) {
+    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    desc.size = size;
+    desc.mipLevelCount = mipLevelCount;
+    desc.sampleCount = 1;
+    desc.dimension = WGPUTextureDimension_2D;
+    desc.format = format;
+    desc.usage = WGPUTextureUsage_CopySrc | WGPUTextureUsage_CopyDst | WGPUTextureUsage_RenderAttachment;
+    return t.createTextureTracked(desc);
+}
+
 void submit(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder) {
     WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
     wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
@@ -238,6 +306,30 @@ void copyTextureToBuffer(
     submit(t, encoder);
 }
 
+void copyTextureToBufferAspect(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    WGPUBuffer buffer,
+    TexelCopyBufferLayout layout,
+    WGPUExtent3D copySize,
+    uint32_t mipLevel,
+    WGPUOrigin3D origin,
+    WGPUTextureAspect aspect) {
+    WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    source.texture = texture;
+    source.mipLevel = mipLevel;
+    source.origin = origin;
+    source.aspect = aspect;
+
+    WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+    destination.buffer = buffer;
+    destination.layout = toWgpuLayout(layout);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &copySize);
+    submit(t, encoder);
+}
+
 void writeTexture(
     AllFeaturesMaxLimitsGpuTest& t,
     WGPUTexture texture,
@@ -254,6 +346,29 @@ void writeTexture(
     layout.bytesPerRow = blocksPerRow * block.bytesPerBlock;
     layout.rowsPerImage = dimension == WGPUTextureDimension_1D ? WGPU_COPY_STRIDE_UNDEFINED : blockRowsPerImage;
     t.queueWriteTexture(texture, size, layout, data.data(), data.size(), mipLevel, WGPUOrigin3D{0, 0, 0});
+}
+
+void writeTextureAspect(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    WGPUExtent3D size,
+    uint32_t mipLevel,
+    WGPUOrigin3D origin,
+    WGPUTextureAspect aspect,
+    uint32_t bytesPerRow,
+    uint32_t rowsPerImage,
+    const std::vector<uint8_t>& data) {
+    WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+    layout.offset = 0;
+    layout.bytesPerRow = bytesPerRow;
+    layout.rowsPerImage = rowsPerImage;
+
+    WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    destination.texture = texture;
+    destination.mipLevel = mipLevel;
+    destination.origin = origin;
+    destination.aspect = aspect;
+    wgpuQueueWriteTexture(t.queue(), &destination, data.data(), data.size(), &layout, &size);
 }
 
 struct AppliedCopy {
@@ -370,6 +485,373 @@ void overlayExpectedCopy(
                 std::memcpy(expected.data() + dstOffset, srcData.data() + srcOffset, bytesInRow);
             }
         }
+    }
+}
+
+std::vector<uint8_t> getInitialStencilData(WGPUExtent3D copySize) {
+    return generateData(static_cast<size_t>(copySize.width) * copySize.height * copySize.depthOrArrayLayers);
+}
+
+void initializeStencilAspect(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    uint32_t mipLevel,
+    uint32_t baseArrayLayer,
+    WGPUExtent3D copySize,
+    const std::vector<uint8_t>& stencilData) {
+    writeTextureAspect(
+        t,
+        texture,
+        copySize,
+        mipLevel,
+        WGPUOrigin3D{0, 0, baseArrayLayer},
+        WGPUTextureAspect_StencilOnly,
+        copySize.width,
+        copySize.height,
+        stencilData);
+}
+
+void verifyStencilAspect(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    const std::vector<uint8_t>& stencilData,
+    uint32_t mipLevel,
+    uint32_t baseArrayLayer,
+    WGPUExtent3D copySize) {
+    const uint32_t bytesPerRow = static_cast<uint32_t>(alignTo(copySize.width, kBytesPerRowAlignment));
+    const uint64_t byteLength = alignTo(
+        static_cast<uint64_t>(bytesPerRow) * copySize.height * (copySize.depthOrArrayLayers - 1)
+            + static_cast<uint64_t>(bytesPerRow) * (copySize.height - 1)
+            + copySize.width,
+        kBufferCopyAlignment);
+    std::vector<uint8_t> expected(static_cast<size_t>(byteLength), 0);
+    for (uint32_t z = 0; z < copySize.depthOrArrayLayers; ++z) {
+        for (uint32_t y = 0; y < copySize.height; ++y) {
+            const uint64_t srcOffset = static_cast<uint64_t>(z) * copySize.height * copySize.width
+                + static_cast<uint64_t>(y) * copySize.width;
+            const uint64_t dstOffset = static_cast<uint64_t>(z) * copySize.height * bytesPerRow
+                + static_cast<uint64_t>(y) * bytesPerRow;
+            std::memcpy(expected.data() + dstOffset, stencilData.data() + srcOffset, copySize.width);
+        }
+    }
+
+    WGPUBuffer buffer = t.makeBufferWithContents(expected.data(), expected.size(), WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+    copyTextureToBufferAspect(
+        t,
+        texture,
+        buffer,
+        TexelCopyBufferLayout{0, bytesPerRow, copySize.height},
+        copySize,
+        mipLevel,
+        WGPUOrigin3D{0, 0, baseArrayLayer},
+        WGPUTextureAspect_StencilOnly);
+    t.expectGPUBufferValuesEqual(buffer, expected.data(), expected.size());
+}
+
+WGPUTextureView createLayerView(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    WGPUTextureFormat format,
+    uint32_t mipLevel,
+    uint32_t arrayLayer) {
+    WGPUTextureViewDescriptor desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    desc.format = format;
+    desc.dimension = WGPUTextureViewDimension_2D;
+    desc.baseMipLevel = mipLevel;
+    desc.mipLevelCount = 1;
+    desc.baseArrayLayer = arrayLayer;
+    desc.arrayLayerCount = 1;
+    desc.aspect = WGPUTextureAspect_All;
+    return t.createViewTracked(texture, desc);
+}
+
+WGPUBindGroupLayout getDepthCopyBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t) {
+    WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+    entry.binding = 0;
+    entry.visibility = WGPUShaderStage_Vertex;
+    entry.buffer.type = WGPUBufferBindingType_Uniform;
+    entry.buffer.hasDynamicOffset = WGPU_TRUE;
+    entry.buffer.minBindingSize = 4;
+
+    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    desc.entryCount = 1;
+    desc.entries = &entry;
+    return t.createBindGroupLayoutTracked(desc);
+}
+
+WGPUBuffer createLayerUniformBuffer(AllFeaturesMaxLimitsGpuTest& t, uint32_t layerCount) {
+    std::vector<uint8_t> data(static_cast<size_t>(layerCount) * kDynamicUniformStride, 0);
+    for (uint32_t layer = 0; layer < layerCount; ++layer) {
+        const float value = static_cast<float>(layer);
+        std::memcpy(data.data() + static_cast<size_t>(layer) * kDynamicUniformStride, &value, sizeof(value));
+    }
+    return t.makeBufferWithContents(data.data(), data.size(), WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform);
+}
+
+WGPUBindGroup createLayerUniformBindGroup(AllFeaturesMaxLimitsGpuTest& t, WGPUBindGroupLayout layout, WGPUBuffer buffer) {
+    WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+    entry.binding = 0;
+    entry.buffer = buffer;
+    entry.offset = 0;
+    entry.size = 4;
+
+    WGPUBindGroupDescriptor desc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    desc.layout = layout;
+    desc.entryCount = 1;
+    desc.entries = &entry;
+    return t.createBindGroupTracked(desc);
+}
+
+WGPUPipelineLayout createPipelineLayout(AllFeaturesMaxLimitsGpuTest& t, WGPUBindGroupLayout bindGroupLayout) {
+    WGPUPipelineLayoutDescriptor desc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    desc.bindGroupLayoutCount = 1;
+    desc.bindGroupLayouts = &bindGroupLayout;
+    return t.createPipelineLayoutTracked(desc);
+}
+
+WGPURenderPipeline createDepthCopyPipeline(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTextureFormat depthStencilFormat,
+    WGPUCompareFunction depthCompare,
+    WGPUOptionalBool depthWriteEnabled,
+    bool includeFragment,
+    WGPUPipelineLayout layout) {
+    WGPUShaderModule vertexModule = t.createShaderModuleTracked(kDepthVertexShader);
+    WGPUDepthStencilState depthStencil = WGPU_DEPTH_STENCIL_STATE_INIT;
+    depthStencil.format = depthStencilFormat;
+    depthStencil.depthWriteEnabled = depthWriteEnabled;
+    depthStencil.depthCompare = depthCompare;
+
+    WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+    colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+    colorTarget.writeMask = WGPUColorWriteMask_All;
+
+    WGPUShaderModule fragmentModule = nullptr;
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    if (includeFragment) {
+        fragmentModule = t.createShaderModuleTracked(kGreenFragmentShader);
+        fragment.module = fragmentModule;
+        fragment.entryPoint = stringView("main");
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+    }
+
+    WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    desc.layout = layout;
+    desc.vertex.module = vertexModule;
+    desc.vertex.entryPoint = stringView("main");
+    desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    desc.multisample.count = 1;
+    desc.depthStencil = &depthStencil;
+    desc.fragment = includeFragment ? &fragment : nullptr;
+    return t.createRenderPipelineTracked(desc);
+}
+
+void encodeDepthDrawPass(
+    WGPUCommandEncoder encoder,
+    WGPURenderPipeline pipeline,
+    WGPUBindGroup bindGroup,
+    WGPUTextureView depthStencilView,
+    WGPUTextureFormat format,
+    WGPURenderPassColorAttachment* colorAttachment,
+    bool clearDepth,
+    uint32_t layer) {
+    WGPURenderPassDepthStencilAttachment depthStencilAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    depthStencilAttachment.view = depthStencilView;
+    depthStencilAttachment.depthLoadOp = clearDepth ? WGPULoadOp_Clear : WGPULoadOp_Load;
+    depthStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
+    depthStencilAttachment.depthClearValue = 0.0f;
+    if (isStencilTextureFormat(format)) {
+        depthStencilAttachment.stencilLoadOp = WGPULoadOp_Load;
+        depthStencilAttachment.stencilStoreOp = WGPUStoreOp_Store;
+    }
+
+    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    passDesc.colorAttachmentCount = colorAttachment == nullptr ? 0 : 1;
+    passDesc.colorAttachments = colorAttachment;
+    passDesc.depthStencilAttachment = &depthStencilAttachment;
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+    const uint32_t dynamicOffset = layer * kDynamicUniformStride;
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 1, &dynamicOffset);
+    wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass);
+}
+
+void initializeDepthAspect(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    WGPUTextureFormat format,
+    uint32_t mipLevel,
+    uint32_t baseArrayLayer,
+    WGPUExtent3D copySize) {
+    WGPUBindGroupLayout bindGroupLayout = getDepthCopyBindGroupLayout(t);
+    WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, bindGroupLayout);
+    WGPURenderPipeline pipeline = createDepthCopyPipeline(
+        t, format, WGPUCompareFunction_Always, WGPUOptionalBool_True, false, pipelineLayout);
+    WGPUBuffer uniformBuffer = createLayerUniformBuffer(t, copySize.depthOrArrayLayers);
+    WGPUBindGroup bindGroup = createLayerUniformBindGroup(t, bindGroupLayout, uniformBuffer);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    for (uint32_t layer = 0; layer < copySize.depthOrArrayLayers; ++layer) {
+        WGPUTextureView view = createLayerView(t, texture, format, mipLevel, baseArrayLayer + layer);
+        encodeDepthDrawPass(encoder, pipeline, bindGroup, view, format, nullptr, true, layer);
+    }
+    submit(t, encoder);
+}
+
+WGPUTexture createColorOutputTexture(AllFeaturesMaxLimitsGpuTest& t, WGPUExtent3D size) {
+    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    desc.size = size;
+    desc.mipLevelCount = 1;
+    desc.sampleCount = 1;
+    desc.dimension = WGPUTextureDimension_2D;
+    desc.format = WGPUTextureFormat_RGBA8Unorm;
+    desc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    return t.createTextureTracked(desc);
+}
+
+void expectSingleColor(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, WGPUExtent3D size) {
+    const uint32_t rowBytes = size.width * 4;
+    const uint32_t bytesPerRow = static_cast<uint32_t>(alignTo(rowBytes, kBytesPerRowAlignment));
+    const uint64_t byteLength = alignTo(
+        static_cast<uint64_t>(bytesPerRow) * size.height * (size.depthOrArrayLayers - 1)
+            + static_cast<uint64_t>(bytesPerRow) * (size.height - 1)
+            + rowBytes,
+        kBufferCopyAlignment);
+    std::vector<uint8_t> expected(static_cast<size_t>(byteLength), 0);
+    for (uint32_t z = 0; z < size.depthOrArrayLayers; ++z) {
+        for (uint32_t y = 0; y < size.height; ++y) {
+            const uint64_t rowOffset = static_cast<uint64_t>(z) * size.height * bytesPerRow
+                + static_cast<uint64_t>(y) * bytesPerRow;
+            for (uint32_t x = 0; x < size.width; ++x) {
+                expected[rowOffset + x * 4 + 0] = 0;
+                expected[rowOffset + x * 4 + 1] = 255;
+                expected[rowOffset + x * 4 + 2] = 0;
+                expected[rowOffset + x * 4 + 3] = 255;
+            }
+        }
+    }
+
+    WGPUBuffer buffer = t.makeBufferWithContents(expected.data(), expected.size(), WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+    copyTextureToBufferAspect(
+        t,
+        texture,
+        buffer,
+        TexelCopyBufferLayout{0, bytesPerRow, size.height},
+        size,
+        0,
+        WGPUOrigin3D{0, 0, 0},
+        WGPUTextureAspect_All);
+    t.expectGPUBufferValuesEqual(buffer, expected.data(), expected.size());
+}
+
+WGPUTextureView createColorLayerView(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, uint32_t layer) {
+    WGPUTextureViewDescriptor desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    desc.format = WGPUTextureFormat_RGBA8Unorm;
+    desc.dimension = WGPUTextureViewDimension_2D;
+    desc.baseMipLevel = 0;
+    desc.mipLevelCount = 1;
+    desc.baseArrayLayer = layer;
+    desc.arrayLayerCount = 1;
+    desc.aspect = WGPUTextureAspect_All;
+    return t.createViewTracked(texture, desc);
+}
+
+void verifyDepthAspect(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    WGPUTextureFormat format,
+    uint32_t mipLevel,
+    uint32_t baseArrayLayer,
+    WGPUExtent3D copySize) {
+    WGPUBindGroupLayout bindGroupLayout = getDepthCopyBindGroupLayout(t);
+    WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, bindGroupLayout);
+    WGPURenderPipeline pipeline = createDepthCopyPipeline(
+        t, format, WGPUCompareFunction_Equal, WGPUOptionalBool_False, true, pipelineLayout);
+    WGPUBuffer uniformBuffer = createLayerUniformBuffer(t, copySize.depthOrArrayLayers);
+    WGPUBindGroup bindGroup = createLayerUniformBindGroup(t, bindGroupLayout, uniformBuffer);
+    WGPUTexture output = createColorOutputTexture(t, copySize);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    for (uint32_t layer = 0; layer < copySize.depthOrArrayLayers; ++layer) {
+        WGPUTextureView colorView = createColorLayerView(t, output, layer);
+        WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        colorAttachment.view = colorView;
+        colorAttachment.loadOp = WGPULoadOp_Clear;
+        colorAttachment.storeOp = WGPUStoreOp_Store;
+        colorAttachment.clearValue = WGPUColor{1.0, 0.0, 0.0, 1.0};
+        WGPUTextureView depthView = createLayerView(t, texture, format, mipLevel, baseArrayLayer + layer);
+        encodeDepthDrawPass(encoder, pipeline, bindGroup, depthView, format, &colorAttachment, false, layer);
+    }
+    submit(t, encoder);
+    expectSingleColor(t, output, copySize);
+}
+
+ParamsBuilder depthStencilParams(ParamsBuilder u) {
+    return u.combine("format", depthStencilFormatValues())
+        .beginSubcases()
+        .combine("srcTextureSizeIndex", indexValues(static_cast<uint32_t>(kDepthStencilTextureSizes.size())))
+        .combine("srcCopyLevel", {0, 2})
+        .combine("dstCopyLevel", {0, 2})
+        .combine("srcCopyBaseArrayLayer", {0, 1})
+        .combine("dstCopyBaseArrayLayer", {0, 1})
+        .filter([](const ParamRecord& params) {
+            const uint32_t sizeIndex = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "srcTextureSizeIndex")));
+            const uint32_t srcBase = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "srcCopyBaseArrayLayer")));
+            const uint32_t dstBase = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "dstCopyBaseArrayLayer")));
+            const WGPUExtent3D size = kDepthStencilTextureSizes[sizeIndex];
+            return size.depthOrArrayLayers > srcBase && size.depthOrArrayLayers > dstBase;
+        });
+}
+
+void runDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
+    const auto format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+    t.skipIfTextureFormatNotSupported(format);
+
+    const uint32_t sizeIndex = static_cast<uint32_t>(t.param<int64_t>("srcTextureSizeIndex"));
+    const uint32_t srcCopyLevel = static_cast<uint32_t>(t.param<int64_t>("srcCopyLevel"));
+    const uint32_t dstCopyLevel = static_cast<uint32_t>(t.param<int64_t>("dstCopyLevel"));
+    const uint32_t srcCopyBaseArrayLayer = static_cast<uint32_t>(t.param<int64_t>("srcCopyBaseArrayLayer"));
+    const uint32_t dstCopyBaseArrayLayer = static_cast<uint32_t>(t.param<int64_t>("dstCopyBaseArrayLayer"));
+    const WGPUExtent3D srcTextureSize = kDepthStencilTextureSizes[sizeIndex];
+    WGPUExtent3D copySize{
+        std::max(1u, srcTextureSize.width >> srcCopyLevel),
+        std::max(1u, srcTextureSize.height >> srcCopyLevel),
+        srcTextureSize.depthOrArrayLayers - std::max(srcCopyBaseArrayLayer, dstCopyBaseArrayLayer),
+    };
+    WGPUExtent3D dstTextureSize{
+        copySize.width << dstCopyLevel,
+        copySize.height << dstCopyLevel,
+        srcTextureSize.depthOrArrayLayers,
+    };
+
+    WGPUTexture src = createDepthStencilTexture(t, format, srcTextureSize, srcCopyLevel + 1);
+    WGPUTexture dst = createDepthStencilTexture(t, format, dstTextureSize, dstCopyLevel + 1);
+    std::vector<uint8_t> stencilData;
+    if (isStencilTextureFormat(format)) {
+        stencilData = getInitialStencilData(copySize);
+        initializeStencilAspect(t, src, srcCopyLevel, srcCopyBaseArrayLayer, copySize, stencilData);
+    }
+    if (isDepthTextureFormat(format)) {
+        initializeDepthAspect(t, src, format, srcCopyLevel, srcCopyBaseArrayLayer, copySize);
+    }
+
+    copyTextureToTexture(
+        t,
+        src,
+        dst,
+        copySize,
+        srcCopyLevel,
+        WGPUOrigin3D{0, 0, srcCopyBaseArrayLayer},
+        dstCopyLevel,
+        WGPUOrigin3D{0, 0, dstCopyBaseArrayLayer});
+
+    if (isStencilTextureFormat(format)) {
+        verifyStencilAspect(t, dst, stencilData, dstCopyLevel, dstCopyBaseArrayLayer, copySize);
+    }
+    if (isDepthTextureFormat(format)) {
+        verifyDepthAspect(t, dst, format, dstCopyLevel, dstCopyBaseArrayLayer, copySize);
     }
 }
 
@@ -598,7 +1080,8 @@ CTS_TEST(g, "color_textures,compressed,array")
     .unimplemented("compressed texture copyTextureToTexture tests are deferred");
 
 CTS_TEST(g, "copy_depth_stencil")
-    .unimplemented("depth/stencil copyTextureToTexture tests are deferred");
+    .params(depthStencilParams)
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) { runDepthStencil(t); });
 
 CTS_TEST(g, "copy_multisampled_color")
     .unimplemented("multisampled color copyTextureToTexture tests are deferred");

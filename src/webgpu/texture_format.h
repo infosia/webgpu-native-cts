@@ -210,6 +210,15 @@ inline constexpr std::array<WGPUTextureFormat, 43> kRegularTextureFormats = {
 
 inline constexpr std::array<WGPUTextureFormat, kRegularTextureFormats.size()> kColorTextureFormats = kRegularTextureFormats;
 
+inline constexpr std::array<WGPUTextureFormat, 6> kDepthStencilFormats = {
+    WGPUTextureFormat_Stencil8,
+    WGPUTextureFormat_Depth16Unorm,
+    WGPUTextureFormat_Depth32Float,
+    WGPUTextureFormat_Depth24Plus,
+    WGPUTextureFormat_Depth24PlusStencil8,
+    WGPUTextureFormat_Depth32FloatStencil8,
+};
+
 // Representative formats for the --sample-formats fast-iteration mode (see specs/format-sampling-mode.md).
 inline constexpr std::array<WGPUTextureFormat, 12> kRepresentativeTextureFormats = {
     WGPUTextureFormat_RGBA8Unorm,     WGPUTextureFormat_RGBA8Snorm,    WGPUTextureFormat_RGBA8Uint,
@@ -545,6 +554,23 @@ inline bool isDepthTextureFormat(WGPUTextureFormat format) {
 
 inline bool isStencilTextureFormat(WGPUTextureFormat format) {
     return textureFormatInfo(format).hasStencil;
+}
+
+inline uint32_t depthStencilFormatAspectSize(WGPUTextureFormat format, WGPUTextureAspect aspect) {
+    if (aspect == WGPUTextureAspect_StencilOnly) {
+        return 1;
+    }
+    switch (format) {
+        case WGPUTextureFormat_Depth16Unorm:
+            return 2;
+        case WGPUTextureFormat_Depth32Float:
+        case WGPUTextureFormat_Depth24Plus:
+        case WGPUTextureFormat_Depth24PlusStencil8:
+        case WGPUTextureFormat_Depth32FloatStencil8:
+            return 4;
+        default:
+            return textureFormatInfo(format).bytesPerBlock;
+    }
 }
 
 inline bool isDepthOrStencilTextureFormat(WGPUTextureFormat format) {

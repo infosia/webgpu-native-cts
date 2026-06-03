@@ -105,16 +105,20 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   `copyTextureToBuffer`/`copyTextureToTexture`), and the **TexelView decode-value comparison stack** that
   backs the color `image_copy` port (137256 subcases). See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 30 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 31 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
 - **yawgpu** — the primary conformance subject — passes **every ported test through T25** (all
   `api,validation` at `pass=4332`, plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone` /
   color `image_copy` / color `copyTextureToTexture` operation tests; the full color `image_copy` run is
-  `pass=137256 fail=0` and `copyTextureToTexture` is `pass=30910 fail=0`, both matching the Dawn oracle). Every finding it has surfaced has been fixed in yawgpu and re-confirmed on hardware —
-  `expectations/yawgpu.txt` has no expected failures. (It also *runs* the `immediate_data_size` cases that
-  Dawn/wgpu-native skip.) See [FINDINGS](docs/FINDINGS.md) for the per-finding record.
+  `pass=137256 fail=0` and color `copyTextureToTexture` is `pass=30910 fail=0`, both matching the Dawn
+  oracle). The T26 depth/stencil `copyTextureToTexture` port then surfaced one **open** finding —
+  **F-031** (the **depth aspect** of `copyTextureToTexture` reads back wrong; the stencil aspect is fine;
+  `copy_depth_stencil` `pass=36 fail=180` where Dawn/wgpu-native pass `216/0`). Every earlier finding was
+  fixed in yawgpu and re-confirmed on hardware; `expectations/yawgpu.txt` has no expected failures (F-031
+  surfaced, not masked). (It also *runs* the `immediate_data_size` cases that Dawn/wgpu-native skip.) See
+  [FINDINGS](docs/FINDINGS.md) for the per-finding record.
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
@@ -126,7 +130,12 @@ Every divergence the suite surfaces is reported, fixed upstream, and re-confirme
 
 ### Test results
 
-**Full ported suite, single process** (Windows 11, NVIDIA GeForce RTX 5060 Ti — Vulkan, 2026-06-03).
+Three views, widest first: the **whole suite in one process**, then per-backend **cross-comparisons**
+that isolate each case — `api,validation`, then `api,operation`.
+
+#### 1. Whole ported suite — one process
+
+Real-GPU **Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti, 2026-06-03).
 With the two most recent yawgpu fixes — **F-029** (a cross-test Vulkan device-resource leak in
 `image_copy`) and **F-030** (an intermittent `MAP_READ` readback race) — the **entire ported suite now
 runs green in a single process**, which is what makes an accurate whole-run count possible (previously
@@ -139,8 +148,15 @@ the leak poisoned every test that ran after `image_copy`). All 17 ported files, 
 
 (266,336 executed case/subcase units; the skips are feature-gated or environment-gated cases.)
 
-The per-backend comparison below isolates each case in its own subprocess (`--isolate`) over the ported
-`api,validation` surface — **4715 cases** across 10 files, at the [pinned backend revisions](docs/UPSTREAM.md).
+**Update (T26, this commit):** the new `copy_depth_stencil` test surfaces **F-031** on yawgpu — its
+*depth-aspect* `copyTextureToTexture` fails 180 / 216 depth subcases on Metal (the stencil aspect
+passes; Dawn and wgpu-native pass `216/0`). The count above predates T26 and will gain those depth
+failures until F-031 is fixed.
+
+#### 2. Cross-backend comparison — `api,validation` (`--isolate`)
+
+Each case in its own subprocess, over the ported `api,validation` surface — **4715 cases** across 10
+files, at the [pinned backend revisions](docs/UPSTREAM.md).
 
 **Real-GPU Metal** (Apple Silicon):
 
@@ -150,11 +166,9 @@ The per-backend comparison below isolates each case in its own subprocess (`--is
 | **yawgpu** | 4332 | 383 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips |
 | **wgpu-native** | 3407 | 756 | 338 | 214 | 214 crashes are eager-panics on invalid input (F-001–F-004 incl. F-003 mapping, F-007, F-013, F-017, F-019, F-021); 338 fails are missing-validation / uncaptured-error divergences (F-015 view-usage subset ≈ 324, F-012, F-003 mapping) |
 
-**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti). On the **latest** code — all ported
-`api,validation` *and* `api,operation` files on yawgpu `1297b7e` — yawgpu runs **clean: zero
-failures, zero crashes** (2026-06-03, `--isolate --expectations`, exit 0), matching its Metal result;
-the two Vulkan-specific findings **F-029 / F-030** were both found *and* fixed on this platform. The
-per-case table below is the earlier **T13-era `api,validation` snapshot** (4331 cases, 2026-06-01):
+**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti) — the earlier **T13-era `api,validation`
+snapshot** (4331 cases, 2026-06-01; the *current* whole surface is view 1 above, where the
+Vulkan-specific F-029/F-030 were found and fixed):
 
 | Backend | pass | skip | xfail | xpass | fail | crash |
 |---------|-----:|-----:|------:|------:|-----:|------:|
@@ -173,14 +187,15 @@ because each adapter exposes a different optional-feature set. All `wgpu-native`
 `--isolate` and reclassified via the expectations file, so an `--isolate --expectations` run still
 exits 0 on both platforms.
 
-Over the ported **`api,operation`** surface (7 files; execute-and-readback, run in-process on Metal) —
-the two large *structural* ports where the format axis is swept densely:
+#### 3. Cross-backend comparison — `api,operation` (Metal, in-process readback)
 
-| Backend | `image_copy` (137256) | `copyTextureToTexture` (30910) | operation findings |
-|---------|----------------------:|-------------------------------:|--------------------|
-| **Dawn** (oracle) | pass=137256 fail=0 | pass=30910 fail=0 | — |
-| **yawgpu** | pass=137256 fail=0 | pass=30910 fail=0 | none — F-023/024/025/026/029/030 all fixed (Metal + Vulkan) |
-| **wgpu-native** | pass=116772 fail=1332 | pass=26236 fail=738 | F-027, F-028 (3D multi-slice copy/readback; partial cases, surfaced/unmasked) |
+The large *structural* ports, where the format axis is swept densely (cells are `pass / fail`):
+
+| Backend | `image_copy` (137256) | `copyTextureToTexture` color (30910) | `copy_depth_stencil` (216) | findings |
+|---------|----------------------:|-------------------------------------:|---------------------------:|----------|
+| **Dawn** (oracle) | 137256 / 0 | 30910 / 0 | 216 / 0 | — |
+| **yawgpu** | 137256 / 0 | 30910 / 0 | **36 / 180** | **F-031** (depth aspect fails; stencil passes) |
+| **wgpu-native** | 116772 / 1332 | 26236 / 738 | 216 / 0 | F-027, F-028 (3D multi-slice copy/readback) |
 
 The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,
 `onSubmittedWorkDone`) pass on Dawn and yawgpu; on wgpu-native `clearBuffer:clear`'s `size=0` subcase

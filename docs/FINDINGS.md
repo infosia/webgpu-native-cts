@@ -19,13 +19,16 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
-## Re-test summary — all yawgpu findings resolved (through T25); no open yawgpu findings
+## Re-test summary — yawgpu findings resolved through T25; one open from T26 (F-031)
 
-Every defect this suite has surfaced against **yawgpu** (the primary conformance subject) — both
-correctness and resource-lifetime — has been fixed in yawgpu and re-confirmed on real hardware — the
-full intended cycle: the suite reports a divergence, yawgpu fixes it, the fix is verified on real-GPU
-Metal (and, for `api,validation` and the Vulkan-specific findings, on Windows/Vulkan, NVIDIA).
-`expectations/yawgpu.txt` carries **no** expected-failure lines.
+Every defect this suite surfaced against **yawgpu** (the primary conformance subject) through T25 — both
+correctness and resource-lifetime — was fixed in yawgpu and re-confirmed on real hardware (the full
+intended cycle: the suite reports a divergence, yawgpu fixes it, the fix is verified on real-GPU Metal,
+and for `api,validation` + the Vulkan-specific findings on Windows/Vulkan, NVIDIA). The **T26**
+depth/stencil `copyTextureToTexture` port then surfaced one new **open** yawgpu finding —
+[F-031](#f-031--yawgpu-diverges-on-the-depth-aspect-of-copytexturetotexture-copied-depth-fails-an-equality-re-render)
+(the **depth aspect** of `copyTextureToTexture`; the stencil aspect is fine). `expectations/yawgpu.txt`
+carries **no** expected-failure lines (F-031 surfaced, not masked).
 
 The last two yawgpu findings are now resolved too, verified on real-GPU Windows/Vulkan (NVIDIA):
 [F-029](#f-029--yawgpu-leaks-vulkan-device-resources-across-image_copy-cases-later-tests-in-the-same-process-fail)
@@ -42,13 +45,14 @@ The last two yawgpu findings are now resolved too, verified on real-GPU Windows/
 | `api,operation` buffer/queue (T22–T23) | F-023 `e56f30a`, F-024 `c893eac` | `command_buffer,* pass=5` (Dawn-equal) |
 | `image_copy` color (T24b) | F-025, F-026 — `1e6c70b` | `image_copy pass=137256 fail=0` |
 | `image_copy` cross-test leak + readback race | F-029 (`1e67300`), F-030 (`1297b7e`) | full `image_copy` repeatably `pass=137256 fail=0`; cross-test poison gone |
+| `copyTextureToTexture` depth/stencil (T26) | **open — F-031** (depth aspect) | Dawn + wgpu-native `pass=216 fail=0`; yawgpu `pass=36 fail=180` (stencil passes; depth fails) |
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030
 — **all** of them; each keeps a compact record below.
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028 (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
-**Open — yawgpu:** none — all resolved.
+**Open — yawgpu:** F-031 (depth aspect of `copyTextureToTexture`, surfaced by T26).
 
 ---
 
@@ -649,6 +653,38 @@ F-023 note; under the macOS sandbox Metal enumerates no adapters and every case 
   Vulkan persistently-mapped buffers). Re-test on real-GPU Windows/Vulkan: `image_copy:mip_levels:*` is
   deterministically `pass=6192 fail=0` across repeated runs and full `image_copy:*` is back to
   `pass=137256 fail=0`. No `expectations/yawgpu.txt` lines (surfaced, not masked).
+
+---
+
+## F-031 — yawgpu diverges on the depth aspect of `copyTextureToTexture` (copied depth fails an equality re-render)
+
+- **Backend:** yawgpu (`1297b7e`, Metal). **Not** present in Dawn **or** wgpu-native — both pass all 216 cases.
+- **Found by:** `api/operation/command_buffer/copyTextureToTexture:copy_depth_stencil` (T26) — the first
+  ported test that exercises **depth-attachment rendering + depth/stencil-aspect copies**. It renders a
+  per-layer depth (`depthCompare:'always'`, depth = `0.5 + 0.2·sin(layer)`) into the source,
+  `copyTextureToTexture`-copies the subresource, then re-renders against the destination with
+  `depthCompare:'equal'` (writing green where the copied depth equals the freshly-computed depth) and
+  asserts the colour output is all green; the stencil aspect is checked by a byte-exact
+  `copyTextureToBuffer` readback.
+- **Observed on yawgpu:** every **depth** format fails — `Depth16Unorm`, `Depth24Plus`,
+  `Depth24PlusStencil8`, `Depth32Float`, `Depth32FloatStencil8` (enum 45–49) are each `fail=36/36`; the
+  green re-render produces **no green** (`GPU buffer mismatch at byte 1: expected 255, got 0` — the G
+  channel is 0, so the `equal` depth test passed nowhere). **`Stencil8`** (enum 44, stencil-only, no depth
+  aspect) **passes 36/36** — so the **stencil-aspect copy works; the depth-aspect path does not**.
+  Deterministic; all 180 depth subcases fail identically. Full run `pass=36 fail=180`.
+- **Expected (WebGPU):** the copied depth must equal the source depth, so the `depthCompare:'equal'`
+  re-render is all green. Dawn and wgpu-native both pass all 216 (`pass=216 fail=0` each).
+- **Likely root:** the **depth aspect is not preserved across `copyTextureToTexture`** (the destination
+  depth ≠ the rendered source depth, so `equal` fails everywhere), while the stencil aspect copies
+  correctly. Whether the gap is in the depth-aspect copy itself or in yawgpu's depth-attachment
+  render/compare path is for the yawgpu side to localize; the stencil-only pass isolates it to the
+  **depth** path. (This is the suite's first depth-render + depth-copy coverage — newly exercised, not a
+  regression.)
+- **Status:** **OPEN** — yawgpu's first open finding since F-030. 3-way confirmed (Dawn + wgpu-native
+  pass). No `expectations/yawgpu.txt` lines added (surfaced for the fix, not masked; real-GPU runs use the
+  Bash sandbox disabled — see the F-023 note). A combined whole-listing yawgpu run is otherwise clean
+  (`pass=32634 fail=180`, the 180 being exactly these depth cases — no cross-test poison from the new
+  render passes).
 
 ---
 
