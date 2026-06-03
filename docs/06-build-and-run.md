@@ -99,14 +99,43 @@ $CTS_YAWGPU_DIR/                       # yawgpu checkout root
 cargo build --release --features metal        # produces target/release/libyawgpu.{a,dylib}
 #   (Windows/Linux: --features vulkan; e.g. --target-dir target-vulkan → target-vulkan/release/)
 # Point CTS at the checkout root:
-cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=/abs/path/to/yawgpu
+cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=<yawgpu>
 ```
 
 `cts::createInstance()` **must** chain `YaWGPUInstanceBackendSelect` to get a real GPU backend — an
 unchained yawgpu instance returns a Noop. The shim selects a platform default — Metal on Apple,
 Vulkan elsewhere (Windows/Linux) — and yawgpu must be built with the matching cargo feature
-(`--features metal` / `--features vulkan`). A runtime `--yawgpu-backend metal|vulkan` option is
-deferred until more than one backend is compiled into a single library.
+(`--features metal` / `--features vulkan`). `CTS_YAWGPU_BACKEND={metal,vulkan,gles}` overrides the
+yawgpu instance backend at runtime; unset, empty, or unknown values keep the platform default. The
+selected backend must be compiled into the linked `libyawgpu.a`.
+
+To run yawgpu's Vulkan HAL on macOS through MoltenVK, build yawgpu's Vulkan library in a separate
+target dir and point CTS at that exact archive:
+
+```bash
+CARGO_TARGET_DIR=<yawgpu>/target-vulkan \
+  cargo build --release -p yawgpu --features vulkan
+
+cmake -S . -B build-yawgpu-vulkan \
+      -DCTS_BACKEND=yawgpu \
+      -DCTS_YAWGPU_DIR=<yawgpu> \
+      -DCTS_YAWGPU_LIB=<yawgpu>/target-vulkan/release/libyawgpu.a
+cmake --build build-yawgpu-vulkan --target cts
+```
+
+Run with the Vulkan backend override and MoltenVK loader environment:
+
+```bash
+CTS_YAWGPU_BACKEND=vulkan \
+DYLD_LIBRARY_PATH=$VULKAN_SDK/lib \
+VK_ICD_FILENAMES=$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json \
+  build-yawgpu-vulkan/cts '<query>'
+```
+
+`DYLD_LIBRARY_PATH=$VULKAN_SDK/lib` is required so `ash` can load the Vulkan loader; without it yawgpu
+can report `BackendUnavailable`. This is Vulkan API coverage via MoltenVK, not native Vulkan. It is
+useful for yawgpu Vulkan HAL triage, but authoritative Vulkan conformance still requires native
+Vulkan hardware/OS coverage.
 
 For **Dawn** (added after yawgpu): it exposes a `webgpu_dawn` / `dawn::webgpu_dawn` CMake target
 and `include/webgpu/webgpu.h`; the `find_library`/header paths differ accordingly and are captured
