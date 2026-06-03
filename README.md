@@ -105,7 +105,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   `copyTextureToBuffer`/`copyTextureToTexture`), and the **TexelView decode-value comparison stack** that
   backs the color `image_copy` port (137256 subcases). See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 28 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 30 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
@@ -126,8 +126,21 @@ Every divergence the suite surfaces is reported, fixed upstream, and re-confirme
 
 ### Test results
 
-Over the ported `api,validation` surface — **4715 cases** across 10 files, each case in its own
-subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
+**Full ported suite, single process** (Windows 11, NVIDIA GeForce RTX 5060 Ti — Vulkan, 2026-06-03).
+With the two most recent yawgpu fixes — **F-029** (a cross-test Vulkan device-resource leak in
+`image_copy`) and **F-030** (an intermittent `MAP_READ` readback race) — the **entire ported suite now
+runs green in a single process**, which is what makes an accurate whole-run count possible (previously
+the leak poisoned every test that ran after `image_copy`). All 17 ported files, full coverage (no
+`--sample-formats`), no `expectations/yawgpu.txt` lines:
+
+| Backend | pass | skip | fail | crash |
+|---------|-----:|-----:|-----:|------:|
+| **yawgpu** | 214333 | 52003 | 0 | 0 |
+
+(266,336 executed case/subcase units; the skips are feature-gated or environment-gated cases.)
+
+The per-backend comparison below isolates each case in its own subprocess (`--isolate`) over the ported
+`api,validation` surface — **4715 cases** across 10 files, at the [pinned backend revisions](docs/UPSTREAM.md).
 
 **Real-GPU Metal** (Apple Silicon):
 
