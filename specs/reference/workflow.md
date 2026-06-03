@@ -74,6 +74,12 @@ Fast-mode counts are for iteration only — never report a `--sample-formats` su
 coverage (its stderr notice says as much). The committed catalog (`src/webgpu/listing.json`) and the
 authoritative pass/fail counts always come from full runs.
 
+**Combined (cross-test) pass.** Resource-lifetime bugs that only bite *across* tests sharing one
+process — e.g. F-029, where `image_copy` leaked device resources and poisoned every later GPU test —
+are invisible to per-file runs. Periodically, and whenever a new operation file lands, run a
+**combined** whole-listing fast-mode pass (all file-level `:*` queries in a single `cts
+--sample-formats` invocation) and confirm a clean summary.
+
 ## Spec format
 
 Every task spec follows [`task-template.md`](task-template.md):

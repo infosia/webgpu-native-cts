@@ -105,7 +105,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   `copyTextureToBuffer`/`copyTextureToTexture`), and the **TexelView decode-value comparison stack** that
   backs the color `image_copy` port (137256 subcases). See [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 28 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 30 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
