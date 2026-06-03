@@ -17,6 +17,7 @@
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -44,6 +45,34 @@ const char* statusName(TestStatus status) {
         return "crash";
     }
     return "fail";
+}
+
+std::optional<TestStatus> statusFromName(std::string_view status) {
+    if (status == "pass") {
+        return TestStatus::Pass;
+    }
+    if (status == "skip") {
+        return TestStatus::Skip;
+    }
+    if (status == "warn") {
+        return TestStatus::Warn;
+    }
+    if (status == "fail") {
+        return TestStatus::Fail;
+    }
+    if (status == "crash") {
+        return TestStatus::Crash;
+    }
+    return std::nullopt;
+}
+
+std::string sanitizeResultMessage(std::string message) {
+    for (char& ch : message) {
+        if (ch == '\t' || ch == '\r' || ch == '\n') {
+            ch = ' ';
+        }
+    }
+    return message;
 }
 
 std::string trim(const std::string& text) {
@@ -129,6 +158,19 @@ struct CaseRun {
     std::string query;
 };
 
+std::vector<CaseRun> collectCases(
+    const std::vector<Query>& queries,
+    bool sampleFormats,
+    FormatSampleStats* stats);
+std::vector<SubcaseResult> runCase(const CaseRun& c);
+
+bool caseSelectedByShard(size_t index, const RunOptions& options) {
+    if (index < options.shardFrom) {
+        return false;
+    }
+    return caseBelongsToShard(index, options.shardIndex, options.shardCount);
+}
+
 SubcaseResult runOne(const std::string& query, const TestSpec& test, const ParamRecord& params) {
     if (test.unimplemented) {
         return SubcaseResult{query, TestStatus::Skip, test.unimplementedReason};
@@ -174,39 +216,16 @@ SubcaseResult runOne(const std::string& query, const TestSpec& test, const Param
 
 std::vector<SubcaseResult> collectRuns(
     const std::vector<Query>& queries,
-    bool sampleFormats,
+    const RunOptions& options,
     FormatSampleStats* stats) {
     std::vector<SubcaseResult> results;
-    for (const SpecFile& file : Registry::instance().files()) {
-        for (const TestSpec& test : file.tests) {
-            bool testSelected = false;
-            for (const Query& q : queries) {
-                testSelected = testSelected || queryMatchesTest(q, file.path, test.name);
-            }
-            if (!testSelected) {
-                continue;
-            }
-            const auto cases = sampledExpandedCases(test, sampleFormats, stats);
-            for (const auto& c : cases) {
-                bool selected = false;
-                for (const Query& q : queries) {
-                    selected = selected || queryMatchesCase(q, file.path, test.name, c.params);
-                }
-                if (!selected) {
-                    continue;
-                }
-
-                if (c.subcases.empty()) {
-                    results.push_back(runOne(caseQuery(file.path, test.name, c.params), test, c.params));
-                } else {
-                    for (const ParamRecord& subcase : c.subcases) {
-                        ParamRecord merged = c.params;
-                        merged.insert(merged.end(), subcase.begin(), subcase.end());
-                        results.push_back(runOne(caseQuery(file.path, test.name, c.params), test, merged));
-                    }
-                }
-            }
+    const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (!caseSelectedByShard(i, options)) {
+            continue;
         }
+        std::vector<SubcaseResult> caseResults = runCase(cases[i]);
+        results.insert(results.end(), caseResults.begin(), caseResults.end());
     }
     return results;
 }
@@ -311,7 +330,7 @@ int runSingleCase(const RunOptions& options) {
     return 0;
 }
 
-std::optional<SubcaseResult> parseResultLine(const std::string& query, const std::string& output) {
+std::optional<SubcaseResult> parseIsolatedResultLine(const std::string& query, const std::string& output) {
     std::istringstream in(output);
     std::string line;
     while (std::getline(in, line)) {
@@ -323,20 +342,9 @@ std::optional<SubcaseResult> parseResultLine(const std::string& query, const std
         const std::string status =
             messageStart == std::string::npos ? line.substr(statusStart) : line.substr(statusStart, messageStart - statusStart);
         const std::string message = messageStart == std::string::npos ? "" : line.substr(messageStart + 1);
-        if (status == "pass") {
-            return SubcaseResult{query, TestStatus::Pass, message};
-        }
-        if (status == "skip") {
-            return SubcaseResult{query, TestStatus::Skip, message};
-        }
-        if (status == "warn") {
-            return SubcaseResult{query, TestStatus::Warn, message};
-        }
-        if (status == "fail") {
-            return SubcaseResult{query, TestStatus::Fail, message};
-        }
-        if (status == "crash") {
-            return SubcaseResult{query, TestStatus::Crash, message};
+        const std::optional<TestStatus> parsedStatus = statusFromName(status);
+        if (parsedStatus) {
+            return SubcaseResult{query, *parsedStatus, message};
         }
         return SubcaseResult{query, TestStatus::Crash, "unknown RESULT status: " + status};
     }
@@ -512,7 +520,7 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
         return SubcaseResult{query, TestStatus::Crash, windowsExitMessage(exitCode)};
     }
 
-    std::optional<SubcaseResult> parsed = parseResultLine(query, output);
+    std::optional<SubcaseResult> parsed = parseIsolatedResultLine(query, output);
     if (!parsed) {
         return SubcaseResult{query, TestStatus::Crash, "no RESULT line"};
     }
@@ -599,7 +607,7 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
         return SubcaseResult{query, TestStatus::Crash, "child exited " + std::to_string(exitCode)};
     }
 
-    std::optional<SubcaseResult> parsed = parseResultLine(query, output);
+    std::optional<SubcaseResult> parsed = parseIsolatedResultLine(query, output);
     if (!parsed) {
         return SubcaseResult{query, TestStatus::Crash, "no RESULT line"};
     }
@@ -612,8 +620,12 @@ std::vector<SubcaseResult> collectIsolatedRuns(
     const std::vector<Query>& queries,
     FormatSampleStats* stats) {
     std::vector<SubcaseResult> results;
-    for (const CaseRun& c : collectCases(queries, options.sampleFormats, stats)) {
-        results.push_back(runIsolatedChild(options, c.query));
+    const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (!caseSelectedByShard(i, options)) {
+            continue;
+        }
+        results.push_back(runIsolatedChild(options, cases[i].query));
     }
     return results;
 }
@@ -624,7 +636,12 @@ std::vector<SubcaseResult> collectSelectiveRuns(
     const ExpectationSet& crashList,
     FormatSampleStats* stats) {
     std::vector<SubcaseResult> results;
-    for (const CaseRun& c : collectCases(queries, options.sampleFormats, stats)) {
+    const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (!caseSelectedByShard(i, options)) {
+            continue;
+        }
+        const CaseRun& c = cases[i];
         if (expectationMatches(crashList, c.query)) {
             results.push_back(runIsolatedChild(options, c.query));
         } else {
@@ -645,6 +662,321 @@ void writeCrashList(const std::string& path, const std::vector<SubcaseResult>& r
     }
     std::cerr << "emitted " << lines.size() << " crashing cases to " << path << "\n";
 }
+
+size_t expectedResultCount(const CaseRun& c) {
+    return c.subcases.empty() ? 1 : c.subcases.size();
+}
+
+void emitShardResults(const std::vector<SubcaseResult>& results) {
+    for (const SubcaseResult& result : results) {
+        std::cout << "RESULT\t" << statusName(result.status)
+                  << "\t" << result.query
+                  << "\t" << sanitizeResultMessage(result.message)
+                  << "\n";
+        std::cout.flush();
+    }
+}
+
+std::vector<SubcaseResult> collectShardResultRuns(
+    const RunOptions& options,
+    const std::vector<Query>& queries,
+    FormatSampleStats* stats) {
+    std::vector<SubcaseResult> results;
+    const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (!caseSelectedByShard(i, options)) {
+            continue;
+        }
+        std::vector<SubcaseResult> caseResults = runCase(cases[i]);
+        emitShardResults(caseResults);
+        results.insert(results.end(), caseResults.begin(), caseResults.end());
+    }
+    return results;
+}
+
+#if !defined(_WIN32)
+struct WorkerState {
+    int shard = 0;
+    pid_t pid = -1;
+    int fd = -1;
+    std::string buffer;
+    std::vector<size_t> positions;
+    size_t next = 0;
+};
+
+std::string shardArg(int shard, int workers) {
+    return std::to_string(shard) + "/" + std::to_string(workers);
+}
+
+WorkerState spawnWorker(
+    const RunOptions& options,
+    const std::vector<std::string>& queryTexts,
+    int shard,
+    int workers,
+    const std::vector<size_t>& positions,
+    size_t next) {
+    std::array<int, 2> stdoutPipe{};
+    if (pipe(stdoutPipe.data()) != 0) {
+        throw std::runtime_error("pipe failed: " + std::string(std::strerror(errno)));
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(stdoutPipe[0]);
+        close(stdoutPipe[1]);
+        throw std::runtime_error("fork failed: " + std::string(std::strerror(errno)));
+    }
+
+    if (pid == 0) {
+        close(stdoutPipe[0]);
+        if (dup2(stdoutPipe[1], STDOUT_FILENO) < 0) {
+            _exit(127);
+        }
+        close(stdoutPipe[1]);
+        const int devNull = open("/dev/null", O_WRONLY);
+        if (devNull >= 0) {
+            (void)dup2(devNull, STDERR_FILENO);
+            close(devNull);
+        }
+
+        std::vector<std::string> args;
+        args.push_back(options.executablePath);
+        for (const std::string& arg : options.forwardedArgs) {
+            args.push_back(arg);
+        }
+        for (const std::string& query : queryTexts) {
+            args.push_back(query);
+        }
+        args.push_back("--shard");
+        args.push_back(shardArg(shard, workers));
+        args.push_back("--shard-results");
+        if (next < positions.size() && positions[next] > 0) {
+            args.push_back("--shard-from");
+            args.push_back(std::to_string(positions[next]));
+        }
+
+        std::vector<char*> argv;
+        argv.reserve(args.size() + 1);
+        for (std::string& arg : args) {
+            argv.push_back(arg.data());
+        }
+        argv.push_back(nullptr);
+        execv(options.executablePath.c_str(), argv.data());
+        _exit(127);
+    }
+
+    close(stdoutPipe[1]);
+    const int flags = fcntl(stdoutPipe[0], F_GETFL, 0);
+    if (flags >= 0) {
+        (void)fcntl(stdoutPipe[0], F_SETFL, flags | O_NONBLOCK);
+    }
+    return WorkerState{shard, pid, stdoutPipe[0], "", positions, next};
+}
+
+std::string workerExitMessage(int status) {
+    if (WIFSIGNALED(status)) {
+        return signalMessage(WTERMSIG(status));
+    }
+    if (WIFEXITED(status)) {
+        return "child exited " + std::to_string(WEXITSTATUS(status));
+    }
+    return "child did not exit normally";
+}
+
+void advanceCompletedWorkerCases(
+    WorkerState& worker,
+    const std::vector<CaseRun>& cases,
+    const std::vector<std::vector<SubcaseResult>>& resultsByCase) {
+    while (worker.next < worker.positions.size()) {
+        const size_t position = worker.positions[worker.next];
+        if (resultsByCase[position].size() < expectedResultCount(cases[position])) {
+            break;
+        }
+        ++worker.next;
+    }
+}
+
+void recordWorkerLine(
+    WorkerState& worker,
+    const std::string& line,
+    const std::vector<CaseRun>& cases,
+    std::vector<std::vector<SubcaseResult>>& resultsByCase) {
+    std::optional<SubcaseResult> parsed = parseResultLine(line);
+    if (!parsed || worker.next >= worker.positions.size()) {
+        return;
+    }
+
+    const size_t position = worker.positions[worker.next];
+    const std::string& expectedQuery = cases[position].query;
+    if (parsed->query != expectedQuery) {
+        resultsByCase[position].clear();
+        resultsByCase[position].push_back(SubcaseResult{
+            expectedQuery,
+            TestStatus::Crash,
+            "shard worker reported unexpected query: " + parsed->query,
+        });
+        ++worker.next;
+        return;
+    }
+
+    resultsByCase[position].push_back(*parsed);
+    advanceCompletedWorkerCases(worker, cases, resultsByCase);
+}
+
+void drainWorkerLines(
+    WorkerState& worker,
+    const char* data,
+    size_t size,
+    const std::vector<CaseRun>& cases,
+    std::vector<std::vector<SubcaseResult>>& resultsByCase) {
+    worker.buffer.append(data, size);
+    while (true) {
+        const size_t newline = worker.buffer.find('\n');
+        if (newline == std::string::npos) {
+            break;
+        }
+        std::string line = worker.buffer.substr(0, newline);
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        worker.buffer.erase(0, newline + 1);
+        recordWorkerLine(worker, line, cases, resultsByCase);
+    }
+}
+
+std::optional<WorkerState> finishWorker(
+    WorkerState worker,
+    const RunOptions& options,
+    const std::vector<std::string>& queryTexts,
+    const std::vector<CaseRun>& cases,
+    std::vector<std::vector<SubcaseResult>>& resultsByCase) {
+    if (!worker.buffer.empty()) {
+        recordWorkerLine(worker, worker.buffer, cases, resultsByCase);
+        worker.buffer.clear();
+    }
+
+    int status = 0;
+    while (waitpid(worker.pid, &status, 0) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        throw std::runtime_error("waitpid failed: " + std::string(std::strerror(errno)));
+    }
+
+    advanceCompletedWorkerCases(worker, cases, resultsByCase);
+    const bool cleanExit = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    if (cleanExit && worker.next >= worker.positions.size()) {
+        return std::nullopt;
+    }
+
+    if (worker.next < worker.positions.size()) {
+        const size_t crashedPosition = worker.positions[worker.next];
+        resultsByCase[crashedPosition].clear();
+        resultsByCase[crashedPosition].push_back(SubcaseResult{
+            cases[crashedPosition].query,
+            TestStatus::Crash,
+            cleanExit ? "shard worker ended before reporting case" : "shard worker aborted: " + workerExitMessage(status),
+        });
+        ++worker.next;
+    }
+
+    if (worker.next >= worker.positions.size()) {
+        return std::nullopt;
+    }
+    return spawnWorker(options, queryTexts, worker.shard, options.workers, worker.positions, worker.next);
+}
+
+std::vector<SubcaseResult> collectParallelRuns(
+    const RunOptions& options,
+    const std::vector<Query>& queries,
+    FormatSampleStats* stats) {
+    const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
+    std::vector<std::vector<SubcaseResult>> resultsByCase(cases.size());
+    std::vector<std::string> queryTexts = options.queries;
+
+    std::vector<WorkerState> workers;
+    for (int shard = 0; shard < options.workers; ++shard) {
+        std::vector<size_t> positions;
+        for (size_t i = 0; i < cases.size(); ++i) {
+            if (caseBelongsToShard(i, shard, options.workers)) {
+                positions.push_back(i);
+            }
+        }
+        if (!positions.empty()) {
+            workers.push_back(spawnWorker(options, queryTexts, shard, options.workers, positions, 0));
+        }
+    }
+
+    std::array<char, 4096> buffer{};
+    while (!workers.empty()) {
+        std::vector<pollfd> fds;
+        fds.reserve(workers.size());
+        for (const WorkerState& worker : workers) {
+            fds.push_back(pollfd{worker.fd, POLLIN | POLLHUP, 0});
+        }
+
+        int ready = poll(fds.data(), fds.size(), -1);
+        if (ready < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            throw std::runtime_error("poll failed: " + std::string(std::strerror(errno)));
+        }
+
+        for (size_t i = 0; i < workers.size();) {
+            const short revents = fds[i].revents;
+            if ((revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) == 0) {
+                ++i;
+                continue;
+            }
+
+            bool closed = false;
+            while (true) {
+                const ssize_t n = read(workers[i].fd, buffer.data(), buffer.size());
+                if (n > 0) {
+                    drainWorkerLines(workers[i], buffer.data(), static_cast<size_t>(n), cases, resultsByCase);
+                    continue;
+                }
+                if (n == 0) {
+                    close(workers[i].fd);
+                    closed = true;
+                    break;
+                }
+                if (errno == EINTR) {
+                    continue;
+                }
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    break;
+                }
+                close(workers[i].fd);
+                throw std::runtime_error("read failed: " + std::string(std::strerror(errno)));
+            }
+
+            if (!closed) {
+                ++i;
+                continue;
+            }
+
+            std::optional<WorkerState> replacement =
+                finishWorker(std::move(workers[i]), options, queryTexts, cases, resultsByCase);
+            workers.erase(workers.begin() + static_cast<std::ptrdiff_t>(i));
+            if (replacement) {
+                workers.push_back(std::move(*replacement));
+            }
+        }
+    }
+
+    std::vector<SubcaseResult> merged;
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (resultsByCase[i].empty()) {
+            merged.push_back(SubcaseResult{cases[i].query, TestStatus::Crash, "shard worker produced no result"});
+            continue;
+        }
+        merged.insert(merged.end(), resultsByCase[i].begin(), resultsByCase[i].end());
+    }
+    return merged;
+}
+#endif
 
 int printRunResults(const std::vector<SubcaseResult>& results, const ExpectationSet& expectations) {
     size_t pass = 0;
@@ -698,6 +1030,35 @@ bool expectationMatches(const ExpectationSet& expectations, const std::string& q
     return false;
 }
 
+bool caseBelongsToShard(size_t index, int shardIndex, int shardCount) {
+    if (shardCount <= 0) {
+        return true;
+    }
+    return shardIndex >= 0 && shardIndex < shardCount && index % static_cast<size_t>(shardCount) == static_cast<size_t>(shardIndex);
+}
+
+std::optional<SubcaseResult> parseResultLine(const std::string& line) {
+    if (!line.starts_with("RESULT\t")) {
+        return std::nullopt;
+    }
+    const size_t statusStart = std::string_view("RESULT\t").size();
+    const size_t queryStart = line.find('\t', statusStart);
+    if (queryStart == std::string::npos) {
+        return std::nullopt;
+    }
+    const size_t messageStart = line.find('\t', queryStart + 1);
+    const std::string status = line.substr(statusStart, queryStart - statusStart);
+    const std::string query = messageStart == std::string::npos
+        ? line.substr(queryStart + 1)
+        : line.substr(queryStart + 1, messageStart - queryStart - 1);
+    const std::string message = messageStart == std::string::npos ? "" : sanitizeResultMessage(line.substr(messageStart + 1));
+    const std::optional<TestStatus> parsedStatus = statusFromName(status);
+    if (!parsedStatus) {
+        return SubcaseResult{query, TestStatus::Crash, "unknown RESULT status: " + status};
+    }
+    return SubcaseResult{query, *parsedStatus, message};
+}
+
 std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& results) {
     std::set<std::string> lines;
     for (const SubcaseResult& result : results) {
@@ -723,28 +1084,36 @@ int runQueries(const RunOptions& options) {
         queries.push_back(parseQuery(text));
     }
 
+    if (options.workers >= 2) {
+        if (options.isolate || !options.crashListPath.empty()) {
+            std::cerr << "--workers is incompatible with --isolate and --crash-list\n";
+            return 1;
+        }
+#if defined(_WIN32)
+        std::cerr << "--workers is POSIX-only for now; use --shard I/N across processes/CI\n";
+        return 1;
+#endif
+    }
+
     if (options.list || options.listCases) {
-        for (const SpecFile& file : Registry::instance().files()) {
-            for (const TestSpec& test : file.tests) {
-                bool selected = false;
-                for (const Query& query : queries) {
-                    selected = selected || queryMatchesTest(query, file.path, test.name);
-                }
-                if (!selected) {
-                    continue;
-                }
-                if (options.list) {
-                    printTestListLine(file.path, test, options.sampleFormats);
-                }
-                if (options.listCases) {
-                    for (const auto& c : sampledExpandedCases(test, options.sampleFormats, nullptr)) {
-                        for (const Query& query : queries) {
-                            if (queryMatchesCase(query, file.path, test.name, c.params)) {
-                                std::cout << caseQuery(file.path, test.name, c.params) << "\n";
-                                break;
-                            }
-                        }
+        if (options.list) {
+            for (const SpecFile& file : Registry::instance().files()) {
+                for (const TestSpec& test : file.tests) {
+                    bool selected = false;
+                    for (const Query& query : queries) {
+                        selected = selected || queryMatchesTest(query, file.path, test.name);
                     }
+                    if (selected) {
+                        printTestListLine(file.path, test, options.sampleFormats);
+                    }
+                }
+            }
+        }
+        if (options.listCases) {
+            const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, nullptr);
+            for (size_t i = 0; i < cases.size(); ++i) {
+                if (caseSelectedByShard(i, options)) {
+                    std::cout << cases[i].query << "\n";
                 }
             }
         }
@@ -761,10 +1130,25 @@ int runQueries(const RunOptions& options) {
 
     std::vector<SubcaseResult> results;
     FormatSampleStats sampleStats;
-    if (options.sampleFormats) {
+    if (options.sampleFormats && !options.shardResults) {
         std::cerr << "format-sample: representative-formats mode ON - non-representative format cases are SKIPPED; this is NOT full conformance coverage.\n";
     }
-    if (!options.crashListPath.empty()) {
+    if (options.workers >= 2) {
+#if defined(_WIN32)
+        std::cerr << "--workers is POSIX-only for now; use --shard I/N across processes/CI\n";
+        return 1;
+#else
+        try {
+            results = collectParallelRuns(options, queries, &sampleStats);
+        } catch (const std::exception& e) {
+            std::cerr << e.what() << "\n";
+            return 1;
+        }
+#endif
+    } else if (options.shardResults) {
+        (void)collectShardResultRuns(options, queries, &sampleStats);
+        return 0;
+    } else if (!options.crashListPath.empty()) {
         ExpectationSet crashList;
         try {
             crashList = loadExpectations(options.crashListPath);
@@ -784,9 +1168,9 @@ int runQueries(const RunOptions& options) {
             }
         }
     } else {
-        results = collectRuns(queries, options.sampleFormats, &sampleStats);
+        results = collectRuns(queries, options, &sampleStats);
     }
-    if (options.sampleFormats && sampleStats.runsDropped > 0) {
+    if (options.sampleFormats && !options.shardResults && sampleStats.runsDropped > 0) {
         std::cerr << "format-sample: thinned " << sampleStats.testsSampled
                   << " tests, dropped " << sampleStats.runsDropped
                   << " of " << (sampleStats.runsKept + sampleStats.runsDropped)

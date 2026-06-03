@@ -510,6 +510,61 @@ int main() {
                 }),
                 "crash-list lines sorted unique crashes");
 
+        {
+            const std::vector<std::string> cases = {
+                "case0", "case1", "case2", "case3", "case4", "case5", "case6", "case7", "case8", "case9",
+                "case10", "case11", "case12", "case13", "case14", "case15", "case16",
+            };
+            for (const int shardCount : {1, 3, 8}) {
+                std::vector<std::string> unioned;
+                std::vector<bool> seen(cases.size(), false);
+                for (int shardIndex = 0; shardIndex < shardCount; ++shardIndex) {
+                    for (size_t i = 0; i < cases.size(); ++i) {
+                        const bool selected = cts::caseBelongsToShard(i, shardIndex, shardCount);
+                        require(selected == (i % static_cast<size_t>(shardCount) == static_cast<size_t>(shardIndex)),
+                                "shard assignment is idx modulo shard count");
+                        if (selected) {
+                            require(!seen[i], "shard partition is disjoint");
+                            seen[i] = true;
+                            unioned.push_back(cases[i]);
+                        }
+                    }
+                }
+                for (bool selected : seen) {
+                    require(selected, "shard partition covers all cases");
+                }
+                std::vector<std::string> sortedUnion = unioned;
+                std::sort(sortedUnion.begin(), sortedUnion.end());
+                std::vector<std::string> sortedCases = cases;
+                std::sort(sortedCases.begin(), sortedCases.end());
+                require(sortedUnion == sortedCases, "shard partition union equals full set");
+            }
+            require(cts::caseBelongsToShard(5, -1, 0), "disabled sharding selects all cases");
+        }
+
+        {
+            const std::optional<cts::SubcaseResult> parsed = cts::parseResultLine(
+                "RESULT\tfail\twebgpu:a,b,c:test:x=1\tmessage with spaces");
+            require(parsed.has_value(), "RESULT line parses");
+            require(parsed->status == cts::TestStatus::Fail, "RESULT line status parses");
+            require(parsed->query == "webgpu:a,b,c:test:x=1", "RESULT line query parses");
+            require(parsed->message == "message with spaces", "RESULT line message parses");
+
+            const std::optional<cts::SubcaseResult> noMessage = cts::parseResultLine(
+                "RESULT\tpass\twebgpu:a,b,c:test:x=2");
+            require(noMessage.has_value(), "RESULT line without message parses");
+            require(noMessage->status == cts::TestStatus::Pass, "RESULT line pass status parses");
+            require(noMessage->message.empty(), "RESULT line empty message");
+
+            const std::optional<cts::SubcaseResult> sanitized = cts::parseResultLine(
+                "RESULT\twarn\twebgpu:a,b,c:test:x=3\tmessage\twith\ncontrols");
+            require(sanitized.has_value(), "RESULT line with controls parses");
+            require(sanitized->message == "message with controls", "RESULT line controls are sanitized");
+
+            const std::optional<cts::SubcaseResult> ignored = cts::parseResultLine("noise");
+            require(!ignored.has_value(), "non-RESULT line ignored");
+        }
+
         require(cts::kTextureUsages.size() == 6, "texture usages count");
         require(cts::kAllTextureUsages == 0x3F, "all texture usages bits");
         require((cts::kSomeBogusTextureUsage & cts::kAllTextureUsages) == 0, "bogus texture usage disjoint");

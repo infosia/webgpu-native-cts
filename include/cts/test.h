@@ -4,6 +4,7 @@
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -254,6 +255,11 @@ struct RunOptions {
     bool listCases = false;
     bool isolate = false;
     bool sampleFormats = false;
+    int workers = 0;
+    int shardIndex = -1;
+    int shardCount = 0;
+    size_t shardFrom = 0;
+    bool shardResults = false;
     std::string runCaseQuery;
     std::string expectationsPath;
     std::string crashListPath;
@@ -266,6 +272,8 @@ struct RunOptions {
 int runQueries(const RunOptions& options);
 int writeListingJson(const std::string& path);
 std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& results);
+bool caseBelongsToShard(size_t index, int shardIndex, int shardCount);
+std::optional<SubcaseResult> parseResultLine(const std::string& line);
 std::vector<SubcaseResult> runSyntheticFailureForSelfTest();
 void setCurrentTest(Fixture* fixture);
 

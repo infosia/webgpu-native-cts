@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <iostream>
+#include <charconv>
 #include <string>
 
 #include "cts/test.h"
@@ -63,7 +64,7 @@ const char* adapterTypeName(WGPUAdapterType type) {
 }
 
 void printUsage() {
-    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--isolate] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
+    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--workers N] [--shard I/N] [--isolate] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
               << "\n"
               << "Without arguments, creates a WebGPU instance, requests an adapter,\n"
               << "prints adapter information, and exits.\n";
@@ -113,6 +114,38 @@ int runAdapterEnumeration() {
     return EXIT_SUCCESS;
 }
 
+bool parseInt(const std::string& text, int* value) {
+    const char* begin = text.data();
+    const char* end = text.data() + text.size();
+    auto [ptr, ec] = std::from_chars(begin, end, *value);
+    return ec == std::errc() && ptr == end;
+}
+
+bool parseSize(const std::string& text, size_t* value) {
+    const char* begin = text.data();
+    const char* end = text.data() + text.size();
+    auto [ptr, ec] = std::from_chars(begin, end, *value);
+    return ec == std::errc() && ptr == end;
+}
+
+bool parseShard(const std::string& text, int* index, int* count) {
+    const size_t slash = text.find('/');
+    if (slash == std::string::npos) {
+        return false;
+    }
+    int parsedIndex = -1;
+    int parsedCount = 0;
+    if (!parseInt(text.substr(0, slash), &parsedIndex) || !parseInt(text.substr(slash + 1), &parsedCount)) {
+        return false;
+    }
+    if (parsedCount < 1 || parsedIndex < 0 || parsedIndex >= parsedCount) {
+        return false;
+    }
+    *index = parsedIndex;
+    *count = parsedCount;
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -142,6 +175,38 @@ int main(int argc, char** argv) {
             } else if (arg == "--sample-formats") {
                 options.sampleFormats = true;
                 options.forwardedArgs.push_back(arg);
+            } else if (arg == "--workers") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --workers\n";
+                    return EXIT_FAILURE;
+                }
+                const std::string value = argv[++i];
+                if (!parseInt(value, &options.workers) || options.workers < 1) {
+                    std::cerr << "invalid --workers value: " << value << "\n";
+                    return EXIT_FAILURE;
+                }
+            } else if (arg == "--shard") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --shard\n";
+                    return EXIT_FAILURE;
+                }
+                const std::string value = argv[++i];
+                if (!parseShard(value, &options.shardIndex, &options.shardCount)) {
+                    std::cerr << "invalid --shard value: " << value << "\n";
+                    return EXIT_FAILURE;
+                }
+            } else if (arg == "--shard-results") {
+                options.shardResults = true;
+            } else if (arg == "--shard-from") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --shard-from\n";
+                    return EXIT_FAILURE;
+                }
+                const std::string value = argv[++i];
+                if (!parseSize(value, &options.shardFrom)) {
+                    std::cerr << "invalid --shard-from value: " << value << "\n";
+                    return EXIT_FAILURE;
+                }
             } else if (arg == "--run-case") {
                 if (i + 1 >= argc) {
                     std::cerr << "missing value for --run-case\n";
