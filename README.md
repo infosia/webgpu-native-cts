@@ -137,16 +137,20 @@ subprocess (`--isolate`), at the [pinned backend revisions](docs/UPSTREAM.md).
 | **yawgpu** | 4332 | 383 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips |
 | **wgpu-native** | 3407 | 756 | 338 | 214 | 214 crashes are eager-panics on invalid input (F-001–F-004 incl. F-003 mapping, F-007, F-013, F-017, F-019, F-021); 338 fails are missing-validation / uncaptured-error divergences (F-015 view-usage subset ≈ 324, F-012, F-003 mapping) |
 
-**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti; `--isolate --expectations`, exit 0;
-the 4331-case surface as of T13, before the T14 BGL storage/multisampled tests, 2026-06-01):
+**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti). On the **latest** code — all ported
+`api,validation` *and* `api,operation` files on yawgpu `1297b7e` — yawgpu runs **clean: zero
+failures, zero crashes** (2026-06-03, `--isolate --expectations`, exit 0), matching its Metal result;
+the two Vulkan-specific findings **F-029 / F-030** were both found *and* fixed on this platform. The
+per-case table below is the earlier **T13-era `api,validation` snapshot** (4331 cases, 2026-06-01):
 
 | Backend | pass | skip | xfail | xpass | fail | crash |
 |---------|-----:|-----:|------:|------:|-----:|------:|
 | **yawgpu** | 4131 | 200 | 0 | 0 | 0 | 0 |
 | **wgpu-native** | 2260 | 1579 | 274 | 218 | 0 | 0 |
 
-**yawgpu posts the same `pass=4131 skip=200`, zero failures, on both platforms** (and matches Dawn) —
-a clean cross-platform result. (Dawn is not yet built on Windows.) The `wgpu-native` row differs from
+**At that snapshot yawgpu posted `pass=4131 skip=200`, zero failures, on both platforms** (matching
+Dawn's Metal numbers at that surface) — a clean cross-platform result. (Dawn is not yet built on
+Windows.) The `wgpu-native` row differs from
 its Metal numbers because the expectations file (`expectations/wgpu-native.txt`) was tuned on Metal and
 this NVIDIA Vulkan driver diverges: 218 cases the file lists as failures (202 `createTexture`, 16
 `createView`) actually **pass** here (reported as `xpass`), while 274 expected divergences are still
