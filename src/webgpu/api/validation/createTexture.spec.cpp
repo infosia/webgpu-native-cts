@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
+#include "webgpu/util/enum_strings.h"
 
 using namespace cts;
 
@@ -30,19 +32,14 @@ std::vector<Value> textureDimensionValuesWithUndefined() {
     values.reserve(kTextureDimensions.size() + 1);
     values.push_back(Value::undef());
     for (WGPUTextureDimension dimension : kTextureDimensions) {
-        values.emplace_back(static_cast<int64_t>(dimension));
+        values.emplace_back(std::string(textureDimensionIdentifier(dimension)));
     }
     return values;
 }
 
 template <std::size_t N>
 std::vector<Value> textureFormatValues(const std::array<WGPUTextureFormat, N>& formats) {
-    std::vector<Value> values;
-    values.reserve(formats.size());
-    for (WGPUTextureFormat format : formats) {
-        values.emplace_back(static_cast<int64_t>(format));
-    }
-    return values;
+    return formatIdentifierValues(formats);
 }
 
 std::vector<Value> allTextureFormatValues() {
@@ -72,12 +69,7 @@ WGPUFeatureName textureFormatFeatureFromValue(const Value& value) {
 std::vector<Value> textureFormatsForFeatureParam(const ParamRecord& params, std::string_view key) {
     const WGPUFeatureName feature = textureFormatFeatureFromValue(*findParam(params, key));
     const std::vector<WGPUTextureFormat> formats = filterFormatsByFeature(feature);
-    std::vector<Value> values;
-    values.reserve(formats.size());
-    for (WGPUTextureFormat format : formats) {
-        values.emplace_back(static_cast<int64_t>(format));
-    }
-    return values;
+    return formatIdentifierValues(formats);
 }
 
 std::vector<Value> uncompressedTextureFormatValues() {
@@ -189,7 +181,7 @@ WGPUTextureDimension dimensionFromValue(const Value& value) {
     if (valueIsUndefined(value)) {
         return WGPUTextureDimension_Undefined;
     }
-    return static_cast<WGPUTextureDimension>(valueAs<int64_t>(value));
+    return parseTextureDimension(valueAs<std::string>(value));
 }
 
 WGPUTextureDimension dimensionFromParams(const ParamRecord& params) {
@@ -198,7 +190,7 @@ WGPUTextureDimension dimensionFromParams(const ParamRecord& params) {
 
 WGPUTextureDimension dimensionParam(AllFeaturesMaxLimitsGpuTest& t) {
     return t.paramIsUndefined("dimension") ? WGPUTextureDimension_Undefined
-                                           : static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
+                                           : parseTextureDimension(t.param<std::string>("dimension"));
 }
 
 std::vector<Value> mipLevelCountValues() {
@@ -287,7 +279,7 @@ CTS_TEST(g, "texture_usage")
             .combine("usage1", usages)
             .filter([](const ParamRecord& params) {
                 const WGPUTextureDimension dimension = dimensionFromParams(params);
-                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
                 return textureFormatAndDimensionPossiblyCompatible(dimension, format);
             })
             .filter([](const ParamRecord& params) {
@@ -300,7 +292,7 @@ CTS_TEST(g, "texture_usage")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPUTextureDimension dimension = dimensionParam(t);
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const WGPUTextureUsage usage0 = t.param<WGPUTextureUsage>("usage0");
         const WGPUTextureUsage usage1 = t.param<WGPUTextureUsage>("usage1");
         const WGPUTextureUsage usage = usage0 | usage1;
@@ -361,8 +353,8 @@ CTS_TEST(g, "viewFormats")
             });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
-        const WGPUTextureFormat viewFormat = static_cast<WGPUTextureFormat>(t.param<int64_t>("viewFormat"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+        const WGPUTextureFormat viewFormat = parseTextureFormat(t.param<std::string>("viewFormat"));
 
         t.skipIfTextureFormatNotSupported(format);
         t.skipIfTextureFormatNotSupported(viewFormat);
@@ -400,11 +392,11 @@ CTS_TEST(g, "sample_count,1d_2d_array_3d")
     .desc("Test that 1d, 2d array, and 3d multisampled textures are invalid.")
     .params([](ParamsBuilder u) {
         return u.beginSubcases().combineWithParams({
-            ParamRecord{{"dimension", static_cast<int64_t>(WGPUTextureDimension_2D)}, {"w", 4}, {"h", 4}, {"d", 1}, {"shouldError", false}},
-            ParamRecord{{"dimension", static_cast<int64_t>(WGPUTextureDimension_1D)}, {"w", 4}, {"h", 1}, {"d", 1}, {"shouldError", true}},
-            ParamRecord{{"dimension", static_cast<int64_t>(WGPUTextureDimension_2D)}, {"w", 4}, {"h", 4}, {"d", 4}, {"shouldError", true}},
-            ParamRecord{{"dimension", static_cast<int64_t>(WGPUTextureDimension_2D)}, {"w", 4}, {"h", 4}, {"d", 6}, {"shouldError", true}},
-            ParamRecord{{"dimension", static_cast<int64_t>(WGPUTextureDimension_3D)}, {"w", 4}, {"h", 4}, {"d", 4}, {"shouldError", true}},
+            ParamRecord{{"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_2D))}, {"w", 4}, {"h", 4}, {"d", 1}, {"shouldError", false}},
+            ParamRecord{{"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_1D))}, {"w", 4}, {"h", 1}, {"d", 1}, {"shouldError", true}},
+            ParamRecord{{"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_2D))}, {"w", 4}, {"h", 4}, {"d", 4}, {"shouldError", true}},
+            ParamRecord{{"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_2D))}, {"w", 4}, {"h", 4}, {"d", 6}, {"shouldError", true}},
+            ParamRecord{{"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_3D))}, {"w", 4}, {"h", 4}, {"d", 4}, {"shouldError", true}},
         });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
@@ -412,7 +404,7 @@ CTS_TEST(g, "sample_count,1d_2d_array_3d")
         desc.size.width = static_cast<uint32_t>(t.param<int>("w"));
         desc.size.height = static_cast<uint32_t>(t.param<int>("h"));
         desc.size.depthOrArrayLayers = static_cast<uint32_t>(t.param<int>("d"));
-        desc.dimension = static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
+        desc.dimension = parseTextureDimension(t.param<std::string>("dimension"));
         desc.sampleCount = 4;
         desc.format = WGPUTextureFormat_RGBA8Unorm;
         desc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
@@ -431,8 +423,8 @@ CTS_TEST(g, "dimension_type_and_format_compatibility")
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPUTextureDimension dimension = t.paramIsUndefined("dimension")
             ? WGPUTextureDimension_Undefined
-            : static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+            : parseTextureDimension(t.param<std::string>("dimension"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
 
         t.skipIfTextureFormatNotSupported(format);
         const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
@@ -453,7 +445,7 @@ CTS_TEST(g, "dimension_type_and_format_compatibility")
 CTS_TEST(g, "sampleCount,various_sampleCount_with_all_formats")
     .desc("Test texture creation with various sample counts on all texture formats.")
     .params([](ParamsBuilder u) {
-        return u.combine("dimension", {Value::undef(), Value(static_cast<int64_t>(WGPUTextureDimension_2D))})
+        return u.combine("dimension", {Value::undef(), Value(std::string(textureDimensionIdentifier(WGPUTextureDimension_2D)))})
             .combine("format", allTextureFormatValues())
             .beginSubcases()
             .combine("sampleCount", sampleCountValues());
@@ -461,8 +453,8 @@ CTS_TEST(g, "sampleCount,various_sampleCount_with_all_formats")
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPUTextureDimension dimension = t.paramIsUndefined("dimension")
             ? WGPUTextureDimension_Undefined
-            : static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+            : parseTextureDimension(t.param<std::string>("dimension"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const uint32_t sampleCount = static_cast<uint32_t>(t.param<int>("sampleCount"));
 
         t.skipIfTextureFormatNotSupported(format);
@@ -506,12 +498,12 @@ CTS_TEST(g, "sampleCount,valid_sampleCount_with_other_parameter_varies")
             .combine("usage", validCombinationsOfOneOrTwoTextureUsageValues())
             .filter([](const ParamRecord& params) {
                 const WGPUTextureDimension dimension = dimensionFromParams(params);
-                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
                 return textureFormatAndDimensionPossiblyCompatible(dimension, format);
             })
             .filter([](const ParamRecord& params) {
                 const WGPUTextureDimension dimension = dimensionFromParams(params);
-                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
                 const uint32_t mipLevelCount =
                     static_cast<uint32_t>(valueAs<int>(*findParam(params, "mipLevelCount")));
                 const uint32_t arrayLayerCount =
@@ -537,8 +529,8 @@ CTS_TEST(g, "sampleCount,valid_sampleCount_with_other_parameter_varies")
         const bool dimensionIsUndefined = t.paramIsUndefined("dimension");
         const WGPUTextureDimension dimension = dimensionIsUndefined
             ? WGPUTextureDimension_Undefined
-            : static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+            : parseTextureDimension(t.param<std::string>("dimension"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const uint32_t sampleCount = static_cast<uint32_t>(t.param<int>("sampleCount"));
         const uint32_t arrayLayerCount = static_cast<uint32_t>(t.param<int>("arrayLayerCount"));
         const uint32_t mipLevelCount = static_cast<uint32_t>(t.param<int>("mipLevelCount"));
@@ -595,13 +587,13 @@ CTS_TEST(g, "zero_size_and_usage")
     .params([](ParamsBuilder u) {
         return u.combine("dimension", textureDimensionValuesWithUndefined())
             .combine("format",
-                     {Value(static_cast<int64_t>(WGPUTextureFormat_RGBA8Unorm)),
-                      Value(static_cast<int64_t>(WGPUTextureFormat_RGB10A2Unorm)),
-                      Value(static_cast<int64_t>(WGPUTextureFormat_BC1RGBAUnorm)),
-                      Value(static_cast<int64_t>(WGPUTextureFormat_Depth24PlusStencil8))})
+                     {Value(std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))),
+                      Value(std::string(textureFormatIdentifier(WGPUTextureFormat_RGB10A2Unorm))),
+                      Value(std::string(textureFormatIdentifier(WGPUTextureFormat_BC1RGBAUnorm))),
+                      Value(std::string(textureFormatIdentifier(WGPUTextureFormat_Depth24PlusStencil8)))})
             .filter([](const ParamRecord& params) {
                 const WGPUTextureDimension dimension = dimensionFromParams(params);
-                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
                 return textureFormatAndDimensionPossiblyCompatible(dimension, format);
             })
             .beginSubcases()
@@ -615,7 +607,7 @@ CTS_TEST(g, "zero_size_and_usage")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPUTextureDimension dimension = dimensionParam(t);
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const std::string zeroArgument = t.param<std::string>("zeroArgument");
 
         t.skipIfTextureFormatNotSupported(format);
@@ -657,7 +649,7 @@ CTS_TEST(g, "mipLevelCount,format")
             .combine("mipLevelCount", mipLevelCountValues())
             .filter([](const ParamRecord& params) {
                 const WGPUTextureDimension dimension = dimensionFromParams(params);
-                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
                 return textureFormatAndDimensionPossiblyCompatible(dimension, format);
             })
             .combine("largestDimension", {Value(0), Value(1), Value(2)})
@@ -669,7 +661,7 @@ CTS_TEST(g, "mipLevelCount,format")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPUTextureDimension dimension = dimensionParam(t);
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const uint32_t mipLevelCount = static_cast<uint32_t>(t.param<int>("mipLevelCount"));
         const int largestDimension = t.param<int>("largestDimension");
 
@@ -710,8 +702,8 @@ CTS_TEST(g, "mipLevelCount,bound_check")
     .desc("Test mipLevelCount boundary validation.")
     .params([](ParamsBuilder u) {
         return u.combine("format",
-                         {Value(static_cast<int64_t>(WGPUTextureFormat_RGBA8Unorm)),
-                          Value(static_cast<int64_t>(WGPUTextureFormat_BC1RGBAUnorm))})
+                         {Value(std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))),
+                          Value(std::string(textureFormatIdentifier(WGPUTextureFormat_BC1RGBAUnorm)))})
             .beginSubcases()
             .combineWithParams({
                 ParamRecord{{"w", 32}, {"h", 32}, {"d", 1}, {"dimension", Value::undef()}},
@@ -720,19 +712,19 @@ CTS_TEST(g, "mipLevelCount,bound_check")
                 ParamRecord{{"w", 32}, {"h", 31}, {"d", 1}, {"dimension", Value::undef()}},
                 ParamRecord{{"w", 32}, {"h", 28}, {"d", 1}, {"dimension", Value::undef()}},
                 ParamRecord{{"w", 31}, {"h", 31}, {"d", 1}, {"dimension", Value::undef()}},
-                ParamRecord{{"w", 32}, {"h", 1}, {"d", 1}, {"dimension", static_cast<int64_t>(WGPUTextureDimension_1D)}},
-                ParamRecord{{"w", 31}, {"h", 1}, {"d", 1}, {"dimension", static_cast<int64_t>(WGPUTextureDimension_1D)}},
-                ParamRecord{{"w", 32}, {"h", 32}, {"d", 32}, {"dimension", static_cast<int64_t>(WGPUTextureDimension_3D)}},
-                ParamRecord{{"w", 32}, {"h", 31}, {"d", 31}, {"dimension", static_cast<int64_t>(WGPUTextureDimension_3D)}},
-                ParamRecord{{"w", 31}, {"h", 32}, {"d", 31}, {"dimension", static_cast<int64_t>(WGPUTextureDimension_3D)}},
-                ParamRecord{{"w", 31}, {"h", 31}, {"d", 32}, {"dimension", static_cast<int64_t>(WGPUTextureDimension_3D)}},
-                ParamRecord{{"w", 31}, {"h", 31}, {"d", 31}, {"dimension", static_cast<int64_t>(WGPUTextureDimension_3D)}},
+                ParamRecord{{"w", 32}, {"h", 1}, {"d", 1}, {"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_1D))}},
+                ParamRecord{{"w", 31}, {"h", 1}, {"d", 1}, {"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_1D))}},
+                ParamRecord{{"w", 32}, {"h", 32}, {"d", 32}, {"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_3D))}},
+                ParamRecord{{"w", 32}, {"h", 31}, {"d", 31}, {"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_3D))}},
+                ParamRecord{{"w", 31}, {"h", 32}, {"d", 31}, {"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_3D))}},
+                ParamRecord{{"w", 31}, {"h", 31}, {"d", 32}, {"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_3D))}},
+                ParamRecord{{"w", 31}, {"h", 31}, {"d", 31}, {"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_3D))}},
                 ParamRecord{{"w", 32}, {"h", 8}, {"d", 1}, {"dimension", Value::undef()}},
                 ParamRecord{{"w", 32}, {"h", 32}, {"d", 64}, {"dimension", Value::undef()}},
-                ParamRecord{{"w", 32}, {"h", 32}, {"d", 64}, {"dimension", static_cast<int64_t>(WGPUTextureDimension_3D)}},
+                ParamRecord{{"w", 32}, {"h", 32}, {"d", 64}, {"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_3D))}},
             })
             .filter([](const ParamRecord& params) {
-                const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
+                const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
                 if (format != WGPUTextureFormat_BC1RGBAUnorm) {
                     return true;
                 }
@@ -746,7 +738,7 @@ CTS_TEST(g, "mipLevelCount,bound_check")
             });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const WGPUTextureDimension dimension = dimensionParam(t);
 
         t.skipIfTextureFormatNotSupported(format);
@@ -794,7 +786,7 @@ CTS_TEST(g, "texture_size,1d_texture")
             .combine("depthOrArrayLayers", {Value(1), Value(2)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const int widthVariant = t.param<int>("widthVariant");
         const uint32_t height = static_cast<uint32_t>(t.param<int>("height"));
         const uint32_t depthOrArrayLayers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
@@ -819,13 +811,13 @@ CTS_TEST(g, "texture_size,1d_texture")
 CTS_TEST(g, "texture_size,2d_texture,uncompressed_format")
     .desc("Test upper-bound texture size validation for 2D uncompressed textures.")
     .params([](ParamsBuilder u) {
-        return u.combine("dimension", {Value::undef(), Value(static_cast<int64_t>(WGPUTextureDimension_2D))})
+        return u.combine("dimension", {Value::undef(), Value(std::string(textureDimensionIdentifier(WGPUTextureDimension_2D)))})
             .combine("format", uncompressedTextureFormatValues())
             .combine("sizeVariant", sizeVariantValues());
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPUTextureDimension dimension = dimensionParam(t);
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const int sizeVariant = t.param<int>("sizeVariant");
         const int testedDim = sizeVariant / 3;
         const int offset = sizeVariant % 3 - 1;
@@ -869,7 +861,7 @@ CTS_TEST(g, "texture_size,3d_texture,uncompressed_format")
             .combine("sizeVariant", sizeVariantValues());
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const int sizeVariant = t.param<int>("sizeVariant");
         const int testedDim = sizeVariant / 3;
         const int offset = sizeVariant % 3 - 1;
@@ -904,14 +896,14 @@ CTS_TEST(g, "texture_size,3d_texture,uncompressed_format")
 CTS_TEST(g, "texture_size,2d_texture,compressed_format")
     .desc("Test upper-bound texture size validation for 2D compressed textures.")
     .params([](ParamsBuilder u) {
-        return u.combine("dimension", {Value::undef(), Value(static_cast<int64_t>(WGPUTextureDimension_2D))})
+        return u.combine("dimension", {Value::undef(), Value(std::string(textureDimensionIdentifier(WGPUTextureDimension_2D)))})
             .combine("format", compressedTextureFormatValues())
             .beginSubcases()
             .combine("sizeVariant", compressedSizeVariantValues());
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPUTextureDimension dimension = dimensionParam(t);
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const size_t sizeVariant = static_cast<size_t>(t.param<int>("sizeVariant"));
         const WGPULimits limits = t.getLimits();
 
@@ -951,7 +943,7 @@ CTS_TEST(g, "texture_size,3d_texture,compressed_format")
             .combine("sizeVariant", compressedSizeVariantValues());
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const size_t sizeVariant = static_cast<size_t>(t.param<int>("sizeVariant"));
         const WGPULimits limits = t.getLimits();
 

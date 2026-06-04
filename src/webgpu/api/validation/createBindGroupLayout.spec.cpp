@@ -8,6 +8,7 @@
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
+#include "webgpu/util/enum_strings.h"
 
 using namespace cts;
 
@@ -114,18 +115,13 @@ std::vector<Value> textureViewDimensionValuesWithUndefined() {
     values.reserve(kTextureViewDimensions.size() + 1);
     values.push_back(Value::undef());
     for (WGPUTextureViewDimension dimension : kTextureViewDimensions) {
-        values.emplace_back(static_cast<int64_t>(dimension));
+        values.emplace_back(std::string(textureViewDimensionIdentifier(dimension)));
     }
     return values;
 }
 
 std::vector<Value> allTextureFormatValues() {
-    std::vector<Value> values;
-    values.reserve(kAllTextureFormats.size());
-    for (WGPUTextureFormat format : kAllTextureFormats) {
-        values.emplace_back(static_cast<int64_t>(format));
-    }
-    return values;
+    return formatIdentifierValues(kAllTextureFormats);
 }
 
 bool isValidBufferTypeForStages(
@@ -397,7 +393,7 @@ CTS_TEST(g, "multisampled_validation")
         const bool viewDimensionIsUndefined = t.paramIsUndefined("viewDimension");
         const WGPUTextureViewDimension viewDimension = viewDimensionIsUndefined
             ? WGPUTextureViewDimension_Undefined
-            : static_cast<WGPUTextureViewDimension>(t.param<int64_t>("viewDimension"));
+            : parseTextureViewDimension(t.param<std::string>("viewDimension"));
         const bool sampleTypeIsUndefined = t.paramIsUndefined("sampleType");
         const WGPUTextureSampleType appliedSampleType = sampleTypeIsUndefined
             ? WGPUTextureSampleType_Float
@@ -435,7 +431,7 @@ CTS_TEST(g, "storage_texture,layout_dimension")
         const bool viewDimensionIsUndefined = t.paramIsUndefined("viewDimension");
         const WGPUTextureViewDimension viewDimension = viewDimensionIsUndefined
             ? WGPUTextureViewDimension_Undefined
-            : static_cast<WGPUTextureViewDimension>(t.param<int64_t>("viewDimension"));
+            : parseTextureViewDimension(t.param<std::string>("viewDimension"));
 
         WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
         entry.binding = 0;
@@ -465,7 +461,7 @@ CTS_TEST(g, "storage_texture,formats")
             .combine("access", storageTextureAccessValues());
     })
     .fn([](GpuTest& t) {
-        const WGPUTextureFormat format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         const WGPUStorageTextureAccess access = static_cast<WGPUStorageTextureAccess>(t.param<uint64_t>("access"));
 
         t.skipIfTextureFormatNotSupported(format);
