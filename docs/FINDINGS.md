@@ -59,18 +59,18 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032
 — each keeps a compact record below.
-**Open — yawgpu:** none on Metal. (Vulkan, confirmed on **native Windows/Vulkan, NVIDIA RTX 5060 Ti,
-2026-06-04**: F-031 is fixed on the Vulkan HAL too — `copy_depth_stencil` `pass=216 fail=0` (native,
-matching MoltenVK `216/0`); **F-032's depth/stencil aspect buffer-copy support is still a Vulkan/GLES-HAL
-follow-up** — `image_copy` depth/stencil `pass=352 fail=800` on native Windows, byte-identical to MoltenVK,
-so it is a real HAL gap, not a MoltenVK artifact. See its note. This is the only open yawgpu finding.
-F-033 is a likely-MoltenVK-only Mac artifact, not a yawgpu defect.)
+**Open — yawgpu: none** (Metal **and** Vulkan). Confirmed on **native Windows/Vulkan, NVIDIA RTX 5060 Ti,
+2026-06-04**: both depth/stencil findings are now fixed on the Vulkan HAL too — F-031 `copy_depth_stencil`
+`pass=216 fail=0` (`cac328a`) and F-032 `image_copy` depth/stencil `pass=1152 fail=0` (`3c847ac`, up from
+`pass=352 fail=800`); the full ported suite on native Windows/Vulkan is green (`pass=7208 skip=388 fail=0`).
+The **GLES** HAL is the only remaining untested follow-up (not a known defect). F-033 is a
+likely-MoltenVK-only Mac artifact, not a yawgpu defect.
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028 (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
 **Tooling / environment (not a backend conformance defect):** F-033 — color `copyTextureToTexture`
 pixel mismatches when yawgpu's Vulkan HAL is run on **Mac via MoltenVK**; likely a MoltenVK translation
-artifact (native Windows/Vulkan is clean through F-031), low priority.
+artifact (native Windows/Vulkan is fully clean — `pass=7208 fail=0`), low priority.
 
 ---
 
@@ -761,23 +761,18 @@ artifact (native Windows/Vulkan is clean through F-031), low priority.
   (surfaced for the fix, not masked). It was surfaced only because the T27 readback buffers are
   zero-initialized (a copy that writes nothing fails instead of being masked by a pre-filled expected
   buffer).
-- **Note (Vulkan) — OPEN, confirmed on native hardware:** the F-032 fix is in the **Metal** HAL; the
-  **Vulkan HAL** is not yet complete. First re-checked on Mac via MoltenVK (yawgpu `cac328a`): `image_copy`
-  depth/stencil `pass=352 fail=800` (improved from `288/864` once the F-031 Vulkan depth-render fix landed,
-  but the aspect buffer-copy support is still missing). **Now confirmed on native Windows/Vulkan (NVIDIA RTX
-  5060 Ti, 2026-06-04): `pass=352 fail=800` — byte-identical to MoltenVK**, so this is a genuine yawgpu
-  Vulkan-HAL gap, **not** a MoltenVK translation artifact. Native breakdown of the 800 fails (`got 0`):
-  - **Stencil-plane extraction from packed depth+stencil formats — 576** (all three methods
-    WriteTexture/CopyB2T/CopyT2B): `Depth24PlusStencil8` (288) + `Depth32FloatStencil8` (288), stencil
-    aspect, `expected 1 got 0`.
-  - **Depth-aspect `copyTextureToBuffer` — 224**: `Depth32FloatStencil8` depth (96, all fail) plus
-    `Depth16Unorm` (64) and `Depth32Float` (64) depth (the remaining 32 each pass — partial).
-  - **Passing 352**: plain `Stencil8` all three methods (288) + the partial `Depth16Unorm`/`Depth32Float`
-    depth-copy subcases (32 each). (Format enums 44–49 = `Stencil8`/`Depth16Unorm`/`Depth24Plus`/
-    `Depth24PlusStencil8`/`Depth32Float`/`Depth32FloatStencil8`.)
-
-  **yawgpu follow-up: port the F-032 depth/stencil aspect buffer-copy support to the Vulkan (and GLES)
-  HALs** (same pattern as F-031's Vulkan follow-up, now done). This is the suite's one open yawgpu finding.
+- **Note (Vulkan) — RESOLVED on the Vulkan HAL (`3c847ac`):** the original F-032 fix (`c8f15d5`/`af9ac5c`)
+  was **Metal**-only, so the Vulkan HAL initially still failed the aspect buffer copies. This was confirmed
+  to be a real HAL gap (not a MoltenVK artifact) on **native Windows/Vulkan (NVIDIA RTX 5060 Ti):
+  `pass=352 fail=800`, byte-identical to MoltenVK** — the 800 fails (`got 0`) being stencil-plane
+  extraction from packed depth+stencil formats (576: `Depth24PlusStencil8` + `Depth32FloatStencil8` stencil
+  aspect, all three methods) plus depth-aspect `copyTextureToBuffer` (224). yawgpu then ported the
+  depth/stencil-aspect buffer-copy support to the **Vulkan HAL** in `3c847ac` ("resolve depth/stencil
+  aspect buffer copies on the Vulkan HAL"); **confirmed on native Windows/Vulkan (NVIDIA RTX 5060 Ti,
+  2026-06-04): `image_copy` depth/stencil `pass=1152 fail=0`** (Dawn-equal, up from `pass=352 fail=800`),
+  with the full ported suite green (`pass=7208 skip=388 fail=0`) and no `copy_depth_stencil` regression
+  (F-031 still `216/0`). So F-032 is now fixed on Metal **and** Vulkan. **GLES** remains the only untested
+  HAL (follow-up, not a known defect).
 
 ---
 
@@ -800,15 +795,17 @@ artifact (native Windows/Vulkan is clean through F-031), low priority.
   **buffer⇄texture** color copies are clean — `image_copy` color `pass=25824` (its only fails are the
   depth/stencil F-032 cases), and `copyBufferToBuffer`/`writeBuffer`/`clearBuffer`/`basic` have **0**
   fails. Only **texture→texture** color copy diverges.
-- **Depth/stencil on this run are the known findings, not F-033:** `copy_depth_stencil` `fail=180`
-  ([F-031](#f-031--yawgpu-diverges-on-the-depth-aspect-of-copytexturetotexture-copied-depth-fails-an-equality-re-render),
-  Vulkan render path unfixed) and `image_copy` depth/stencil `fail=864`
-  ([F-032](#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)).
-- **Status:** **OPEN — likely MoltenVK-only**, low priority. Authoritative Vulkan conformance is native
-  (Windows/NVIDIA, clean through F-031). To confirm attribution, re-run the failing color-T2T cases on
-  **native Vulkan**; if they pass there (as expected), this is a MoltenVK limitation and not actionable
-  for yawgpu. No `expectations/` lines added. (Recorded because the Mac→Vulkan-via-MoltenVK path is now
-  a documented diagnostic — see `docs/06-build-and-run.md` — and this is its main known caveat.)
+- **Depth/stencil on this (2026-06-03 MoltenVK) run were the known findings, not F-033:** `copy_depth_stencil`
+  `fail=180` ([F-031](#f-031--yawgpu-diverges-on-the-depth-aspect-of-copytexturetotexture-copied-depth-fails-an-equality-re-render))
+  and `image_copy` depth/stencil `fail=864`
+  ([F-032](#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8))
+  — **both since fixed on the Vulkan HAL** (`cac328a` / `3c847ac`; native Windows `216/0` and `1152/0`).
+- **Status:** **CONFIRMED MoltenVK-only — not a yawgpu defect**, low priority. The predicted native check
+  is now done: the full ported suite on **native Vulkan (Windows/NVIDIA, 2026-06-04)** — including all color
+  `copyTextureToTexture` — is **clean** (`pass=7208 skip=388 fail=0`), so the color-T2T cases that mismatch
+  under MoltenVK pass on native Vulkan, confirming this is a MoltenVK (Vulkan→Metal) translation limitation,
+  not actionable for yawgpu. No `expectations/` lines added. (Recorded because the Mac→Vulkan-via-MoltenVK
+  path is now a documented diagnostic — see `docs/06-build-and-run.md` — and this is its main known caveat.)
 
 ---
 
