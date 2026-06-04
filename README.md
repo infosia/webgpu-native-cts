@@ -134,10 +134,11 @@ real-GPU Metal:
   per-**subcase**). The depth/stencil findings are all resolved on Metal **and** Vulkan. The T30
 `rendering/draw` port surfaced **F-034** (yawgpu didn't execute **indexed/indirect** draws), now
 **resolved** (`36a6b66`): `rendering/draw` `pass=564 fail=0` (Dawn/wgpu-equal). The **T31**
-`rendering/color_target_state` port then surfaced **F-035** — yawgpu **ignores `GPUColorTargetState`
-`blend` + `writeMask`** (writes the raw fragment output to all channels), `pass=2 fail=21` vs the Dawn
+`rendering/color_target_state` port then surfaced **F-035** — yawgpu **ignored `GPUColorTargetState`
+`blend` + `writeMask`** (wrote the raw fragment output to all channels), `pass=2 fail=21` vs the Dawn
 oracle's `pass=23`, **cross-HAL** (Metal == Vulkan/MoltenVK byte-identical, not a MoltenVK artifact),
-**open**/surfaced/unmasked. yawgpu's **one open finding is F-035**; the **GLES** HAL is the only
+now **resolved** (`74f5ef2`): `color_target_state` `pass=23 fail=0` on **both** Metal and Vulkan/MoltenVK.
+**yawgpu has no open findings**; the **GLES** HAL is the only
   untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.

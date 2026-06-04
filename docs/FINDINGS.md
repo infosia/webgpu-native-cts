@@ -57,12 +57,14 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035
 — each keeps a compact record below.
-**Open — yawgpu:** [F-035](#f-035--yawgpu-ignores-gpucolortargetstate-blend-and-writemask-writes-the-raw-fragment-output--cross-hal)
-— yawgpu **ignores `GPUColorTargetState` `blend` + `writeMask`** (writes the raw fragment output to all
-channels; `rendering/color_target_state`, T31), **cross-HAL** (Metal == Vulkan/MoltenVK, `pass=2 fail=21`,
-Dawn-oracle `pass=23`), surfaced/unmasked.
+**Open — yawgpu: none.**
+[F-035](#f-035--yawgpu-ignores-gpucolortargetstate-blend-and-writemask-writes-the-raw-fragment-output--cross-hal)
+(yawgpu ignored `GPUColorTargetState` `blend` + `writeMask`, writing the raw fragment output to all
+channels — `rendering/color_target_state`, T31) is now **resolved** (`74f5ef2`, real-GPU Metal +
+Vulkan/MoltenVK: `pass=23 fail=0`, was `pass=2 fail=21`); it reproduced byte-identically on Metal +
+Vulkan/MoltenVK, which localized it to yawgpu's shared color-target-state translation.
 [F-034](#f-034--yawgpu-a-fragment-storage-write-is-lost-on-indexed--indirect-draws) (yawgpu didn't execute
 **indexed/indirect** draws — `rendering/draw`, T30) is now **resolved** (`36a6b66`, real-GPU Metal:
 `pass=564 fail=0`, was `340 fail=224`); it reproduced byte-identically on Metal + Vulkan/MoltenVK, which
@@ -897,9 +899,11 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   `writeMask` + blending are MoltenVK-supported (Dawn/wgpu-native honor them), so this is **not** a
   MoltenVK artifact (unlike F-033) and **not** Metal-specific — it points at yawgpu's shared
   (HAL-agnostic) pipeline color-target-state translation.
-- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
-  The 21 failures stand until yawgpu applies the per-target `writeMask` + `blend`; re-run
-  `webgpu:api,operation,rendering,color_target_state:*` (Dawn-equal target `pass=23`).
+- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `74f5ef2` —
+  "apply color-target blend + writeMask + blend constant"). Re-test: `color_target_state`
+  `pass=23 fail=0` on **both** HALs (Dawn-equal, up from `pass=2 fail=21`). Surfaced, not masked
+  (`expectations/yawgpu.txt` never carried a line for it). The cross-HAL reproduction (Metal ==
+  Vulkan/MoltenVK) correctly localized it to yawgpu's shared color-target-state translation.
 
 ---
 
