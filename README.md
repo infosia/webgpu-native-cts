@@ -97,10 +97,10 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **10 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **11 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
-  `onSubmittedWorkDone`, `rendering/{basic, draw}` (the color render-to-texture + draw-call foundations),
-  and `compute/basic` (the compute foundation).
+  `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state}` (the color render-to-texture +
+  draw-call + blend-state foundations), and `compute/basic` (the compute foundation).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
@@ -109,7 +109,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 33 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 35 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
@@ -133,8 +133,11 @@ real-GPU Metal:
   skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `pass=…` numbers above are
   per-**subcase**). The depth/stencil findings are all resolved on Metal **and** Vulkan. The T30
 `rendering/draw` port surfaced **F-034** (yawgpu didn't execute **indexed/indirect** draws), now
-**resolved** (`36a6b66`): `rendering/draw` `pass=564 fail=0` (Dawn/wgpu-equal). **yawgpu has no open
-findings**; the **GLES** HAL is the only
+**resolved** (`36a6b66`): `rendering/draw` `pass=564 fail=0` (Dawn/wgpu-equal). The **T31**
+`rendering/color_target_state` port then surfaced **F-035** — yawgpu **ignores `GPUColorTargetState`
+`blend` + `writeMask`** (writes the raw fragment output to all channels), `pass=2 fail=21` vs the Dawn
+oracle's `pass=23`, **cross-HAL** (Metal == Vulkan/MoltenVK byte-identical, not a MoltenVK artifact),
+**open**/surfaced/unmasked. yawgpu's **one open finding is F-035**; the **GLES** HAL is the only
   untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
@@ -142,7 +145,9 @@ findings**; the **GLES** HAL is the only
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
   view-usage subset rule), and the wgpu-native 3D multi-slice copy/readback family **F-027** (a 3D
   whole-subresource `image_copy` readback after a non-zero-origin copy) and **F-028** (3D
-  `copyTextureToTexture` leaves depth slices z≥1 zero; 2D-array copies pass).
+  `copyTextureToTexture` leaves depth slices z≥1 zero; 2D-array copies pass), plus **F-036** (aborts
+  when a constant-factor blend draws without `setBlendConstant`, which should default to `[0,0,0,0]`;
+  `color_target_state`, contained via `--isolate` + expectations).
 
 Every divergence the suite surfaces is reported, fixed upstream, and re-confirmed on hardware.
 

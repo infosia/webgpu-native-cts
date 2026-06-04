@@ -59,7 +59,10 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032
 — each keeps a compact record below.
-**Open — yawgpu: none.**
+**Open — yawgpu:** [F-035](#f-035--yawgpu-ignores-gpucolortargetstate-blend-and-writemask-writes-the-raw-fragment-output--cross-hal)
+— yawgpu **ignores `GPUColorTargetState` `blend` + `writeMask`** (writes the raw fragment output to all
+channels; `rendering/color_target_state`, T31), **cross-HAL** (Metal == Vulkan/MoltenVK, `pass=2 fail=21`,
+Dawn-oracle `pass=23`), surfaced/unmasked.
 [F-034](#f-034--yawgpu-a-fragment-storage-write-is-lost-on-indexed--indirect-draws) (yawgpu didn't execute
 **indexed/indirect** draws — `rendering/draw`, T30) is now **resolved** (`36a6b66`, real-GPU Metal:
 `pass=564 fail=0`, was `340 fail=224`); it reproduced byte-identically on Metal + Vulkan/MoltenVK, which
@@ -71,7 +74,8 @@ pass or skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `p
 this file are per-**subcase**, so they are much larger). The **GLES** HAL is the only remaining untested
 follow-up (not a known defect). F-033 is a **confirmed** MoltenVK-only Mac artifact, not a yawgpu defect.
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
-F-028 (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
+F-028, F-036 (abort when a constant-factor blend draws without `setBlendConstant`; `color_target_state`,
+T31) (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
 **Tooling / environment (not a backend conformance defect):** F-033 — color `copyTextureToTexture`
 pixel mismatches when yawgpu's Vulkan HAL is run on **Mac via MoltenVK**; a **confirmed** MoltenVK
@@ -858,6 +862,69 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   up from `pass=340 fail=224`); V1/V2 unaffected. 3-way confirmed (Dawn + wgpu-native pass all 744). No
   `expectations/yawgpu.txt` lines were ever added (surfaced for the fix, not masked). The cross-HAL
   reproduction above (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's shared draw path.
+
+---
+
+## F-035 — yawgpu ignores `GPUColorTargetState` `blend` and `writeMask` (writes the raw fragment output) — cross-HAL
+
+- **Backend:** yawgpu (`36a6b66`, real-GPU **Metal** and **Vulkan/MoltenVK** — byte-identical). **Not**
+  present in Dawn (oracle passes all).
+- **Found by:** the T31 (V4) `rendering/color_target_state` ports — the suite's first
+  `GPUColorTargetState` `blend` + `writeMask` coverage (`color_write_mask,{channel_work,
+  blending_disabled}`, `blend_constant,{initial,setting,not_inherited}`). **Dawn (oracle) passes all 23**
+  (`pass=23 fail=0`) with the exact same harness code; **yawgpu fails 21** (`pass=2 fail=21`), which
+  isolates the behavior to the backend.
+- **Observed (every failure is `expected 0` — or `0.5` — `got 1`: a channel that should be masked off
+  or blended down is written full-scale):** yawgpu writes the raw (clamped) fragment output to all four
+  channels, ignoring **both** fields of `GPUColorTargetState`:
+  - **`writeMask` ignored** — `color_write_mask,channel_work` fails 15/16 (only `mask=15`, all channels,
+    passes); `mask=0` (write nothing) returns all-`1`. `color_write_mask,blending_disabled` fails both
+    subcases (`writeMask=RED`, yet green reads `1`). All four channels are always written regardless of
+    the mask.
+  - **`blend` ignored** — `blend_constant,{initial,setting,not_inherited}` use a `srcFactor=constant`
+    blend; `src * blendConstant` is **not** applied — the raw source (clamped to `1`) is written. Only
+    `setting:{r:1,g:1,b:1,a:1}` passes (there `constant=1` ⇒ `src*1=src`, indistinguishable from the bug).
+  - The unifying tell: a case passes **iff** its expected result equals the raw source (`1`); whenever
+    `writeMask` or `blend` should pull a channel **below** the source, yawgpu emits the source.
+- **Expected (WebGPU):** the per-target `writeMask` gates which channels the pipeline writes, and `blend`
+  (here `src*constant + dst*…`) is applied before the unorm store. Dawn does both; wgpu-native honors
+  `writeMask` (`color_write_mask,*` `pass=18`, and would honor `blend` but for the unrelated F-036 abort).
+- **Likely root cause:** yawgpu reads only `WGPUColorTargetState.format` and does **not** propagate
+  `.writeMask` / `.blend` into the HAL render-pipeline color-attachment state. (Two observable symptoms;
+  could be one color-target-state translation gap or two — **for yawgpu to localize**.)
+- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
+  `CTS_YAWGPU_BACKEND=vulkan`) are **byte-identical** — `pass=2 fail=21`, same case-by-case pattern.
+  `writeMask` + blending are MoltenVK-supported (Dawn/wgpu-native honor them), so this is **not** a
+  MoltenVK artifact (unlike F-033) and **not** Metal-specific — it points at yawgpu's shared
+  (HAL-agnostic) pipeline color-target-state translation.
+- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
+  The 21 failures stand until yawgpu applies the per-target `writeMask` + `blend`; re-run
+  `webgpu:api,operation,rendering,color_target_state:*` (Dawn-equal target `pass=23`).
+
+---
+
+## F-036 — wgpu-native aborts when a constant-factor blend draws without `setBlendConstant` (should default to `[0,0,0,0]`)
+
+- **Backend:** wgpu-native (`v29.0.0.0-8-g9176708`, real-GPU Metal). **Not** present in Dawn or yawgpu
+  (both run the cases — Dawn passes, yawgpu fails for the unrelated F-035 reason, neither crashes).
+- **Found by:** the T31 `rendering/color_target_state` ports — `blend_constant,initial` and
+  `blend_constant,not_inherited`, the two cases that intentionally **omit** `setBlendConstant` on a
+  `srcFactor=constant` pipeline to verify the constant defaults to `[0,0,0,0]`. **Dawn passes both;
+  wgpu-native aborts both** (`signal 6`; full run `pass=21 crash=2`).
+- **Observed:** at `queueSubmit`, wgpu-native raises `Validation Error … In a draw command … Blend
+  constant needs to be set`, then `fatal runtime error: failed to initiate panic … aborting` — a process
+  abort, like F-001/F-002. `blend_constant,setting` (which calls `setBlendConstant`) and every
+  `color_write_mask,*` case pass.
+- **Expected (WebGPU):** the render-pass blend constant **defaults to `(0,0,0,0)`**; `setBlendConstant`
+  is optional. Drawing a constant-factor blend without it is valid and must use `(0,0,0,0)`. Dawn and
+  yawgpu do not require the call.
+- **Two defects:** (a) wgpu-native wrongly **requires** `setBlendConstant` for constant-factor blends (a
+  spec deviation), and (b) it surfaces this as a **process abort** rather than a catchable validation
+  error (the F-001/F-002 abort class).
+- **Status:** **OPEN** (wgpu-native, bring-up reference). Contained via `--isolate`; the 2 cases
+  (`blend_constant,initial:*`, `blend_constant,not_inherited:*`) are marked expected in
+  `expectations/wgpu-native.txt` so an `--isolate --expectations …` run stays green (still an open defect,
+  not masked-away).
 
 ---
 

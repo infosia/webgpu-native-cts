@@ -115,3 +115,10 @@ webgpu:api,validation,buffer,mapping:getMappedRange,sizeAndOffsetOOB,mapped:*
 webgpu:api,validation,buffer,mapping:unmap,state,unmapped:*
 webgpu:api,validation,buffer,mapping:unmap,state,destroyed:*
 webgpu:api,validation,buffer,mapping:unmap,state,mapped:*
+
+# F-036: wgpu-native aborts when a constant-factor blend draws without setBlendConstant
+# (the blend constant should default to [0,0,0,0]; setBlendConstant is optional). Process abort
+# (signal 6) at queueSubmit. blend_constant,setting (which calls setBlendConstant) and all
+# color_write_mask,* pass.
+webgpu:api,operation,rendering,color_target_state:blend_constant,initial:*
+webgpu:api,operation,rendering,color_target_state:blend_constant,not_inherited:*
