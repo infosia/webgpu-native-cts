@@ -62,15 +62,17 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 **Open — yawgpu: none** (Metal **and** Vulkan). Confirmed on **native Windows/Vulkan, NVIDIA RTX 5060 Ti,
 2026-06-04**: both depth/stencil findings are now fixed on the Vulkan HAL too — F-031 `copy_depth_stencil`
 `pass=216 fail=0` (`cac328a`) and F-032 `image_copy` depth/stencil `pass=1152 fail=0` (`3c847ac`, up from
-`pass=352 fail=800`); the full ported suite on native Windows/Vulkan is green (`pass=7208 skip=388 fail=0`).
-The **GLES** HAL is the only remaining untested follow-up (not a known defect). F-033 is a
-likely-MoltenVK-only Mac artifact, not a yawgpu defect.
+`pass=352 fail=800`); the full ported suite on native Windows/Vulkan is green — **all 7596 ported cases**
+pass or skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `pass=…` totals elsewhere in
+this file are per-**subcase**, so they are much larger). The **GLES** HAL is the only remaining untested
+follow-up (not a known defect). F-033 is a **confirmed** MoltenVK-only Mac artifact, not a yawgpu defect.
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028 (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
 **Tooling / environment (not a backend conformance defect):** F-033 — color `copyTextureToTexture`
-pixel mismatches when yawgpu's Vulkan HAL is run on **Mac via MoltenVK**; likely a MoltenVK translation
-artifact (native Windows/Vulkan is fully clean — `pass=7208 fail=0`), low priority.
+pixel mismatches when yawgpu's Vulkan HAL is run on **Mac via MoltenVK**; a **confirmed** MoltenVK
+translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=7208 skip=388 fail=0`, all
+7596 cases), low priority.
 
 ---
 
@@ -776,13 +778,14 @@ artifact (native Windows/Vulkan is fully clean — `pass=7208 fail=0`), low prio
 
 ---
 
-## F-033 — color `copyTextureToTexture` pixel mismatches on Mac via MoltenVK (likely a MoltenVK artifact, not a yawgpu defect)
+## F-033 — color `copyTextureToTexture` pixel mismatches on Mac via MoltenVK (confirmed MoltenVK artifact, not a yawgpu defect)
 
 - **Environment finding, not a backend conformance defect.** Backend: yawgpu's **Vulkan** HAL **run on
   macOS through MoltenVK** (`CTS_YAWGPU_BACKEND=vulkan` on a `--features vulkan` build — see
   `docs/06-build-and-run.md`). **Not** present on yawgpu **Metal**, and **native Windows/Vulkan (NVIDIA)
-  passed everything through F-031**, which includes the T25 color `copyTextureToTexture` port — so this
-  is almost certainly a **MoltenVK (Vulkan→Metal) translation artifact**, not a yawgpu Vulkan-HAL bug.
+  does not exhibit it** (the yawgpu developer re-checked native Windows/Vulkan directly: color
+  `copyTextureToTexture` is clean there) — so this is a **MoltenVK (Vulkan→Metal) translation artifact**,
+  not a yawgpu Vulkan-HAL bug.
 - **Found by:** the fast-mode (`--sample-formats`) whole-suite measurement on yawgpu-Vulkan/MoltenVK
   (2026-06-03). `api,validation` is **fully clean** (`pass=9561 skip=816 fail=0`); the only color
   divergence is in `copyTextureToTexture`.
@@ -806,6 +809,12 @@ artifact (native Windows/Vulkan is fully clean — `pass=7208 fail=0`), low prio
   under MoltenVK pass on native Vulkan, confirming this is a MoltenVK (Vulkan→Metal) translation limitation,
   not actionable for yawgpu. No `expectations/` lines added. (Recorded because the Mac→Vulkan-via-MoltenVK
   path is now a documented diagnostic — see `docs/06-build-and-run.md` — and this is its main known caveat.)
+- **Re-confirmed on Mac/MoltenVK at the latest yawgpu (`3c847ac`, 2026-06-04):** color
+  `copyTextureToTexture` still mismatches (full run `pass=16614 fail=14512` — `color_textures` `array`
+  9400 + `non_array` 5076 + `zero_sized` 36, same `expected 0, got 1` signature), while F-031
+  `copy_depth_stencil` (`216/0`) and F-032 `image_copy` depth/stencil (`1152/0`) now **pass under MoltenVK
+  too**. So only the color-T2T translation gap remains under MoltenVK, and native Windows/Vulkan is clean —
+  isolating it firmly to MoltenVK, not yawgpu.
 
 ---
 

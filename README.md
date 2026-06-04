@@ -125,8 +125,11 @@ real-GPU Metal:
   depth/stencil findings are fixed on the Vulkan HAL: F-031 `copy_depth_stencil` `pass=216 fail=0`
   (`cac328a`) and F-032 `image_copy` depth/stencil `pass=1152 fail=0` (`3c847ac`, up from a confirmed
   native-hardware `pass=352 fail=800` gap — byte-identical to MoltenVK, i.e. a real HAL gap, not a
-  translation artifact). The full ported suite on native Vulkan is `pass=7208 skip=388 fail=0`. yawgpu now
-  has **no open findings on Metal or Vulkan**; the **GLES** HAL is the only untested follow-up.
+  translation artifact). The full ported suite on native Vulkan is green — all 7596 ported cases pass or
+  skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `pass=…` numbers above are
+  per-**subcase**). yawgpu now has **no open findings on Metal or Vulkan**; the **GLES** HAL is the only
+  untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
+  confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
@@ -194,7 +197,10 @@ test poisons another.
 fixed on the Vulkan HAL, `3c847ac`, up from a confirmed native `352 / 800` gap — byte-identical to the
 MoltenVK profile, i.e. a real HAL gap, since closed; see
 [F-032](docs/FINDINGS.md#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)).
-The full ported suite on native Vulkan is green: `pass=7208 skip=388 fail=0`.
+The full ported suite on native Vulkan is green — all 7596 ported cases pass or skip
+(`pass=7208 skip=388 fail=0`, a per-case count). The only Mac-only artifact (F-033 color
+`copyTextureToTexture` under MoltenVK) is a confirmed MoltenVK translation limitation, absent on native
+Vulkan.
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
