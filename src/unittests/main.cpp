@@ -225,7 +225,7 @@ int main() {
         }
 
         {
-            const auto cases = cts::ParamsBuilder()
+            const auto smallFormatCases = cts::ParamsBuilder()
                 .combine("format", {
                     static_cast<int64_t>(WGPUTextureFormat_R8Unorm),
                     static_cast<int64_t>(WGPUTextureFormat_RGBA8Unorm),
@@ -233,12 +233,12 @@ int main() {
                     static_cast<int64_t>(WGPUTextureFormat_RGBA8Uint),
                 })
                 .expand();
-            const auto sampled = cts::sampleFormatsInCases(cases, representativeFormatHook());
-            require(sampled.size() == cases.size(), "small format sweep unchanged");
+            const auto sampled = cts::sampleFormatsInCases(smallFormatCases, representativeFormatHook());
+            require(sampled.size() == smallFormatCases.size(), "small format sweep unchanged");
         }
 
         {
-            const auto cases = cts::ParamsBuilder()
+            const auto zeroSurvivorCases = cts::ParamsBuilder()
                 .combine("format", {
                     static_cast<int64_t>(WGPUTextureFormat_R8Unorm),
                     static_cast<int64_t>(WGPUTextureFormat_R8Snorm),
@@ -249,14 +249,14 @@ int main() {
                     static_cast<int64_t>(WGPUTextureFormat_RG8Uint),
                 })
                 .expand();
-            const auto sampled = cts::sampleFormatsInCases(cases, representativeFormatHook());
-            require(sampled.size() == cases.size(), "zero-survivor format sweep unchanged");
+            const auto sampled = cts::sampleFormatsInCases(zeroSurvivorCases, representativeFormatHook());
+            require(sampled.size() == zeroSurvivorCases.size(), "zero-survivor format sweep unchanged");
         }
 
         {
-            const auto cases = cts::ParamsBuilder().combine("dimension", {1, 2, 3, 4, 5, 6, 7}).expand();
-            const auto sampled = cts::sampleFormatsInCases(cases, representativeFormatHook());
-            require(sampled.size() == cases.size(), "no format-like param unchanged");
+            const auto dimensionCases = cts::ParamsBuilder().combine("dimension", {1, 2, 3, 4, 5, 6, 7}).expand();
+            const auto sampled = cts::sampleFormatsInCases(dimensionCases, representativeFormatHook());
+            require(sampled.size() == dimensionCases.size(), "no format-like param unchanged");
         }
 
         {
@@ -511,22 +511,22 @@ int main() {
                 "crash-list lines sorted unique crashes");
 
         {
-            const std::vector<std::string> cases = {
+            const std::vector<std::string> shardCases = {
                 "case0", "case1", "case2", "case3", "case4", "case5", "case6", "case7", "case8", "case9",
                 "case10", "case11", "case12", "case13", "case14", "case15", "case16",
             };
             for (const int shardCount : {1, 3, 8}) {
                 std::vector<std::string> unioned;
-                std::vector<bool> seen(cases.size(), false);
+                std::vector<bool> seen(shardCases.size(), false);
                 for (int shardIndex = 0; shardIndex < shardCount; ++shardIndex) {
-                    for (size_t i = 0; i < cases.size(); ++i) {
+                    for (size_t i = 0; i < shardCases.size(); ++i) {
                         const bool selected = cts::caseBelongsToShard(i, shardIndex, shardCount);
                         require(selected == (i % static_cast<size_t>(shardCount) == static_cast<size_t>(shardIndex)),
                                 "shard assignment is idx modulo shard count");
                         if (selected) {
                             require(!seen[i], "shard partition is disjoint");
                             seen[i] = true;
-                            unioned.push_back(cases[i]);
+                            unioned.push_back(shardCases[i]);
                         }
                     }
                 }
@@ -535,7 +535,7 @@ int main() {
                 }
                 std::vector<std::string> sortedUnion = unioned;
                 std::sort(sortedUnion.begin(), sortedUnion.end());
-                std::vector<std::string> sortedCases = cases;
+                std::vector<std::string> sortedCases = shardCases;
                 std::sort(sortedCases.begin(), sortedCases.end());
                 require(sortedUnion == sortedCases, "shard partition union equals full set");
             }

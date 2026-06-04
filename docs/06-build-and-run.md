@@ -195,7 +195,7 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 |--------|--------|
 | `--list` / `--list-cases` | print matching paths/cases; do not run |
 | `--sample-formats` | opt-in fast-iteration mode for large texture-format sweeps; keeps only representative formats, prints a stderr notice/recap, and is not full conformance coverage |
-| `--workers N` | POSIX-only parallel runner: fork `N` shard workers on one machine, merge their machine-readable results back into the same ordered text summary as a sequential run. `N=1` is sequential. Incompatible with `--isolate` and `--crash-list`; on Windows, use `--shard I/N` from separate processes/CI jobs |
+| `--workers N` | parallel runner: spawn `N` shard workers on one machine, merge their machine-readable results back into the same ordered text summary as a sequential run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess`. `N=1` is sequential. Incompatible with `--isolate` and `--crash-list` |
 | `--shard I/N` | run or list only the deterministic round-robin shard where case index `idx % N == I`; works with `--list-cases` for partition checks and can be used directly in CI on any platform |
 | `--verbose` / `--quiet` | log level |
 | `--power-preference {low,high}` | adapter selection |

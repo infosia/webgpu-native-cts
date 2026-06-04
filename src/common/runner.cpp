@@ -694,11 +694,16 @@ std::vector<SubcaseResult> collectShardResultRuns(
     return results;
 }
 
-#if !defined(_WIN32)
 struct WorkerState {
     int shard = 0;
+#if defined(_WIN32)
+    PROCESS_INFORMATION proc{};
+    HANDLE readPipe = INVALID_HANDLE_VALUE;
+    bool pipeDrained = false;
+#else
     pid_t pid = -1;
     int fd = -1;
+#endif
     std::string buffer;
     std::vector<size_t> positions;
     size_t next = 0;
@@ -708,6 +713,31 @@ std::string shardArg(int shard, int workers) {
     return std::to_string(shard) + "/" + std::to_string(workers);
 }
 
+std::vector<std::string> workerArgs(
+    const RunOptions& options,
+    const std::vector<std::string>& queryTexts,
+    int shard,
+    int workers,
+    const std::vector<size_t>& positions,
+    size_t next) {
+    std::vector<std::string> args;
+    args.push_back(options.executablePath);
+    for (const std::string& arg : options.forwardedArgs) {
+        args.push_back(arg);
+    }
+    for (const std::string& query : queryTexts) {
+        args.push_back(query);
+    }
+    args.push_back("--shard");
+    args.push_back(shardArg(shard, workers));
+    args.push_back("--shard-results");
+    if (next < positions.size() && positions[next] > 0) {
+        args.push_back("--shard-from");
+        args.push_back(std::to_string(positions[next]));
+    }
+    return args;
+}
+
 WorkerState spawnWorker(
     const RunOptions& options,
     const std::vector<std::string>& queryTexts,
@@ -715,6 +745,83 @@ WorkerState spawnWorker(
     int workers,
     const std::vector<size_t>& positions,
     size_t next) {
+#if defined(_WIN32)
+    SECURITY_ATTRIBUTES inheritable{};
+    inheritable.nLength = sizeof(inheritable);
+    inheritable.bInheritHandle = TRUE;
+
+    HANDLE stdoutRead = INVALID_HANDLE_VALUE;
+    HANDLE stdoutWrite = INVALID_HANDLE_VALUE;
+    if (!CreatePipe(&stdoutRead, &stdoutWrite, &inheritable, 0)) {
+        throw std::runtime_error(windowsErrorMessage("CreatePipe", GetLastError()));
+    }
+    if (!SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0)) {
+        const DWORD error = GetLastError();
+        CloseHandle(stdoutRead);
+        CloseHandle(stdoutWrite);
+        throw std::runtime_error(windowsErrorMessage("SetHandleInformation", error));
+    }
+
+    HANDLE nulHandle = CreateFileA(
+        "NUL",
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &inheritable,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (nulHandle == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        CloseHandle(stdoutRead);
+        CloseHandle(stdoutWrite);
+        throw std::runtime_error(windowsErrorMessage("CreateFileA(NUL)", error));
+    }
+
+    std::string commandLine;
+    for (const std::string& arg : workerArgs(options, queryTexts, shard, workers, positions, next)) {
+        if (!commandLine.empty()) {
+            commandLine.push_back(' ');
+        }
+        commandLine += quoteWindowsArg(arg);
+    }
+
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = stdoutWrite;
+    startup.hStdError = nulHandle;
+
+    PROCESS_INFORMATION process{};
+    BOOL created = CreateProcessA(
+        options.executablePath.c_str(),
+        commandLine.data(),
+        nullptr,
+        nullptr,
+        TRUE,
+        0,
+        nullptr,
+        nullptr,
+        &startup,
+        &process);
+    if (!created) {
+        const DWORD error = GetLastError();
+        CloseHandle(stdoutRead);
+        CloseHandle(stdoutWrite);
+        CloseHandle(nulHandle);
+        throw std::runtime_error(windowsErrorMessage("CreateProcessA", error));
+    }
+
+    CloseHandle(stdoutWrite);
+    CloseHandle(nulHandle);
+    WorkerState worker;
+    worker.shard = shard;
+    worker.proc = process;
+    worker.readPipe = stdoutRead;
+    worker.positions = positions;
+    worker.next = next;
+    return worker;
+#else
     std::array<int, 2> stdoutPipe{};
     if (pipe(stdoutPipe.data()) != 0) {
         throw std::runtime_error("pipe failed: " + std::string(std::strerror(errno)));
@@ -739,21 +846,7 @@ WorkerState spawnWorker(
             close(devNull);
         }
 
-        std::vector<std::string> args;
-        args.push_back(options.executablePath);
-        for (const std::string& arg : options.forwardedArgs) {
-            args.push_back(arg);
-        }
-        for (const std::string& query : queryTexts) {
-            args.push_back(query);
-        }
-        args.push_back("--shard");
-        args.push_back(shardArg(shard, workers));
-        args.push_back("--shard-results");
-        if (next < positions.size() && positions[next] > 0) {
-            args.push_back("--shard-from");
-            args.push_back(std::to_string(positions[next]));
-        }
+        std::vector<std::string> args = workerArgs(options, queryTexts, shard, workers, positions, next);
 
         std::vector<char*> argv;
         argv.reserve(args.size() + 1);
@@ -771,16 +864,44 @@ WorkerState spawnWorker(
         (void)fcntl(stdoutPipe[0], F_SETFL, flags | O_NONBLOCK);
     }
     return WorkerState{shard, pid, stdoutPipe[0], "", positions, next};
+#endif
 }
 
-std::string workerExitMessage(int status) {
+struct WorkerExit {
+    bool clean = false;
+    std::string message;
+};
+
+WorkerExit waitWorkerExit(WorkerState& worker) {
+#if defined(_WIN32)
+    WaitForSingleObject(worker.proc.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    if (!GetExitCodeProcess(worker.proc.hProcess, &exitCode)) {
+        const DWORD error = GetLastError();
+        CloseHandle(worker.proc.hThread);
+        CloseHandle(worker.proc.hProcess);
+        throw std::runtime_error(windowsErrorMessage("GetExitCodeProcess", error));
+    }
+    CloseHandle(worker.proc.hThread);
+    CloseHandle(worker.proc.hProcess);
+    return WorkerExit{exitCode == 0, exitCode == 0 ? "" : windowsExitMessage(exitCode)};
+#else
+    int status = 0;
+    while (waitpid(worker.pid, &status, 0) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        throw std::runtime_error("waitpid failed: " + std::string(std::strerror(errno)));
+    }
     if (WIFSIGNALED(status)) {
-        return signalMessage(WTERMSIG(status));
+        return WorkerExit{false, signalMessage(WTERMSIG(status))};
     }
     if (WIFEXITED(status)) {
-        return "child exited " + std::to_string(WEXITSTATUS(status));
+        const int exitCode = WEXITSTATUS(status);
+        return WorkerExit{exitCode == 0, exitCode == 0 ? "" : "child exited " + std::to_string(exitCode)};
     }
-    return "child did not exit normally";
+    return WorkerExit{false, "child did not exit normally"};
+#endif
 }
 
 void advanceCompletedWorkerCases(
@@ -855,17 +976,10 @@ std::optional<WorkerState> finishWorker(
         worker.buffer.clear();
     }
 
-    int status = 0;
-    while (waitpid(worker.pid, &status, 0) < 0) {
-        if (errno == EINTR) {
-            continue;
-        }
-        throw std::runtime_error("waitpid failed: " + std::string(std::strerror(errno)));
-    }
+    const WorkerExit exit = waitWorkerExit(worker);
 
     advanceCompletedWorkerCases(worker, cases, resultsByCase);
-    const bool cleanExit = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-    if (cleanExit && worker.next >= worker.positions.size()) {
+    if (exit.clean && worker.next >= worker.positions.size()) {
         return std::nullopt;
     }
 
@@ -875,7 +989,7 @@ std::optional<WorkerState> finishWorker(
         resultsByCase[crashedPosition].push_back(SubcaseResult{
             cases[crashedPosition].query,
             TestStatus::Crash,
-            cleanExit ? "shard worker ended before reporting case" : "shard worker aborted: " + workerExitMessage(status),
+            exit.clean ? "shard worker ended before reporting case" : "shard worker aborted: " + exit.message,
         });
         ++worker.next;
     }
@@ -907,6 +1021,71 @@ std::vector<SubcaseResult> collectParallelRuns(
         }
     }
 
+#if defined(_WIN32)
+    std::vector<char> buffer(4096);
+    while (!workers.empty()) {
+        bool hadActivity = false;
+        for (size_t i = 0; i < workers.size();) {
+            WorkerState& worker = workers[i];
+            if (!worker.pipeDrained) {
+                DWORD bytesAvailable = 0;
+                if (!PeekNamedPipe(worker.readPipe, nullptr, 0, nullptr, &bytesAvailable, nullptr)) {
+                    const DWORD error = GetLastError();
+                    if (error == ERROR_BROKEN_PIPE) {
+                        CloseHandle(worker.readPipe);
+                        worker.readPipe = INVALID_HANDLE_VALUE;
+                        worker.pipeDrained = true;
+                        hadActivity = true;
+                    } else {
+                        CloseHandle(worker.readPipe);
+                        throw std::runtime_error(windowsErrorMessage("PeekNamedPipe", error));
+                    }
+                } else if (bytesAvailable > 0) {
+                    if (buffer.size() < bytesAvailable) {
+                        buffer.resize(bytesAvailable);
+                    }
+                    DWORD bytesRead = 0;
+                    if (!ReadFile(worker.readPipe, buffer.data(), bytesAvailable, &bytesRead, nullptr)) {
+                        const DWORD error = GetLastError();
+                        if (error == ERROR_BROKEN_PIPE) {
+                            CloseHandle(worker.readPipe);
+                            worker.readPipe = INVALID_HANDLE_VALUE;
+                            worker.pipeDrained = true;
+                            hadActivity = true;
+                        } else {
+                            CloseHandle(worker.readPipe);
+                            throw std::runtime_error(windowsErrorMessage("ReadFile", error));
+                        }
+                    } else if (bytesRead == 0) {
+                        CloseHandle(worker.readPipe);
+                        worker.readPipe = INVALID_HANDLE_VALUE;
+                        worker.pipeDrained = true;
+                        hadActivity = true;
+                    } else {
+                        drainWorkerLines(worker, buffer.data(), bytesRead, cases, resultsByCase);
+                        hadActivity = true;
+                    }
+                }
+            }
+
+            if (!worker.pipeDrained || WaitForSingleObject(worker.proc.hProcess, 0) != WAIT_OBJECT_0) {
+                ++i;
+                continue;
+            }
+
+            std::optional<WorkerState> replacement =
+                finishWorker(std::move(workers[i]), options, queryTexts, cases, resultsByCase);
+            workers.erase(workers.begin() + static_cast<std::ptrdiff_t>(i));
+            if (replacement) {
+                workers.push_back(std::move(*replacement));
+            }
+            hadActivity = true;
+        }
+        if (!hadActivity) {
+            Sleep(2);
+        }
+    }
+#else
     std::array<char, 4096> buffer{};
     while (!workers.empty()) {
         std::vector<pollfd> fds;
@@ -965,6 +1144,7 @@ std::vector<SubcaseResult> collectParallelRuns(
             }
         }
     }
+#endif
 
     std::vector<SubcaseResult> merged;
     for (size_t i = 0; i < cases.size(); ++i) {
@@ -976,7 +1156,6 @@ std::vector<SubcaseResult> collectParallelRuns(
     }
     return merged;
 }
-#endif
 
 int printRunResults(const std::vector<SubcaseResult>& results, const ExpectationSet& expectations) {
     size_t pass = 0;
@@ -1089,10 +1268,6 @@ int runQueries(const RunOptions& options) {
             std::cerr << "--workers is incompatible with --isolate and --crash-list\n";
             return 1;
         }
-#if defined(_WIN32)
-        std::cerr << "--workers is POSIX-only for now; use --shard I/N across processes/CI\n";
-        return 1;
-#endif
     }
 
     if (options.list || options.listCases) {
@@ -1134,17 +1309,12 @@ int runQueries(const RunOptions& options) {
         std::cerr << "format-sample: representative-formats mode ON - non-representative format cases are SKIPPED; this is NOT full conformance coverage.\n";
     }
     if (options.workers >= 2) {
-#if defined(_WIN32)
-        std::cerr << "--workers is POSIX-only for now; use --shard I/N across processes/CI\n";
-        return 1;
-#else
         try {
             results = collectParallelRuns(options, queries, &sampleStats);
         } catch (const std::exception& e) {
             std::cerr << e.what() << "\n";
             return 1;
         }
-#endif
     } else if (options.shardResults) {
         (void)collectShardResultRuns(options, queries, &sampleStats);
         return 0;
