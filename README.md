@@ -113,7 +113,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
-- **yawgpu** — the primary conformance subject — passes **every ported test through T29** (all
+- **yawgpu** — the primary conformance subject — passes **every ported test through T30** (all
   `api,validation` at `pass=4332`, plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone`
   operation tests and the full color **and** depth/stencil image-copy / `copyTextureToTexture` ports:
   `image_copy` `pass=138408 fail=0` (color + depth/stencil), color `copyTextureToTexture`
@@ -131,10 +131,10 @@ real-GPU Metal:
   native-hardware `pass=352 fail=800` gap — byte-identical to MoltenVK, i.e. a real HAL gap, not a
   translation artifact). The full ported suite on native Vulkan is green — all 7596 ported cases pass or
   skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `pass=…` numbers above are
-  per-**subcase**). The depth/stencil findings are all resolved on Metal **and** Vulkan; yawgpu's **one
-open finding** is **F-034** — a fragment `read_write` storage write is lost on **indexed/indirect** draws
-(surfaced by the T30 `rendering/draw` port: Dawn + wgpu-native pass all 744, yawgpu fails 224). The
-**GLES** HAL is the only
+  per-**subcase**). The depth/stencil findings are all resolved on Metal **and** Vulkan. The T30
+`rendering/draw` port surfaced **F-034** (yawgpu didn't execute **indexed/indirect** draws), now
+**resolved** (`36a6b66`): `rendering/draw` `pass=564 fail=0` (Dawn/wgpu-equal). **yawgpu has no open
+findings**; the **GLES** HAL is the only
   untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.

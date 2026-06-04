@@ -59,10 +59,12 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032
 — each keeps a compact record below.
-**Open — yawgpu:** [F-034](#f-034--yawgpu-a-fragment-storage-write-is-lost-on-indexed--indirect-draws)
-— a fragment storage write is lost on **indexed/indirect** draws (`rendering/draw`, T30; Dawn + wgpu-native
-pass all 744, yawgpu fails 224). The depth/stencil findings are all resolved: confirmed on **native
-Windows/Vulkan, NVIDIA RTX 5060 Ti, 2026-06-04** — F-031 `copy_depth_stencil`
+**Open — yawgpu: none.**
+[F-034](#f-034--yawgpu-a-fragment-storage-write-is-lost-on-indexed--indirect-draws) (yawgpu didn't execute
+**indexed/indirect** draws — `rendering/draw`, T30) is now **resolved** (`36a6b66`, real-GPU Metal:
+`pass=564 fail=0`, was `340 fail=224`); it reproduced byte-identically on Metal + Vulkan/MoltenVK, which
+localized it to yawgpu's shared draw path. The depth/stencil findings are all resolved too: confirmed on
+**native Windows/Vulkan, NVIDIA RTX 5060 Ti, 2026-06-04** — F-031 `copy_depth_stencil`
 `pass=216 fail=0` (`cac328a`) and F-032 `image_copy` depth/stencil `pass=1152 fail=0` (`3c847ac`, up from
 `pass=352 fail=800`); the full ported suite on native Windows/Vulkan is green — **all 7596 ported cases**
 pass or skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `pass=…` totals elsewhere in
@@ -848,10 +850,14 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   indexed/indirect draw + fragment storage write are MoltenVK-supported (Dawn/wgpu-native pass), so this
   is **not** a MoltenVK artifact (unlike F-033) and **not** Metal-specific — it points at yawgpu's
   **shared (HAL-agnostic) indexed/indirect draw path**, not a per-HAL backend.
-- **Status:** **OPEN** — yawgpu's only open finding. 3-way confirmed (Dawn + wgpu-native pass all 744).
-  No `expectations/yawgpu.txt` lines added (surfaced for the fix, not masked; real-GPU runs use the Bash
-  sandbox disabled — see the F-023 note). The T30 port is committed (Dawn/wgpu-verified); the
-  `vertex_attributes,*` + `largeish_buffer` slices are deferred (unimplemented).
+- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal; yawgpu `36a6b66`). The root cause was that
+  yawgpu **did not execute indexed / indirect draws** at all (the `drawIndexed` / `drawIndirect` /
+  `drawIndexedIndirect` paths weren't issued) — so neither the raster nor the fragment storage write
+  happened (the `result==0` was the first-reported symptom). yawgpu `36a6b66` ("implement indexed /
+  indirect draw execution") adds those paths. Re-test: `rendering/draw` `pass=564 fail=0` (Dawn/wgpu-equal,
+  up from `pass=340 fail=224`); V1/V2 unaffected. 3-way confirmed (Dawn + wgpu-native pass all 744). No
+  `expectations/yawgpu.txt` lines were ever added (surfaced for the fix, not masked). The cross-HAL
+  reproduction above (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's shared draw path.
 
 ---
 
