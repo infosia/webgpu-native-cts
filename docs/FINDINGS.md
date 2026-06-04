@@ -59,8 +59,10 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032
 — each keeps a compact record below.
-**Open — yawgpu: none** (Metal **and** Vulkan). Confirmed on **native Windows/Vulkan, NVIDIA RTX 5060 Ti,
-2026-06-04**: both depth/stencil findings are now fixed on the Vulkan HAL too — F-031 `copy_depth_stencil`
+**Open — yawgpu:** [F-034](#f-034--yawgpu-a-fragment-storage-write-is-lost-on-indexed--indirect-draws)
+— a fragment storage write is lost on **indexed/indirect** draws (`rendering/draw`, T30; Dawn + wgpu-native
+pass all 744, yawgpu fails 224). The depth/stencil findings are all resolved: confirmed on **native
+Windows/Vulkan, NVIDIA RTX 5060 Ti, 2026-06-04** — F-031 `copy_depth_stencil`
 `pass=216 fail=0` (`cac328a`) and F-032 `image_copy` depth/stencil `pass=1152 fail=0` (`3c847ac`, up from
 `pass=352 fail=800`); the full ported suite on native Windows/Vulkan is green — **all 7596 ported cases**
 pass or skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `pass=…` totals elsewhere in
@@ -815,6 +817,35 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   `copy_depth_stencil` (`216/0`) and F-032 `image_copy` depth/stencil (`1152/0`) now **pass under MoltenVK
   too**. So only the color-T2T translation gap remains under MoltenVK, and native Windows/Vulkan is clean —
   isolating it firmly to MoltenVK, not yawgpu.
+
+---
+
+## F-034 — yawgpu: a fragment storage write is lost on **indexed / indirect** draws
+
+- **Backend:** yawgpu (`af9ac5c`, real-GPU Metal). **Not** present in Dawn or wgpu-native.
+- **Found by:** the T30 `rendering/draw` ports (`arguments`, `default_arguments`) — the suite's first
+  vertex/index-buffer + multi-variant draw coverage. **Dawn (oracle) and wgpu-native both pass all 744**
+  with the exact same harness code; **yawgpu fails 224** (`pass=340 fail=224`, plus 183 feature-gated
+  skips for `indirect-first-instance`), which isolates the behavior to the backend.
+- **Observed (all 224 failures are `result` buffer `expected 1, got 0`):** the test's fragment shader
+  writes `result.value = 1u` to a `@group(0) @binding(0) var<storage, read_write>` whenever it runs; the
+  read-back is **0** (the write didn't take effect) for:
+  - **indexed** draws — `indexed=true` (both direct `drawIndexed` 128 and `drawIndexedIndirect` 64), and
+  - **indirect** non-indexed draws — `indexed=false; indirect=true` (`drawIndirect`, 16).
+  - **Plain `draw` (`indexed=false; indirect=false`) passes** — the fragment storage write works there.
+  `default_arguments` mirrors it: the 8 `draw` subcases pass, the 16 `drawIndexed` subcases fail.
+- **Expected (WebGPU):** a fragment-stage `read_write` storage write must take effect on every draw
+  variant. Dawn and wgpu-native do.
+- **Scope / localization:** the divergence is on the **`drawIndexed` / `drawIndirect` /
+  `drawIndexedIndirect`** paths specifically (the index-buffer and/or indirect-buffer draw encoding);
+  the plain `draw` path is fine. The reported failure is the fragment **storage side-effect**
+  (`result==0`); the test's first-failure report doesn't say whether the raster (the green pixels) also
+  diverges on these paths — **for yawgpu to localize** (fragment storage binding/flush on indexed/indirect
+  draws vs the draw not rasterizing at all).
+- **Status:** **OPEN** — yawgpu's only open finding. 3-way confirmed (Dawn + wgpu-native pass all 744).
+  No `expectations/yawgpu.txt` lines added (surfaced for the fix, not masked; real-GPU runs use the Bash
+  sandbox disabled — see the F-023 note). The T30 port is committed (Dawn/wgpu-verified); the
+  `vertex_attributes,*` + `largeish_buffer` slices are deferred (unimplemented).
 
 ---
 
