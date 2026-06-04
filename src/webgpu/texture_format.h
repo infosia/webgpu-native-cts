@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include "cts/webgpu.h"
@@ -21,6 +22,7 @@ enum class TextureFormatClass {
 
 struct TextureFormatInfo {
     WGPUTextureFormat format;
+    std::string_view identifier;
     uint32_t blockWidth;
     uint32_t blockHeight;
     uint32_t bytesPerBlock;
@@ -77,110 +79,110 @@ inline constexpr std::array<WGPUTextureViewDimension, 6> kTextureViewDimensions 
 inline constexpr uint32_t kLevels = 6;
 
 inline constexpr std::array<TextureFormatInfo, 49> kUncompressedTextureFormatInfos = {{
-    {WGPUTextureFormat_R8Unorm, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R8Snorm, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R8Uint, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R8Sint, 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG8Unorm, 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG8Snorm, 1, 1, 2, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG8Uint, 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG8Sint, 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA8Unorm, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA8UnormSrgb, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA8Snorm, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA8Uint, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA8Sint, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_BGRA8Unorm, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_BGRA8UnormSrgb, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R16Unorm, 1, 1, 2, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R16Snorm, 1, 1, 2, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R16Uint, 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R16Sint, 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R16Float, 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG16Unorm, 1, 1, 4, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG16Snorm, 1, 1, 4, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG16Uint, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG16Sint, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG16Float, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA16Unorm, 1, 1, 8, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA16Snorm, 1, 1, 8, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA16Uint, 1, 1, 8, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA16Sint, 1, 1, 8, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA16Float, 1, 1, 8, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R32Uint, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R32Sint, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_R32Float, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG32Uint, 1, 1, 8, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG32Sint, 1, 1, 8, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG32Float, 1, 1, 8, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA32Uint, 1, 1, 16, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA32Sint, 1, 1, 16, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGBA32Float, 1, 1, 16, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGB10A2Uint, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGB10A2Unorm, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RG11B10Ufloat, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_RGB9E5Ufloat, 1, 1, 4, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_Stencil8, 1, 1, 1, false, true, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_Depth16Unorm, 1, 1, 2, true, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_Depth32Float, 1, 1, 4, true, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_Depth24Plus, 1, 1, 0, true, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_Depth24PlusStencil8, 1, 1, 1, true, true, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
-    {WGPUTextureFormat_Depth32FloatStencil8, 1, 1, 4, true, true, true, WGPUFeatureName_Depth32FloatStencil8, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R8Unorm, "r8unorm", 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R8Snorm, "r8snorm", 1, 1, 1, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R8Uint, "r8uint", 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R8Sint, "r8sint", 1, 1, 1, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG8Unorm, "rg8unorm", 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG8Snorm, "rg8snorm", 1, 1, 2, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG8Uint, "rg8uint", 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG8Sint, "rg8sint", 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA8Unorm, "rgba8unorm", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA8UnormSrgb, "rgba8unorm-srgb", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA8Snorm, "rgba8snorm", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA8Uint, "rgba8uint", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA8Sint, "rgba8sint", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_BGRA8Unorm, "bgra8unorm", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_BGRA8UnormSrgb, "bgra8unorm-srgb", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R16Unorm, "r16unorm", 1, 1, 2, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R16Snorm, "r16snorm", 1, 1, 2, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R16Uint, "r16uint", 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R16Sint, "r16sint", 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R16Float, "r16float", 1, 1, 2, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG16Unorm, "rg16unorm", 1, 1, 4, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG16Snorm, "rg16snorm", 1, 1, 4, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG16Uint, "rg16uint", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG16Sint, "rg16sint", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG16Float, "rg16float", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA16Unorm, "rgba16unorm", 1, 1, 8, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA16Snorm, "rgba16snorm", 1, 1, 8, false, false, true, WGPUFeatureName_TextureFormatsTier1, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA16Uint, "rgba16uint", 1, 1, 8, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA16Sint, "rgba16sint", 1, 1, 8, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA16Float, "rgba16float", 1, 1, 8, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R32Uint, "r32uint", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R32Sint, "r32sint", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_R32Float, "r32float", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG32Uint, "rg32uint", 1, 1, 8, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG32Sint, "rg32sint", 1, 1, 8, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG32Float, "rg32float", 1, 1, 8, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA32Uint, "rgba32uint", 1, 1, 16, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA32Sint, "rgba32sint", 1, 1, 16, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGBA32Float, "rgba32float", 1, 1, 16, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGB10A2Uint, "rgb10a2uint", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGB10A2Unorm, "rgb10a2unorm", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RG11B10Ufloat, "rg11b10ufloat", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_RGB9E5Ufloat, "rgb9e5ufloat", 1, 1, 4, false, false, false, WGPUFeatureName_Force32, false, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_Stencil8, "stencil8", 1, 1, 1, false, true, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_Depth16Unorm, "depth16unorm", 1, 1, 2, true, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_Depth32Float, "depth32float", 1, 1, 4, true, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_Depth24Plus, "depth24plus", 1, 1, 0, true, false, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_Depth24PlusStencil8, "depth24plus-stencil8", 1, 1, 1, true, true, false, WGPUFeatureName_Force32, true, TextureFormatClass::Uncompressed},
+    {WGPUTextureFormat_Depth32FloatStencil8, "depth32float-stencil8", 1, 1, 4, true, true, true, WGPUFeatureName_Depth32FloatStencil8, true, TextureFormatClass::Uncompressed},
 }};
 
 inline constexpr std::array<TextureFormatInfo, 52> kCompressedTextureFormatInfos = {{
-    {WGPUTextureFormat_BC1RGBAUnorm, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC1RGBAUnormSrgb, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC2RGBAUnorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC2RGBAUnormSrgb, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC3RGBAUnorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC3RGBAUnormSrgb, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC4RUnorm, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC4RSnorm, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC5RGUnorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC5RGSnorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC6HRGBUfloat, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC6HRGBFloat, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC7RGBAUnorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_BC7RGBAUnormSrgb, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
-    {WGPUTextureFormat_ETC2RGB8Unorm, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_ETC2RGB8UnormSrgb, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_ETC2RGB8A1Unorm, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_ETC2RGB8A1UnormSrgb, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_ETC2RGBA8Unorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_ETC2RGBA8UnormSrgb, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_EACR11Unorm, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_EACR11Snorm, 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_EACRG11Unorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_EACRG11Snorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
-    {WGPUTextureFormat_ASTC4x4Unorm, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC4x4UnormSrgb, 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC5x4Unorm, 5, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC5x4UnormSrgb, 5, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC5x5Unorm, 5, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC5x5UnormSrgb, 5, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC6x5Unorm, 6, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC6x5UnormSrgb, 6, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC6x6Unorm, 6, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC6x6UnormSrgb, 6, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC8x5Unorm, 8, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC8x5UnormSrgb, 8, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC8x6Unorm, 8, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC8x6UnormSrgb, 8, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC8x8Unorm, 8, 8, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC8x8UnormSrgb, 8, 8, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC10x5Unorm, 10, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC10x5UnormSrgb, 10, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC10x6Unorm, 10, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC10x6UnormSrgb, 10, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC10x8Unorm, 10, 8, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC10x8UnormSrgb, 10, 8, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC10x10Unorm, 10, 10, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC10x10UnormSrgb, 10, 10, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC12x10Unorm, 12, 10, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC12x10UnormSrgb, 12, 10, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC12x12Unorm, 12, 12, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
-    {WGPUTextureFormat_ASTC12x12UnormSrgb, 12, 12, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_BC1RGBAUnorm, "bc1-rgba-unorm", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC1RGBAUnormSrgb, "bc1-rgba-unorm-srgb", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC2RGBAUnorm, "bc2-rgba-unorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC2RGBAUnormSrgb, "bc2-rgba-unorm-srgb", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC3RGBAUnorm, "bc3-rgba-unorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC3RGBAUnormSrgb, "bc3-rgba-unorm-srgb", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC4RUnorm, "bc4-r-unorm", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC4RSnorm, "bc4-r-snorm", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC5RGUnorm, "bc5-rg-unorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC5RGSnorm, "bc5-rg-snorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC6HRGBUfloat, "bc6h-rgb-ufloat", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC6HRGBFloat, "bc6h-rgb-float", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC7RGBAUnorm, "bc7-rgba-unorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_BC7RGBAUnormSrgb, "bc7-rgba-unorm-srgb", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionBC, false, TextureFormatClass::BC},
+    {WGPUTextureFormat_ETC2RGB8Unorm, "etc2-rgb8unorm", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_ETC2RGB8UnormSrgb, "etc2-rgb8unorm-srgb", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_ETC2RGB8A1Unorm, "etc2-rgb8a1unorm", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_ETC2RGB8A1UnormSrgb, "etc2-rgb8a1unorm-srgb", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_ETC2RGBA8Unorm, "etc2-rgba8unorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_ETC2RGBA8UnormSrgb, "etc2-rgba8unorm-srgb", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_EACR11Unorm, "eac-r11unorm", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_EACR11Snorm, "eac-r11snorm", 4, 4, 8, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_EACRG11Unorm, "eac-rg11unorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_EACRG11Snorm, "eac-rg11snorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionETC2, false, TextureFormatClass::ETC2},
+    {WGPUTextureFormat_ASTC4x4Unorm, "astc-4x4-unorm", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC4x4UnormSrgb, "astc-4x4-unorm-srgb", 4, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC5x4Unorm, "astc-5x4-unorm", 5, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC5x4UnormSrgb, "astc-5x4-unorm-srgb", 5, 4, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC5x5Unorm, "astc-5x5-unorm", 5, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC5x5UnormSrgb, "astc-5x5-unorm-srgb", 5, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC6x5Unorm, "astc-6x5-unorm", 6, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC6x5UnormSrgb, "astc-6x5-unorm-srgb", 6, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC6x6Unorm, "astc-6x6-unorm", 6, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC6x6UnormSrgb, "astc-6x6-unorm-srgb", 6, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC8x5Unorm, "astc-8x5-unorm", 8, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC8x5UnormSrgb, "astc-8x5-unorm-srgb", 8, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC8x6Unorm, "astc-8x6-unorm", 8, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC8x6UnormSrgb, "astc-8x6-unorm-srgb", 8, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC8x8Unorm, "astc-8x8-unorm", 8, 8, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC8x8UnormSrgb, "astc-8x8-unorm-srgb", 8, 8, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC10x5Unorm, "astc-10x5-unorm", 10, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC10x5UnormSrgb, "astc-10x5-unorm-srgb", 10, 5, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC10x6Unorm, "astc-10x6-unorm", 10, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC10x6UnormSrgb, "astc-10x6-unorm-srgb", 10, 6, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC10x8Unorm, "astc-10x8-unorm", 10, 8, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC10x8UnormSrgb, "astc-10x8-unorm-srgb", 10, 8, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC10x10Unorm, "astc-10x10-unorm", 10, 10, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC10x10UnormSrgb, "astc-10x10-unorm-srgb", 10, 10, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC12x10Unorm, "astc-12x10-unorm", 12, 10, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC12x10UnormSrgb, "astc-12x10-unorm-srgb", 12, 10, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC12x12Unorm, "astc-12x12-unorm", 12, 12, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
+    {WGPUTextureFormat_ASTC12x12UnormSrgb, "astc-12x12-unorm-srgb", 12, 12, 16, false, false, true, WGPUFeatureName_TextureCompressionASTC, false, TextureFormatClass::ASTC},
 }};
 
 inline constexpr std::array<WGPUTextureFormat, kUncompressedTextureFormatInfos.size()> kUncompressedTextureFormats = {
@@ -471,6 +473,24 @@ inline const TextureFormatInfo& textureFormatInfo(WGPUTextureFormat format) {
     for (const TextureFormatInfo& info : kCompressedTextureFormatInfos) {
         if (info.format == format) {
             return info;
+        }
+    }
+    std::abort();
+}
+
+inline std::string_view textureFormatIdentifier(WGPUTextureFormat format) {
+    return textureFormatInfo(format).identifier;
+}
+
+inline WGPUTextureFormat parseTextureFormat(std::string_view identifier) {
+    for (const TextureFormatInfo& info : kUncompressedTextureFormatInfos) {
+        if (info.identifier == identifier) {
+            return info.format;
+        }
+    }
+    for (const TextureFormatInfo& info : kCompressedTextureFormatInfos) {
+        if (info.identifier == identifier) {
+            return info.format;
         }
     }
     std::abort();

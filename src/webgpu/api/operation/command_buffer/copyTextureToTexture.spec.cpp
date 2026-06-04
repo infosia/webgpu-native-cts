@@ -11,6 +11,7 @@
 #include "cts/gpu.h"
 #include "cts/test.h"
 #include "webgpu/texture_format.h"
+#include "webgpu/util/enum_strings.h"
 #include "webgpu/util/texture_layout.h"
 
 using namespace cts;
@@ -163,30 +164,20 @@ std::vector<uint8_t> generateData(size_t size, uint32_t start = 0) {
 }
 
 std::vector<Value> regularTextureFormatValues() {
-    std::vector<Value> values;
-    values.reserve(kRegularTextureFormats.size());
-    for (WGPUTextureFormat format : kRegularTextureFormats) {
-        values.push_back(static_cast<int64_t>(format));
-    }
-    return values;
+    return formatIdentifierValues(kRegularTextureFormats);
 }
 
 std::vector<Value> depthStencilFormatValues() {
-    std::vector<Value> values;
-    values.reserve(kDepthStencilFormats.size());
-    for (WGPUTextureFormat format : kDepthStencilFormats) {
-        values.push_back(static_cast<int64_t>(format));
-    }
-    return values;
+    return formatIdentifierValues(kDepthStencilFormats);
 }
 
 std::vector<Value> textureDimensionValues(bool include1D) {
     std::vector<Value> values;
     if (include1D) {
-        values.push_back(static_cast<int64_t>(WGPUTextureDimension_1D));
+        values.push_back(std::string(textureDimensionIdentifier(WGPUTextureDimension_1D)));
     }
-    values.push_back(static_cast<int64_t>(WGPUTextureDimension_2D));
-    values.push_back(static_cast<int64_t>(WGPUTextureDimension_3D));
+    values.push_back(std::string(textureDimensionIdentifier(WGPUTextureDimension_2D)));
+    values.push_back(std::string(textureDimensionIdentifier(WGPUTextureDimension_3D)));
     return values;
 }
 
@@ -806,7 +797,7 @@ ParamsBuilder depthStencilParams(ParamsBuilder u) {
 }
 
 void runDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
-    const auto format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
+    const auto format = parseTextureFormat(t.param<std::string>("format"));
     t.skipIfTextureFormatNotSupported(format);
 
     const uint32_t sizeIndex = static_cast<uint32_t>(t.param<int64_t>("srcTextureSizeIndex"));
@@ -921,8 +912,8 @@ ParamsBuilder compatibleFormatParams(ParamsBuilder u) {
     return u.combine("srcFormat", regularTextureFormatValues())
         .combine("dstFormat", regularTextureFormatValues())
         .filter([](const ParamRecord& params) {
-            const auto srcFormat = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "srcFormat")));
-            const auto dstFormat = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "dstFormat")));
+            const auto srcFormat = parseTextureFormat(valueAs<std::string>(*findParam(params, "srcFormat")));
+            const auto dstFormat = parseTextureFormat(valueAs<std::string>(*findParam(params, "dstFormat")));
             return textureFormatsAreViewCompatible(srcFormat, dstFormat);
         });
 }
@@ -931,9 +922,9 @@ ParamsBuilder nonArrayParams(ParamsBuilder u) {
     return compatibleFormatParams(u)
         .combine("dimension", textureDimensionValues(true))
         .filter([](const ParamRecord& params) {
-            const auto srcFormat = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "srcFormat")));
-            const auto dstFormat = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "dstFormat")));
-            const auto dimension = static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "dimension")));
+            const auto srcFormat = parseTextureFormat(valueAs<std::string>(*findParam(params, "srcFormat")));
+            const auto dstFormat = parseTextureFormat(valueAs<std::string>(*findParam(params, "dstFormat")));
+            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
             return textureFormatAndDimensionPossiblyCompatible(dimension, srcFormat)
                 && textureFormatAndDimensionPossiblyCompatible(dimension, dstFormat);
         })
@@ -941,7 +932,7 @@ ParamsBuilder nonArrayParams(ParamsBuilder u) {
         .combine("sizePairIndex", indexValues(static_cast<uint32_t>(kNonArraySizePairs.size())))
         .combine("copyBoxOffsetsIndex", indexValues(static_cast<uint32_t>(kCopyBoxOffsetsForWholeDepth.size())))
         .filter([](const ParamRecord& params) {
-            const auto dimension = static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "dimension")));
+            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
             const uint32_t offsetIndex = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "copyBoxOffsetsIndex")));
             const CopyBoxOffset& offsets = kCopyBoxOffsetsForWholeDepth[offsetIndex];
             return dimension != WGPUTextureDimension_1D
@@ -950,7 +941,7 @@ ParamsBuilder nonArrayParams(ParamsBuilder u) {
         .combine("srcCopyLevel", {0, 3})
         .combine("dstCopyLevel", {0, 3})
         .filter([](const ParamRecord& params) {
-            const auto dimension = static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "dimension")));
+            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
             const uint32_t srcCopyLevel = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "srcCopyLevel")));
             const uint32_t dstCopyLevel = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "dstCopyLevel")));
             return dimension != WGPUTextureDimension_1D || (srcCopyLevel == 0 && dstCopyLevel == 0);
@@ -961,9 +952,9 @@ ParamsBuilder arrayParams(ParamsBuilder u) {
     return compatibleFormatParams(u)
         .combine("dimension", textureDimensionValues(false))
         .filter([](const ParamRecord& params) {
-            const auto srcFormat = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "srcFormat")));
-            const auto dstFormat = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "dstFormat")));
-            const auto dimension = static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "dimension")));
+            const auto srcFormat = parseTextureFormat(valueAs<std::string>(*findParam(params, "srcFormat")));
+            const auto dstFormat = parseTextureFormat(valueAs<std::string>(*findParam(params, "dstFormat")));
+            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
             return textureFormatAndDimensionPossiblyCompatible(dimension, srcFormat)
                 && textureFormatAndDimensionPossiblyCompatible(dimension, dstFormat);
         })
@@ -975,8 +966,8 @@ ParamsBuilder arrayParams(ParamsBuilder u) {
 }
 
 ParamsBuilder zeroSizedParams(ParamsBuilder u) {
-    return u.combine("srcFormat", {static_cast<int64_t>(WGPUTextureFormat_RGBA8Unorm)})
-        .combine("dstFormat", {static_cast<int64_t>(WGPUTextureFormat_RGBA8Unorm)})
+    return u.combine("srcFormat", {std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))})
+        .combine("dstFormat", {std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))})
         .beginSubcases()
         .combine("zeroSizedConfigIndex", indexValues(static_cast<uint32_t>(kZeroSizedConfigs.size())))
         .combine("copyBoxOffsetsIndex", indexValues(static_cast<uint32_t>(kZeroSizedCopyBoxOffsets.size())))
@@ -1000,9 +991,9 @@ ParamsBuilder zeroSizedParams(ParamsBuilder u) {
 }
 
 void runNonArray(AllFeaturesMaxLimitsGpuTest& t) {
-    const auto srcFormat = static_cast<WGPUTextureFormat>(t.param<int64_t>("srcFormat"));
-    const auto dstFormat = static_cast<WGPUTextureFormat>(t.param<int64_t>("dstFormat"));
-    const auto dimension = static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
+    const auto srcFormat = parseTextureFormat(t.param<std::string>("srcFormat"));
+    const auto dstFormat = parseTextureFormat(t.param<std::string>("dstFormat"));
+    const auto dimension = parseTextureDimension(t.param<std::string>("dimension"));
     const uint32_t sizePairIndex = static_cast<uint32_t>(t.param<int64_t>("sizePairIndex"));
     const uint32_t offsetIndex = static_cast<uint32_t>(t.param<int64_t>("copyBoxOffsetsIndex"));
     const uint32_t srcCopyLevel = static_cast<uint32_t>(t.param<int64_t>("srcCopyLevel"));
@@ -1021,9 +1012,9 @@ void runNonArray(AllFeaturesMaxLimitsGpuTest& t) {
 }
 
 void runArray(AllFeaturesMaxLimitsGpuTest& t) {
-    const auto srcFormat = static_cast<WGPUTextureFormat>(t.param<int64_t>("srcFormat"));
-    const auto dstFormat = static_cast<WGPUTextureFormat>(t.param<int64_t>("dstFormat"));
-    const auto dimension = static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
+    const auto srcFormat = parseTextureFormat(t.param<std::string>("srcFormat"));
+    const auto dstFormat = parseTextureFormat(t.param<std::string>("dstFormat"));
+    const auto dimension = parseTextureDimension(t.param<std::string>("dimension"));
     const uint32_t sizePairIndex = static_cast<uint32_t>(t.param<int64_t>("sizePairIndex"));
     const uint32_t offsetIndex = static_cast<uint32_t>(t.param<int64_t>("copyBoxOffsetsIndex"));
     const uint32_t srcCopyLevel = static_cast<uint32_t>(t.param<int64_t>("srcCopyLevel"));

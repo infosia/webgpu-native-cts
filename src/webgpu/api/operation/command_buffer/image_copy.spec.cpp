@@ -14,6 +14,7 @@
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
+#include "webgpu/util/enum_strings.h"
 #include "webgpu/util/texture_layout.h"
 
 using namespace cts;
@@ -131,6 +132,96 @@ WGPUStringView stringView(std::string_view value) {
     return WGPUStringView{value.data(), value.size()};
 }
 
+std::string_view copyMethodIdentifier(ImageCopyType method) {
+    switch (method) {
+        case ImageCopyType::WriteTexture:
+            return "WriteTexture";
+        case ImageCopyType::CopyB2T:
+            return "CopyB2T";
+        case ImageCopyType::CopyT2B:
+            return "CopyT2B";
+        default:
+            std::abort();
+    }
+}
+
+ImageCopyType parseCopyMethod(std::string_view identifier) {
+    if (identifier == "WriteTexture") {
+        return ImageCopyType::WriteTexture;
+    }
+    if (identifier == "CopyB2T") {
+        return ImageCopyType::CopyB2T;
+    }
+    if (identifier == "CopyT2B") {
+        return ImageCopyType::CopyT2B;
+    }
+    std::abort();
+}
+
+std::string_view initMethodIdentifier(InitMethod method) {
+    switch (method) {
+        case InitMethod::WriteTexture:
+            return "WriteTexture";
+        case InitMethod::CopyB2T:
+            return "CopyB2T";
+        default:
+            std::abort();
+    }
+}
+
+InitMethod parseInitMethod(std::string_view identifier) {
+    if (identifier == "WriteTexture") {
+        return InitMethod::WriteTexture;
+    }
+    if (identifier == "CopyB2T") {
+        return InitMethod::CopyB2T;
+    }
+    std::abort();
+}
+
+std::string_view checkMethodIdentifier(CheckMethod method) {
+    switch (method) {
+        case CheckMethod::FullCopyT2B:
+            return "FullCopyT2B";
+        case CheckMethod::PartialCopyT2B:
+            return "PartialCopyT2B";
+        default:
+            std::abort();
+    }
+}
+
+CheckMethod parseCheckMethod(std::string_view identifier) {
+    if (identifier == "FullCopyT2B") {
+        return CheckMethod::FullCopyT2B;
+    }
+    if (identifier == "PartialCopyT2B") {
+        return CheckMethod::PartialCopyT2B;
+    }
+    std::abort();
+}
+
+std::string_view depthStencilAspectIdentifier(DepthStencilAspect aspect) {
+    switch (aspect) {
+        case DepthStencilAspect::DepthOnly:
+            return textureAspectIdentifier(WGPUTextureAspect_DepthOnly);
+        case DepthStencilAspect::StencilOnly:
+            return textureAspectIdentifier(WGPUTextureAspect_StencilOnly);
+        default:
+            std::abort();
+    }
+}
+
+DepthStencilAspect parseDepthStencilAspect(std::string_view identifier) {
+    const WGPUTextureAspect aspect = parseTextureAspect(identifier);
+    if (aspect == WGPUTextureAspect_DepthOnly) {
+        return DepthStencilAspect::DepthOnly;
+    }
+    if (aspect == WGPUTextureAspect_StencilOnly) {
+        return DepthStencilAspect::StencilOnly;
+    }
+    std::abort();
+}
+
 std::vector<uint8_t> generateData(size_t size, uint32_t start = 0) {
     std::vector<uint8_t> data(size);
     for (size_t i = 0; i < data.size(); ++i) {
@@ -140,43 +231,33 @@ std::vector<uint8_t> generateData(size_t size, uint32_t start = 0) {
 }
 
 std::vector<Value> colorFormatValues() {
-    std::vector<Value> values;
-    values.reserve(kColorTextureFormats.size());
-    for (WGPUTextureFormat format : kColorTextureFormats) {
-        values.push_back(static_cast<int64_t>(format));
-    }
-    return values;
+    return formatIdentifierValues(kColorTextureFormats);
 }
 
 std::vector<Value> depthStencilFormatValues() {
-    std::vector<Value> values;
-    values.reserve(kDepthStencilFormats.size());
-    for (WGPUTextureFormat format : kDepthStencilFormats) {
-        values.push_back(static_cast<int64_t>(format));
-    }
-    return values;
+    return formatIdentifierValues(kDepthStencilFormats);
 }
 
 std::vector<Value> depthStencilAspectValues() {
     return {
-        static_cast<int64_t>(DepthStencilAspect::DepthOnly),
-        static_cast<int64_t>(DepthStencilAspect::StencilOnly),
+        std::string(depthStencilAspectIdentifier(DepthStencilAspect::DepthOnly)),
+        std::string(depthStencilAspectIdentifier(DepthStencilAspect::StencilOnly)),
     };
 }
 
 std::vector<Value> depthStencilCopyMethodValues() {
     return {
-        static_cast<int64_t>(ImageCopyType::WriteTexture),
-        static_cast<int64_t>(ImageCopyType::CopyB2T),
-        static_cast<int64_t>(ImageCopyType::CopyT2B),
+        std::string(copyMethodIdentifier(ImageCopyType::WriteTexture)),
+        std::string(copyMethodIdentifier(ImageCopyType::CopyB2T)),
+        std::string(copyMethodIdentifier(ImageCopyType::CopyT2B)),
     };
 }
 
 std::vector<Value> textureDimensionValues() {
     return {
-        static_cast<int64_t>(WGPUTextureDimension_1D),
-        static_cast<int64_t>(WGPUTextureDimension_2D),
-        static_cast<int64_t>(WGPUTextureDimension_3D),
+        std::string(textureDimensionIdentifier(WGPUTextureDimension_1D)),
+        std::string(textureDimensionIdentifier(WGPUTextureDimension_2D)),
+        std::string(textureDimensionIdentifier(WGPUTextureDimension_3D)),
     };
 }
 
@@ -184,16 +265,16 @@ ParamsBuilder baseParams(ParamsBuilder u) {
     return u.combine("format", colorFormatValues())
         .combine("dimension", textureDimensionValues())
         .combine("initMethod", {
-            static_cast<int64_t>(InitMethod::WriteTexture),
-            static_cast<int64_t>(InitMethod::CopyB2T),
+            std::string(initMethodIdentifier(InitMethod::WriteTexture)),
+            std::string(initMethodIdentifier(InitMethod::CopyB2T)),
         })
         .combine("checkMethod", {
-            static_cast<int64_t>(CheckMethod::FullCopyT2B),
-            static_cast<int64_t>(CheckMethod::PartialCopyT2B),
+            std::string(checkMethodIdentifier(CheckMethod::FullCopyT2B)),
+            std::string(checkMethodIdentifier(CheckMethod::PartialCopyT2B)),
         })
         .filter([](const ParamRecord& params) {
-            const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
-            const auto dimension = static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "dimension")));
+            const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
+            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
             return textureFormatAndDimensionPossiblyCompatible(dimension, format);
         });
 }
@@ -864,10 +945,10 @@ void doCopyTextureToBufferWithDepthAspectTest(
 
 CopyScenario scenarioFromParams(AllFeaturesMaxLimitsGpuTest& t) {
     CopyScenario scenario;
-    scenario.format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
-    scenario.dimension = static_cast<WGPUTextureDimension>(t.param<int64_t>("dimension"));
-    scenario.initMethod = static_cast<InitMethod>(t.param<int64_t>("initMethod"));
-    scenario.checkMethod = static_cast<CheckMethod>(t.param<int64_t>("checkMethod"));
+    scenario.format = parseTextureFormat(t.param<std::string>("format"));
+    scenario.dimension = parseTextureDimension(t.param<std::string>("dimension"));
+    scenario.initMethod = parseInitMethod(t.param<std::string>("initMethod"));
+    scenario.checkMethod = parseCheckMethod(t.param<std::string>("checkMethod"));
     scenario.textureSize = baseTextureSize(scenario.dimension);
     scenario.copySize = scenario.textureSize;
     scenario.uploadLayout = uploadLayoutFor(scenario.format, scenario.copySize, 0, 0, 0, false);
@@ -888,7 +969,7 @@ ParamsBuilder rowsParams(ParamsBuilder u) {
         .combine("paddingIndex", indexValues(4))
         .combine("copySizeIndex", indexValues(14))
         .filter([](const ParamRecord& params) {
-            const auto dimension = static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "dimension")));
+            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
             const uint32_t copySizeIndex = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "copySizeIndex")));
             return dimension != WGPUTextureDimension_1D || copySizeIndex < 5;
         });
@@ -902,7 +983,7 @@ ParamsBuilder offsetsParams(ParamsBuilder u) {
         .combine("copyWidthIndex", indexValues(3))
         .combine("rowsPerImageEqualsCopyHeight", {true, false})
         .filter([](const ParamRecord& params) {
-            const auto dimension = static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "dimension")));
+            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
             const uint32_t copyDepthIndex = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "copyDepthIndex")));
             return dimension == WGPUTextureDimension_3D || copyDepthIndex == 0;
         });
@@ -916,7 +997,7 @@ ParamsBuilder originsParams(ParamsBuilder u) {
         .combine("textureSizePaddingValueInBlocks", indexValues(3))
         .combine("coordinateToTest", indexValues(3))
         .filter([](const ParamRecord& params) {
-            const auto dimension = static_cast<WGPUTextureDimension>(valueAs<int64_t>(*findParam(params, "dimension")));
+            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
             const uint32_t coordinate = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "coordinateToTest")));
             return !(dimension == WGPUTextureDimension_1D && coordinate != 0)
                 && !(dimension == WGPUTextureDimension_2D && coordinate == 2);
@@ -948,9 +1029,9 @@ ParamsBuilder depthStencilBaseParams(ParamsBuilder u) {
         .combine("copyMethod", depthStencilCopyMethodValues())
         .combine("aspect", depthStencilAspectValues())
         .filter([](const ParamRecord& params) {
-            const auto format = static_cast<WGPUTextureFormat>(valueAs<int64_t>(*findParam(params, "format")));
-            const auto copyMethod = static_cast<ImageCopyType>(valueAs<int64_t>(*findParam(params, "copyMethod")));
-            const auto aspect = static_cast<DepthStencilAspect>(valueAs<int64_t>(*findParam(params, "aspect")));
+            const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
+            const auto copyMethod = parseCopyMethod(valueAs<std::string>(*findParam(params, "copyMethod")));
+            const auto aspect = parseDepthStencilAspect(valueAs<std::string>(*findParam(params, "aspect")));
             return copyMethodSupportedWithDepthStencilFormat(aspect, format, copyMethod);
         });
 }
@@ -1077,9 +1158,9 @@ void runUndefinedParams(AllFeaturesMaxLimitsGpuTest& t) {
 }
 
 void runRowsPerImageAndBytesPerRowDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
-    const auto format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
-    const auto copyMethod = static_cast<ImageCopyType>(t.param<int64_t>("copyMethod"));
-    const auto aspect = static_cast<DepthStencilAspect>(t.param<int64_t>("aspect"));
+    const auto format = parseTextureFormat(t.param<std::string>("format"));
+    const auto copyMethod = parseCopyMethod(t.param<std::string>("copyMethod"));
+    const auto aspect = parseDepthStencilAspect(t.param<std::string>("aspect"));
     t.skipIfTextureFormatNotSupported(format);
 
     const uint32_t paddingIndex = static_cast<uint32_t>(t.param<int64_t>("paddingIndex"));
@@ -1132,9 +1213,9 @@ void runRowsPerImageAndBytesPerRowDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
 }
 
 void runOffsetsAndSizesDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
-    const auto format = static_cast<WGPUTextureFormat>(t.param<int64_t>("format"));
-    const auto copyMethod = static_cast<ImageCopyType>(t.param<int64_t>("copyMethod"));
-    const auto aspect = static_cast<DepthStencilAspect>(t.param<int64_t>("aspect"));
+    const auto format = parseTextureFormat(t.param<std::string>("format"));
+    const auto copyMethod = parseCopyMethod(t.param<std::string>("copyMethod"));
+    const auto aspect = parseDepthStencilAspect(t.param<std::string>("aspect"));
     t.skipIfTextureFormatNotSupported(format);
 
     const uint32_t offsetIndex = static_cast<uint32_t>(t.param<int64_t>("offsetsAndPaddingsIndex"));

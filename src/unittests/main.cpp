@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include "common/query.h"
@@ -14,6 +15,7 @@
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
+#include "webgpu/util/enum_strings.h"
 #include "webgpu/util/texel_data.h"
 #include "webgpu/util/texel_view.h"
 #include "webgpu/util/texture_layout.h"
@@ -71,21 +73,21 @@ double srgbDecode(double value) {
 }
 
 cts::FormatSampleHook representativeFormatHook() {
-    return [](std::string_view key, int64_t value) -> std::optional<bool> {
+    return [](std::string_view key, const cts::Value& value) -> std::optional<bool> {
         if (key == "format" || key == "textureFormat" || key == "viewFormat") {
-            return cts::isRepresentativeTextureFormat(static_cast<WGPUTextureFormat>(value));
+            if (const auto* identifier = std::get_if<std::string>(&value.data())) {
+                return cts::isRepresentativeTextureFormat(cts::parseTextureFormat(*identifier));
+            }
+            if (const auto* numeric = std::get_if<int64_t>(&value.data())) {
+                return cts::isRepresentativeTextureFormat(static_cast<WGPUTextureFormat>(*numeric));
+            }
         }
         return std::nullopt;
     };
 }
 
 std::vector<cts::Value> colorFormatValues() {
-    std::vector<cts::Value> values;
-    values.reserve(cts::kColorTextureFormats.size());
-    for (WGPUTextureFormat format : cts::kColorTextureFormats) {
-        values.push_back(static_cast<int64_t>(format));
-    }
-    return values;
+    return cts::formatIdentifierValues(cts::kColorTextureFormats);
 }
 
 std::size_t totalRuns(const std::vector<cts::ParamsBuilder::ExpandedCase>& cases) {
@@ -193,6 +195,11 @@ int main() {
         require(cts::stringifyValue(cts::Value(0.5)) == "0.5", "double stringify");
         require(cts::stringifyValue(cts::Value::undef()) == "_undef_", "undefined stringify");
         require(cts::stringifyValue(cts::Value("abc")) == "\"abc\"", "string stringify");
+        require(cts::stringifyParams({
+                    {"format", std::string(cts::textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))},
+                    {"dimension", std::string(cts::textureDimensionIdentifier(WGPUTextureDimension_2D))},
+                }) == "format=\"rgba8unorm\";dimension=\"2d\"",
+                "readable enum params stringify");
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
         require(cts::kColorTextureFormats.size() == 43, "color texture format count");
@@ -218,8 +225,8 @@ int main() {
             require(stats.runsKept == 8 * 3, "case-level format sampling stats kept");
             require(stats.runsDropped == (43 - 8) * 3, "case-level format sampling stats dropped");
             for (const auto& c : sampled) {
-                const auto format = static_cast<WGPUTextureFormat>(
-                    cts::valueAs<int64_t>(*cts::findParam(c.params, "format")));
+                const auto format = cts::parseTextureFormat(
+                    cts::valueAs<std::string>(*cts::findParam(c.params, "format")));
                 require(cts::isRepresentativeTextureFormat(format), "case-level survivor is representative");
             }
         }
@@ -270,8 +277,8 @@ int main() {
             require(sampled.size() == 1, "subcase-level format sampling keeps case");
             require(sampled[0].subcases.size() == 8, "subcase-level format sampling survivor count");
             for (const cts::ParamRecord& subcase : sampled[0].subcases) {
-                const auto format = static_cast<WGPUTextureFormat>(
-                    cts::valueAs<int64_t>(*cts::findParam(subcase, "format")));
+                const auto format = cts::parseTextureFormat(
+                    cts::valueAs<std::string>(*cts::findParam(subcase, "format")));
                 require(cts::isRepresentativeTextureFormat(format), "subcase-level survivor is representative");
             }
         }
@@ -723,6 +730,22 @@ int main() {
                 "tier1 storage texture format count");
         require(cts::kTextureAspects.size() == 3, "texture aspect count");
         require(cts::kTextureViewDimensions.size() == 6, "texture view dimension count");
+        for (WGPUTextureFormat format : cts::kAllTextureFormats) {
+            require(cts::parseTextureFormat(cts::textureFormatIdentifier(format)) == format,
+                    "texture format identifier roundtrip");
+        }
+        for (WGPUTextureDimension dimension : cts::kTextureDimensions) {
+            require(cts::parseTextureDimension(cts::textureDimensionIdentifier(dimension)) == dimension,
+                    "texture dimension identifier roundtrip");
+        }
+        for (WGPUTextureViewDimension dimension : cts::kTextureViewDimensions) {
+            require(cts::parseTextureViewDimension(cts::textureViewDimensionIdentifier(dimension)) == dimension,
+                    "texture view dimension identifier roundtrip");
+        }
+        for (WGPUTextureAspect aspect : cts::kTextureAspects) {
+            require(cts::parseTextureAspect(cts::textureAspectIdentifier(aspect)) == aspect,
+                    "texture aspect identifier roundtrip");
+        }
         require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_Cube) == WGPUTextureDimension_2D,
                 "cube view dimension maps to 2d");
         require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_2DArray) == WGPUTextureDimension_2D,

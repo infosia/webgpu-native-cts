@@ -2,6 +2,7 @@
 
 #include <map>
 #include <set>
+#include <string>
 #include <utility>
 
 namespace cts {
@@ -52,7 +53,7 @@ std::vector<ParamsBuilder::ExpandedCase> sampleFormatsInCases(
         return cases;
     }
 
-    std::map<std::string, std::set<int64_t>> recognizedValues;
+    std::map<std::string, std::set<std::string>> recognizedValues;
     std::vector<std::vector<bool>> keepByCase;
     keepByCase.reserve(cases.size());
     std::size_t totalRuns = 0;
@@ -65,15 +66,11 @@ std::vector<ParamsBuilder::ExpandedCase> sampleFormatsInCases(
         for (const ParamRecord& run : runs) {
             bool keep = true;
             for (const auto& [key, value] : run) {
-                if (!std::holds_alternative<int64_t>(value.data())) {
-                    continue;
-                }
-                const int64_t intValue = std::get<int64_t>(value.data());
-                const std::optional<bool> verdict = hook(key, intValue);
+                const std::optional<bool> verdict = hook(key, value);
                 if (!verdict) {
                     continue;
                 }
-                recognizedValues[key].insert(intValue);
+                recognizedValues[key].insert(stringifyValue(value));
                 keep = keep && *verdict;
             }
             caseKeep.push_back(keep);

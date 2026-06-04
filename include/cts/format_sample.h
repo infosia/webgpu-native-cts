@@ -11,7 +11,7 @@
 
 namespace cts {
 
-using FormatSampleHook = std::function<std::optional<bool>(std::string_view key, int64_t value)>;
+using FormatSampleHook = std::function<std::optional<bool>(std::string_view key, const Value& value)>;
 
 void setFormatSampleHook(FormatSampleHook hook);
 const FormatSampleHook& getFormatSampleHook();
