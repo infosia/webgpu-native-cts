@@ -24,6 +24,8 @@
 
 #if defined(_WIN32)
 #include <array>
+#include <fcntl.h>
+#include <io.h>
 #include <string>
 #include <windows.h>
 #endif
@@ -75,6 +77,19 @@ std::string sanitizeResultMessage(std::string message) {
     return message;
 }
 
+std::string_view dropTrailingCR(std::string_view line) {
+    if (!line.empty() && line.back() == '\r') {
+        line.remove_suffix(1);
+    }
+    return line;
+}
+
+void setStdoutBinaryForResultProtocol() {
+#if defined(_WIN32)
+    (void)_setmode(_fileno(stdout), _O_BINARY);
+#endif
+}
+
 std::string trim(const std::string& text) {
     const size_t first = text.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
@@ -83,6 +98,8 @@ std::string trim(const std::string& text) {
     const size_t last = text.find_last_not_of(" \t\r\n");
     return text.substr(first, last - first + 1);
 }
+
+} // namespace
 
 ExpectationSet loadExpectations(const std::string& path) {
     ExpectationSet expectations;
@@ -113,6 +130,8 @@ ExpectationSet loadExpectations(const std::string& path) {
     }
     return expectations;
 }
+
+namespace {
 
 ParamsBuilder buildParams(const TestSpec& test) {
     if (!test.paramsFn) {
@@ -330,18 +349,22 @@ int runSingleCase(const RunOptions& options) {
     return 0;
 }
 
+} // namespace
+
 std::optional<SubcaseResult> parseIsolatedResultLine(const std::string& query, const std::string& output) {
     std::istringstream in(output);
     std::string line;
     while (std::getline(in, line)) {
-        if (!line.starts_with("RESULT\t")) {
+        std::string_view resultLine = dropTrailingCR(line);
+        if (!resultLine.starts_with("RESULT\t")) {
             continue;
         }
         const size_t statusStart = std::string_view("RESULT\t").size();
-        const size_t messageStart = line.find('\t', statusStart);
-        const std::string status =
-            messageStart == std::string::npos ? line.substr(statusStart) : line.substr(statusStart, messageStart - statusStart);
-        const std::string message = messageStart == std::string::npos ? "" : line.substr(messageStart + 1);
+        const size_t messageStart = resultLine.find('\t', statusStart);
+        const std::string status = messageStart == std::string::npos
+            ? std::string(resultLine.substr(statusStart))
+            : std::string(resultLine.substr(statusStart, messageStart - statusStart));
+        const std::string message = messageStart == std::string::npos ? "" : std::string(resultLine.substr(messageStart + 1));
         const std::optional<TestStatus> parsedStatus = statusFromName(status);
         if (parsedStatus) {
             return SubcaseResult{query, *parsedStatus, message};
@@ -350,6 +373,8 @@ std::optional<SubcaseResult> parseIsolatedResultLine(const std::string& query, c
     }
     return std::nullopt;
 }
+
+namespace {
 
 #if defined(_WIN32)
 std::string windowsErrorMessage(const char* operation, DWORD error) {
@@ -956,10 +981,7 @@ void drainWorkerLines(
         if (newline == std::string::npos) {
             break;
         }
-        std::string line = worker.buffer.substr(0, newline);
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
+        std::string line(dropTrailingCR(std::string_view(worker.buffer).substr(0, newline)));
         worker.buffer.erase(0, newline + 1);
         recordWorkerLine(worker, line, cases, resultsByCase);
     }
@@ -972,7 +994,8 @@ std::optional<WorkerState> finishWorker(
     const std::vector<CaseRun>& cases,
     std::vector<std::vector<SubcaseResult>>& resultsByCase) {
     if (!worker.buffer.empty()) {
-        recordWorkerLine(worker, worker.buffer, cases, resultsByCase);
+        std::string line(dropTrailingCR(worker.buffer));
+        recordWorkerLine(worker, line, cases, resultsByCase);
         worker.buffer.clear();
     }
 
@@ -1217,20 +1240,22 @@ bool caseBelongsToShard(size_t index, int shardIndex, int shardCount) {
 }
 
 std::optional<SubcaseResult> parseResultLine(const std::string& line) {
-    if (!line.starts_with("RESULT\t")) {
+    std::string_view resultLine = dropTrailingCR(line);
+    if (!resultLine.starts_with("RESULT\t")) {
         return std::nullopt;
     }
     const size_t statusStart = std::string_view("RESULT\t").size();
-    const size_t queryStart = line.find('\t', statusStart);
+    const size_t queryStart = resultLine.find('\t', statusStart);
     if (queryStart == std::string::npos) {
         return std::nullopt;
     }
-    const size_t messageStart = line.find('\t', queryStart + 1);
-    const std::string status = line.substr(statusStart, queryStart - statusStart);
+    const size_t messageStart = resultLine.find('\t', queryStart + 1);
+    const std::string status = std::string(resultLine.substr(statusStart, queryStart - statusStart));
     const std::string query = messageStart == std::string::npos
-        ? line.substr(queryStart + 1)
-        : line.substr(queryStart + 1, messageStart - queryStart - 1);
-    const std::string message = messageStart == std::string::npos ? "" : sanitizeResultMessage(line.substr(messageStart + 1));
+        ? std::string(resultLine.substr(queryStart + 1))
+        : std::string(resultLine.substr(queryStart + 1, messageStart - queryStart - 1));
+    const std::string message =
+        messageStart == std::string::npos ? "" : sanitizeResultMessage(std::string(resultLine.substr(messageStart + 1)));
     const std::optional<TestStatus> parsedStatus = statusFromName(status);
     if (!parsedStatus) {
         return SubcaseResult{query, TestStatus::Crash, "unknown RESULT status: " + status};
@@ -1250,6 +1275,7 @@ std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& result
 
 int runQueries(const RunOptions& options) {
     if (!options.runCaseQuery.empty()) {
+        setStdoutBinaryForResultProtocol();
         try {
             return runSingleCase(options);
         } catch (const std::exception& e) {
@@ -1316,6 +1342,7 @@ int runQueries(const RunOptions& options) {
             return 1;
         }
     } else if (options.shardResults) {
+        setStdoutBinaryForResultProtocol();
         (void)collectShardResultRuns(options, queries, &sampleStats);
         return 0;
     } else if (!options.crashListPath.empty()) {

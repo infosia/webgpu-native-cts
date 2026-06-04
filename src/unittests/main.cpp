@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <cstddef>
 #include <cstdint>
@@ -498,6 +500,32 @@ int main() {
         require(!cts::expectationMatches(expectations, "a:b:test_more:foo"), "expectation prefix avoids test_more");
         require(!cts::expectationMatches(expectations, "a:b:tes:foo"), "expectation prefix avoids shorter test");
         require(cts::expectationMatches(expectations, "a:b:test:*"), "expectation non-wildcard exact match");
+        {
+            const std::string crlfPath = "cts_unittests_crlf_expectations.txt";
+            const std::string lfPath = "cts_unittests_lf_expectations.txt";
+            {
+                std::ofstream out(crlfPath);
+                out << "webgpu:a,b,c:test:*\r\n";
+                out << "webgpu:a,b,c:exact:x=1\r\n";
+            }
+            {
+                std::ofstream out(lfPath);
+                out << "webgpu:a,b,c:test:*\n";
+                out << "webgpu:a,b,c:exact:x=1\n";
+            }
+            const cts::ExpectationSet crlfExpectations = cts::loadExpectations(crlfPath);
+            const cts::ExpectationSet lfExpectations = cts::loadExpectations(lfPath);
+            std::remove(crlfPath.c_str());
+            std::remove(lfPath.c_str());
+            require(crlfExpectations.exact == lfExpectations.exact, "CRLF expectations exact equals LF");
+            require(crlfExpectations.prefixes == lfExpectations.prefixes, "CRLF expectations prefixes equal LF");
+            require(cts::expectationMatches(crlfExpectations, "webgpu:a,b,c:test:x=2"),
+                    "CRLF expectations prefix parses");
+            require(cts::expectationMatches(crlfExpectations, "webgpu:a,b,c:exact:x=1"),
+                    "CRLF expectations exact parses");
+            require(!cts::expectationMatches(crlfExpectations, "webgpu:a,b,c:exact:x=2"),
+                    "CRLF expectations exact mismatch");
+        }
         cts::ExpectationSet crashList;
         crashList.exact.insert("webgpu:a:b:c:x=1");
         crashList.prefixes.push_back("webgpu:a:b:d:");
@@ -562,6 +590,33 @@ int main() {
             require(noMessage.has_value(), "RESULT line without message parses");
             require(noMessage->status == cts::TestStatus::Pass, "RESULT line pass status parses");
             require(noMessage->message.empty(), "RESULT line empty message");
+
+            const std::optional<cts::SubcaseResult> crlfNoMessage = cts::parseResultLine(
+                "RESULT\tpass\twebgpu:a,b,c:test:*\r");
+            require(crlfNoMessage.has_value(), "CRLF RESULT line without message parses");
+            require(crlfNoMessage->status == cts::TestStatus::Pass, "CRLF RESULT pass status parses");
+            require(crlfNoMessage->query == "webgpu:a,b,c:test:*", "CRLF RESULT query strips CR");
+            require(crlfNoMessage->message.empty(), "CRLF RESULT empty message");
+
+            const std::optional<cts::SubcaseResult> crlfMessage = cts::parseResultLine(
+                "RESULT\tfail\twebgpu:a,b,c:test:x=4\tmessage\r");
+            require(crlfMessage.has_value(), "CRLF RESULT line with message parses");
+            require(crlfMessage->status == cts::TestStatus::Fail, "CRLF RESULT fail status parses");
+            require(crlfMessage->query == "webgpu:a,b,c:test:x=4", "CRLF RESULT message query strips CR");
+            require(crlfMessage->message == "message", "CRLF RESULT message strips CR");
+
+            const std::optional<cts::SubcaseResult> isolatedPass = cts::parseIsolatedResultLine(
+                "webgpu:a,b,c:test:*", "RESULT\tpass\r\n");
+            require(isolatedPass.has_value(), "CRLF isolated RESULT pass parses");
+            require(isolatedPass->status == cts::TestStatus::Pass, "CRLF isolated pass status parses");
+            require(isolatedPass->query == "webgpu:a,b,c:test:*", "CRLF isolated pass query preserved");
+            require(isolatedPass->message.empty(), "CRLF isolated pass message empty");
+
+            const std::optional<cts::SubcaseResult> isolatedFail = cts::parseIsolatedResultLine(
+                "webgpu:a,b,c:test:*", "RESULT\tfail\tmsg\r\n");
+            require(isolatedFail.has_value(), "CRLF isolated RESULT fail parses");
+            require(isolatedFail->status == cts::TestStatus::Fail, "CRLF isolated fail status parses");
+            require(isolatedFail->message == "msg", "CRLF isolated fail message strips CR");
 
             const std::optional<cts::SubcaseResult> sanitized = cts::parseResultLine(
                 "RESULT\twarn\twebgpu:a,b,c:test:x=3\tmessage\twith\ncontrols");

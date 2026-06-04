@@ -154,6 +154,7 @@ struct ExpectationSet {
 };
 
 bool expectationMatches(const ExpectationSet& expectations, const std::string& query);
+ExpectationSet loadExpectations(const std::string& path);
 
 using FixtureFactory = std::function<std::unique_ptr<Fixture>()>;
 using TestFn = std::function<void(Fixture&)>;
@@ -274,6 +275,7 @@ int writeListingJson(const std::string& path);
 std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& results);
 bool caseBelongsToShard(size_t index, int shardIndex, int shardCount);
 std::optional<SubcaseResult> parseResultLine(const std::string& line);
+std::optional<SubcaseResult> parseIsolatedResultLine(const std::string& query, const std::string& output);
 std::vector<SubcaseResult> runSyntheticFailureForSelfTest();
 void setCurrentTest(Fixture* fixture);
 
