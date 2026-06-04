@@ -2,8 +2,10 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <functional>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -24,6 +26,40 @@ constexpr std::array<ResourceState, 3> kResourceStates = {
     ResourceState::Invalid,
     ResourceState::Destroyed,
 };
+
+inline std::string_view resourceStateIdentifier(ResourceState state) {
+    switch (state) {
+        case ResourceState::Valid:
+            return "valid";
+        case ResourceState::Invalid:
+            return "invalid";
+        case ResourceState::Destroyed:
+            return "destroyed";
+    }
+    std::abort();
+}
+
+inline ResourceState parseResourceState(std::string_view identifier) {
+    if (identifier == "valid") {
+        return ResourceState::Valid;
+    }
+    if (identifier == "invalid") {
+        return ResourceState::Invalid;
+    }
+    if (identifier == "destroyed") {
+        return ResourceState::Destroyed;
+    }
+    std::abort();
+}
+
+inline std::vector<Value> resourceStateValues() {
+    std::vector<Value> values;
+    values.reserve(kResourceStates.size());
+    for (ResourceState state : kResourceStates) {
+        values.emplace_back(std::string(resourceStateIdentifier(state)));
+    }
+    return values;
+}
 
 class GpuTest : public Fixture {
   public:

@@ -28,15 +28,6 @@ WGPUBuffer createCopyBuffer(GpuTest& t, uint64_t size, WGPUBufferUsage usage) {
     return t.createBufferTracked(desc);
 }
 
-std::vector<Value> resourceStateValues() {
-    std::vector<Value> values;
-    values.reserve(kResourceStates.size());
-    for (ResourceState state : kResourceStates) {
-        values.emplace_back(static_cast<int64_t>(state));
-    }
-    return values;
-}
-
 enum class CommandExpectation {
     Success,
     FinishError,
@@ -91,8 +82,8 @@ CTS_TEST(g, "buffer_state")
         return u.combine("srcBufferState", resourceStateValues()).combine("dstBufferState", resourceStateValues());
     })
     .fn([](GpuTest& t) {
-        const ResourceState srcState = static_cast<ResourceState>(t.param<int64_t>("srcBufferState"));
-        const ResourceState dstState = static_cast<ResourceState>(t.param<int64_t>("dstBufferState"));
+        const ResourceState srcState = parseResourceState(t.param<std::string>("srcBufferState"));
+        const ResourceState dstState = parseResourceState(t.param<std::string>("dstBufferState"));
 
         WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
         desc.size = 16;

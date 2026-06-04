@@ -801,6 +801,18 @@ int main() {
             require(cts::parseTextureAspect(cts::textureAspectIdentifier(aspect)) == aspect,
                     "texture aspect identifier roundtrip");
         }
+        for (WGPUBufferBindingType type : cts::kBufferBindingTypes) {
+            require(cts::parseBufferBindingType(cts::bufferBindingTypeIdentifier(type)) == type,
+                    "buffer binding type identifier roundtrip");
+        }
+        for (WGPUStorageTextureAccess access : cts::kStorageTextureAccessValues) {
+            require(cts::parseStorageTextureAccess(cts::storageTextureAccessIdentifier(access)) == access,
+                    "storage texture access identifier roundtrip");
+        }
+        for (WGPUTextureSampleType sampleType : cts::kTextureSampleTypes) {
+            require(cts::parseTextureSampleType(cts::textureSampleTypeIdentifier(sampleType)) == sampleType,
+                    "texture sample type identifier roundtrip");
+        }
         require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_Cube) == WGPUTextureDimension_2D,
                 "cube view dimension maps to 2d");
         require(cts::getTextureDimensionFromView(WGPUTextureViewDimension_2DArray) == WGPUTextureDimension_2D,

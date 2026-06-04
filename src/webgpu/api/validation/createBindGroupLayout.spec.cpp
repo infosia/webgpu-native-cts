@@ -63,7 +63,7 @@ std::vector<Value> bufferBindingTypeValues() {
     std::vector<Value> values;
     values.reserve(kBufferBindingTypes.size());
     for (WGPUBufferBindingType type : kBufferBindingTypes) {
-        values.emplace_back(static_cast<uint64_t>(type));
+        values.emplace_back(std::string(bufferBindingTypeIdentifier(type)));
     }
     return values;
 }
@@ -86,7 +86,7 @@ std::vector<Value> storageTextureAccessValuesWithUndefined() {
     values.reserve(kStorageTextureAccessValues.size() + 1);
     values.push_back(Value::undef());
     for (WGPUStorageTextureAccess access : kStorageTextureAccessValues) {
-        values.emplace_back(static_cast<uint64_t>(access));
+        values.emplace_back(std::string(storageTextureAccessIdentifier(access)));
     }
     return values;
 }
@@ -95,7 +95,7 @@ std::vector<Value> storageTextureAccessValues() {
     std::vector<Value> values;
     values.reserve(kStorageTextureAccessValues.size());
     for (WGPUStorageTextureAccess access : kStorageTextureAccessValues) {
-        values.emplace_back(static_cast<uint64_t>(access));
+        values.emplace_back(std::string(storageTextureAccessIdentifier(access)));
     }
     return values;
 }
@@ -105,7 +105,7 @@ std::vector<Value> textureSampleTypeValuesWithUndefined() {
     values.reserve(kTextureSampleTypes.size() + 1);
     values.push_back(Value::undef());
     for (WGPUTextureSampleType sampleType : kTextureSampleTypes) {
-        values.emplace_back(static_cast<uint64_t>(sampleType));
+        values.emplace_back(std::string(textureSampleTypeIdentifier(sampleType)));
     }
     return values;
 }
@@ -327,7 +327,7 @@ CTS_TEST(g, "visibility,VERTEX_shader_stage_buffer_type")
     })
     .fn([](GpuTest& t) {
         const WGPUShaderStage shaderStage = static_cast<WGPUShaderStage>(t.param<uint64_t>("shaderStage"));
-        const WGPUBufferBindingType type = static_cast<WGPUBufferBindingType>(t.param<uint64_t>("type"));
+        const WGPUBufferBindingType type = parseBufferBindingType(t.param<std::string>("type"));
         const WGPUCompatibilityModeLimits compat = t.getCompatibilityModeLimits();
 
         WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
@@ -360,7 +360,7 @@ CTS_TEST(g, "visibility,VERTEX_shader_stage_storage_texture_access")
         const bool accessIsUndefined = t.paramIsUndefined("access");
         const WGPUStorageTextureAccess appliedAccess = accessIsUndefined
             ? WGPUStorageTextureAccess_WriteOnly
-            : static_cast<WGPUStorageTextureAccess>(t.param<uint64_t>("access"));
+            : parseStorageTextureAccess(t.param<std::string>("access"));
         const WGPUCompatibilityModeLimits compat = t.getCompatibilityModeLimits();
 
         WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
@@ -397,7 +397,7 @@ CTS_TEST(g, "multisampled_validation")
         const bool sampleTypeIsUndefined = t.paramIsUndefined("sampleType");
         const WGPUTextureSampleType appliedSampleType = sampleTypeIsUndefined
             ? WGPUTextureSampleType_Float
-            : static_cast<WGPUTextureSampleType>(t.param<uint64_t>("sampleType"));
+            : parseTextureSampleType(t.param<std::string>("sampleType"));
 
         WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
         entry.binding = 0;
@@ -462,7 +462,7 @@ CTS_TEST(g, "storage_texture,formats")
     })
     .fn([](GpuTest& t) {
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
-        const WGPUStorageTextureAccess access = static_cast<WGPUStorageTextureAccess>(t.param<uint64_t>("access"));
+        const WGPUStorageTextureAccess access = parseStorageTextureAccess(t.param<std::string>("access"));
 
         t.skipIfTextureFormatNotSupported(format);
 
@@ -492,7 +492,7 @@ CTS_TEST(g, "max_dynamic_buffers")
             .combine("staticBuffers", {Value(0), Value(1)});
     })
     .fn([](GpuTest& t) {
-        const WGPUBufferBindingType type = static_cast<WGPUBufferBindingType>(t.param<uint64_t>("type"));
+        const WGPUBufferBindingType type = parseBufferBindingType(t.param<std::string>("type"));
         const uint32_t extraDynamicBuffers = static_cast<uint32_t>(t.param<int>("extraDynamicBuffers"));
         const uint32_t staticBuffers = static_cast<uint32_t>(t.param<int>("staticBuffers"));
         const WGPULimits limits = t.getLimits();

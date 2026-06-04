@@ -25,10 +25,10 @@ webgpu:api,validation,buffer,mapping:mapAsync,state,mappedAtCreation:*
 webgpu:api,validation,buffer,mapping:mapAsync,state,mapped:*
 
 # F-004: wgpu-native aborts when commands using destroyed buffers reach queue submit.
-webgpu:api,validation,encoding,cmds,clearBuffer:buffer_state:bufferState=2
-webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=0;dstBufferState=2
-webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=2;dstBufferState=0
-webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState=2;dstBufferState=2
+webgpu:api,validation,encoding,cmds,clearBuffer:buffer_state:bufferState="destroyed"
+webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState="valid";dstBufferState="destroyed"
+webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState="destroyed";dstBufferState="valid"
+webgpu:api,validation,encoding,cmds,copyBufferToBuffer:buffer_state:srcBufferState="destroyed";dstBufferState="destroyed"
 
 # T5: wgpu-native aborts on transient texture usages and bogus texture usage bits before validation can be observed.
 webgpu:api,validation,createTexture:usage:usage1=0;usage2=32

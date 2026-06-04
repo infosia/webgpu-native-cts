@@ -9,6 +9,7 @@
 #include "cts/gpu.h"
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
+#include "webgpu/util/enum_strings.h"
 
 using namespace cts;
 
@@ -79,7 +80,7 @@ std::vector<Value> bufferBindingTypeValues() {
     std::vector<Value> values;
     values.reserve(kBufferBindingTypes.size());
     for (WGPUBufferBindingType type : kBufferBindingTypes) {
-        values.emplace_back(static_cast<uint64_t>(type));
+        values.emplace_back(std::string(bufferBindingTypeIdentifier(type)));
     }
     return values;
 }
@@ -388,7 +389,7 @@ CTS_TEST(g, "number_of_dynamic_buffers_exceeds_the_maximum_value")
     })
     .fn([](GpuTest& t) {
         const WGPUShaderStage visibility = static_cast<WGPUShaderStage>(t.param<int>("visibility"));
-        const WGPUBufferBindingType type = static_cast<WGPUBufferBindingType>(t.param<uint64_t>("type"));
+        const WGPUBufferBindingType type = parseBufferBindingType(t.param<std::string>("type"));
         const WGPULimits limits = t.getLimits();
         const uint32_t maxDynamicLimit = bufferTypeMaxDynamicBuffersLimit(limits, type);
         const uint32_t limit = getBindingLimitForBindingType(t, visibility, bufferTypeKey(type));

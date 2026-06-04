@@ -95,15 +95,6 @@ std::vector<Value> textureViewCubeDimensionValues() {
     };
 }
 
-std::vector<Value> resourceStateValues() {
-    std::vector<Value> values;
-    values.reserve(kResourceStates.size());
-    for (ResourceState state : kResourceStates) {
-        values.emplace_back(static_cast<int64_t>(state));
-    }
-    return values;
-}
-
 std::vector<Value> textureFormatFeatureValues() {
     std::vector<Value> values;
     values.reserve(kFeaturesForFormats.size());
@@ -432,7 +423,7 @@ CTS_TEST(g, "texture_state")
         return u.beginSubcases().combine("state", resourceStateValues());
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const ResourceState state = static_cast<ResourceState>(t.param<int64_t>("state"));
+        const ResourceState state = parseResourceState(t.param<std::string>("state"));
 
         WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
         textureDesc.size.width = 1;
