@@ -97,14 +97,17 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **8 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **9 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
-  `onSubmittedWorkDone`, and `rendering/basic` (the color render-to-texture foundation).
+  `onSubmittedWorkDone`, `rendering/basic` (the color render-to-texture foundation), and `compute/basic`
+  (the compute foundation).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
-  backs the color `image_copy` port (137256 subcases), and the **render-to-texture path** (depth via
-  `copyTextureToTexture:copy_depth_stencil`; color via `rendering/basic`). See [COVERAGE](docs/COVERAGE.md).
+  backs the color `image_copy` port (137256 subcases), the **render-to-texture path** (depth via
+  `copyTextureToTexture:copy_depth_stencil`; color via `rendering/basic`), and the **compute path**
+  (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
+  [COVERAGE](docs/COVERAGE.md).
 
 **Conformance outcome.** The suite has surfaced 32 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
