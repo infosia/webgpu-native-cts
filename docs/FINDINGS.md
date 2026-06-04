@@ -842,6 +842,12 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   (`result==0`); the test's first-failure report doesn't say whether the raster (the green pixels) also
   diverges on these paths — **for yawgpu to localize** (fragment storage binding/flush on indexed/indirect
   draws vs the draw not rasterizing at all).
+- **Cross-HAL (not HAL-specific):** re-run on Mac via MoltenVK (yawgpu `3c847ac`, **Vulkan** HAL,
+  `CTS_YAWGPU_BACKEND=vulkan`) — **byte-identical** to Metal: `pass=340 fail=224`, same
+  `indexed=true (128+64)` + `indexed=false;indirect=true (16)` pattern, same `result==0`. The
+  indexed/indirect draw + fragment storage write are MoltenVK-supported (Dawn/wgpu-native pass), so this
+  is **not** a MoltenVK artifact (unlike F-033) and **not** Metal-specific — it points at yawgpu's
+  **shared (HAL-agnostic) indexed/indirect draw path**, not a per-HAL backend.
 - **Status:** **OPEN** — yawgpu's only open finding. 3-way confirmed (Dawn + wgpu-native pass all 744).
   No `expectations/yawgpu.txt` lines added (surfaced for the fix, not masked; real-GPU runs use the Bash
   sandbox disabled — see the F-023 note). The T30 port is committed (Dawn/wgpu-verified); the
