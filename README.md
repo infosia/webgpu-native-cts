@@ -121,6 +121,13 @@ real-GPU Metal:
   failures (nothing masked). (It also *runs*
   the `immediate_data_size` cases that Dawn/wgpu-native skip.) See [FINDINGS](docs/FINDINGS.md) for the
   per-finding record.
+  **On Windows/Vulkan (NVIDIA RTX 5060 Ti)** the picture is the same *except* for F-032: F-031 is fixed on
+  the Vulkan HAL too (`copy_depth_stencil` `pass=216 fail=0`, native — confirmed `cac328a`), but **F-032's
+  depth/stencil-aspect buffer copies remain an open Vulkan-HAL gap** (`image_copy` depth/stencil
+  `pass=352 fail=800`, native — byte-identical to the MoltenVK profile, so a genuine HAL gap, not a
+  translation artifact). That is yawgpu's **one open finding**, pending a port of the aspect buffer-copy
+  support to the Vulkan (and GLES) HALs; the rest of the ported suite is green on Vulkan
+  (full run `pass=7190 skip=388 fail=18`, the 18 being exactly the F-032 depth/stencil aspect cases).
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
@@ -181,6 +188,15 @@ The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, 
 aborts (F-002, contained by `--isolate`). Run in one process, the command_buffer operation files show
 **no cross-test interference** — yawgpu is clean across the combined run (`pass=32785 skip=5 fail=0`); no
 test poisons another.
+
+**yawgpu on Windows/Vulkan** (NVIDIA RTX 5060 Ti, native — not MoltenVK; 2026-06-04): the operation
+ports match Metal *except* the F-032 depth/stencil-aspect buffer copies, which are an open Vulkan-HAL
+gap. `image_copy` color `137256 / 0`, `copyTextureToTexture` `copy_depth_stencil` `216 / 0` (F-031 fixed
+on the Vulkan HAL, `cac328a`), but `image_copy` depth/stencil **`352 / 800`** — byte-identical to the
+MoltenVK profile, confirming a real HAL gap rather than a translation artifact (see
+[F-032](docs/FINDINGS.md#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)).
+The full ported suite on Vulkan is otherwise green:
+`pass=7190 skip=388 fail=18` (the 18 failing cases = the F-032 d/s aspect combos, 800 subcases).
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
