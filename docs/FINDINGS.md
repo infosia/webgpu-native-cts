@@ -57,13 +57,15 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039
 — each keeps a compact record below.
-**Open — yawgpu:** [F-039](#f-039--yawgpu-two-dispatches-in-one-compute-pass-lose-their-writes-under-batch-execution--cross-hal)
-— `two_dispatches_in_the_same_compute_pass` (two compute dispatches writing one storage buffer in one
-pass; `memory_sync/buffer/single_buffer`, T35) reads back `0` instead of `2` **only under batch /
-`--isolate` execution** (`pass=24 fail=1`), while passing in isolation; **cross-HAL** (Metal ==
-Vulkan/MoltenVK), Dawn/wgpu-native clean. The `rw`/`wr`/`ww` cross-boundary cases pass. Surfaced/unmasked.
+**Open — yawgpu: none.**
+[F-039](#f-039--yawgpu-two-dispatches-in-one-compute-pass-lose-their-writes-under-batch-execution--cross-hal)
+(`two_dispatches_in_the_same_compute_pass` read back `0` instead of `2` under batch/`--isolate` —
+`memory_sync/buffer/single_buffer`, T35) is now **resolved** (`89f25df`, real-GPU Metal + Vulkan/MoltenVK:
+`pass=25 fail=0` across all run modes, was `pass=24 fail=1` in batch); the root cause was yawgpu treating
+the whole compute pass as one usage scope instead of per-dispatch, and it reproduced on Metal +
+Vulkan/MoltenVK, which localized it to yawgpu's shared layer.
 [F-038](#f-038--yawgpu-mishandles-stencil-operations-compare-and-masks--cross-hal)
 (yawgpu mishandled stencil ops/compare/masks — `rendering/stencil`, T33) is now **resolved** (`40f5d7f`,
 real-GPU Metal + Vulkan/MoltenVK: `pass=188 fail=0`, was `pass=97 fail=91`); the single root cause was the
@@ -1062,10 +1064,16 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   `--run-case`/batch execution mode) leaves yawgpu in a state where a compute pass with **two** dispatches
   writing one storage buffer produces no visible result on the following readback. A cross-test
   state/resource leak or a missing flush on the multi-dispatch path — **for yawgpu to localize**.
-- **Status:** **OPEN** (yawgpu). **Surfaced, not masked.** The case passes in isolation (so an
-  `expectations/yawgpu.txt` xfail would mismatch standalone/isolation behaviour) — none is added; the batch
-  failure stands as the report. Reproduce: `webgpu:api,operation,memory_sync,buffer,single_buffer:*` on
-  Metal or Vulkan (Dawn/wgpu target `pass=25`).
+- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `89f25df` —
+  "compute dispatch is a per-dispatch usage scope"). **Root cause: yawgpu treated the whole compute pass
+  as a single usage scope instead of per-dispatch**, so two dispatches writing one storage buffer in one
+  pass were mishandled (the result was lost); because that scope-tracking state depended on prior
+  in-process work, it surfaced only under batch / `--isolate`. Re-test: `single_buffer` `pass=25 fail=0` on
+  **both** HALs across `--workers` / no-workers / `--isolate` (was `pass=24 fail=1` in batch); regression
+  sweep (compute + rendering + sampling) `pass=926 fail=0`. The cross-HAL reproduction (Metal ==
+  Vulkan/MoltenVK) correctly localized it to yawgpu's shared layer; the "specific to the multi-dispatch
+  path" observation pinpointed it. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever
+  added.
 
 ---
 

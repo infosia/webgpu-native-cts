@@ -151,10 +151,11 @@ operations/compare/masks** (`pass=97 fail=91` deterministic vs Dawn/wgpu-native 
 Metal == Vulkan/MoltenVK byte-identical) — now **resolved** (`40f5d7f`): the single root cause was the
 dynamic stencil reference (`setStencilReference`) not being threaded to the HAL; re-test `pass=188 fail=0`
 on both HALs, neighboring rendering + compute unaffected. The **T35** `memory_sync/buffer/single_buffer`
-port then surfaced **F-039** — yawgpu's `two_dispatches_in_the_same_compute_pass` reads back `0` instead
+port then surfaced **F-039** — yawgpu's `two_dispatches_in_the_same_compute_pass` read back `0` instead
 of `2` (both storage writes lost) **only under batch / `--isolate` execution** while passing in isolation,
-**cross-HAL** (Metal == Vulkan/MoltenVK); the `rw`/`wr`/`ww` cross-boundary cases pass, Dawn/wgpu-native
-clean. yawgpu's **one open finding is F-039**; the **GLES** HAL
+**cross-HAL** (Metal == Vulkan/MoltenVK) — now **resolved** (`89f25df`): yawgpu was treating the whole
+compute pass as one usage scope instead of per-dispatch; re-test `pass=25 fail=0` across all run modes on
+both HALs, regression sweep `pass=926 fail=0`. **yawgpu has no open findings**; the **GLES** HAL
   is the only untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
