@@ -97,12 +97,13 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **15 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **17 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil}` (the color
   render-to-texture + draw-call + blend-state + depth-test + stencil-test foundations), `compute/basic`
-  (the compute foundation), `sampling/filter_mode` (the texture-sampling foundation), and
-  `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation).
+  (the compute foundation), `sampling/filter_mode` (the texture-sampling foundation),
+  `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation), and
+  `render_pass/{resolve, storeop2}` (the multisample-resolve + store-op foundation).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
@@ -111,7 +112,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 38 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 39 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
@@ -155,8 +156,11 @@ port then surfaced **F-039** — yawgpu's `two_dispatches_in_the_same_compute_pa
 of `2` (both storage writes lost) **only under batch / `--isolate` execution** while passing in isolation,
 **cross-HAL** (Metal == Vulkan/MoltenVK) — now **resolved** (`89f25df`): yawgpu was treating the whole
 compute pass as one usage scope instead of per-dispatch; re-test `pass=25 fail=0` across all run modes on
-both HALs, regression sweep `pass=926 fail=0`. **yawgpu has no open findings**; the **GLES** HAL
-  is the only untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
+both HALs, regression sweep `pass=926 fail=0`. The **T36** `render_pass/resolve` port then surfaced
+**F-040** — yawgpu's **multisample (MSAA) resolve does not write the resolve target** (reads back all
+zeros; all 12 `render_pass_resolve` subcases fail deterministically while the non-MSAA `storeop2` passes),
+**cross-HAL** (Metal == Vulkan/MoltenVK), Dawn/wgpu-native clean. yawgpu's **one open finding is F-040**;
+  the **GLES** HAL is the only untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,

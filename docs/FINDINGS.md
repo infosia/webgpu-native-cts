@@ -59,7 +59,11 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039
 — each keeps a compact record below.
-**Open — yawgpu: none.**
+**Open — yawgpu:** [F-040](#f-040--yawgpu-multisample-resolve-does-not-write-the-resolve-target--cross-hal)
+— yawgpu's **multisample (MSAA) resolve does not write the resolve target** (it reads back all zeros;
+`render_pass/resolve`, T36): all 12 `render_pass_resolve` subcases fail `(0,0) expected 1 got 0`
+deterministically, while the non-MSAA `storeop2` passes; **cross-HAL** (Metal == Vulkan/MoltenVK,
+`pass=2 fail=12`), Dawn/wgpu-native clean. Surfaced/unmasked.
 [F-039](#f-039--yawgpu-two-dispatches-in-one-compute-pass-lose-their-writes-under-batch-execution--cross-hal)
 (`two_dispatches_in_the_same_compute_pass` read back `0` instead of `2` under batch/`--isolate` —
 `memory_sync/buffer/single_buffer`, T35) is now **resolved** (`89f25df`, real-GPU Metal + Vulkan/MoltenVK:
@@ -1074,6 +1078,35 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   Vulkan/MoltenVK) correctly localized it to yawgpu's shared layer; the "specific to the multi-dispatch
   path" observation pinpointed it. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever
   added.
+
+---
+
+## F-040 — yawgpu: multisample resolve does not write the resolve target — cross-HAL
+
+- **Backend:** yawgpu (`89f25df`, real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present
+  in Dawn or wgpu-native (both pass all 14).
+- **Found by:** the T36 (V8) `render_pass/resolve` port — the suite's first **multisample (MSAA) resolve**
+  path (`sampleCount=4` color attachments + a `resolveTarget`). **Dawn (oracle) and wgpu-native both pass
+  all 14**; **yawgpu fails all 12 `render_pass_resolve` subcases** (`pass=2 fail=12` — the 2 passes are the
+  non-MSAA `storeop2` store/discard cases), **deterministic**.
+- **Observed:** every resolve subcase fails at the resolve-target pixel `(0,0)` channel 0 —
+  `expected 1, got 0`. The drawn white triangle fully covers the top-left of the `4×4 sampleCount=4`
+  attachment, so the resolve target's `(0,0)` should be white `[1,1,1,1]`; yawgpu reads back **`0`** (the
+  resolve target stays at its cleared/uninitialized value) — i.e. the **multisample resolve does not write
+  to the `resolveTarget`** at all. Affects both the single draw+resolve pass and the separate
+  empty-load-resolve pass, and both `store`/`discard` store-ops.
+- **Expected (WebGPU):** when a color attachment has a `resolveTarget`, the multisampled samples are
+  averaged and written to the single-sample resolve target at pass end. Dawn and wgpu-native do this
+  (resolve target reads white / black / `0.5` midpoint).
+- **Scope / not the basic render path:** `storeop2` (a plain `sampleCount=1` render + `store`/`discard`)
+  **passes** — so single-sample color render + store works; the gap is specifically the **MSAA resolve**
+  (multisample attachment → resolve target).
+- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
+  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=2 fail=12` with the same 12-case set — so it is in yawgpu's
+  **shared (HAL-agnostic)** multisample-resolve handling, not a per-HAL path.
+- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
+  The 12 failures stand until yawgpu implements/fixes the resolve-target write; re-run
+  `webgpu:api,operation,render_pass,resolve:*` (Dawn/wgpu target `pass=12`).
 
 ---
 
