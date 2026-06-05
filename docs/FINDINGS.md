@@ -59,7 +59,11 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040
 — each keeps a compact record below.
-**Open — yawgpu: none.**
+**Open — yawgpu:** [F-041](#f-041--yawgpu-read-only-storage-texture-textureload-reads-back-zero--cross-hal)
+— yawgpu's **read-only storage-texture `textureLoad` reads back zero** (the output buffer is all zeros;
+`storage_texture/read_only`, T37): all 3 `basic` cases (`r32uint`/`r32sint`/`r32float`, compute/2D) fail
+deterministically; **cross-HAL** (Metal == Vulkan/MoltenVK, `pass=0 fail=3`), Dawn/wgpu-native clean. The
+compute storage-buffer path works (V2), so it's specific to the storage **texture** read. Surfaced/unmasked.
 [F-040](#f-040--yawgpu-multisample-resolve-does-not-write-the-resolve-target--cross-hal)
 (yawgpu's **multisample (MSAA) resolve** did not write the resolve target — `render_pass/resolve`, T36) is
 now **resolved** (`bc8c280` + `3303058`, real-GPU Metal + Vulkan/MoltenVK: `pass=12 fail=0`, was
@@ -1117,6 +1121,36 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   "slice 2/3" estimate; no further yawgpu slice was needed. The deferred V8b resolve breadth — format
   matrix, `numColorAttachments=4`, mip/layer-offset resolve, transient — is our remaining **CTS**
   coverage, not blocked on yawgpu.)
+
+---
+
+## F-041 — yawgpu: read-only storage-texture `textureLoad` reads back zero — cross-HAL
+
+- **Backend:** yawgpu (`bc8c280`, real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present
+  in Dawn or wgpu-native (both pass all 3).
+- **Found by:** the T37 (V9) `storage_texture/read_only` port — the suite's first **read-only
+  storage-texture** read (`textureLoad` on a `texture_storage_2d<format, read>` in a compute shader, the
+  result written to an output storage buffer). **Dawn (oracle) and wgpu-native both pass all 3** (formats
+  `r32uint`/`r32sint`/`r32float`); **yawgpu fails all 3** (`pass=0 fail=3`), **deterministic**.
+- **Observed:** every case fails at the output buffer's first byte with **`got 0`** (expected the texel-0
+  value — `r32uint` `1`, `r32sint` `0xFF…` = `-1`, `r32float` `0x…CD` = `0.1`). The output buffer reads
+  back **all zeros** — i.e. the compute shader's `textureLoad(readOnlyTexture, …)` returns `0`, so the
+  storage texture's uploaded contents are **not** read into the shader. (The compute **storage-buffer**
+  path works — V2 `compute/basic` passes on yawgpu — so the gap is specifically the storage **texture**
+  read: the `texture_storage_2d<…, read>` binding / `textureLoad`, or the `queueWriteTexture` upload into
+  a `STORAGE_BINDING` texture.)
+- **Expected (WebGPU):** `textureLoad` on a read-only storage texture returns the stored texel. Dawn and
+  wgpu-native do (output = `[value, 0, 0, 1]` per texel).
+- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
+  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=0 fail=3` — so it is in yawgpu's **shared (HAL-agnostic)**
+  read-only-storage-texture handling, not a per-HAL path.
+- **Related:** yawgpu was finding-rich on the **validation** side for storage textures
+  ([F-016](#f-016--yawgpu-rejects-read-write-storage-textures-on-read-write-capable-formats),
+  [F-018](#f-018--yawgpu-over-restricts-bindgrouplayout-storage-texture-bindings)); this is the first
+  **operation** coverage and surfaces a functional gap.
+- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
+  The 3 failures stand until yawgpu fixes the read-only storage-texture read; re-run
+  `webgpu:api,operation,storage_texture,read_only:*` (Dawn/wgpu target `pass=3`).
 
 ---
 

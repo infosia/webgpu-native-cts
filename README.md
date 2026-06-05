@@ -97,13 +97,14 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **17 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **18 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil}` (the color
   render-to-texture + draw-call + blend-state + depth-test + stencil-test foundations), `compute/basic`
   (the compute foundation), `sampling/filter_mode` (the texture-sampling foundation),
-  `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation), and
-  `render_pass/{resolve, storeop2}` (the multisample-resolve + store-op foundation).
+  `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation),
+  `render_pass/{resolve, storeop2}` (the multisample-resolve + store-op foundation), and
+  `storage_texture/read_only` (the read-only storage-texture foundation).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
@@ -112,7 +113,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 39 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 40 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
@@ -161,7 +162,10 @@ both HALs, regression sweep `pass=926 fail=0`. The **T36** `render_pass/resolve`
 `render_pass_resolve` subcases failed deterministically while the non-MSAA `storeop2` passed),
 **cross-HAL** (Metal == Vulkan/MoltenVK) — now **resolved** (`bc8c280`+`3303058`): yawgpu had no MSAA
 pipeline / resolve (and no multi-color-attachment) support; re-test `pass=12 fail=0` on both HALs,
-regression sweep `pass=951 fail=0`. **yawgpu has no open findings**;
+regression sweep `pass=951 fail=0`. The **T37** `storage_texture/read_only` port then surfaced **F-041**
+— yawgpu's **read-only storage-texture `textureLoad` reads back zero** (the output buffer is all zeros;
+all 3 `basic` cases fail deterministically while the compute storage-*buffer* path works), **cross-HAL**
+(Metal == Vulkan/MoltenVK), Dawn/wgpu-native clean. yawgpu's **one open finding is F-041**;
   the **GLES** HAL is the only untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
