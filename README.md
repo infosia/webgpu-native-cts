@@ -97,11 +97,11 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **13 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **14 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil}` (the color
-  render-to-texture + draw-call + blend-state + depth-test + stencil-test foundations), and
-  `compute/basic` (the compute foundation).
+  render-to-texture + draw-call + blend-state + depth-test + stencil-test foundations), `compute/basic`
+  (the compute foundation), and `sampling/filter_mode` (the texture-sampling foundation).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
