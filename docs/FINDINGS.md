@@ -57,14 +57,14 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038
 — each keeps a compact record below.
-**Open — yawgpu:** [F-038](#f-038--yawgpu-mishandles-stencil-operations-compare-and-masks--cross-hal)
-— yawgpu **mishandles stencil operations, compare, and masks** (`rendering/stencil`, T33): stencil ops
-`invert`/`increment-clamp`/`increment-wrap`/`decrement-wrap` give wrong values, the compare doesn't
-correctly use the stored stencil value, and read/write masks diverge — `pass=97 fail=91` deterministic,
-vs Dawn/wgpu-native `pass=188`. **Cross-HAL** (Metal == Vulkan/MoltenVK, byte-identical 91-case set), so
-it's in yawgpu's shared stencil translation. Surfaced/unmasked.
+**Open — yawgpu: none.**
+[F-038](#f-038--yawgpu-mishandles-stencil-operations-compare-and-masks--cross-hal)
+(yawgpu mishandled stencil ops/compare/masks — `rendering/stencil`, T33) is now **resolved** (`40f5d7f`,
+real-GPU Metal + Vulkan/MoltenVK: `pass=188 fail=0`, was `pass=97 fail=91`); the single root cause was the
+dynamic stencil reference (`setStencilReference`) not being threaded to the HAL, and it reproduced
+byte-identically on Metal + Vulkan/MoltenVK, which localized it to yawgpu's shared state path.
 [F-037](#f-037--yawgpu-metal-hal-non-deterministic-depth-attachment-renderreadback-race)
 (a **Metal-HAL-only** non-deterministic flake on the `rendering/depth` ports, T32 — the drawn point's
 output intermittently read back as the clear value) is now **resolved** (`186cd54`): the root cause was
@@ -1018,9 +1018,16 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   `CTS_YAWGPU_BACKEND=vulkan`) fail the **byte-identical 91-case set** (`diff` empty). So this is **not** a
   per-HAL stencil-op/compare enum mapping (those differ between Metal and Vulkan) — it is in yawgpu's
   **shared (HAL-agnostic) stencil state translation**. (Contrast F-037, which was Metal-HAL-only.)
-- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
-  The 91 failures stand until yawgpu fixes the stencil op/compare/mask handling; re-run
-  `webgpu:api,operation,rendering,stencil:*` (Dawn/wgpu target `pass=188`).
+- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `40f5d7f` —
+  "thread dynamic stencil reference to the HAL"). **Single root cause: the dynamic stencil reference
+  (`setStencilReference`) was not threaded through to the HAL** — so everything that depends on it was
+  scrambled at once (the base `replace` wrote against the wrong reference, the verify `equal` compared
+  against the wrong reference, and the masked compares diverged). That single gap is why the three
+  observed facets above (ops / compare / masks) never reconciled into one black-box hypothesis — they were
+  all downstream of the missing reference. Re-test: `rendering/stencil` `pass=188 fail=0` on **both** HALs
+  (Dawn/wgpu-equal, up from `pass=97 fail=91`); neighboring rendering + compute `pass=720 fail=0` (no
+  regression). The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's
+  shared state path. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever added.
 
 ---
 
