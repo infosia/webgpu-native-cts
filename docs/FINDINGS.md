@@ -57,15 +57,16 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037
 — each keeps a compact record below.
-**Open — yawgpu:** [F-037](#f-037--yawgpu-metal-hal-non-deterministic-depth-attachment-renderreadback-race)
-— a **Metal-HAL-only** non-deterministic race in the depth-stencil-attachment render→readback path
-(`rendering/depth`, T32): the full set is flaky (`fail≈33–44/130`, varying run-to-run; the drawn point's
-output intermittently reads back as the clear value), yet every case passes in isolation. yawgpu's own
-**Vulkan/MoltenVK** HAL — plus Dawn and wgpu-native on Metal — are all clean and deterministic
-(`pass=130`), so it is Metal-HAL-specific. Surfaced/unmasked (non-deterministic + per-case-correct ⇒ no
-expectations entry).
+**Open — yawgpu: none.**
+[F-037](#f-037--yawgpu-metal-hal-non-deterministic-depth-attachment-renderreadback-race)
+(a **Metal-HAL-only** non-deterministic flake on the `rendering/depth` ports, T32 — the drawn point's
+output intermittently read back as the clear value) is now **resolved** (`186cd54`): the root cause was
+yawgpu's Metal HAL not emitting `[[point_size]]` for **`point-list`** pipelines (the depth tests are the
+suite's first point-list users), so the point size was undefined on Metal; re-test `pass=130 fail=0`
+across 11 consecutive runs (was `fail≈33–44`), neighboring triangle-list rendering unaffected
+(`pass=589 fail=0`). Vulkan/MoltenVK, Dawn, and wgpu-native/Metal were always clean.
 [F-035](#f-035--yawgpu-ignores-gpucolortargetstate-blend-and-writemask-writes-the-raw-fragment-output--cross-hal)
 (yawgpu ignored `GPUColorTargetState` `blend` + `writeMask`, writing the raw fragment output to all
 channels — `rendering/color_target_state`, T31) is now **resolved** (`74f5ef2`, real-GPU Metal +
@@ -967,11 +968,18 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 - **Not cross-HAL (unlike F-035), not Metal-generic (unlike a driver issue):** Metal-HAL-specific to
   yawgpu. (Contrast F-033, a MoltenVK-only artifact; this is the opposite — the *native* Metal HAL is the
   one that races, while the Vulkan-via-MoltenVK HAL is clean.)
-- **Status:** **OPEN** (yawgpu Metal HAL). **Surfaced, not masked.** Because it is non-deterministic *and*
-  every case is correct in isolation (the failing set differs each run), an `expectations/yawgpu.txt`
-  entry would be wrong (it would xpass most runs and can't enumerate a stable set) — so none is added; the
-  flakiness stands as the report. Re-run `webgpu:api,operation,rendering,depth:*` on Metal to reproduce
-  (Dawn/wgpu/Vulkan target `pass=130`).
+- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal; yawgpu `186cd54` — "emit `[[point_size]]` for
+  Metal point-list pipelines"). **Root cause: not a sync race** (the hypothesis above was wrong) — yawgpu's
+  Metal HAL did not emit a `[[point_size]]` from the vertex function for **`point-list`** pipelines, so the
+  rendered point's size was **undefined** on Metal and the single pixel was intermittently not covered
+  (hence the non-determinism and the `expected 1, got 0`). The depth tests are simply the suite's **first
+  `point-list` users** (T30/T31 use `triangle-list`), so only they flaked — the depth attachment was
+  incidental; the **point-list topology** was the real differentiator. Vulkan defaults point size to `1.0`
+  (and Dawn/wgpu-native emit it for Metal), which is why every other path was clean. Re-test:
+  `rendering/depth` `pass=130 fail=0` across **11 consecutive runs** (8 sequential + 3 `--workers 8`), no
+  flakiness; neighboring rendering (`basic`+`draw`+`color_target_state`, all triangle-list)
+  `pass=589 fail=0` (no regression). Metal-HAL-only fix; Vulkan/MoltenVK was always clean. Surfaced, not
+  masked — no `expectations/yawgpu.txt` entry was ever added.
 
 ---
 

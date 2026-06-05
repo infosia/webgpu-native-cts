@@ -138,11 +138,13 @@ real-GPU Metal:
 `blend` + `writeMask`** (wrote the raw fragment output to all channels), `pass=2 fail=21` vs the Dawn
 oracle's `pass=23`, **cross-HAL** (Metal == Vulkan/MoltenVK byte-identical, not a MoltenVK artifact),
 now **resolved** (`74f5ef2`): `color_target_state` `pass=23 fail=0` on **both** Metal and Vulkan/MoltenVK.
-The **T32** `rendering/depth` port then surfaced **F-037** — a **Metal-HAL-only** non-deterministic race in
-yawgpu's depth-stencil-attachment render→readback path (`fail≈33–44/130`, varying run-to-run; the drawn
-point intermittently reads back as the clear value), yet every case passes in isolation; Dawn,
-wgpu-native/Metal, and yawgpu's own **Vulkan/MoltenVK** HAL are all clean and deterministic (`pass=130`),
-**open**/surfaced/unmasked. yawgpu's **one open finding is F-037** (Metal HAL); the **GLES** HAL is the only
+The **T32** `rendering/depth` port then surfaced **F-037** — a **Metal-HAL-only** non-deterministic flake
+(`fail≈33–44/130`, varying run-to-run; the drawn point intermittently read back as the clear value) while
+every case passed in isolation and Dawn, wgpu-native/Metal, and yawgpu's own **Vulkan/MoltenVK** HAL were
+all clean (`pass=130`) — now **resolved** (`186cd54`): the Metal HAL wasn't emitting `[[point_size]]` for
+**`point-list`** pipelines (the depth tests are the suite's first point-list users), so point size was
+undefined on Metal; re-test `pass=130 fail=0` across 11 runs, triangle-list rendering unaffected.
+**yawgpu has no open findings**; the **GLES** HAL is the only
   untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
