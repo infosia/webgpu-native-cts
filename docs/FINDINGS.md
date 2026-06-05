@@ -59,7 +59,11 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038
 — each keeps a compact record below.
-**Open — yawgpu: none.**
+**Open — yawgpu:** [F-039](#f-039--yawgpu-two-dispatches-in-one-compute-pass-lose-their-writes-under-batch-execution--cross-hal)
+— `two_dispatches_in_the_same_compute_pass` (two compute dispatches writing one storage buffer in one
+pass; `memory_sync/buffer/single_buffer`, T35) reads back `0` instead of `2` **only under batch /
+`--isolate` execution** (`pass=24 fail=1`), while passing in isolation; **cross-HAL** (Metal ==
+Vulkan/MoltenVK), Dawn/wgpu-native clean. The `rw`/`wr`/`ww` cross-boundary cases pass. Surfaced/unmasked.
 [F-038](#f-038--yawgpu-mishandles-stencil-operations-compare-and-masks--cross-hal)
 (yawgpu mishandled stencil ops/compare/masks — `rendering/stencil`, T33) is now **resolved** (`40f5d7f`,
 real-GPU Metal + Vulkan/MoltenVK: `pass=188 fail=0`, was `pass=97 fail=91`); the single root cause was the
@@ -1028,6 +1032,40 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   (Dawn/wgpu-equal, up from `pass=97 fail=91`); neighboring rendering + compute `pass=720 fail=0` (no
   regression). The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's
   shared state path. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever added.
+
+---
+
+## F-039 — yawgpu: two dispatches in one compute pass lose their writes under batch execution — cross-HAL
+
+- **Backend:** yawgpu (`40f5d7f`, real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present
+  in Dawn or wgpu-native (both pass in every mode).
+- **Found by:** the T35 (V7) `memory_sync/buffer/single_buffer` port —
+  `two_dispatches_in_the_same_compute_pass` (two compute dispatches write `1` then `2` to one storage
+  buffer **in the same pass**, which the spec orders ⇒ expect `2`). **Dawn and wgpu-native pass it in
+  every mode; yawgpu reads back `0`** (the buffer's initial value — **neither** dispatch's write is
+  visible) **only under batch / `--isolate` execution** (`pass=24 fail=1`), yet it **passes deterministically
+  (10/10 Metal, 5/5 Vulkan) when run as the sole query in a fresh process.**
+- **Observed:** `expected 2, got 0`. Deterministic — the full `single_buffer:*` run fails this one case
+  every time (Metal **and** Vulkan/MoltenVK). The `rw`/`wr`/`ww` cross-boundary cases (single dispatch per
+  pass, storage writes/reads/copies across separate command buffers and submits) **all pass even in the
+  same batch** — so it is **specific to the multiple-dispatches-in-one-pass path**, not storage compute or
+  the readback helper in general (the same `expectGPUBufferValuesEqual` readback verifies `rw`/`wr`/`ww`).
+- **Expected (WebGPU):** dispatches in the same compute pass are ordered; after the two writes the buffer
+  holds `2`, and that result is visible to a subsequent `copyBufferToBuffer` readback. Dawn and
+  wgpu-native do this in all modes.
+- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
+  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=24 fail=1` in batch and both pass the case in isolation —
+  so it is in yawgpu's **shared (HAL-agnostic)** layer, not a per-HAL path. (Same family as the resolved
+  **F-029**/**F-030** cross-test contamination, here on Metal+Vulkan and **deterministic**, and specific to
+  the two-dispatch compute pass.)
+- **Localization (for yawgpu):** the case is correct in isolation, so prior in-process GPU work (or the
+  `--run-case`/batch execution mode) leaves yawgpu in a state where a compute pass with **two** dispatches
+  writing one storage buffer produces no visible result on the following readback. A cross-test
+  state/resource leak or a missing flush on the multi-dispatch path — **for yawgpu to localize**.
+- **Status:** **OPEN** (yawgpu). **Surfaced, not masked.** The case passes in isolation (so an
+  `expectations/yawgpu.txt` xfail would mismatch standalone/isolation behaviour) — none is added; the batch
+  failure stands as the report. Reproduce: `webgpu:api,operation,memory_sync,buffer,single_buffer:*` on
+  Metal or Vulkan (Dawn/wgpu target `pass=25`).
 
 ---
 

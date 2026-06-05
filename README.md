@@ -97,11 +97,12 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **14 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **15 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil}` (the color
   render-to-texture + draw-call + blend-state + depth-test + stencil-test foundations), `compute/basic`
-  (the compute foundation), and `sampling/filter_mode` (the texture-sampling foundation).
+  (the compute foundation), `sampling/filter_mode` (the texture-sampling foundation), and
+  `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
@@ -110,7 +111,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 37 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 38 cross-backend findings to date; the full per-finding
 record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
 real-GPU Metal:
 
@@ -149,7 +150,11 @@ The **T33** `rendering/stencil` port then surfaced **F-038** — yawgpu **mishan
 operations/compare/masks** (`pass=97 fail=91` deterministic vs Dawn/wgpu-native `pass=188`, **cross-HAL**
 Metal == Vulkan/MoltenVK byte-identical) — now **resolved** (`40f5d7f`): the single root cause was the
 dynamic stencil reference (`setStencilReference`) not being threaded to the HAL; re-test `pass=188 fail=0`
-on both HALs, neighboring rendering + compute unaffected. **yawgpu has no open findings**; the **GLES** HAL
+on both HALs, neighboring rendering + compute unaffected. The **T35** `memory_sync/buffer/single_buffer`
+port then surfaced **F-039** — yawgpu's `two_dispatches_in_the_same_compute_pass` reads back `0` instead
+of `2` (both storage writes lost) **only under batch / `--isolate` execution** while passing in isolation,
+**cross-HAL** (Metal == Vulkan/MoltenVK); the `rw`/`wr`/`ww` cross-boundary cases pass, Dawn/wgpu-native
+clean. yawgpu's **one open finding is F-039**; the **GLES** HAL
   is the only untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
