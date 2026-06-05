@@ -1113,8 +1113,10 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   repeated runs (was `pass=2 fail=12`); regression sweep (rendering + compute + sampling + memory_sync)
   `pass=951 fail=0`. The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to
   yawgpu's shared resolve handling. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever
-  added. (The deferred V8b resolve breadth — format matrix, `numColorAttachments=4`, mip/layer-offset
-  resolve, transient — is not yet exercised; yawgpu noted a remaining "slice 3/3".)
+  added. (The fix landed complete in **2** commits — `3303058` + `bc8c280` — despite the commit message's
+  "slice 2/3" estimate; no further yawgpu slice was needed. The deferred V8b resolve breadth — format
+  matrix, `numColorAttachments=4`, mip/layer-offset resolve, transient — is our remaining **CTS**
+  coverage, not blocked on yawgpu.)
 
 ---
 
