@@ -57,13 +57,14 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040
 — each keeps a compact record below.
-**Open — yawgpu:** [F-040](#f-040--yawgpu-multisample-resolve-does-not-write-the-resolve-target--cross-hal)
-— yawgpu's **multisample (MSAA) resolve does not write the resolve target** (it reads back all zeros;
-`render_pass/resolve`, T36): all 12 `render_pass_resolve` subcases fail `(0,0) expected 1 got 0`
-deterministically, while the non-MSAA `storeop2` passes; **cross-HAL** (Metal == Vulkan/MoltenVK,
-`pass=2 fail=12`), Dawn/wgpu-native clean. Surfaced/unmasked.
+**Open — yawgpu: none.**
+[F-040](#f-040--yawgpu-multisample-resolve-does-not-write-the-resolve-target--cross-hal)
+(yawgpu's **multisample (MSAA) resolve** did not write the resolve target — `render_pass/resolve`, T36) is
+now **resolved** (`bc8c280` + `3303058`, real-GPU Metal + Vulkan/MoltenVK: `pass=12 fail=0`, was
+`pass=2 fail=12`); yawgpu had no MSAA pipeline / resolve (and no multi-color-attachment) support, and it
+reproduced on Metal + Vulkan/MoltenVK, which localized it to yawgpu's shared resolve handling.
 [F-039](#f-039--yawgpu-two-dispatches-in-one-compute-pass-lose-their-writes-under-batch-execution--cross-hal)
 (`two_dispatches_in_the_same_compute_pass` read back `0` instead of `2` under batch/`--isolate` —
 `memory_sync/buffer/single_buffer`, T35) is now **resolved** (`89f25df`, real-GPU Metal + Vulkan/MoltenVK:
@@ -1104,9 +1105,16 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 - **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
   `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=2 fail=12` with the same 12-case set — so it is in yawgpu's
   **shared (HAL-agnostic)** multisample-resolve handling, not a per-HAL path.
-- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
-  The 12 failures stand until yawgpu implements/fixes the resolve-target write; re-run
-  `webgpu:api,operation,render_pass,resolve:*` (Dawn/wgpu target `pass=12`).
+- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `bc8c280` —
+  "MSAA render pipelines + multisample resolve", on top of `3303058` "multiple color attachments in the
+  regular render path"). Root cause: yawgpu had **no MSAA render pipeline / multisample-resolve support**
+  (and the regular render path didn't handle multiple color attachments), so the resolve target was never
+  written. Re-test: `render_pass/resolve` `pass=12 fail=0` (+ `storeop2` 2) on **both** HALs across
+  repeated runs (was `pass=2 fail=12`); regression sweep (rendering + compute + sampling + memory_sync)
+  `pass=951 fail=0`. The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to
+  yawgpu's shared resolve handling. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever
+  added. (The deferred V8b resolve breadth — format matrix, `numColorAttachments=4`, mip/layer-offset
+  resolve, transient — is not yet exercised; yawgpu noted a remaining "slice 3/3".)
 
 ---
 

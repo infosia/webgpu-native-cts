@@ -157,9 +157,11 @@ of `2` (both storage writes lost) **only under batch / `--isolate` execution** w
 **cross-HAL** (Metal == Vulkan/MoltenVK) — now **resolved** (`89f25df`): yawgpu was treating the whole
 compute pass as one usage scope instead of per-dispatch; re-test `pass=25 fail=0` across all run modes on
 both HALs, regression sweep `pass=926 fail=0`. The **T36** `render_pass/resolve` port then surfaced
-**F-040** — yawgpu's **multisample (MSAA) resolve does not write the resolve target** (reads back all
-zeros; all 12 `render_pass_resolve` subcases fail deterministically while the non-MSAA `storeop2` passes),
-**cross-HAL** (Metal == Vulkan/MoltenVK), Dawn/wgpu-native clean. yawgpu's **one open finding is F-040**;
+**F-040** — yawgpu's **multisample (MSAA) resolve did not write the resolve target** (all 12
+`render_pass_resolve` subcases failed deterministically while the non-MSAA `storeop2` passed),
+**cross-HAL** (Metal == Vulkan/MoltenVK) — now **resolved** (`bc8c280`+`3303058`): yawgpu had no MSAA
+pipeline / resolve (and no multi-color-attachment) support; re-test `pass=12 fail=0` on both HALs,
+regression sweep `pass=951 fail=0`. **yawgpu has no open findings**;
   the **GLES** HAL is the only untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
