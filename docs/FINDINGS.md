@@ -59,7 +59,11 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041
 — each keeps a compact record below.
-**Open — yawgpu: none.**
+**Open — yawgpu:** [F-042](#f-042--yawgpu-a-render-stage-fragment-storage-buffer-write-from-a-point-draw-reads-back-zero--cross-hal)
+— yawgpu's **render-stage (fragment) storage-buffer write** from a `point-list` draw reads back `0`
+(`memory_sync/buffer/single_buffer` `two_draws_*`, T39): all 5 cases fail `expected 1 or 2, got 0`
+deterministically (the non-bundle subcase too — so not bundle-specific); the compute storage write works;
+**cross-HAL** (Metal == Vulkan/MoltenVK), Dawn/wgpu-native clean. Surfaced/unmasked.
 [F-041](#f-041--yawgpu-read-only-storage-texture-textureload-reads-back-zero--cross-hal)
 (yawgpu's **read-only storage-texture `textureLoad`** read back zero — `storage_texture/read_only`, T37) is
 now **resolved** (`2e4edb7`, real-GPU Metal + Vulkan/MoltenVK: `pass=3 fail=0`, was `pass=0 fail=3`);
@@ -1159,6 +1163,38 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   runtime-array-size change touched all runtime-sized storage-buffer arrays — no regression). The cross-HAL
   reproduction (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's shared storage-texture
   handling. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever added.
+
+---
+
+## F-042 — yawgpu: a render-stage (fragment) storage-buffer write from a point draw reads back zero — cross-HAL
+
+- **Backend:** yawgpu (`2e4edb7`, real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present
+  in Dawn or wgpu-native (both pass all 5).
+- **Found by:** the T39 (V7b) `memory_sync/buffer/single_buffer` `two_draws_*` ports — the suite's first
+  **render-stage storage write** (a fragment shader writing `var<storage, read_write> data; data.a =
+  value` from a `point-list` draw) + render bundles. **Dawn (oracle) and wgpu-native both pass all 5**
+  (`two_draws_in_the_same_render_pass` 4 subcases + `two_draws_in_the_same_render_bundle`); **yawgpu fails
+  all 5** (`pass=0 fail=5`), **deterministic**.
+- **Observed:** every case fails `expected 1 or 2, got 0` — the storage buffer stays at its initial `0`,
+  i.e. the fragment shader's storage write never takes effect (or the point never rasterizes the `1×1`
+  target). The **`firstDrawUseBundle=false, secondDrawUseBundle=false`** subcase (no render bundle, plain
+  render-pass draws) fails too — so this is **not** render-bundle-specific; it is the **render-stage
+  (fragment) storage write** (or the `point-list` draw into the `1×1` attachment).
+- **Scope / not the compute path:** the **compute** storage-buffer write works — `rw`/`wr`/`ww`/
+  `two_dispatches_in_the_same_compute_pass` all pass on yawgpu — so the gap is specifically the
+  **fragment-stage** storage write from a render-pass (point) draw.
+- **Expected (WebGPU):** a fragment-stage `read_write` storage write takes effect (the buffer holds `1` or
+  `2` after the two draws). Dawn and wgpu-native do.
+- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
+  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=0 fail=5` — so it is in yawgpu's **shared (HAL-agnostic)**
+  render-stage storage-write / point-draw handling, not a per-HAL path.
+- **Related but distinct:** [F-034](#f-034--yawgpu-a-fragment-storage-write-is-lost-on-indexed--indirect-draws)
+  was a fragment storage write lost on **indexed/indirect** draws (resolved); plain **triangle** draws
+  worked there. This is a plain **point** draw, **cross-HAL**, so a separate manifestation — **for yawgpu
+  to localize** (point-list fragment storage write vs the point's `1×1` coverage).
+- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
+  The 5 failures stand until yawgpu fixes the render-stage storage write; re-run
+  `webgpu:api,operation,memory_sync,buffer,single_buffer:two_draws_*` (Dawn/wgpu target `pass=5`).
 
 ---
 

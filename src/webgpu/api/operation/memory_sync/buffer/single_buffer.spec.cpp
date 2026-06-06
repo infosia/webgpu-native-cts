@@ -2,6 +2,8 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -22,6 +24,11 @@ constexpr uint32_t kBufferSize = 4;
 constexpr uint32_t kSrcValue = 0;
 constexpr uint32_t kOpValue = 1;
 
+struct RenderPipelineForTest {
+    WGPUBindGroupLayout bindGroupLayout = nullptr;
+    WGPURenderPipeline pipeline = nullptr;
+};
+
 constexpr std::string_view kStorageReadShader = R"(
 struct Data {
   a : u32,
@@ -33,6 +40,12 @@ struct Data {
 @compute @workgroup_size(1)
 fn main() {
   dst.a = src.a;
+}
+)";
+
+constexpr std::string_view kDummyVertexShader = R"(
+@vertex fn vert_main() -> @builtin(position) vec4<f32> {
+  return vec4<f32>(0.5, 0.5, 0.0, 1.0);
 }
 )";
 
@@ -69,6 +82,23 @@ fn main() {
     return shader.str();
 }
 
+std::string storageWriteFragmentShader(uint32_t value) {
+    std::ostringstream shader;
+    shader << R"(
+struct Data {
+  a : u32,
+};
+
+@group(0) @binding(0) var<storage, read_write> data : Data;
+
+@fragment fn frag_main() -> @location(0) vec4<f32> {
+  data.a = )" << value << R"(u;
+  return vec4<f32>();
+}
+)";
+    return shader.str();
+}
+
 WGPUBuffer createBufferWithValue(AllFeaturesMaxLimitsGpuTest& t, uint32_t value) {
     return t.makeBufferWithContents(
         &value,
@@ -87,6 +117,19 @@ WGPUBindGroupLayout createStorageWriteBindGroupLayout(AllFeaturesMaxLimitsGpuTes
     WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
     entry.binding = 0;
     entry.visibility = WGPUShaderStage_Compute;
+    entry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entry.buffer.type = WGPUBufferBindingType_Storage;
+
+    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    desc.entryCount = 1;
+    desc.entries = &entry;
+    return t.createBindGroupLayoutTracked(desc);
+}
+
+WGPUBindGroupLayout createRenderStorageWriteBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t) {
+    WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+    entry.binding = 0;
+    entry.visibility = WGPUShaderStage_Fragment;
     entry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
     entry.buffer.type = WGPUBufferBindingType_Storage;
 
@@ -146,6 +189,31 @@ WGPUComputePipeline createStorageReadComputePipeline(AllFeaturesMaxLimitsGpuTest
     desc.compute.module = shaderModule;
     desc.compute.entryPoint = stringView("main");
     return t.createComputePipelineTracked(desc);
+}
+
+RenderPipelineForTest createStorageWriteRenderPipeline(AllFeaturesMaxLimitsGpuTest& t, uint32_t value) {
+    WGPUBindGroupLayout bindGroupLayout = createRenderStorageWriteBindGroupLayout(t);
+    WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, bindGroupLayout);
+    WGPUShaderModule vertexModule = t.createShaderModuleTracked(kDummyVertexShader);
+    WGPUShaderModule fragmentModule = t.createShaderModuleTracked(storageWriteFragmentShader(value));
+
+    WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+    colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    fragment.module = fragmentModule;
+    fragment.entryPoint = stringView("frag_main");
+    fragment.targetCount = 1;
+    fragment.targets = &colorTarget;
+
+    WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    desc.layout = pipelineLayout;
+    desc.vertex.module = vertexModule;
+    desc.vertex.entryPoint = stringView("vert_main");
+    desc.primitive.topology = WGPUPrimitiveTopology_PointList;
+    desc.multisample.count = 1;
+    desc.fragment = &fragment;
+    return RenderPipelineForTest{bindGroupLayout, t.createRenderPipelineTracked(desc)};
 }
 
 WGPUBindGroup createStorageWriteBindGroup(
@@ -263,6 +331,87 @@ void verifyData(AllFeaturesMaxLimitsGpuTest& t, WGPUBuffer buffer, uint32_t expe
     t.expectGPUBufferValuesEqual(buffer, &expected, sizeof(expected));
 }
 
+void verifyDataTwoValidValues(AllFeaturesMaxLimitsGpuTest& t, WGPUBuffer buffer, uint32_t first, uint32_t second) {
+    t.expectGPUBufferValuesPassCheck(
+        buffer,
+        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            if (len < sizeof(uint32_t)) {
+                return std::string("buffer readback is too small");
+            }
+            uint32_t value = 0;
+            std::memcpy(&value, actual, sizeof(value));
+            if (value == first || value == second) {
+                return std::nullopt;
+            }
+            std::ostringstream message;
+            message << "expected " << first << " or " << second << ", got " << value;
+            return message.str();
+        },
+        0,
+        sizeof(uint32_t));
+}
+
+WGPUTexture createRenderTarget(AllFeaturesMaxLimitsGpuTest& t) {
+    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    desc.size = WGPUExtent3D{1, 1, 1};
+    desc.mipLevelCount = 1;
+    desc.sampleCount = 1;
+    desc.dimension = WGPUTextureDimension_2D;
+    desc.format = WGPUTextureFormat_RGBA8Unorm;
+    desc.usage = WGPUTextureUsage_RenderAttachment;
+    return t.createTextureTracked(desc);
+}
+
+WGPURenderPassEncoder beginSimpleRenderPass(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder) {
+    WGPUTexture target = createRenderTarget(t);
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    WGPUTextureView targetView = t.createViewTracked(target, viewDesc);
+
+    WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    colorAttachment.view = targetView;
+    colorAttachment.loadOp = WGPULoadOp_Clear;
+    colorAttachment.storeOp = WGPUStoreOp_Store;
+    colorAttachment.clearValue = WGPUColor{0.0, 1.0, 0.0, 1.0};
+
+    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    passDesc.colorAttachmentCount = 1;
+    passDesc.colorAttachments = &colorAttachment;
+    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+}
+
+WGPURenderBundleEncoder createRenderBundleEncoder(AllFeaturesMaxLimitsGpuTest& t) {
+    WGPUTextureFormat colorFormat = WGPUTextureFormat_RGBA8Unorm;
+    WGPURenderBundleEncoderDescriptor desc = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
+    desc.colorFormatCount = 1;
+    desc.colorFormats = &colorFormat;
+    desc.sampleCount = 1;
+    return wgpuDeviceCreateRenderBundleEncoder(t.device(), &desc);
+}
+
+void recordRenderBundleDraw(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPURenderBundleEncoder renderer,
+    WGPUBuffer buffer,
+    uint32_t value) {
+    RenderPipelineForTest pipeline = createStorageWriteRenderPipeline(t, value);
+    WGPUBindGroup bindGroup = createStorageWriteBindGroup(t, pipeline.bindGroupLayout, buffer);
+    wgpuRenderBundleEncoderSetPipeline(renderer, pipeline.pipeline);
+    wgpuRenderBundleEncoderSetBindGroup(renderer, 0, bindGroup, 0, nullptr);
+    wgpuRenderBundleEncoderDraw(renderer, 1, 1, 0, 0);
+}
+
+void recordRenderPassDraw(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPURenderPassEncoder renderer,
+    WGPUBuffer buffer,
+    uint32_t value) {
+    RenderPipelineForTest pipeline = createStorageWriteRenderPipeline(t, value);
+    WGPUBindGroup bindGroup = createStorageWriteBindGroup(t, pipeline.bindGroupLayout, buffer);
+    wgpuRenderPassEncoderSetPipeline(renderer, pipeline.pipeline);
+    wgpuRenderPassEncoderSetBindGroup(renderer, 0, bindGroup, 0, nullptr);
+    wgpuRenderPassEncoderDraw(renderer, 1, 1, 0, 0);
+}
+
 void runReadWriteTest(AllFeaturesMaxLimitsGpuTest& t) {
     const std::string boundary = t.param<std::string>("boundary");
     const std::string readOp = t.param<std::string>("readOp");
@@ -375,9 +524,53 @@ CTS_TEST(g, "two_dispatches_in_the_same_compute_pass")
     });
 
 CTS_TEST(g, "two_draws_in_the_same_render_pass")
-    .unimplemented("storage-write render pipeline + render bundles deferred to V7b");
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases()
+            .combine("firstDrawUseBundle", {false, true})
+            .combine("secondDrawUseBundle", {false, true});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        WGPUBuffer buffer = createBufferWithValue(t, kSrcValue);
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPURenderPassEncoder pass = beginSimpleRenderPass(t, encoder);
+        const std::array<bool, 2> useBundle = {{
+            t.param<bool>("firstDrawUseBundle"),
+            t.param<bool>("secondDrawUseBundle"),
+        }};
+
+        for (uint32_t i = 0; i < useBundle.size(); ++i) {
+            if (useBundle[i]) {
+                WGPURenderBundleEncoder bundleEncoder = createRenderBundleEncoder(t);
+                recordRenderBundleDraw(t, bundleEncoder, buffer, i + 1);
+                WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(bundleEncoder, nullptr);
+                wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
+            } else {
+                recordRenderPassDraw(t, pass, buffer, i + 1);
+            }
+        }
+
+        wgpuRenderPassEncoderEnd(pass);
+        WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
+        wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
+
+        verifyDataTwoValidValues(t, buffer, 1, 2);
+    });
 
 CTS_TEST(g, "two_draws_in_the_same_render_bundle")
-    .unimplemented("storage-write render pipeline + render bundles deferred to V7b");
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        WGPUBuffer buffer = createBufferWithValue(t, kSrcValue);
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPURenderPassEncoder pass = beginSimpleRenderPass(t, encoder);
+        WGPURenderBundleEncoder bundleEncoder = createRenderBundleEncoder(t);
+        recordRenderBundleDraw(t, bundleEncoder, buffer, 1);
+        recordRenderBundleDraw(t, bundleEncoder, buffer, 2);
+        WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(bundleEncoder, nullptr);
+        wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
+        wgpuRenderPassEncoderEnd(pass);
+        WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
+        wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
+
+        verifyDataTwoValidValues(t, buffer, 1, 2);
+    });
 
 } // namespace
