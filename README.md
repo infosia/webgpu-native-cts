@@ -114,62 +114,17 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   [COVERAGE](docs/COVERAGE.md).
 
 **Conformance outcome.** The suite has surfaced 40 cross-backend findings to date; the full per-finding
-record (what, which backend, current status) lives in [FINDINGS](docs/FINDINGS.md). Current state on
-real-GPU Metal:
+record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
+state:
 
-- **yawgpu** — the primary conformance subject — passes **every ported test through T30** (all
-  `api,validation` at `pass=4332`, plus the buffer / `writeBuffer` / `basic` / `onSubmittedWorkDone`
-  operation tests and the full color **and** depth/stencil image-copy / `copyTextureToTexture` ports:
-  `image_copy` `pass=138408 fail=0` (color + depth/stencil), color `copyTextureToTexture`
-  `pass=30910 fail=0`, and `copy_depth_stencil` `pass=216 fail=0` — all matching the Dawn oracle). The
-  **T27** image_copy depth/stencil port surfaced **F-032** (yawgpu zeroed the depth aspect of
-  `copyTextureToBuffer` and the stencil aspect of packed depth+stencil formats), now **resolved**
-  (`c8f15d5`, `af9ac5c`): `image_copy` depth/stencil `pass=1152 fail=0`. Every finding the suite
-  surfaced was fixed in yawgpu and re-confirmed on hardware; `expectations/yawgpu.txt` has no expected
-  failures (nothing masked). (It also *runs*
-  the `immediate_data_size` cases that Dawn/wgpu-native skip.) See [FINDINGS](docs/FINDINGS.md) for the
-  per-finding record.
-  **On Windows/Vulkan (NVIDIA RTX 5060 Ti) the picture now matches Metal — fully green.** Both
-  depth/stencil findings are fixed on the Vulkan HAL: F-031 `copy_depth_stencil` `pass=216 fail=0`
-  (`cac328a`) and F-032 `image_copy` depth/stencil `pass=1152 fail=0` (`3c847ac`, up from a confirmed
-  native-hardware `pass=352 fail=800` gap — byte-identical to MoltenVK, i.e. a real HAL gap, not a
-  translation artifact). The full ported suite on native Vulkan is green — all 7596 ported cases pass or
-  skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `pass=…` numbers above are
-  per-**subcase**). The depth/stencil findings are all resolved on Metal **and** Vulkan. The T30
-`rendering/draw` port surfaced **F-034** (yawgpu didn't execute **indexed/indirect** draws), now
-**resolved** (`36a6b66`): `rendering/draw` `pass=564 fail=0` (Dawn/wgpu-equal). The **T31**
-`rendering/color_target_state` port then surfaced **F-035** — yawgpu **ignored `GPUColorTargetState`
-`blend` + `writeMask`** (wrote the raw fragment output to all channels), `pass=2 fail=21` vs the Dawn
-oracle's `pass=23`, **cross-HAL** (Metal == Vulkan/MoltenVK byte-identical, not a MoltenVK artifact),
-now **resolved** (`74f5ef2`): `color_target_state` `pass=23 fail=0` on **both** Metal and Vulkan/MoltenVK.
-The **T32** `rendering/depth` port then surfaced **F-037** — a **Metal-HAL-only** non-deterministic flake
-(`fail≈33–44/130`, varying run-to-run; the drawn point intermittently read back as the clear value) while
-every case passed in isolation and Dawn, wgpu-native/Metal, and yawgpu's own **Vulkan/MoltenVK** HAL were
-all clean (`pass=130`) — now **resolved** (`186cd54`): the Metal HAL wasn't emitting `[[point_size]]` for
-**`point-list`** pipelines (the depth tests are the suite's first point-list users), so point size was
-undefined on Metal; re-test `pass=130 fail=0` across 11 runs, triangle-list rendering unaffected.
-The **T33** `rendering/stencil` port then surfaced **F-038** — yawgpu **mishandled stencil
-operations/compare/masks** (`pass=97 fail=91` deterministic vs Dawn/wgpu-native `pass=188`, **cross-HAL**
-Metal == Vulkan/MoltenVK byte-identical) — now **resolved** (`40f5d7f`): the single root cause was the
-dynamic stencil reference (`setStencilReference`) not being threaded to the HAL; re-test `pass=188 fail=0`
-on both HALs, neighboring rendering + compute unaffected. The **T35** `memory_sync/buffer/single_buffer`
-port then surfaced **F-039** — yawgpu's `two_dispatches_in_the_same_compute_pass` read back `0` instead
-of `2` (both storage writes lost) **only under batch / `--isolate` execution** while passing in isolation,
-**cross-HAL** (Metal == Vulkan/MoltenVK) — now **resolved** (`89f25df`): yawgpu was treating the whole
-compute pass as one usage scope instead of per-dispatch; re-test `pass=25 fail=0` across all run modes on
-both HALs, regression sweep `pass=926 fail=0`. The **T36** `render_pass/resolve` port then surfaced
-**F-040** — yawgpu's **multisample (MSAA) resolve did not write the resolve target** (all 12
-`render_pass_resolve` subcases failed deterministically while the non-MSAA `storeop2` passed),
-**cross-HAL** (Metal == Vulkan/MoltenVK) — now **resolved** (`bc8c280`+`3303058`): yawgpu had no MSAA
-pipeline / resolve (and no multi-color-attachment) support; re-test `pass=12 fail=0` on both HALs,
-regression sweep `pass=951 fail=0`. The **T37** `storage_texture/read_only` port then surfaced **F-041**
-— yawgpu's **read-only storage-texture `textureLoad` read back zero** (the output buffer was all zeros;
-all 3 `basic` cases failed deterministically while the compute storage-*buffer* path worked), **cross-HAL**
-(Metal == Vulkan/MoltenVK) — now **resolved** (`2e4edb7`): yawgpu wired the storage-texture bindings + the
-Metal HAL's MSL runtime-array buffer sizes; re-test `pass=3 fail=0` on both HALs, broad regression sweep
-`pass=965 fail=0`. **yawgpu has no open findings**;
-  the **GLES** HAL is the only untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
-  confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
+- **yawgpu** — the primary conformance subject — **passes the entire ported suite with no open findings**,
+  on real-GPU Metal **and** Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti). Every
+  finding the suite has surfaced against yawgpu was fixed and re-confirmed on hardware;
+  `expectations/yawgpu.txt` carries no expected failures — nothing is masked. (It also *runs* the
+  `immediate_data_size` cases Dawn/wgpu-native skip.) The one Mac-only artifact — **F-033**, color
+  `copyTextureToTexture` under MoltenVK — is a confirmed MoltenVK translation limitation, absent on native
+  Vulkan; the **GLES** HAL is the only untested follow-up. See [FINDINGS](docs/FINDINGS.md) for the
+  per-finding record (root cause + fix per `F-0NN`).
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
@@ -179,7 +134,8 @@ Metal HAL's MSL runtime-array buffer sizes; re-test `pass=3 fail=0` on both HALs
   when a constant-factor blend draws without `setBlendConstant`, which should default to `[0,0,0,0]`;
   `color_target_state`, contained via `--isolate` + expectations).
 
-Every divergence the suite surfaces is reported, fixed upstream, and re-confirmed on hardware.
+Every divergence is reported and surfaced — never masked to make a test pass; yawgpu's were fixed and
+re-confirmed on hardware, wgpu-native's are contained via `--isolate` + expectations.
 
 ### Test results
 
