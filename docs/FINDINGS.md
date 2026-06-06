@@ -57,23 +57,15 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043
 — each keeps a compact record below.
-**Open — yawgpu:**
+**Open — yawgpu: none.**
 [F-043](#f-043--yawgpu-render-pass-depthslice-is-ignored--always-renders-to-slice-0-of-a-3d-texture--cross-hal)
-— yawgpu **ignores `WGPURenderPassColorAttachment.depthSlice`** and always renders to slice 0 of a 3D
-texture (`rendering/3d_texture_slices` `one_color_attachment,mip_levels`, T43): the 3 `depthSlice=1` cases
-fail `pass=3 fail=3` on **both** Metal and Vulkan/MoltenVK (byte-identical), Dawn + wgpu-native pass all 6.
-Mip routing is fine (`depthSlice=0` passes at all mip levels); the gap is the z-slice selection. Surfaced,
-not masked.
-
-The previous yawgpu finding,
-[F-042](#f-042--yawgpu-a-render-stage-fragment-storage-buffer-write-from-a-point-draw-reads-back-zero--cross-hal)
-(yawgpu's **render-stage (fragment) storage write** from a `point-list` draw read back `0` —
-`memory_sync/buffer/single_buffer` `two_draws_*`, T39) is now **resolved** (`042902b` + `eadc2f6`, real-GPU
-Metal + Vulkan/MoltenVK: `pass=5 fail=0`, was `pass=0 fail=5`); the render usage scope now allows
-write+write across draws + executes render-bundle draws, and it reproduced on Metal + Vulkan/MoltenVK,
-which localized it to yawgpu's shared render-stage handling.
+(yawgpu **ignored `WGPURenderPassColorAttachment.depthSlice`** and always rendered to slice 0 of a 3D
+texture — `rendering/3d_texture_slices` `one_color_attachment,mip_levels`, T43) is now **resolved**
+(`c6935f7`, real-GPU Metal + Vulkan/MoltenVK: `pass=6 fail=0`, was `pass=3 fail=3`); the attachment's
+`depthSlice` is now threaded into the 3D render-target view, and it reproduced byte-identically on Metal +
+Vulkan/MoltenVK, which localized it to yawgpu's shared depthSlice translation.
 [F-041](#f-041--yawgpu-read-only-storage-texture-textureload-reads-back-zero--cross-hal)
 (yawgpu's **read-only storage-texture `textureLoad`** read back zero — `storage_texture/read_only`, T37) is
 now **resolved** (`2e4edb7`, real-GPU Metal + Vulkan/MoltenVK: `pass=3 fail=0`, was `pass=0 fail=3`);
@@ -1237,10 +1229,13 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 - **Cross-HAL (not HAL-specific):** Metal (`build-yawgpu`) and Vulkan/MoltenVK (`build-yawgpu-vulkan`,
   `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=3 fail=3` with the **byte-identical** error — so it is in
   yawgpu's **shared (HAL-agnostic)** `depthSlice` → render-target-view translation, not a per-HAL path.
-- **Status:** **OPEN** (2026-06-06, real-GPU Metal **and** Vulkan/MoltenVK: `pass=3 fail=3`). For yawgpu to
-  thread `WGPURenderPassColorAttachment.depthSlice` into the 3D render-target attachment so the draw targets
-  the requested slice. **Surfaced, not masked** — no `expectations/yawgpu.txt` entry added (the 3 cases stay
-  failing until fixed).
+- **Status:** **RESOLVED** (2026-06-06, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `c6935f7` — "thread
+  render-pass depthSlice to the 3D color attachment"). Root cause exactly as diagnosed: the attachment's
+  `depthSlice` was not threaded into the 3D render-target view, so every draw landed on slice 0. Re-test
+  (cts relinked against the new lib): `one_color_attachment,mip_levels` `pass=6 fail=0` on **both** HALs
+  (was `pass=3 fail=3`); the cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to
+  yawgpu's shared depthSlice → render-target translation. **Surfaced, not masked** — no
+  `expectations/yawgpu.txt` entry was ever added.
 
 ---
 
