@@ -97,14 +97,14 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **18 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **19 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil}` (the color
   render-to-texture + draw-call + blend-state + depth-test + stencil-test foundations), `compute/basic`
   (the compute foundation), `sampling/filter_mode` (the texture-sampling foundation),
   `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation),
   `render_pass/{resolve, storeop2}` (the multisample-resolve + store-op foundation), and
-  `storage_texture/read_only` (the read-only storage-texture foundation).
+  `storage_texture/{read_only, read_write}` (the storage-texture read + write foundations).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
@@ -180,9 +180,10 @@ Run end-to-end, **Dawn (oracle) and yawgpu are green across the whole suite** �
 `pass=247751 / 247579 fail=0 crash=0` (per-**subcase** leaf totals; the small pass/skip delta is
 feature-gating, not failures). The `api,operation` half now includes the V1–V9 foundations —
 `rendering/{basic, draw, color_target_state, depth, stencil}`, `compute/basic`, `sampling/filter_mode`,
-`memory_sync/buffer/single_buffer`, `render_pass/{resolve, storeop2}`, and `storage_texture/read_only` —
-most of which surfaced a yawgpu finding since fixed and re-verified (F-034/035/037/038/039/040/041, all
-resolved; `basic`/`compute`/`sampling`/`storeop2` were clean first-time). **wgpu-native** is run per-**case**
+`memory_sync/buffer/single_buffer`, `render_pass/{resolve, storeop2}`, and
+`storage_texture/{read_only, read_write}` — most of which surfaced a yawgpu finding since fixed and
+re-verified (F-034/035/037/038/039/040/041, all resolved; `basic`/`compute`/`sampling`/`storeop2`/
+`read_write` were clean first-time). **wgpu-native** is run per-**case**
 via `--isolate --expectations` (the only mode that contains its aborts): its `api,operation` half is
 `pass=3322 fail=78 xfail=3 crash=0` — the 78 fails are the 3D copy/readback findings **F-027**/**F-028**,
 the 3 `xfail` the contained **F-002** (`clearBuffer`) + **F-036** (`color_target_state`) aborts; its
