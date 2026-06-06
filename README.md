@@ -97,10 +97,11 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **21 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **22 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
-  `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil, depth_bias}` (the
-  color render-to-texture + draw-call + blend-state + depth-test + stencil-test + depth-bias foundations),
+  `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil, depth_bias,
+  indirect_draw}` (the color render-to-texture + draw-call + blend-state + depth-test + stencil-test +
+  depth-bias + indirect-draw foundations),
   `compute/basic` (the compute foundation), `sampling/filter_mode` (the texture-sampling foundation),
   `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation),
   `render_pass/{resolve, storeop2}` (the multisample-resolve + store-op foundation),
