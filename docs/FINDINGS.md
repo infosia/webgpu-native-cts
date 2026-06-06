@@ -57,13 +57,15 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042
 — each keeps a compact record below.
-**Open — yawgpu:** [F-042](#f-042--yawgpu-a-render-stage-fragment-storage-buffer-write-from-a-point-draw-reads-back-zero--cross-hal)
-— yawgpu's **render-stage (fragment) storage-buffer write** from a `point-list` draw reads back `0`
-(`memory_sync/buffer/single_buffer` `two_draws_*`, T39): all 5 cases fail `expected 1 or 2, got 0`
-deterministically (the non-bundle subcase too — so not bundle-specific); the compute storage write works;
-**cross-HAL** (Metal == Vulkan/MoltenVK), Dawn/wgpu-native clean. Surfaced/unmasked.
+**Open — yawgpu: none.**
+[F-042](#f-042--yawgpu-a-render-stage-fragment-storage-buffer-write-from-a-point-draw-reads-back-zero--cross-hal)
+(yawgpu's **render-stage (fragment) storage write** from a `point-list` draw read back `0` —
+`memory_sync/buffer/single_buffer` `two_draws_*`, T39) is now **resolved** (`042902b` + `eadc2f6`, real-GPU
+Metal + Vulkan/MoltenVK: `pass=5 fail=0`, was `pass=0 fail=5`); the render usage scope now allows
+write+write across draws + executes render-bundle draws, and it reproduced on Metal + Vulkan/MoltenVK,
+which localized it to yawgpu's shared render-stage handling.
 [F-041](#f-041--yawgpu-read-only-storage-texture-textureload-reads-back-zero--cross-hal)
 (yawgpu's **read-only storage-texture `textureLoad`** read back zero — `storage_texture/read_only`, T37) is
 now **resolved** (`2e4edb7`, real-GPU Metal + Vulkan/MoltenVK: `pass=3 fail=0`, was `pass=0 fail=3`);
@@ -1192,9 +1194,15 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   was a fragment storage write lost on **indexed/indirect** draws (resolved); plain **triangle** draws
   worked there. This is a plain **point** draw, **cross-HAL**, so a separate manifestation — **for yawgpu
   to localize** (point-list fragment storage write vs the point's `1×1` coverage).
-- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
-  The 5 failures stand until yawgpu fixes the render-stage storage write; re-run
-  `webgpu:api,operation,memory_sync,buffer,single_buffer:two_draws_*` (Dawn/wgpu target `pass=5`).
+- **Status:** **RESOLVED** (2026-06-06, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `042902b` —
+  "render bundle execution", on top of `eadc2f6` "render usage scope allows write+write across draws").
+  Root cause: yawgpu's **render usage scope** rejected/dropped a write-after-write to the same storage
+  buffer across draws in one render pass (and render-bundle draws weren't executed). Re-test:
+  `two_draws_*` `pass=5 fail=0` (full `single_buffer` `pass=30 fail=0`) on **both** HALs across repeated
+  runs (was `pass=0 fail=5`); broad regression sweep (rendering + render_pass + compute + sampling +
+  storage_texture) `pass=946 fail=0`. The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly
+  localized it to yawgpu's shared render-stage handling. Surfaced, not masked — no `expectations/yawgpu.txt`
+  entry was ever added.
 
 ---
 

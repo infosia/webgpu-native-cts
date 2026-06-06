@@ -117,12 +117,10 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
-- **yawgpu** — the primary conformance subject — passes the entire ported suite on real-GPU Metal **and**
-  Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti), except its **one open finding**
-  **F-042** (a render-stage/fragment storage write from a `point-list` draw reads back `0`, cross-HAL;
-  the compute storage write works). Every other finding the suite has surfaced against yawgpu was fixed
-  and re-confirmed on hardware; `expectations/yawgpu.txt` carries no expected failures — nothing is masked
-  (F-042 stands surfaced). (It also *runs* the
+- **yawgpu** — the primary conformance subject — **passes the entire ported suite with no open findings**,
+  on real-GPU Metal **and** Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti). Every
+  finding the suite has surfaced against yawgpu was fixed and re-confirmed on hardware;
+  `expectations/yawgpu.txt` carries no expected failures — nothing is masked. (It also *runs* the
   `immediate_data_size` cases Dawn/wgpu-native skip.) The one Mac-only artifact — **F-033**, color
   `copyTextureToTexture` under MoltenVK — is a confirmed MoltenVK translation limitation, absent on native
   Vulkan; the **GLES** HAL is the only untested follow-up. See [FINDINGS](docs/FINDINGS.md) for the
