@@ -59,7 +59,15 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042
 — each keeps a compact record below.
-**Open — yawgpu: none.**
+**Open — yawgpu:**
+[F-043](#f-043--yawgpu-render-pass-depthslice-is-ignored--always-renders-to-slice-0-of-a-3d-texture--cross-hal)
+— yawgpu **ignores `WGPURenderPassColorAttachment.depthSlice`** and always renders to slice 0 of a 3D
+texture (`rendering/3d_texture_slices` `one_color_attachment,mip_levels`, T43): the 3 `depthSlice=1` cases
+fail `pass=3 fail=3` on **both** Metal and Vulkan/MoltenVK (byte-identical), Dawn + wgpu-native pass all 6.
+Mip routing is fine (`depthSlice=0` passes at all mip levels); the gap is the z-slice selection. Surfaced,
+not masked.
+
+The previous yawgpu finding,
 [F-042](#f-042--yawgpu-a-render-stage-fragment-storage-buffer-write-from-a-point-draw-reads-back-zero--cross-hal)
 (yawgpu's **render-stage (fragment) storage write** from a `point-list` draw read back `0` —
 `memory_sync/buffer/single_buffer` `two_draws_*`, T39) is now **resolved** (`042902b` + `eadc2f6`, real-GPU
@@ -1203,6 +1211,36 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   storage_texture) `pass=946 fail=0`. The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly
   localized it to yawgpu's shared render-stage handling. Surfaced, not masked — no `expectations/yawgpu.txt`
   entry was ever added.
+
+---
+
+## F-043 — yawgpu: render-pass `depthSlice` is ignored — always renders to slice 0 of a 3D texture — cross-HAL
+
+- **Backend:** yawgpu (real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present in Dawn or
+  wgpu-native (both pass all 6).
+- **Found by:** the T43 (V13) `rendering/3d_texture_slices` `one_color_attachment,mip_levels` port (single
+  format `rgba8unorm`) — the suite's first **render-to-3D-slice** path
+  (`WGPURenderPassColorAttachment.depthSlice` selecting one `z` slice of a `dimension:'3d'` render target).
+  **Dawn (oracle) and wgpu-native both pass all 6** (`mipLevel∈{0,1,2}` × `depthSlice∈{0,1}`); **yawgpu
+  fails the 3 `depthSlice=1` cases** (`pass=3 fail=3`), **deterministic**.
+- **Observed:** every `depthSlice=1` case fails `rgba8unorm mismatch at (0, 0, 0) channel 0: expected 0,
+  got 11` — slice `z=0` holds the rendered pattern (`{11,21,31,41}`) even though `depthSlice=1` was
+  requested (so slice 0 should be untouched/zero). I.e. yawgpu **renders to slice 0 regardless of the
+  attachment's `depthSlice`** — the field is ignored. The 3 `depthSlice=0` cases pass because slice 0 is
+  coincidentally the correct target there.
+- **Scope (mip routing is fine):** `depthSlice=0` passes at **all three** mip levels (`mipLevel∈{0,1,2}`),
+  so the `baseMipLevel` selection is handled correctly; the gap is purely the **z-slice** selection
+  (`depthSlice`) within the rendered mip.
+- **Expected (WebGPU):** `GPURenderPassColorAttachment.depthSlice` selects which `z` slice of a 3D render
+  target receives the draw — `depthSlice=1` must write slice 1 and leave slice 0 zero. Dawn and wgpu-native
+  do.
+- **Cross-HAL (not HAL-specific):** Metal (`build-yawgpu`) and Vulkan/MoltenVK (`build-yawgpu-vulkan`,
+  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=3 fail=3` with the **byte-identical** error — so it is in
+  yawgpu's **shared (HAL-agnostic)** `depthSlice` → render-target-view translation, not a per-HAL path.
+- **Status:** **OPEN** (2026-06-06, real-GPU Metal **and** Vulkan/MoltenVK: `pass=3 fail=3`). For yawgpu to
+  thread `WGPURenderPassColorAttachment.depthSlice` into the 3D render-target attachment so the draw targets
+  the requested slice. **Surfaced, not masked** — no `expectations/yawgpu.txt` entry added (the 3 cases stay
+  failing until fixed).
 
 ---
 
