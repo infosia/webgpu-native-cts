@@ -57,13 +57,15 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041
 — each keeps a compact record below.
-**Open — yawgpu:** [F-041](#f-041--yawgpu-read-only-storage-texture-textureload-reads-back-zero--cross-hal)
-— yawgpu's **read-only storage-texture `textureLoad` reads back zero** (the output buffer is all zeros;
-`storage_texture/read_only`, T37): all 3 `basic` cases (`r32uint`/`r32sint`/`r32float`, compute/2D) fail
-deterministically; **cross-HAL** (Metal == Vulkan/MoltenVK, `pass=0 fail=3`), Dawn/wgpu-native clean. The
-compute storage-buffer path works (V2), so it's specific to the storage **texture** read. Surfaced/unmasked.
+**Open — yawgpu: none.**
+[F-041](#f-041--yawgpu-read-only-storage-texture-textureload-reads-back-zero--cross-hal)
+(yawgpu's **read-only storage-texture `textureLoad`** read back zero — `storage_texture/read_only`, T37) is
+now **resolved** (`2e4edb7`, real-GPU Metal + Vulkan/MoltenVK: `pass=3 fail=0`, was `pass=0 fail=3`);
+yawgpu didn't wire the storage-texture bindings (and the Metal HAL lacked MSL runtime-array buffer sizes),
+and it reproduced on Metal + Vulkan/MoltenVK, which localized it to yawgpu's shared storage-texture
+handling.
 [F-040](#f-040--yawgpu-multisample-resolve-does-not-write-the-resolve-target--cross-hal)
 (yawgpu's **multisample (MSAA) resolve** did not write the resolve target — `render_pass/resolve`, T36) is
 now **resolved** (`bc8c280` + `3303058`, real-GPU Metal + Vulkan/MoltenVK: `pass=12 fail=0`, was
@@ -1148,9 +1150,15 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   ([F-016](#f-016--yawgpu-rejects-read-write-storage-textures-on-read-write-capable-formats),
   [F-018](#f-018--yawgpu-over-restricts-bindgrouplayout-storage-texture-bindings)); this is the first
   **operation** coverage and surfaces a functional gap.
-- **Status:** **OPEN** (yawgpu). Surfaced, not masked — `expectations/yawgpu.txt` carries no lines for it.
-  The 3 failures stand until yawgpu fixes the read-only storage-texture read; re-run
-  `webgpu:api,operation,storage_texture,read_only:*` (Dawn/wgpu target `pass=3`).
+- **Status:** **RESOLVED** (2026-06-06, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `2e4edb7` —
+  "wire storage-texture bindings + MSL runtime-array buffer sizes"). Root cause: yawgpu **did not wire the
+  storage-texture bindings** through to the shader (so `textureLoad` read nothing) and the Metal HAL
+  lacked **MSL runtime-array buffer sizes** (the output `array<vec4>` storage buffer). Re-test:
+  `read_only:basic` `pass=3 fail=0` on **both** HALs across repeated runs (was `pass=0 fail=3`); broad
+  regression sweep (rendering + compute + sampling + memory_sync + render_pass) `pass=965 fail=0` (the
+  runtime-array-size change touched all runtime-sized storage-buffer arrays — no regression). The cross-HAL
+  reproduction (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's shared storage-texture
+  handling. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever added.
 
 ---
 

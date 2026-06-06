@@ -163,9 +163,11 @@ both HALs, regression sweep `pass=926 fail=0`. The **T36** `render_pass/resolve`
 **cross-HAL** (Metal == Vulkan/MoltenVK) — now **resolved** (`bc8c280`+`3303058`): yawgpu had no MSAA
 pipeline / resolve (and no multi-color-attachment) support; re-test `pass=12 fail=0` on both HALs,
 regression sweep `pass=951 fail=0`. The **T37** `storage_texture/read_only` port then surfaced **F-041**
-— yawgpu's **read-only storage-texture `textureLoad` reads back zero** (the output buffer is all zeros;
-all 3 `basic` cases fail deterministically while the compute storage-*buffer* path works), **cross-HAL**
-(Metal == Vulkan/MoltenVK), Dawn/wgpu-native clean. yawgpu's **one open finding is F-041**;
+— yawgpu's **read-only storage-texture `textureLoad` read back zero** (the output buffer was all zeros;
+all 3 `basic` cases failed deterministically while the compute storage-*buffer* path worked), **cross-HAL**
+(Metal == Vulkan/MoltenVK) — now **resolved** (`2e4edb7`): yawgpu wired the storage-texture bindings + the
+Metal HAL's MSL runtime-array buffer sizes; re-test `pass=3 fail=0` on both HALs, broad regression sweep
+`pass=965 fail=0`. **yawgpu has no open findings**;
   the **GLES** HAL is the only untested follow-up. (The one Mac-only artifact — F-033 color `copyTextureToTexture` under MoltenVK — is a
   confirmed MoltenVK translation limitation, absent on native Vulkan; see [FINDINGS](docs/FINDINGS.md).)
 - **Dawn** — the oracle — passes everything.
