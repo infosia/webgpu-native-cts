@@ -219,6 +219,21 @@ exits 0 on both platforms.
 
 #### `api,operation` — Metal (in-process readback)
 
+**Full ported suite (28 files = 10 `api,validation` + 18 `api,operation`), 2026-06-06, real-GPU Metal.**
+Run end-to-end, **Dawn (oracle) and yawgpu are green across the whole suite** —
+`pass=247751 / 247579 fail=0 crash=0` (per-**subcase** leaf totals; the small pass/skip delta is
+feature-gating, not failures). The `api,operation` half now includes the V1–V9 foundations —
+`rendering/{basic, draw, color_target_state, depth, stencil}`, `compute/basic`, `sampling/filter_mode`,
+`memory_sync/buffer/single_buffer`, `render_pass/{resolve, storeop2}`, and `storage_texture/read_only` —
+most of which surfaced a yawgpu finding since fixed and re-verified (F-034/035/037/038/039/040/041, all
+resolved; `basic`/`compute`/`sampling`/`storeop2` were clean first-time). **wgpu-native** is run per-**case**
+via `--isolate --expectations` (the only mode that contains its aborts): its `api,operation` half is
+`pass=3322 fail=78 xfail=3 crash=0` — the 78 fails are the 3D copy/readback findings **F-027**/**F-028**,
+the 3 `xfail` the contained **F-002** (`clearBuffer`) + **F-036** (`color_target_state`) aborts; its
+`api,validation` half is the table above. (The Metal Dawn run is per-file: the `AllFeaturesMaxLimitsGpuTest`
+fixture requests a fresh all-features device per test and Dawn caps live devices per process —
+`--isolate`/per-file resets the count; yawgpu has no such cap, so its combined run is clean.)
+
 The large *structural* ports, where the format axis is swept densely (cells are `pass / fail`):
 
 | Backend | `image_copy` (137256) | `copyTextureToTexture` color (30910) | `copy_depth_stencil` (216) | `image_copy` depth/stencil (1152) | findings |
