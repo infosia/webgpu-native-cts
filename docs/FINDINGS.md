@@ -59,7 +59,15 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043
 — each keeps a compact record below.
-**Open — yawgpu: none.**
+**Open — yawgpu:**
+[F-044](#f-044--yawgpu-non-float32-vertex-formats-decode-to-zero-in-the-shader--cross-hal)
+(non-`float32` vertex formats decode to **zero** — only `float32x4` works; `vertex_state/correctness`, T46;
+cross-HAL `pass=1 fail=8`) and
+[F-045](#f-045--yawgpu-and-wgpu-native-frag_depth-is-not-clamped-to-the-viewport-depth-range-before-the-depth-test)
+(`frag_depth` not clamped to the viewport depth range — `rendering/depth_clip_clamp`, T45; also affects
+**wgpu-native**, Dawn passes). Both surfaced, not masked.
+
+The previous yawgpu finding,
 [F-043](#f-043--yawgpu-render-pass-depthslice-is-ignored--always-renders-to-slice-0-of-a-3d-texture--cross-hal)
 (yawgpu **ignored `WGPURenderPassColorAttachment.depthSlice`** and always rendered to slice 0 of a 3D
 texture — `rendering/3d_texture_slices` `one_color_attachment,mip_levels`, T43) is now **resolved**
@@ -1236,6 +1244,61 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   (was `pass=3 fail=3`); the cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to
   yawgpu's shared depthSlice → render-target translation. **Surfaced, not masked** — no
   `expectations/yawgpu.txt` entry was ever added.
+
+---
+
+## F-044 — yawgpu: non-`float32` vertex formats decode to zero in the shader — cross-HAL
+
+- **Backend:** yawgpu (real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present in Dawn or
+  wgpu-native (both pass all 9).
+- **Found by:** the T46 (V16) `vertex_state/correctness` `vertex_format_to_shader_format_conversion` port —
+  9 representative vertex formats (one per decode family), each feeding known raw bytes through a vertex
+  buffer and reading `vec4<f32|u32|i32>` in the shader. **Dawn (oracle) and wgpu-native both pass all 9;
+  yawgpu passes only `float32x4`** (`pass=1 fail=8`), **deterministic**.
+- **Observed:** every non-`float32` format — `float16x4, uint32x4, uint8x4, sint32x4, sint8x4, unorm8x4,
+  snorm8x4, unorm10_10_10_2` — reads back **all zeros** in the shader (e.g. `uint32x4` component 0 expected
+  `1`, got `0`; `unorm8x4` component 1 expected `0.2`, got `0`). Only the identity `float32x4` path decodes
+  correctly. So yawgpu's vertex-attribute fetch implements only the 32-bit-float passthrough; the format
+  *conversions* (8/16-bit, packed `unorm10-10-10-2`, normalized `unorm`/`snorm`, integer `uint`/`sint`,
+  half `float16`) are not applied — the shader input is zero.
+- **Scope / not the storage-write path:** the verification writes the decoded attribute from the **fragment
+  stage to a `read_write` storage buffer**, and `float32x4` writes back correctly — so the render-stage
+  storage write ([F-042](#f-042--yawgpu-a-render-stage-fragment-storage-buffer-write-from-a-point-draw-reads-back-zero--cross-hal),
+  resolved) works; the gap is specifically the **vertex-format decode** for non-`float32` formats.
+- **Expected (WebGPU):** the GPU converts each vertex-buffer element from its `GPUVertexFormat` to the
+  shader's input type (`unorm` = `v/max`, `snorm` = `max(v/max,-1)`, `float16` decode, `unorm10-10-10-2`
+  unpack, integer passthrough). Dawn and wgpu-native do.
+- **Cross-HAL (not HAL-specific):** Metal (`build-yawgpu`) and Vulkan/MoltenVK (`build-yawgpu-vulkan`,
+  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=1 fail=8` with byte-identical "got 0" diffs — so it is in
+  yawgpu's **shared (HAL-agnostic)** vertex-format conversion, not a per-HAL path.
+- **Status:** **OPEN** (2026-06-07, real-GPU Metal **and** Vulkan/MoltenVK: `pass=1 fail=8`). For yawgpu to
+  implement vertex-format conversion for the non-`float32` formats. **Surfaced, not masked** — no
+  `expectations/yawgpu.txt` entry added (the 8 cases stay failing until fixed).
+
+## F-045 — yawgpu and wgpu-native: `frag_depth` is not clamped to the viewport depth range before the depth test
+
+- **Backend:** **yawgpu** (real-GPU Metal **and** Vulkan/MoltenVK — identical) **and wgpu-native** (Metal).
+  **Not** present in Dawn (passes). A two-backend gap; Dawn is the only conformant one.
+- **Found by:** the T45 (V15) `rendering/depth_clip_clamp` `depth_test_input_clamped` port (depth32float,
+  non-MS). An init pass writes `clamp(kDepths, 0.25, 0.75)` into the depth texture; a test pass then
+  re-renders the **unclamped** `kDepths` as `frag_depth` with the **viewport depth set to `[0.25,0.75]`** and
+  `depthCompare:'not-equal'`, writing `color=1.0` only when the resulting depth is unexpected. A correctly
+  **viewport-clamped** `frag_depth` equals the stored value → `not-equal` fails → nothing draws → the
+  `r8unorm` target stays `0`.
+- **Observed:** yawgpu and wgpu-native draw `color=255` for the out-of-range points (`r8unorm pixel 0
+  expected 0, got 255`) — i.e. `frag_depth` was **not clamped to the viewport `[minDepth,maxDepth]`** before
+  the depth test, so the unclamped value mismatched the stored clamped value. Dawn clamps correctly and the
+  target stays `0`. (The `unclippedDepth=true` subcase is **skipped** on both yawgpu and wgpu-native — neither
+  exposes the `depth-clip-control` feature — and runs+passes only on Dawn.)
+- **Expected (WebGPU):** the depth value used for the depth test — including a fragment-written `frag_depth`
+  — is **clamped to the viewport depth range** `[min(minDepth,maxDepth), max(...)]`. This depth *clamping* is
+  independent of the `depth-clip-control` / `unclippedDepth` *clipping* feature. Dawn does it.
+- **Cross-HAL (yawgpu):** Metal == Vulkan/MoltenVK byte-identical — yawgpu's shared depth-clamp handling.
+  That wgpu-native (a mature backend) exhibits the same gap suggests this is a genuine, easily-missed spec
+  requirement rather than a Dawn-specific behavior; Dawn is the conformance reference here.
+- **Status:** **OPEN** (2026-06-07). For yawgpu (and, separately, wgpu-native) to clamp `frag_depth` to the
+  viewport depth range before the depth test. **Surfaced, not masked** — no expectations entry on either
+  backend.
 
 ---
 
