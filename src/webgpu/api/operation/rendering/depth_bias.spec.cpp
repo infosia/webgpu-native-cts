@@ -83,7 +83,7 @@ WGPUTexture createColorTarget(AllFeaturesMaxLimitsGpuTest& t) {
     desc.sampleCount = 1;
     desc.dimension = WGPUTextureDimension_2D;
     desc.format = WGPUTextureFormat_RGBA8Unorm;
-    desc.usage = WGPUTextureUsage_RenderAttachment;
+    desc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
     return t.createTextureTracked(desc);
 }
 
@@ -226,6 +226,137 @@ void runDepthBiasTest(AllFeaturesMaxLimitsGpuTest& t) {
     expectDepthValueInTexture(t, depth, expectedDepth);
 }
 
+bool formatHasStencil(WGPUTextureFormat format) {
+    return format == WGPUTextureFormat_Depth24PlusStencil8 ||
+           format == WGPUTextureFormat_Depth32FloatStencil8;
+}
+
+WGPUDepthStencilState depthStencilStateFor24Bit(WGPUTextureFormat format, int32_t bias, float biasSlopeScale, float biasClamp) {
+    WGPUDepthStencilState state = WGPU_DEPTH_STENCIL_STATE_INIT;
+    state.format = format;
+    state.depthCompare = WGPUCompareFunction_Greater;
+    state.depthWriteEnabled = WGPUOptionalBool_True;
+    state.depthBias = bias;
+    state.depthBiasSlopeScale = biasSlopeScale;
+    state.depthBiasClamp = biasClamp;
+    return state;
+}
+
+void expectColorValueInTexture(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, std::array<uint8_t, 4> expectedRGBA) {
+    constexpr uint32_t kColorBytesPerPixel = 4;
+    const uint32_t bytesPerRow = static_cast<uint32_t>(alignTo(kColorBytesPerPixel, kBytesPerRowAlignment));
+    const uint64_t byteLength = alignTo(kColorBytesPerPixel, kBufferCopyAlignment);
+    WGPUBuffer buffer = createBuffer(t, byteLength, WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc);
+
+    WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    source.texture = texture;
+    source.mipLevel = 0;
+    source.origin = WGPUOrigin3D{0, 0, 0};
+    source.aspect = WGPUTextureAspect_All;
+
+    WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+    destination.buffer = buffer;
+    destination.layout.offset = 0;
+    destination.layout.bytesPerRow = bytesPerRow;
+    destination.layout.rowsPerImage = WGPU_COPY_STRIDE_UNDEFINED;
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPUExtent3D copySize{kWidth, kHeight, 1};
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &copySize);
+    submit(t, encoder);
+
+    t.expectGPUBufferValuesPassCheck(
+        buffer,
+        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            if (len < kColorBytesPerPixel) {
+                return std::string("color readback buffer is too small");
+            }
+            for (uint32_t ch = 0; ch < kColorBytesPerPixel; ++ch) {
+                if (actual[ch] != expectedRGBA[ch]) {
+                    std::ostringstream message;
+                    message << "rgba8unorm mismatch at channel " << ch
+                            << ": expected " << static_cast<int>(expectedRGBA[ch])
+                            << ", got " << static_cast<int>(actual[ch]);
+                    return message.str();
+                }
+            }
+            return std::nullopt;
+        },
+        0,
+        static_cast<size_t>(byteLength));
+}
+
+WGPUTextureFormat depthFormatFromString(const std::string& name) {
+    if (name == "depth24plus") {
+        return WGPUTextureFormat_Depth24Plus;
+    }
+    return WGPUTextureFormat_Depth24PlusStencil8;
+}
+
+void runDepthBiasTestFor24BitFormat(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string formatName = t.param<std::string>("format");
+    const std::string quadAngle = t.param<std::string>("quadAngle");
+    const int32_t bias = static_cast<int32_t>(t.param<int64_t>("bias"));
+    const float biasSlopeScale = static_cast<float>(t.param<double>("biasSlopeScale"));
+    const float biasClamp = static_cast<float>(t.param<double>("biasClamp"));
+    const std::string expectedColorName = t.param<std::string>("expectedColor");
+
+    const std::array<uint8_t, 4> expectedRGBA =
+        (expectedColorName == "red") ? std::array<uint8_t, 4>{255, 0, 0, 255}
+                                     : std::array<uint8_t, 4>{0, 0, 0, 0};
+
+    WGPUTextureFormat format = depthFormatFromString(formatName);
+
+    WGPUTexture color = createColorTarget(t);
+    WGPUTextureDescriptor depthDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    depthDesc.size = WGPUExtent3D{kWidth, kHeight, 1};
+    depthDesc.mipLevelCount = 1;
+    depthDesc.sampleCount = 1;
+    depthDesc.dimension = WGPUTextureDimension_2D;
+    depthDesc.format = format;
+    depthDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    WGPUTexture depth = t.createTextureTracked(depthDesc);
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    WGPUTextureView colorView = t.createViewTracked(color, viewDesc);
+    WGPUTextureView depthView = t.createViewTracked(depth, viewDesc);
+
+    WGPUDepthStencilState depthStencil = depthStencilStateFor24Bit(format, bias, biasSlopeScale, biasClamp);
+    WGPURenderPipeline pipeline = createRenderPipelineForTest(
+        t,
+        quadAngle == "flat" ? kFlatVertexShader : kTiltedXVertexShader,
+        depthStencil);
+
+    WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    colorAttachment.view = colorView;
+    colorAttachment.loadOp = WGPULoadOp_Load;
+    colorAttachment.storeOp = WGPUStoreOp_Store;
+
+    WGPURenderPassDepthStencilAttachment depthAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    depthAttachment.view = depthView;
+    depthAttachment.depthClearValue = 0.4f;
+    depthAttachment.depthLoadOp = WGPULoadOp_Clear;
+    depthAttachment.depthStoreOp = WGPUStoreOp_Store;
+    if (formatHasStencil(format)) {
+        depthAttachment.stencilLoadOp = WGPULoadOp_Clear;
+        depthAttachment.stencilStoreOp = WGPUStoreOp_Store;
+    }
+
+    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    passDesc.colorAttachmentCount = 1;
+    passDesc.colorAttachments = &colorAttachment;
+    passDesc.depthStencilAttachment = &depthAttachment;
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+    wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass);
+    submit(t, encoder);
+
+    expectColorValueInTexture(t, color, expectedRGBA);
+}
+
 CTS_TEST(g, "depth_bias")
     .params([](ParamsBuilder u) {
         return u.combineWithParams({
@@ -240,6 +371,19 @@ CTS_TEST(g, "depth_bias")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         runDepthBiasTest(t);
+    });
+
+CTS_TEST(g, "depth_bias_24bit_format")
+    .params([](ParamsBuilder u) {
+        return u.combine("format", {Value("depth24plus"), Value("depth24plus-stencil8")})
+            .combineWithParams({
+                ParamRecord{{"quadAngle", "flat"}, {"bias", kPointTwoFiveBiasForPointTwoFiveZOnFloat}, {"biasSlopeScale", 0.0}, {"biasClamp", 0.0}, {"expectedColor", "red"}},
+                ParamRecord{{"quadAngle", "tilted"}, {"bias", kPointTwoFiveBiasForPointTwoFiveZOnFloat}, {"biasSlopeScale", 1.0}, {"biasClamp", 0.0}, {"expectedColor", "red"}},
+                ParamRecord{{"quadAngle", "flat"}, {"bias", kPointTwoFiveBiasForPointTwoFiveZOnFloat}, {"biasSlopeScale", 0.0}, {"biasClamp", 0.1}, {"expectedColor", "transparent"}},
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        runDepthBiasTestFor24BitFormat(t);
     });
 
 } // namespace
