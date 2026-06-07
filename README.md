@@ -97,7 +97,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **36 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **37 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture, render/render_bundle,
   programmable/state_tracking}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil, depth_bias,
@@ -112,7 +112,8 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation),
   `render_pass/{resolve, storeop2, clear_value, storeOp, transient_attachment}` (the multisample-resolve +
   store-op + stencil-clear-value + storeOp + transient-attachment foundations),
-  `storage_texture/{read_only, read_write}` (the storage-texture read + write foundations), and
+  `storage_texture/{read_only, read_write}` (the storage-texture read + write foundations),
+  `resource_init/texture_zero` (the texture zero-init foundation), and
   `vertex_state/{index_format, correctness}` (the indexed-draw index-format + vertex-format-decode
   foundations).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
