@@ -77,7 +77,10 @@ cross-HAL `pass=1 fail=5`); and
 also affects **wgpu-native**, Dawn passes); and
 [F-049](#f-049--yawgpu-render-bundle-execution-mishandles-the-viewport-rect-bundle-draw-args-and-repeatedblended-replay--cross-hal)
 (render-bundle execution mishandles the viewport rect / bundle draw-args / repeated-blended replay —
-`command_buffer/render/render_bundle`, T54; cross-HAL `pass=1 fail=3`). All surfaced, not masked.
+`command_buffer/render/render_bundle`, T54; cross-HAL `pass=1 fail=3`); and
+[F-050](#f-050--yawgpu-occlusion-query-returns-zero-even-when-samples-pass--cross-hal)
+(occlusion query returns zero even when samples pass — `command_buffer/queries/occlusionQuery`, T58;
+cross-HAL). All surfaced, not masked.
 
 The previous yawgpu finding,
 [F-043](#f-043--yawgpu-render-pass-depthslice-is-ignored--always-renders-to-slice-0-of-a-3d-texture--cross-hal)
@@ -1409,6 +1412,27 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   shared render-bundle/viewport handling. **For yawgpu to localize** (the viewport-rect gap is the clearest
   single cause; the other two involve render-bundle draw-args / blend / repeated replay).
 - **Status:** **OPEN** (2026-06-07). **Surfaced, not masked** — no `expectations/yawgpu.txt` entry.
+
+---
+
+## F-050 — yawgpu: occlusion query returns zero even when samples pass — cross-HAL
+
+- **Backend:** yawgpu (real-GPU Metal **and** Vulkan/MoltenVK — identical). **Not** present in Dawn or
+  wgpu-native (both pass).
+- **Found by:** the T58 (V30) `command_buffer/queries/occlusionQuery` port (`occlusion_query,basic` +
+  `occlusion_query,empty`). A covering triangle is drawn inside `beginOcclusionQuery(0)`/
+  `endOcclusionQuery()`, then `resolveQuerySet` writes the result. **Dawn and wgpu-native pass both; yawgpu
+  `pass=1 fail=1`** — `empty` (no draw → 0) passes, `basic` fails, **deterministic**, **cross-HAL** (Metal ==
+  Vulkan/MoltenVK).
+- **Observed:** `occlusion_query,basic` resolves to **`0`** ("occlusion query result is 0, expected > 0
+  (covering draw)") — yawgpu's occlusion query never counts the passing samples (the result is always `0` /
+  not written). The `empty` case coincidentally passes because the correct result there is also `0`.
+- **Expected (WebGPU):** an occlusion query resolves to a non-zero sample count when any fragments pass the
+  depth/stencil/scissor tests inside the query. Dawn and wgpu-native do.
+- **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK (`pass=1 fail=1`) — yawgpu's shared
+  occlusion-query handling.
+- **Status:** **OPEN** (2026-06-07). For yawgpu to write the occlusion-query sample count on
+  `resolveQuerySet`. **Surfaced, not masked** — no `expectations/yawgpu.txt` entry.
 
 ---
 
