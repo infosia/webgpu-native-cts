@@ -61,11 +61,17 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 — each keeps a compact record below.
 **Open — yawgpu:**
 [F-044](#f-044--yawgpu-non-float32-vertex-formats-decode-to-zero-in-the-shader--cross-hal)
-(non-`float32` vertex formats decode to **zero** — only `float32x4` works; `vertex_state/correctness`, T46;
-cross-HAL `pass=1 fail=8`) and
+(non-`float32` vertex formats decode to **zero** — `vertex_state/correctness`, T46; cross-HAL `pass=1
+fail=8`);
 [F-045](#f-045--yawgpu-and-wgpu-native-frag_depth-is-not-clamped-to-the-viewport-depth-range-before-the-depth-test)
 (`frag_depth` not clamped to the viewport depth range — `rendering/depth_clip_clamp`, T45; also affects
-**wgpu-native**, Dawn passes). Both surfaced, not masked.
+**wgpu-native**, Dawn passes);
+[F-046](#f-046--yawgpu-face-culling--front_facing-winding-is-mishandled--cross-hal)
+(face culling / `front_facing` winding mishandled — `render_pipeline/culling_tests`, T47; cross-HAL `pass=2
+fail=10`); and
+[F-047](#f-047--yawgpu-pipeline-overridable-constants-are-ignored-read-as-zero--cross-hal)
+(pipeline-overridable `override` constants ignored, read as zero — `render_pipeline/overrides`, T50;
+cross-HAL `pass=1 fail=5`). All surfaced, not masked.
 
 The previous yawgpu finding,
 [F-043](#f-043--yawgpu-render-pass-depthslice-is-ignored--always-renders-to-slice-0-of-a-3d-texture--cross-hal)
@@ -1299,6 +1305,47 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 - **Status:** **OPEN** (2026-06-07). For yawgpu (and, separately, wgpu-native) to clamp `frag_depth` to the
   viewport depth range before the depth test. **Surfaced, not masked** — no expectations entry on either
   backend.
+
+---
+
+## F-046 — yawgpu: face culling / `front_facing` winding is mishandled — cross-HAL
+
+- **Backend:** yawgpu (real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present in Dawn or
+  wgpu-native (both pass all).
+- **Found by:** the T47 (V17) `render_pipeline/culling_tests` `culling` port (`depthStencilFormat=null`). Two
+  opposite-winding triangles are drawn; the fragment colors by `@builtin(front_facing)` (green=front,
+  red=back); `cullMode` culls a face. **Dawn passes all 12 subcases, wgpu-native all 6 cases; yawgpu
+  `pass=2 fail=10`**, **deterministic**.
+- **Observed:** with `frontFace="ccw", cullMode="none"`, the CCW (top-left) triangle is front-facing and
+  should be **green** (`(0,0)` R=0), but yawgpu reads **R=255** (red = the back-facing color) — so
+  `front_facing` is computed with the **wrong winding** (the CCW triangle is treated as back-facing when
+  `frontFace=ccw`). Because `front_facing`/winding is wrong, both the color **and** the cull decision are
+  wrong (e.g. `frontFace="cw", cullMode="front"` fails to cull the front face — `(3,3)` G expected 0, got
+  255). Root cause: the front-face / winding determination (`frontFace` + the CCW/CW convention) is
+  mishandled.
+- **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK byte-identical (`pass=2 fail=10`) — yawgpu's
+  shared winding/cull handling.
+- **Status:** **OPEN** (2026-06-07). For yawgpu to apply `frontFace`/`cullMode` and compute `front_facing`
+  with the correct winding convention. **Surfaced, not masked** — no `expectations/yawgpu.txt` entry.
+
+## F-047 — yawgpu: pipeline-overridable constants are ignored (read as zero) — cross-HAL
+
+- **Backend:** yawgpu (real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present in Dawn or
+  wgpu-native (both pass).
+- **Found by:** the T50 (V20) `render_pipeline/overrides` `basic` port (`isAsync=false`). WGSL `override`
+  constants in the vertex (`xright`/`ytop`) and fragment (`R`/`G`/`B`/`A`) stages are set via the pipeline's
+  `constants` (`WGPUConstantEntry`). **Dawn passes all 6 subcases, wgpu-native passes; yawgpu `pass=1
+  fail=5`**, **deterministic**.
+- **Observed:** every override constant reads back as **0** — neither the WGSL **default** (`= 1.0`) nor the
+  pipeline-provided `WGPUConstantEntry` value is applied. The fragment outputs `{0,0,0,0}`, so only the
+  single subcase whose expected value is all-zero passes; the "no constants → default white", "vertex
+  override collapses the triangle", and "fragment color override" subcases all fail with "got 0". So
+  pipeline-overridable constants are **not implemented** (treated as 0 regardless of default or pipeline
+  value).
+- **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK (`pass=1 fail=5`) — yawgpu's shared override-
+  constant handling.
+- **Status:** **OPEN** (2026-06-07). For yawgpu to apply WGSL `override` defaults + pipeline `constants`
+  values to overridable constants. **Surfaced, not masked** — no `expectations/yawgpu.txt` entry.
 
 ---
 
