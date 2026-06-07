@@ -19,31 +19,11 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
-## Re-test summary — every yawgpu finding through T27 resolved on Metal (incl. F-031, F-032)
+## Re-test summary
 
-Every defect this suite surfaced against **yawgpu** (the primary conformance subject) through T26 — both
-correctness and resource-lifetime — was fixed in yawgpu and re-confirmed on real hardware (the full
-intended cycle: the suite reports a divergence, yawgpu fixes it, the fix is verified on real-GPU Metal,
-and for `api,validation` + the Vulkan-specific findings on Windows/Vulkan, NVIDIA). The **T26**
-depth/stencil `copyTextureToTexture` port surfaced
-[F-031](#f-031--yawgpu-diverges-on-the-depth-aspect-of-copytexturetotexture-copied-depth-fails-an-equality-re-render)
-(the **depth aspect** of `copyTextureToTexture`), now **resolved** — the root cause was that yawgpu's
-regular (non-tiled) real-backend render path had no depth support (seven gaps; see F-031). Re-test:
-`copy_depth_stencil` `pass=216 fail=0` (Dawn-equal). `expectations/yawgpu.txt` carries **no** expected-failure
-lines (F-031 surfaced and fixed, not masked).
-
-The last two yawgpu findings are now resolved too, verified on real-GPU Windows/Vulkan (NVIDIA):
-[F-029](#f-029--yawgpu-leaks-vulkan-device-resources-across-image_copy-cases-later-tests-in-the-same-process-fail)
-(a **cross-test** Vulkan device-resource leak in `image_copy`) and
-[F-030](#f-030--yawgpu-map_read-readback-reads-the-buffer-before-the-gpu-copy-completes-intermittent-zeros)
-(an intermittent `MAP_READ` readback race the F-029 fix un-masked).
-
-The **T27** `image_copy` depth/stencil ports surfaced
-[F-032](#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)
-— yawgpu zeroed out the **depth aspect** of `copyTextureToBuffer` (all depth formats) and the **stencil
-aspect** of the packed depth+stencil formats (plain `Stencil8` was fine), where Dawn and wgpu-native
-pass all 1152 — now **resolved** (`c8f15d5`, `af9ac5c`): `image_copy` depth/stencil `pass=1152 fail=0`,
-full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no open Metal findings.**
+Every defect this suite surfaced against **yawgpu** (the primary conformance subject) was fixed in yawgpu
+and re-confirmed on real hardware — `expectations/yawgpu.txt` carries no expected-failure lines (surfaced,
+never masked). The early validation/copy milestones (commit + result):
 
 | milestone | yawgpu fix(es) | result after fix |
 |-----------|----------------|------------------|
@@ -62,76 +42,11 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 **Open — yawgpu: none.** The user confirmed (2026-06-08) the **full CTS is all-green on native Windows /
 NVIDIA Vulkan** and that all known yawgpu issues are fixed for now.
 
-The 2026-06-08 yawgpu update **resolved all seven** remaining findings, re-verified after rebuilding the
-yawgpu lib (Metal `cargo build --features metal`, Vulkan `--features vulkan --target-dir target-vulkan`) and
-relinking the CTS. Six passed on **both** HALs (Metal + Vulkan/MoltenVK);
-[F-045](#f-045--yawgpu-and-wgpu-native-frag_depth-is-not-clamped-to-the-viewport-depth-range-before-the-depth-test)
-passes on **Metal + native Vulkan** (`155a854`) with the residual MoltenVK failure being a **confirmed
-MoltenVK-only artifact** (Vulkan→Metal `frag_depth` viewport clamp), like **F-033**. The six both-HAL fixes:
-[F-044](#f-044--yawgpu-non-float32-vertex-formats-decode-to-zero-in-the-shader--cross-hal) (`706087f` — full
-vertex-format set; `pass=9`);
-[F-046](#f-046--yawgpu-face-culling--front_facing-winding-is-mishandled--cross-hal) (`f82c2d6`+`d6e700a` —
-cull/frontFace threaded through the subpass path; `pass=12`);
-[F-047](#f-047--yawgpu-pipeline-overridable-constants-are-ignored-read-as-zero--cross-hal) (`fff8634` —
-overridable constants applied in shader codegen; render `pass=6` + compute `pass=1`);
-[F-048](#f-048--yawgpu-and-wgpu-native-the-stencil-reference-value-is-not-masked-to-the-stencil-aspects-bit-width)
-(`9bc49dc` — stencil reference masked to the aspect's 8-bit width; `pass=30`, **wgpu-native still affected**);
-[F-049](#f-049--yawgpu-render-bundle-execution-mishandles-the-viewport-rect-bundle-draw-args-and-repeatedblended-replay--cross-hal)
-(`f82c2d6` — viewport/scissor threaded through the subpass path; `pass=4`); and
-[F-050](#f-050--yawgpu-occlusion-query-returns-zero-even-when-samples-pass--cross-hal) (`37d36e6`+`e70d18d` —
-occlusion-query execution on Metal + Vulkan; `pass=2`).
-
-The previous yawgpu finding,
-[F-043](#f-043--yawgpu-render-pass-depthslice-is-ignored--always-renders-to-slice-0-of-a-3d-texture--cross-hal)
-(yawgpu **ignored `WGPURenderPassColorAttachment.depthSlice`** and always rendered to slice 0 of a 3D
-texture — `rendering/3d_texture_slices` `one_color_attachment,mip_levels`, T43) is now **resolved**
-(`c6935f7`, real-GPU Metal + Vulkan/MoltenVK: `pass=6 fail=0`, was `pass=3 fail=3`); the attachment's
-`depthSlice` is now threaded into the 3D render-target view, and it reproduced byte-identically on Metal +
-Vulkan/MoltenVK, which localized it to yawgpu's shared depthSlice translation.
-[F-041](#f-041--yawgpu-read-only-storage-texture-textureload-reads-back-zero--cross-hal)
-(yawgpu's **read-only storage-texture `textureLoad`** read back zero — `storage_texture/read_only`, T37) is
-now **resolved** (`2e4edb7`, real-GPU Metal + Vulkan/MoltenVK: `pass=3 fail=0`, was `pass=0 fail=3`);
-yawgpu didn't wire the storage-texture bindings (and the Metal HAL lacked MSL runtime-array buffer sizes),
-and it reproduced on Metal + Vulkan/MoltenVK, which localized it to yawgpu's shared storage-texture
-handling.
-[F-040](#f-040--yawgpu-multisample-resolve-does-not-write-the-resolve-target--cross-hal)
-(yawgpu's **multisample (MSAA) resolve** did not write the resolve target — `render_pass/resolve`, T36) is
-now **resolved** (`bc8c280` + `3303058`, real-GPU Metal + Vulkan/MoltenVK: `pass=12 fail=0`, was
-`pass=2 fail=12`); yawgpu had no MSAA pipeline / resolve (and no multi-color-attachment) support, and it
-reproduced on Metal + Vulkan/MoltenVK, which localized it to yawgpu's shared resolve handling.
-[F-039](#f-039--yawgpu-two-dispatches-in-one-compute-pass-lose-their-writes-under-batch-execution--cross-hal)
-(`two_dispatches_in_the_same_compute_pass` read back `0` instead of `2` under batch/`--isolate` —
-`memory_sync/buffer/single_buffer`, T35) is now **resolved** (`89f25df`, real-GPU Metal + Vulkan/MoltenVK:
-`pass=25 fail=0` across all run modes, was `pass=24 fail=1` in batch); the root cause was yawgpu treating
-the whole compute pass as one usage scope instead of per-dispatch, and it reproduced on Metal +
-Vulkan/MoltenVK, which localized it to yawgpu's shared layer.
-[F-038](#f-038--yawgpu-mishandles-stencil-operations-compare-and-masks--cross-hal)
-(yawgpu mishandled stencil ops/compare/masks — `rendering/stencil`, T33) is now **resolved** (`40f5d7f`,
-real-GPU Metal + Vulkan/MoltenVK: `pass=188 fail=0`, was `pass=97 fail=91`); the single root cause was the
-dynamic stencil reference (`setStencilReference`) not being threaded to the HAL, and it reproduced
-byte-identically on Metal + Vulkan/MoltenVK, which localized it to yawgpu's shared state path.
-[F-037](#f-037--yawgpu-metal-hal-non-deterministic-depth-attachment-renderreadback-race)
-(a **Metal-HAL-only** non-deterministic flake on the `rendering/depth` ports, T32 — the drawn point's
-output intermittently read back as the clear value) is now **resolved** (`186cd54`): the root cause was
-yawgpu's Metal HAL not emitting `[[point_size]]` for **`point-list`** pipelines (the depth tests are the
-suite's first point-list users), so the point size was undefined on Metal; re-test `pass=130 fail=0`
-across 11 consecutive runs (was `fail≈33–44`), neighboring triangle-list rendering unaffected
-(`pass=589 fail=0`). Vulkan/MoltenVK, Dawn, and wgpu-native/Metal were always clean.
-[F-035](#f-035--yawgpu-ignores-gpucolortargetstate-blend-and-writemask-writes-the-raw-fragment-output--cross-hal)
-(yawgpu ignored `GPUColorTargetState` `blend` + `writeMask`, writing the raw fragment output to all
-channels — `rendering/color_target_state`, T31) is now **resolved** (`74f5ef2`, real-GPU Metal +
-Vulkan/MoltenVK: `pass=23 fail=0`, was `pass=2 fail=21`); it reproduced byte-identically on Metal +
-Vulkan/MoltenVK, which localized it to yawgpu's shared color-target-state translation.
-[F-034](#f-034--yawgpu-a-fragment-storage-write-is-lost-on-indexed--indirect-draws) (yawgpu didn't execute
-**indexed/indirect** draws — `rendering/draw`, T30) is now **resolved** (`36a6b66`, real-GPU Metal:
-`pass=564 fail=0`, was `340 fail=224`); it reproduced byte-identically on Metal + Vulkan/MoltenVK, which
-localized it to yawgpu's shared draw path. The depth/stencil findings are all resolved too: confirmed on
-**native Windows/Vulkan, NVIDIA RTX 5060 Ti, 2026-06-04** — F-031 `copy_depth_stencil`
-`pass=216 fail=0` (`cac328a`) and F-032 `image_copy` depth/stencil `pass=1152 fail=0` (`3c847ac`, up from
-`pass=352 fail=800`); the full ported suite on native Windows/Vulkan is green — **all 7596 ported cases**
-pass or skip (`pass=7208 skip=388 fail=0`, a per-**case** count; the per-test `pass=…` totals elsewhere in
-this file are per-**subcase**, so they are much larger). The **GLES** HAL is the only remaining untested
-follow-up (not a known defect). F-033 is a **confirmed** MoltenVK-only Mac artifact, not a yawgpu defect.
+Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
+diagnosis is in that commit and in this file's git history. The full ported suite is green on native
+Windows/Vulkan (NVIDIA RTX 5060 Ti) — all 7596 ported cases pass or skip (`pass=7208 skip=388 fail=0`,
+per-**case**; the per-test `pass=…` totals in the records are per-**subcase**). The **GLES** HAL is the only
+untested follow-up.
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028, F-036 (abort when a constant-factor blend draws without `setBlendConstant`; `color_target_state`,
 T31) (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
@@ -745,103 +660,24 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 
 ## F-031 — yawgpu diverges on the depth aspect of `copyTextureToTexture` (copied depth fails an equality re-render)
 
-- **Backend:** yawgpu (`1297b7e`, Metal). **Not** present in Dawn **or** wgpu-native — both pass all 216 cases.
-- **Found by:** `api/operation/command_buffer/copyTextureToTexture:copy_depth_stencil` (T26) — the first
-  ported test that exercises **depth-attachment rendering + depth/stencil-aspect copies**. It renders a
-  per-layer depth (`depthCompare:'always'`, depth = `0.5 + 0.2·sin(layer)`) into the source,
-  `copyTextureToTexture`-copies the subresource, then re-renders against the destination with
-  `depthCompare:'equal'` (writing green where the copied depth equals the freshly-computed depth) and
-  asserts the colour output is all green; the stencil aspect is checked by a byte-exact
-  `copyTextureToBuffer` readback.
-- **Observed on yawgpu:** every **depth** format fails — `Depth16Unorm`, `Depth24Plus`,
-  `Depth24PlusStencil8`, `Depth32Float`, `Depth32FloatStencil8` (enum 45–49) are each `fail=36/36`; the
-  green re-render produces **no green** (`GPU buffer mismatch at byte 1: expected 255, got 0` — the G
-  channel is 0, so the `equal` depth test passed nowhere). **`Stencil8`** (enum 44, stencil-only, no depth
-  aspect) **passes 36/36** — so the **stencil-aspect copy works; the depth-aspect path does not**.
-  Deterministic; all 180 depth subcases fail identically. Full run `pass=36 fail=180`.
-- **Expected (WebGPU):** the copied depth must equal the source depth, so the `depthCompare:'equal'`
-  re-render is all green. Dawn and wgpu-native both pass all 216 (`pass=216 fail=0` each).
-- **Likely root:** the **depth aspect is not preserved across `copyTextureToTexture`** (the destination
-  depth ≠ the rendered source depth, so `equal` fails everywhere), while the stencil aspect copies
-  correctly. Whether the gap is in the depth-aspect copy itself or in yawgpu's depth-attachment
-  render/compare path is for the yawgpu side to localize; the stencil-only pass isolates it to the
-  **depth** path. (This is the suite's first depth-render + depth-copy coverage — newly exercised, not a
-  regression.)
-- **Status:** **RESOLVED** (2026-06-03, real-GPU Metal; yawgpu `f3afc31`). The depth aspect failed not
-  because of the copy but because yawgpu's **regular (non-tiled) real-backend render path had no depth
-  support** — the
-  depth init/verify render passes never ran correctly. Seven gaps were fixed in sequence: (1) render-pass
-  depth-stencil attachment binding + (2) no-colour render passes; (3) render-pipeline depth-stencil +
-  vertex-only (no-fragment) pipelines; (4) `MTLCompileOptions.preserveInvariance` for cross-pipeline
-  depth equality; (5) separate vertex/fragment shader modules on Metal (per-stage MSL + two libraries);
-  (6) render-attachment mip-level/array-layer targeting; (7) over-strict depth/stencil copy validation
-  (the "single 2D layer" + "origin-zero full-subresource" rules were applied to multi-layer / layer-ranged
-  `copyTextureToTexture` and multi-layer stencil write/`copyTextureToBuffer`; corrected to full-w/h-at-zero-
-  x/y-origin while allowing layer ranges, matching WebGPU/Dawn). Re-test: `copy_depth_stencil`
-  `pass=216 fail=0` (Dawn-equal, up from `pass=36 fail=180`); full `copyTextureToTexture` `pass=31126
-  fail=0`; `image_copy` regression `pass=137256 fail=0`. 3-way confirmed (Dawn + wgpu-native pass all 216).
-  No `expectations/yawgpu.txt` lines were ever added (surfaced for the fix, not masked). **Note (Vulkan):**
-  the `f3afc31` fix landed in the **Metal** HAL only — initially confirmed on Mac via MoltenVK that the
-  Vulkan backend still failed `copy_depth_stencil` `pass=36 fail=180` (byte-identical to the pre-fix
-  profile). yawgpu then ported the depth render path to the **Vulkan HAL** in `cac328a`
-  ("resolve depth copyTextureToTexture on the Vulkan HAL"); first re-confirmed (2026-06-04, Mac via MoltenVK —
-  `CTS_YAWGPU_BACKEND=vulkan`): `copy_depth_stencil` `pass=216 fail=0` (Dawn-equal), then **confirmed on
-  native Windows/Vulkan (NVIDIA RTX 5060 Ti, 2026-06-04): `copy_depth_stencil` `pass=216 fail=0`** — so
-  F-031 is fixed on the Vulkan HAL with no residual MoltenVK doubt. **GLES** remains the untested follow-up.
+- **Backend:** yawgpu (Metal + Vulkan). Not in Dawn/wgpu-native (both pass all 216).
+- **What:** `copyTextureToTexture:copy_depth_stencil` (T26) — the copied **depth** aspect failed the
+  `depthCompare:'equal'` re-render (no green) for all depth formats; stencil-only `Stencil8` passed
+  (`pass=36 fail=180`). Root cause: yawgpu's regular real-backend render path had no depth support.
+- **Resolved:** yawgpu `f3afc31` (Metal, 7 depth-render gaps) + `cac328a` (Vulkan HAL); re-test
+  `copy_depth_stencil` `pass=216 fail=0` on Metal **and** native Windows/Vulkan. GLES untested.
 
 ---
 
 ## F-032 — yawgpu returns zeros for depth/stencil aspect buffer⇄texture copies (except plain Stencil8)
 
-- **Backend:** yawgpu (`f3afc31`, real-GPU Metal). **Not** present in Dawn or wgpu-native.
-- **Found by:** the T27 `image_copy` depth/stencil ports
-  (`api,operation,command_buffer,image_copy:rowsPerImage_and_bytesPerRow_depth_stencil` and
-  `:offsets_and_sizes_copy_depth_stencil`) — the suite's first image_copy depth/stencil aspect
-  coverage. **Dawn (oracle) and wgpu-native both pass all 1152** subcases with the exact same harness
-  code; **yawgpu passes 288, fails 864** (9 of the 12 case-level combos), which isolates the behavior
-  to the backend.
-- **Observed on yawgpu (every failure reads back `got 0`):**
-  - **Depth aspect** `copyTextureToBuffer` (depth-only) — **all three depth formats** zero out:
-    `Depth16Unorm` (`expected 255, got 0` at byte 0 — the `1.0`→`0xFFFF` texel), `Depth32Float` and
-    `Depth32FloatStencil8` (`expected 128, got 0` at byte 2 — the `1.0f`→`00 00 80 3F` texel). The test
-    stages depth by sampling an `r32float` source in a fragment shader that writes `@builtin(frag_depth)`,
-    then copies the depth aspect to a buffer; yawgpu yields all zeros.
-  - **Stencil aspect** of the **combined** depth+stencil formats — `Depth24PlusStencil8` and
-    `Depth32FloatStencil8` zero out for all of `WriteTexture` / `CopyB2T` / `CopyT2B` (stencil-only)
-    (`expected 1, got 0`).
-  - **Plain `Stencil8` passes** all three stencil methods (288 subcases) — a standalone single-plane
-    stencil texture copies correctly; only the **aspect extraction from a packed depth+stencil
-    texture** and the **depth plane** are broken.
-- **Expected (WebGPU):** buffer⇄texture copies of the depth aspect (`Depth16Unorm`/`Depth32Float`/
-  `Depth32FloatStencil8`) and the stencil aspect (all stencil formats) must round-trip the aspect's
-  bytes. Dawn and wgpu-native do.
-- **Scope / localization:** distinct from [F-031](#f-031--yawgpu-diverges-on-the-depth-aspect-of-copytexturetotexture-copied-depth-fails-an-equality-re-render)
-  (that was the depth aspect of *`copyTextureToTexture`*, fixed in `f3afc31`). F-032 is the depth/stencil
-  aspect of *buffer⇄texture* copies (`writeTexture` / `copyBufferToTexture` / `copyTextureToBuffer`).
-  Two sub-gaps: (a) depth-plane copy/extraction (or the frag-depth render staging not surviving a depth
-  T2B), and (b) stencil-plane extraction from a packed depth+stencil texture (plain `Stencil8` works,
-  so it is the packed-aspect path, not stencil copies in general).
-- **Status:** **RESOLVED** (2026-06-04, real-GPU Metal; yawgpu `c8f15d5` + `af9ac5c`). yawgpu added
-  depth/stencil aspect buffer-copy support (depth-plane copy + packed-aspect extraction) and corrected
-  the packed-depth aspect-copy buffer-size validation. Re-test: `image_copy` depth/stencil
-  `pass=1152 fail=0` (Dawn-equal, up from `pass=288 fail=864`); full `image_copy` now `pass=138408
-  fail=0` (137256 color + 1152 depth/stencil); combined `command_buffer` cross-test `pass=33937 fail=0`.
-  3-way confirmed (Dawn + wgpu-native pass all 1152). No `expectations/yawgpu.txt` lines were ever added
-  (surfaced for the fix, not masked). It was surfaced only because the T27 readback buffers are
-  zero-initialized (a copy that writes nothing fails instead of being masked by a pre-filled expected
-  buffer).
-- **Note (Vulkan) — RESOLVED on the Vulkan HAL (`3c847ac`):** the original F-032 fix (`c8f15d5`/`af9ac5c`)
-  was **Metal**-only, so the Vulkan HAL initially still failed the aspect buffer copies. This was confirmed
-  to be a real HAL gap (not a MoltenVK artifact) on **native Windows/Vulkan (NVIDIA RTX 5060 Ti):
-  `pass=352 fail=800`, byte-identical to MoltenVK** — the 800 fails (`got 0`) being stencil-plane
-  extraction from packed depth+stencil formats (576: `Depth24PlusStencil8` + `Depth32FloatStencil8` stencil
-  aspect, all three methods) plus depth-aspect `copyTextureToBuffer` (224). yawgpu then ported the
-  depth/stencil-aspect buffer-copy support to the **Vulkan HAL** in `3c847ac` ("resolve depth/stencil
-  aspect buffer copies on the Vulkan HAL"); **confirmed on native Windows/Vulkan (NVIDIA RTX 5060 Ti,
-  2026-06-04): `image_copy` depth/stencil `pass=1152 fail=0`** (Dawn-equal, up from `pass=352 fail=800`),
-  with the full ported suite green (`pass=7208 skip=388 fail=0`) and no `copy_depth_stencil` regression
-  (F-031 still `216/0`). So F-032 is now fixed on Metal **and** Vulkan. **GLES** remains the only untested
-  HAL (follow-up, not a known defect).
+- **Backend:** yawgpu (Metal + Vulkan). Not in Dawn/wgpu-native (both pass all 1152).
+- **What:** the T27 `image_copy` depth/stencil aspect ports — yawgpu returned **zeros** for depth-aspect
+  `copyTextureToBuffer` (all depth formats) and stencil-aspect copies of packed depth+stencil formats;
+  plain `Stencil8` passed (`pass=288 fail=864`). (Surfaced because the T27 readback buffers are
+  zero-initialized — a no-write copy fails instead of being masked by a pre-filled buffer.)
+- **Resolved:** yawgpu `c8f15d5`+`af9ac5c` (Metal) + `3c847ac` (Vulkan HAL); re-test `image_copy`
+  depth/stencil `pass=1152 fail=0` on Metal **and** native Windows/Vulkan.
 
 ---
 
@@ -887,80 +723,23 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 
 ## F-034 — yawgpu: a fragment storage write is lost on **indexed / indirect** draws
 
-- **Backend:** yawgpu (`af9ac5c`, real-GPU Metal). **Not** present in Dawn or wgpu-native.
-- **Found by:** the T30 `rendering/draw` ports (`arguments`, `default_arguments`) — the suite's first
-  vertex/index-buffer + multi-variant draw coverage. **Dawn (oracle) and wgpu-native both pass all 744**
-  with the exact same harness code; **yawgpu fails 224** (`pass=340 fail=224`, plus 183 feature-gated
-  skips for `indirect-first-instance`), which isolates the behavior to the backend.
-- **Observed (all 224 failures are `result` buffer `expected 1, got 0`):** the test's fragment shader
-  writes `result.value = 1u` to a `@group(0) @binding(0) var<storage, read_write>` whenever it runs; the
-  read-back is **0** (the write didn't take effect) for:
-  - **indexed** draws — `indexed=true` (both direct `drawIndexed` 128 and `drawIndexedIndirect` 64), and
-  - **indirect** non-indexed draws — `indexed=false; indirect=true` (`drawIndirect`, 16).
-  - **Plain `draw` (`indexed=false; indirect=false`) passes** — the fragment storage write works there.
-  `default_arguments` mirrors it: the 8 `draw` subcases pass, the 16 `drawIndexed` subcases fail.
-- **Expected (WebGPU):** a fragment-stage `read_write` storage write must take effect on every draw
-  variant. Dawn and wgpu-native do.
-- **Scope / localization:** the divergence is on the **`drawIndexed` / `drawIndirect` /
-  `drawIndexedIndirect`** paths specifically (the index-buffer and/or indirect-buffer draw encoding);
-  the plain `draw` path is fine. The reported failure is the fragment **storage side-effect**
-  (`result==0`); the test's first-failure report doesn't say whether the raster (the green pixels) also
-  diverges on these paths — **for yawgpu to localize** (fragment storage binding/flush on indexed/indirect
-  draws vs the draw not rasterizing at all).
-- **Cross-HAL (not HAL-specific):** re-run on Mac via MoltenVK (yawgpu `3c847ac`, **Vulkan** HAL,
-  `CTS_YAWGPU_BACKEND=vulkan`) — **byte-identical** to Metal: `pass=340 fail=224`, same
-  `indexed=true (128+64)` + `indexed=false;indirect=true (16)` pattern, same `result==0`. The
-  indexed/indirect draw + fragment storage write are MoltenVK-supported (Dawn/wgpu-native pass), so this
-  is **not** a MoltenVK artifact (unlike F-033) and **not** Metal-specific — it points at yawgpu's
-  **shared (HAL-agnostic) indexed/indirect draw path**, not a per-HAL backend.
-- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal; yawgpu `36a6b66`). The root cause was that
-  yawgpu **did not execute indexed / indirect draws** at all (the `drawIndexed` / `drawIndirect` /
-  `drawIndexedIndirect` paths weren't issued) — so neither the raster nor the fragment storage write
-  happened (the `result==0` was the first-reported symptom). yawgpu `36a6b66` ("implement indexed /
-  indirect draw execution") adds those paths. Re-test: `rendering/draw` `pass=564 fail=0` (Dawn/wgpu-equal,
-  up from `pass=340 fail=224`); V1/V2 unaffected. 3-way confirmed (Dawn + wgpu-native pass all 744). No
-  `expectations/yawgpu.txt` lines were ever added (surfaced for the fix, not masked). The cross-HAL
-  reproduction above (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's shared draw path.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 744).
+- **What:** the T30 `rendering/draw` ports — a fragment `read_write` storage write read back `0` on
+  **indexed / indirect** draws (`drawIndexed`/`drawIndirect`/`drawIndexedIndirect`); plain `draw` worked
+  (`pass=340 fail=224`). Root cause: yawgpu didn't execute the indexed/indirect draw paths at all.
+- **Resolved:** yawgpu `36a6b66` (implement indexed/indirect draw execution); re-test `rendering/draw`
+  `pass=564 fail=0`.
 
 ---
 
 ## F-035 — yawgpu ignores `GPUColorTargetState` `blend` and `writeMask` (writes the raw fragment output) — cross-HAL
 
-- **Backend:** yawgpu (`36a6b66`, real-GPU **Metal** and **Vulkan/MoltenVK** — byte-identical). **Not**
-  present in Dawn (oracle passes all).
-- **Found by:** the T31 (V4) `rendering/color_target_state` ports — the suite's first
-  `GPUColorTargetState` `blend` + `writeMask` coverage (`color_write_mask,{channel_work,
-  blending_disabled}`, `blend_constant,{initial,setting,not_inherited}`). **Dawn (oracle) passes all 23**
-  (`pass=23 fail=0`) with the exact same harness code; **yawgpu fails 21** (`pass=2 fail=21`), which
-  isolates the behavior to the backend.
-- **Observed (every failure is `expected 0` — or `0.5` — `got 1`: a channel that should be masked off
-  or blended down is written full-scale):** yawgpu writes the raw (clamped) fragment output to all four
-  channels, ignoring **both** fields of `GPUColorTargetState`:
-  - **`writeMask` ignored** — `color_write_mask,channel_work` fails 15/16 (only `mask=15`, all channels,
-    passes); `mask=0` (write nothing) returns all-`1`. `color_write_mask,blending_disabled` fails both
-    subcases (`writeMask=RED`, yet green reads `1`). All four channels are always written regardless of
-    the mask.
-  - **`blend` ignored** — `blend_constant,{initial,setting,not_inherited}` use a `srcFactor=constant`
-    blend; `src * blendConstant` is **not** applied — the raw source (clamped to `1`) is written. Only
-    `setting:{r:1,g:1,b:1,a:1}` passes (there `constant=1` ⇒ `src*1=src`, indistinguishable from the bug).
-  - The unifying tell: a case passes **iff** its expected result equals the raw source (`1`); whenever
-    `writeMask` or `blend` should pull a channel **below** the source, yawgpu emits the source.
-- **Expected (WebGPU):** the per-target `writeMask` gates which channels the pipeline writes, and `blend`
-  (here `src*constant + dst*…`) is applied before the unorm store. Dawn does both; wgpu-native honors
-  `writeMask` (`color_write_mask,*` `pass=18`, and would honor `blend` but for the unrelated F-036 abort).
-- **Likely root cause:** yawgpu reads only `WGPUColorTargetState.format` and does **not** propagate
-  `.writeMask` / `.blend` into the HAL render-pipeline color-attachment state. (Two observable symptoms;
-  could be one color-target-state translation gap or two — **for yawgpu to localize**.)
-- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
-  `CTS_YAWGPU_BACKEND=vulkan`) are **byte-identical** — `pass=2 fail=21`, same case-by-case pattern.
-  `writeMask` + blending are MoltenVK-supported (Dawn/wgpu-native honor them), so this is **not** a
-  MoltenVK artifact (unlike F-033) and **not** Metal-specific — it points at yawgpu's shared
-  (HAL-agnostic) pipeline color-target-state translation.
-- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `74f5ef2` —
-  "apply color-target blend + writeMask + blend constant"). Re-test: `color_target_state`
-  `pass=23 fail=0` on **both** HALs (Dawn-equal, up from `pass=2 fail=21`). Surfaced, not masked
-  (`expectations/yawgpu.txt` never carried a line for it). The cross-HAL reproduction (Metal ==
-  Vulkan/MoltenVK) correctly localized it to yawgpu's shared color-target-state translation.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn (passes all 23).
+- **What:** the T31 `rendering/color_target_state` ports — yawgpu wrote the raw fragment output to all
+  channels, ignoring **both** `GPUColorTargetState.writeMask` and `.blend` (`pass=2 fail=21`; a case
+  passed only when the expected value equaled the unmasked/unblended source).
+- **Resolved:** yawgpu `74f5ef2` (apply color-target blend + writeMask + blend constant); re-test
+  `color_target_state` `pass=23 fail=0` on both HALs.
 
 ---
 
@@ -991,459 +770,158 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 
 ## F-037 — yawgpu Metal HAL: non-deterministic depth-attachment render/readback race
 
-- **Backend:** yawgpu **Metal HAL** (`74f5ef2`, real-GPU Metal). **Not** present in Dawn (Metal),
-  wgpu-native (Metal), or yawgpu's **own Vulkan/MoltenVK HAL** — all three pass `130/130` deterministically.
-- **Found by:** the T32 (V5) `rendering/depth` ports — the suite's first standalone depth-stencil-
-  **attachment** render path (a render pass with a color **and** a depth-stencil attachment +
-  `GPUDepthStencilState`, depth via the vertex `z`). **Dawn (oracle) passes all 130 deterministically
-  (×3); yawgpu Metal is flaky.**
-- **Observed (non-deterministic):** running the full 130-case set in one process gives `fail≈33–44`,
-  **varying run to run** (`fail=44`, then `37`, then `40`, …); ~43/44 of the mismatches are
-  `expected 1, got 0` — the drawn point's color reads back as the render-pass **clear/background value**,
-  i.e. the draw's output is **intermittently missing**. The failing *set* changes every run. Crucially,
-  **every case passes when run alone in a fresh process** (e.g. `reverse_depth:reversed=true`,
-  `depth_compare_func …Always;clear=0`, `depth_test_fail`, `depth_disabled` — each `20/20` / `10/10`),
-  and `--isolate` over the whole set is *also* flaky — so it is not a single bad case and not one-process
-  cross-case poisoning per se, but a **timing/synchronization race that surfaces under batch execution**.
-- **Expected (WebGPU):** a depth-attachment render pass must complete (and be ordered) before the
-  subsequent `copyTextureToBuffer` snapshot reads the color attachment. Dawn, wgpu-native/Metal, and
-  yawgpu/Vulkan all guarantee this.
-- **Localization (tight):** the **color**-only render+readback paths on the *same* yawgpu Metal HAL are
-  deterministic at much larger scale — T30 `rendering/draw` (`pass=564`) and T31 `color_target_state`
-  (`pass=23`) never flaked — so it is **not** readback volume in general. The differentiator is the
-  **depth-stencil attachment**. Combined with Vulkan/MoltenVK being clean, this points at a missing/weak
-  **synchronization (fence/barrier) on yawgpu's Metal HAL** between a depth-attachment render pass and the
-  following texture→buffer copy (the color result is treated as ready before the pass actually finishes),
-  or a per-pass Metal resource that isn't fenced — **for yawgpu to localize**.
-- **Not cross-HAL (unlike F-035), not Metal-generic (unlike a driver issue):** Metal-HAL-specific to
-  yawgpu. (Contrast F-033, a MoltenVK-only artifact; this is the opposite — the *native* Metal HAL is the
-  one that races, while the Vulkan-via-MoltenVK HAL is clean.)
-- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal; yawgpu `186cd54` — "emit `[[point_size]]` for
-  Metal point-list pipelines"). **Root cause: not a sync race** (the hypothesis above was wrong) — yawgpu's
-  Metal HAL did not emit a `[[point_size]]` from the vertex function for **`point-list`** pipelines, so the
-  rendered point's size was **undefined** on Metal and the single pixel was intermittently not covered
-  (hence the non-determinism and the `expected 1, got 0`). The depth tests are simply the suite's **first
-  `point-list` users** (T30/T31 use `triangle-list`), so only they flaked — the depth attachment was
-  incidental; the **point-list topology** was the real differentiator. Vulkan defaults point size to `1.0`
-  (and Dawn/wgpu-native emit it for Metal), which is why every other path was clean. Re-test:
-  `rendering/depth` `pass=130 fail=0` across **11 consecutive runs** (8 sequential + 3 `--workers 8`), no
-  flakiness; neighboring rendering (`basic`+`draw`+`color_target_state`, all triangle-list)
-  `pass=589 fail=0` (no regression). Metal-HAL-only fix; Vulkan/MoltenVK was always clean. Surfaced, not
-  masked — no `expectations/yawgpu.txt` entry was ever added.
+- **Backend:** yawgpu **Metal HAL only** (Dawn/wgpu-native/yawgpu-Vulkan all clean `130/130`).
+- **What:** the T32 `rendering/depth` ports flaked non-deterministically on Metal (`fail≈33–44`, varying;
+  `expected 1, got 0` — the drawn point intermittently not covered); every case passed in isolation. Root
+  cause: yawgpu's Metal HAL didn't emit `[[point_size]]` for **`point-list`** pipelines (the depth tests
+  are the suite's first point-list users), so point size was undefined. (Initial sync-race hypothesis was
+  wrong.)
+- **Resolved:** yawgpu `186cd54` (emit `[[point_size]]` for Metal point-list); re-test `pass=130 fail=0`
+  across 11 runs. Metal-only fix.
 
 ---
 
 ## F-038 — yawgpu mishandles stencil operations, compare, and masks — cross-HAL
 
-- **Backend:** yawgpu (`186cd54`, real-GPU **Metal** and **Vulkan/MoltenVK** — byte-identical). **Not**
-  present in Dawn or wgpu-native (both pass all 188).
-- **Found by:** the T33 (V5b) `rendering/stencil` ports — the suite's first stencil pipeline state
-  (`setStencilReference`, the `GPUStencilFaceState` `compare`/`failOp`/`passOp`/`depthFailOp`,
-  `stencilReadMask`/`stencilWriteMask`). **Dawn (oracle) and wgpu-native both pass all 188** with the
-  identical harness; **yawgpu fails 91** (`pass=97 fail=91`), **deterministic** (same set across runs),
-  which isolates it to the backend. (The tests verify stencil state via a color readback — green if the
-  stencil test passes / the resulting stencil equals the expected value, base color otherwise.)
-- **Observed (three deterministic facets):**
-  - **Stencil operations** — `invert`, `increment-clamp`, `increment-wrap`, `decrement-wrap` produce the
-    **wrong** resulting stencil value (the `equal`-compare verification reads back base, not green);
-    `keep`, `zero`, `replace`, `decrement-clamp` pass (some likely coincidentally). Hits
-    `stencil_passOp_operation` (7/12 rows), `stencil_failOp_operation` (8/13), and
-    `stencil_depthFailOp_operation` (8/13).
-  - **Stencil compare** — 8/24 `stencil_compare_func` rows fail; the failing pattern is exactly the set
-    where the result should depend on `reference vs stored-stencil(1)` — yawgpu instead returns the
-    **reflexive** result (passes for `equal`/`less-equal`/`greater-equal`/`always`, fails for
-    `less`/`greater`/`not-equal`/`never`, regardless of `reference`), i.e. the **stored stencil value is
-    not correctly used** in the comparison.
-  - **Stencil read/write masks** — `stencil_read_write_mask` fails 6/12 (the `stencilReadMask` /
-    `stencilWriteMask` gating diverges the same way: the masked compare wrongly passes).
-  - `stencil_reference_initialized` **passes** (it only exercises `equal(0,0)`, which is reflexive-true).
-- **Expected (WebGPU):** the stencil test is `f(reference & readMask, storedStencil & readMask)`, and each
-  `GPUStencilOperation` updates the stored stencil per spec. Dawn and wgpu-native do both.
-- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
-  `CTS_YAWGPU_BACKEND=vulkan`) fail the **byte-identical 91-case set** (`diff` empty). So this is **not** a
-  per-HAL stencil-op/compare enum mapping (those differ between Metal and Vulkan) — it is in yawgpu's
-  **shared (HAL-agnostic) stencil state translation**. (Contrast F-037, which was Metal-HAL-only.)
-- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `40f5d7f` —
-  "thread dynamic stencil reference to the HAL"). **Single root cause: the dynamic stencil reference
-  (`setStencilReference`) was not threaded through to the HAL** — so everything that depends on it was
-  scrambled at once (the base `replace` wrote against the wrong reference, the verify `equal` compared
-  against the wrong reference, and the masked compares diverged). That single gap is why the three
-  observed facets above (ops / compare / masks) never reconciled into one black-box hypothesis — they were
-  all downstream of the missing reference. Re-test: `rendering/stencil` `pass=188 fail=0` on **both** HALs
-  (Dawn/wgpu-equal, up from `pass=97 fail=91`); neighboring rendering + compute `pass=720 fail=0` (no
-  regression). The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's
-  shared state path. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever added.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 188).
+- **What:** the T33 `rendering/stencil` ports — yawgpu mishandled stencil ops/compare/masks (`pass=97
+  fail=91`). Single root cause: the dynamic stencil reference (`setStencilReference`) wasn't threaded to
+  the HAL, scrambling everything downstream.
+- **Resolved:** yawgpu `40f5d7f` (thread dynamic stencil reference to the HAL); re-test `rendering/stencil`
+  `pass=188 fail=0` on both HALs.
 
 ---
 
 ## F-039 — yawgpu: two dispatches in one compute pass lose their writes under batch execution — cross-HAL
 
-- **Backend:** yawgpu (`40f5d7f`, real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present
-  in Dawn or wgpu-native (both pass in every mode).
-- **Found by:** the T35 (V7) `memory_sync/buffer/single_buffer` port —
-  `two_dispatches_in_the_same_compute_pass` (two compute dispatches write `1` then `2` to one storage
-  buffer **in the same pass**, which the spec orders ⇒ expect `2`). **Dawn and wgpu-native pass it in
-  every mode; yawgpu reads back `0`** (the buffer's initial value — **neither** dispatch's write is
-  visible) **only under batch / `--isolate` execution** (`pass=24 fail=1`), yet it **passes deterministically
-  (10/10 Metal, 5/5 Vulkan) when run as the sole query in a fresh process.**
-- **Observed:** `expected 2, got 0`. Deterministic — the full `single_buffer:*` run fails this one case
-  every time (Metal **and** Vulkan/MoltenVK). The `rw`/`wr`/`ww` cross-boundary cases (single dispatch per
-  pass, storage writes/reads/copies across separate command buffers and submits) **all pass even in the
-  same batch** — so it is **specific to the multiple-dispatches-in-one-pass path**, not storage compute or
-  the readback helper in general (the same `expectGPUBufferValuesEqual` readback verifies `rw`/`wr`/`ww`).
-- **Expected (WebGPU):** dispatches in the same compute pass are ordered; after the two writes the buffer
-  holds `2`, and that result is visible to a subsequent `copyBufferToBuffer` readback. Dawn and
-  wgpu-native do this in all modes.
-- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
-  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=24 fail=1` in batch and both pass the case in isolation —
-  so it is in yawgpu's **shared (HAL-agnostic)** layer, not a per-HAL path. (Same family as the resolved
-  **F-029**/**F-030** cross-test contamination, here on Metal+Vulkan and **deterministic**, and specific to
-  the two-dispatch compute pass.)
-- **Localization (for yawgpu):** the case is correct in isolation, so prior in-process GPU work (or the
-  `--run-case`/batch execution mode) leaves yawgpu in a state where a compute pass with **two** dispatches
-  writing one storage buffer produces no visible result on the following readback. A cross-test
-  state/resource leak or a missing flush on the multi-dispatch path — **for yawgpu to localize**.
-- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `89f25df` —
-  "compute dispatch is a per-dispatch usage scope"). **Root cause: yawgpu treated the whole compute pass
-  as a single usage scope instead of per-dispatch**, so two dispatches writing one storage buffer in one
-  pass were mishandled (the result was lost); because that scope-tracking state depended on prior
-  in-process work, it surfaced only under batch / `--isolate`. Re-test: `single_buffer` `pass=25 fail=0` on
-  **both** HALs across `--workers` / no-workers / `--isolate` (was `pass=24 fail=1` in batch); regression
-  sweep (compute + rendering + sampling) `pass=926 fail=0`. The cross-HAL reproduction (Metal ==
-  Vulkan/MoltenVK) correctly localized it to yawgpu's shared layer; the "specific to the multi-dispatch
-  path" observation pinpointed it. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever
-  added.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass every mode).
+- **What:** the T35 `memory_sync/single_buffer` `two_dispatches_in_the_same_compute_pass` read back `0`
+  instead of `2` (both writes lost) **only under batch/`--isolate`** (passed in isolation; `pass=24 fail=1`).
+  Root cause: yawgpu treated the whole compute pass as one usage scope instead of per-dispatch.
+- **Resolved:** yawgpu `89f25df` (per-dispatch usage scope); re-test `single_buffer` `pass=25 fail=0` across
+  all run modes on both HALs.
 
 ---
 
 ## F-040 — yawgpu: multisample resolve does not write the resolve target — cross-HAL
 
-- **Backend:** yawgpu (`89f25df`, real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present
-  in Dawn or wgpu-native (both pass all 14).
-- **Found by:** the T36 (V8) `render_pass/resolve` port — the suite's first **multisample (MSAA) resolve**
-  path (`sampleCount=4` color attachments + a `resolveTarget`). **Dawn (oracle) and wgpu-native both pass
-  all 14**; **yawgpu fails all 12 `render_pass_resolve` subcases** (`pass=2 fail=12` — the 2 passes are the
-  non-MSAA `storeop2` store/discard cases), **deterministic**.
-- **Observed:** every resolve subcase fails at the resolve-target pixel `(0,0)` channel 0 —
-  `expected 1, got 0`. The drawn white triangle fully covers the top-left of the `4×4 sampleCount=4`
-  attachment, so the resolve target's `(0,0)` should be white `[1,1,1,1]`; yawgpu reads back **`0`** (the
-  resolve target stays at its cleared/uninitialized value) — i.e. the **multisample resolve does not write
-  to the `resolveTarget`** at all. Affects both the single draw+resolve pass and the separate
-  empty-load-resolve pass, and both `store`/`discard` store-ops.
-- **Expected (WebGPU):** when a color attachment has a `resolveTarget`, the multisampled samples are
-  averaged and written to the single-sample resolve target at pass end. Dawn and wgpu-native do this
-  (resolve target reads white / black / `0.5` midpoint).
-- **Scope / not the basic render path:** `storeop2` (a plain `sampleCount=1` render + `store`/`discard`)
-  **passes** — so single-sample color render + store works; the gap is specifically the **MSAA resolve**
-  (multisample attachment → resolve target).
-- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
-  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=2 fail=12` with the same 12-case set — so it is in yawgpu's
-  **shared (HAL-agnostic)** multisample-resolve handling, not a per-HAL path.
-- **Status:** **RESOLVED** (2026-06-05, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `bc8c280` —
-  "MSAA render pipelines + multisample resolve", on top of `3303058` "multiple color attachments in the
-  regular render path"). Root cause: yawgpu had **no MSAA render pipeline / multisample-resolve support**
-  (and the regular render path didn't handle multiple color attachments), so the resolve target was never
-  written. Re-test: `render_pass/resolve` `pass=12 fail=0` (+ `storeop2` 2) on **both** HALs across
-  repeated runs (was `pass=2 fail=12`); regression sweep (rendering + compute + sampling + memory_sync)
-  `pass=951 fail=0`. The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to
-  yawgpu's shared resolve handling. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever
-  added. (The fix landed complete in **2** commits — `3303058` + `bc8c280` — despite the commit message's
-  "slice 2/3" estimate; no further yawgpu slice was needed. The deferred V8b resolve breadth — format
-  matrix, `numColorAttachments=4`, mip/layer-offset resolve, transient — is our remaining **CTS**
-  coverage, not blocked on yawgpu.)
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 14).
+- **What:** the T36 `render_pass/resolve` port — yawgpu's MSAA resolve never wrote the `resolveTarget`
+  (all 12 `render_pass_resolve` subcases `expected 1, got 0`; non-MSAA `storeop2` passed; `pass=2 fail=12`).
+  Root cause: no MSAA render pipeline / multisample-resolve / multi-color-attachment support.
+- **Resolved:** yawgpu `bc8c280`+`3303058`; re-test `render_pass/resolve` `pass=12 fail=0` on both HALs.
 
 ---
 
 ## F-041 — yawgpu: read-only storage-texture `textureLoad` reads back zero — cross-HAL
 
-- **Backend:** yawgpu (`bc8c280`, real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present
-  in Dawn or wgpu-native (both pass all 3).
-- **Found by:** the T37 (V9) `storage_texture/read_only` port — the suite's first **read-only
-  storage-texture** read (`textureLoad` on a `texture_storage_2d<format, read>` in a compute shader, the
-  result written to an output storage buffer). **Dawn (oracle) and wgpu-native both pass all 3** (formats
-  `r32uint`/`r32sint`/`r32float`); **yawgpu fails all 3** (`pass=0 fail=3`), **deterministic**.
-- **Observed:** every case fails at the output buffer's first byte with **`got 0`** (expected the texel-0
-  value — `r32uint` `1`, `r32sint` `0xFF…` = `-1`, `r32float` `0x…CD` = `0.1`). The output buffer reads
-  back **all zeros** — i.e. the compute shader's `textureLoad(readOnlyTexture, …)` returns `0`, so the
-  storage texture's uploaded contents are **not** read into the shader. (The compute **storage-buffer**
-  path works — V2 `compute/basic` passes on yawgpu — so the gap is specifically the storage **texture**
-  read: the `texture_storage_2d<…, read>` binding / `textureLoad`, or the `queueWriteTexture` upload into
-  a `STORAGE_BINDING` texture.)
-- **Expected (WebGPU):** `textureLoad` on a read-only storage texture returns the stored texel. Dawn and
-  wgpu-native do (output = `[value, 0, 0, 1]` per texel).
-- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
-  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=0 fail=3` — so it is in yawgpu's **shared (HAL-agnostic)**
-  read-only-storage-texture handling, not a per-HAL path.
-- **Related:** yawgpu was finding-rich on the **validation** side for storage textures
-  ([F-016](#f-016--yawgpu-rejects-read-write-storage-textures-on-read-write-capable-formats),
-  [F-018](#f-018--yawgpu-over-restricts-bindgrouplayout-storage-texture-bindings)); this is the first
-  **operation** coverage and surfaces a functional gap.
-- **Status:** **RESOLVED** (2026-06-06, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `2e4edb7` —
-  "wire storage-texture bindings + MSL runtime-array buffer sizes"). Root cause: yawgpu **did not wire the
-  storage-texture bindings** through to the shader (so `textureLoad` read nothing) and the Metal HAL
-  lacked **MSL runtime-array buffer sizes** (the output `array<vec4>` storage buffer). Re-test:
-  `read_only:basic` `pass=3 fail=0` on **both** HALs across repeated runs (was `pass=0 fail=3`); broad
-  regression sweep (rendering + compute + sampling + memory_sync + render_pass) `pass=965 fail=0` (the
-  runtime-array-size change touched all runtime-sized storage-buffer arrays — no regression). The cross-HAL
-  reproduction (Metal == Vulkan/MoltenVK) correctly localized it to yawgpu's shared storage-texture
-  handling. Surfaced, not masked — no `expectations/yawgpu.txt` entry was ever added.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 3).
+- **What:** the T37 `storage_texture/read_only` port — `textureLoad` on a `texture_storage_2d<…, read>`
+  returned `0` (output buffer all zeros; `pass=0 fail=3`). The compute storage-**buffer** path worked.
+  Root cause: storage-texture bindings weren't wired to the shader + the Metal HAL lacked MSL runtime-array
+  buffer sizes.
+- **Resolved:** yawgpu `2e4edb7`; re-test `read_only:basic` `pass=3 fail=0` on both HALs.
 
 ---
 
 ## F-042 — yawgpu: a render-stage (fragment) storage-buffer write from a point draw reads back zero — cross-HAL
 
-- **Backend:** yawgpu (`2e4edb7`, real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present
-  in Dawn or wgpu-native (both pass all 5).
-- **Found by:** the T39 (V7b) `memory_sync/buffer/single_buffer` `two_draws_*` ports — the suite's first
-  **render-stage storage write** (a fragment shader writing `var<storage, read_write> data; data.a =
-  value` from a `point-list` draw) + render bundles. **Dawn (oracle) and wgpu-native both pass all 5**
-  (`two_draws_in_the_same_render_pass` 4 subcases + `two_draws_in_the_same_render_bundle`); **yawgpu fails
-  all 5** (`pass=0 fail=5`), **deterministic**.
-- **Observed:** every case fails `expected 1 or 2, got 0` — the storage buffer stays at its initial `0`,
-  i.e. the fragment shader's storage write never takes effect (or the point never rasterizes the `1×1`
-  target). The **`firstDrawUseBundle=false, secondDrawUseBundle=false`** subcase (no render bundle, plain
-  render-pass draws) fails too — so this is **not** render-bundle-specific; it is the **render-stage
-  (fragment) storage write** (or the `point-list` draw into the `1×1` attachment).
-- **Scope / not the compute path:** the **compute** storage-buffer write works — `rw`/`wr`/`ww`/
-  `two_dispatches_in_the_same_compute_pass` all pass on yawgpu — so the gap is specifically the
-  **fragment-stage** storage write from a render-pass (point) draw.
-- **Expected (WebGPU):** a fragment-stage `read_write` storage write takes effect (the buffer holds `1` or
-  `2` after the two draws). Dawn and wgpu-native do.
-- **Cross-HAL (not HAL-specific):** Metal (`target/release`) and Vulkan/MoltenVK (`target-vulkan`,
-  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=0 fail=5` — so it is in yawgpu's **shared (HAL-agnostic)**
-  render-stage storage-write / point-draw handling, not a per-HAL path.
-- **Related but distinct:** [F-034](#f-034--yawgpu-a-fragment-storage-write-is-lost-on-indexed--indirect-draws)
-  was a fragment storage write lost on **indexed/indirect** draws (resolved); plain **triangle** draws
-  worked there. This is a plain **point** draw, **cross-HAL**, so a separate manifestation — **for yawgpu
-  to localize** (point-list fragment storage write vs the point's `1×1` coverage).
-- **Status:** **RESOLVED** (2026-06-06, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `042902b` —
-  "render bundle execution", on top of `eadc2f6` "render usage scope allows write+write across draws").
-  Root cause: yawgpu's **render usage scope** rejected/dropped a write-after-write to the same storage
-  buffer across draws in one render pass (and render-bundle draws weren't executed). Re-test:
-  `two_draws_*` `pass=5 fail=0` (full `single_buffer` `pass=30 fail=0`) on **both** HALs across repeated
-  runs (was `pass=0 fail=5`); broad regression sweep (rendering + render_pass + compute + sampling +
-  storage_texture) `pass=946 fail=0`. The cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly
-  localized it to yawgpu's shared render-stage handling. Surfaced, not masked — no `expectations/yawgpu.txt`
-  entry was ever added.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 5).
+- **What:** the T39 `memory_sync/single_buffer` `two_draws_*` ports — a fragment-stage `read_write` storage
+  write from a point draw read back `0` (`pass=0 fail=5`, incl. the non-bundle subcase). The compute
+  storage write worked. Root cause: the render usage scope rejected write+write across draws + render-bundle
+  draws weren't executed.
+- **Resolved:** yawgpu `042902b`+`eadc2f6`; re-test `two_draws_*` `pass=5 fail=0` on both HALs.
 
 ---
 
 ## F-043 — yawgpu: render-pass `depthSlice` is ignored — always renders to slice 0 of a 3D texture — cross-HAL
 
-- **Backend:** yawgpu (real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present in Dawn or
-  wgpu-native (both pass all 6).
-- **Found by:** the T43 (V13) `rendering/3d_texture_slices` `one_color_attachment,mip_levels` port (single
-  format `rgba8unorm`) — the suite's first **render-to-3D-slice** path
-  (`WGPURenderPassColorAttachment.depthSlice` selecting one `z` slice of a `dimension:'3d'` render target).
-  **Dawn (oracle) and wgpu-native both pass all 6** (`mipLevel∈{0,1,2}` × `depthSlice∈{0,1}`); **yawgpu
-  fails the 3 `depthSlice=1` cases** (`pass=3 fail=3`), **deterministic**.
-- **Observed:** every `depthSlice=1` case fails `rgba8unorm mismatch at (0, 0, 0) channel 0: expected 0,
-  got 11` — slice `z=0` holds the rendered pattern (`{11,21,31,41}`) even though `depthSlice=1` was
-  requested (so slice 0 should be untouched/zero). I.e. yawgpu **renders to slice 0 regardless of the
-  attachment's `depthSlice`** — the field is ignored. The 3 `depthSlice=0` cases pass because slice 0 is
-  coincidentally the correct target there.
-- **Scope (mip routing is fine):** `depthSlice=0` passes at **all three** mip levels (`mipLevel∈{0,1,2}`),
-  so the `baseMipLevel` selection is handled correctly; the gap is purely the **z-slice** selection
-  (`depthSlice`) within the rendered mip.
-- **Expected (WebGPU):** `GPURenderPassColorAttachment.depthSlice` selects which `z` slice of a 3D render
-  target receives the draw — `depthSlice=1` must write slice 1 and leave slice 0 zero. Dawn and wgpu-native
-  do.
-- **Cross-HAL (not HAL-specific):** Metal (`build-yawgpu`) and Vulkan/MoltenVK (`build-yawgpu-vulkan`,
-  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=3 fail=3` with the **byte-identical** error — so it is in
-  yawgpu's **shared (HAL-agnostic)** `depthSlice` → render-target-view translation, not a per-HAL path.
-- **Status:** **RESOLVED** (2026-06-06, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `c6935f7` — "thread
-  render-pass depthSlice to the 3D color attachment"). Root cause exactly as diagnosed: the attachment's
-  `depthSlice` was not threaded into the 3D render-target view, so every draw landed on slice 0. Re-test
-  (cts relinked against the new lib): `one_color_attachment,mip_levels` `pass=6 fail=0` on **both** HALs
-  (was `pass=3 fail=3`); the cross-HAL reproduction (Metal == Vulkan/MoltenVK) correctly localized it to
-  yawgpu's shared depthSlice → render-target translation. **Surfaced, not masked** — no
-  `expectations/yawgpu.txt` entry was ever added.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 6).
+- **What:** the T43 `rendering/3d_texture_slices` port — yawgpu ignored
+  `WGPURenderPassColorAttachment.depthSlice`, always rendering to slice 0 of a 3D texture (the 3
+  `depthSlice=1` cases failed; `pass=3 fail=3`). Mip routing was fine. Root cause: `depthSlice` wasn't
+  threaded into the 3D render-target view.
+- **Resolved:** yawgpu `c6935f7`; re-test `one_color_attachment,mip_levels` `pass=6 fail=0` on both HALs.
 
 ---
 
 ## F-044 — yawgpu: non-`float32` vertex formats decode to zero in the shader — cross-HAL
 
-- **Backend:** yawgpu (real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present in Dawn or
-  wgpu-native (both pass all 9).
-- **Found by:** the T46 (V16) `vertex_state/correctness` `vertex_format_to_shader_format_conversion` port —
-  9 representative vertex formats (one per decode family), each feeding known raw bytes through a vertex
-  buffer and reading `vec4<f32|u32|i32>` in the shader. **Dawn (oracle) and wgpu-native both pass all 9;
-  yawgpu passes only `float32x4`** (`pass=1 fail=8`), **deterministic**.
-- **Observed:** every non-`float32` format — `float16x4, uint32x4, uint8x4, sint32x4, sint8x4, unorm8x4,
-  snorm8x4, unorm10_10_10_2` — reads back **all zeros** in the shader (e.g. `uint32x4` component 0 expected
-  `1`, got `0`; `unorm8x4` component 1 expected `0.2`, got `0`). Only the identity `float32x4` path decodes
-  correctly. So yawgpu's vertex-attribute fetch implements only the 32-bit-float passthrough; the format
-  *conversions* (8/16-bit, packed `unorm10-10-10-2`, normalized `unorm`/`snorm`, integer `uint`/`sint`,
-  half `float16`) are not applied — the shader input is zero.
-- **Scope / not the storage-write path:** the verification writes the decoded attribute from the **fragment
-  stage to a `read_write` storage buffer**, and `float32x4` writes back correctly — so the render-stage
-  storage write ([F-042](#f-042--yawgpu-a-render-stage-fragment-storage-buffer-write-from-a-point-draw-reads-back-zero--cross-hal),
-  resolved) works; the gap is specifically the **vertex-format decode** for non-`float32` formats.
-- **Expected (WebGPU):** the GPU converts each vertex-buffer element from its `GPUVertexFormat` to the
-  shader's input type (`unorm` = `v/max`, `snorm` = `max(v/max,-1)`, `float16` decode, `unorm10-10-10-2`
-  unpack, integer passthrough). Dawn and wgpu-native do.
-- **Cross-HAL (not HAL-specific):** Metal (`build-yawgpu`) and Vulkan/MoltenVK (`build-yawgpu-vulkan`,
-  `CTS_YAWGPU_BACKEND=vulkan`) both show `pass=1 fail=8` with byte-identical "got 0" diffs — so it is in
-  yawgpu's **shared (HAL-agnostic)** vertex-format conversion, not a per-HAL path.
-- **Status:** **RESOLVED** (2026-06-08, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `706087f` — "implement
-  the full vertex-format set"). Re-test (lib rebuilt + CTS relinked): `vertex_format_to_shader_format_
-  conversion` `pass=9 fail=0` on **both** HALs (was `pass=1 fail=8`). Surfaced, not masked — no
-  `expectations/yawgpu.txt` entry was ever added.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 9).
+- **What:** the T46 `vertex_state/correctness` port — yawgpu decoded only `float32x4`; the other 8
+  representative formats (`float16/uint/sint/unorm/snorm/packed`) read back **all zeros** in the shader
+  (`pass=1 fail=8`). Vertex-format *conversion* wasn't applied (only the 32-bit-float passthrough).
+- **Resolved:** yawgpu `706087f` (full vertex-format set); re-test `vertex_format_to_shader_format_
+  conversion` `pass=9 fail=0` on both HALs.
+
+---
 
 ## F-045 — yawgpu and wgpu-native: `frag_depth` is not clamped to the viewport depth range before the depth test
 
-- **Backend:** **yawgpu** (real-GPU Metal **and** Vulkan/MoltenVK — identical) **and wgpu-native** (Metal).
-  **Not** present in Dawn (passes). A two-backend gap; Dawn is the only conformant one.
-- **Found by:** the T45 (V15) `rendering/depth_clip_clamp` `depth_test_input_clamped` port (depth32float,
-  non-MS). An init pass writes `clamp(kDepths, 0.25, 0.75)` into the depth texture; a test pass then
-  re-renders the **unclamped** `kDepths` as `frag_depth` with the **viewport depth set to `[0.25,0.75]`** and
-  `depthCompare:'not-equal'`, writing `color=1.0` only when the resulting depth is unexpected. A correctly
-  **viewport-clamped** `frag_depth` equals the stored value → `not-equal` fails → nothing draws → the
-  `r8unorm` target stays `0`.
-- **Observed:** yawgpu and wgpu-native draw `color=255` for the out-of-range points (`r8unorm pixel 0
-  expected 0, got 255`) — i.e. `frag_depth` was **not clamped to the viewport `[minDepth,maxDepth]`** before
-  the depth test, so the unclamped value mismatched the stored clamped value. Dawn clamps correctly and the
-  target stays `0`. (The `unclippedDepth=true` subcase is **skipped** on both yawgpu and wgpu-native — neither
-  exposes the `depth-clip-control` feature — and runs+passes only on Dawn.)
-- **Expected (WebGPU):** the depth value used for the depth test — including a fragment-written `frag_depth`
-  — is **clamped to the viewport depth range** `[min(minDepth,maxDepth), max(...)]`. This depth *clamping* is
-  independent of the `depth-clip-control` / `unclippedDepth` *clipping* feature. Dawn does it.
-- **Cross-HAL (yawgpu):** Metal == Vulkan/MoltenVK byte-identical — yawgpu's shared depth-clamp handling.
-  That wgpu-native (a mature backend) exhibits the same gap suggests this is a genuine, easily-missed spec
-  requirement rather than a Dawn-specific behavior; Dawn is the conformance reference here.
-- **Status:** **RESOLVED for yawgpu** (2026-06-08; yawgpu `155a854` — "clamp `frag_depth` to the viewport
-  depth range"). Passes on real-GPU **Metal** (`pass=1 skip=1 fail=0`) **and native Vulkan** — the user
-  confirmed the **full CTS is all-green on native Windows / NVIDIA RTX 5060 Ti**. The remaining failure is
-  **MoltenVK-only** (`pass=0 fail=1`): MoltenVK's Vulkan→Metal translation does not clamp `frag_depth` to the
-  viewport the way native Vulkan/Metal do — a **confirmed MoltenVK artifact**, analogous to
-  **F-033** (color `copyTextureToTexture` under MoltenVK), **not** a yawgpu defect. **Still affects wgpu-native** (a separate wgpu-native gap; Dawn passes). Surfaced, not
-  masked.
+- **Backend:** yawgpu (Metal + native Vulkan) **and wgpu-native**. Not in Dawn (passes).
+- **What:** the T45 `rendering/depth_clip_clamp` `depth_test_input_clamped` port — `frag_depth` was **not
+  clamped to the viewport depth range** `[minDepth,maxDepth]` before the depth test (the out-of-range
+  points drew, `expected 0, got 255`). The depth clamping is independent of the `depth-clip-control`
+  feature; Dawn is the conformance reference.
+- **Status:** **RESOLVED for yawgpu** — yawgpu `155a854` (clamp `frag_depth` to the viewport range); passes
+  on Metal (`pass=1 skip=1`) and **native Vulkan** (user-confirmed full-CTS-green on Windows/NVIDIA). The
+  residual MoltenVK failure (`pass=0 fail=1`) is a **confirmed MoltenVK-only artifact** (Vulkan→Metal),
+  like F-033 — not a yawgpu defect. **Still an open wgpu-native gap.** Surfaced, not masked.
 
 ---
 
 ## F-046 — yawgpu: face culling / `front_facing` winding is mishandled — cross-HAL
 
-- **Backend:** yawgpu (real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present in Dawn or
-  wgpu-native (both pass all).
-- **Found by:** the T47 (V17) `render_pipeline/culling_tests` `culling` port (`depthStencilFormat=null`). Two
-  opposite-winding triangles are drawn; the fragment colors by `@builtin(front_facing)` (green=front,
-  red=back); `cullMode` culls a face. **Dawn passes all 12 subcases, wgpu-native all 6 cases; yawgpu
-  `pass=2 fail=10`**, **deterministic**.
-- **Observed:** with `frontFace="ccw", cullMode="none"`, the CCW (top-left) triangle is front-facing and
-  should be **green** (`(0,0)` R=0), but yawgpu reads **R=255** (red = the back-facing color) — so
-  `front_facing` is computed with the **wrong winding** (the CCW triangle is treated as back-facing when
-  `frontFace=ccw`). Because `front_facing`/winding is wrong, both the color **and** the cull decision are
-  wrong (e.g. `frontFace="cw", cullMode="front"` fails to cull the front face — `(3,3)` G expected 0, got
-  255). Root cause: the front-face / winding determination (`frontFace` + the CCW/CW convention) is
-  mishandled.
-- **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK byte-identical (`pass=2 fail=10`) — yawgpu's
-  shared winding/cull handling.
-- **Status:** **RESOLVED** (2026-06-08, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `f82c2d6` — "thread
-  viewport/scissor + cull/frontFace through the subpass path", + `d6e700a` front_facing regression test).
-  Re-test: `culling` `pass=12 fail=0` on **both** HALs (was `pass=2 fail=10`). Surfaced, not masked.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass).
+- **What:** the T47 `render_pipeline/culling_tests` port — yawgpu computed `@builtin(front_facing)` with the
+  wrong winding (the CCW triangle read red when `frontFace=ccw`), so both the color and the `cullMode`
+  decision were wrong (`pass=2 fail=10`).
+- **Resolved:** yawgpu `f82c2d6`+`d6e700a` (cull/frontFace threaded through the subpass path); re-test
+  `culling` `pass=12 fail=0` on both HALs.
 
 ## F-047 — yawgpu: pipeline-overridable constants are ignored (read as zero) — cross-HAL
 
-- **Backend:** yawgpu (real-GPU **Metal** and **Vulkan/MoltenVK** — identical). **Not** present in Dawn or
-  wgpu-native (both pass).
-- **Found by:** the T50 (V20) `render_pipeline/overrides` `basic` port (`isAsync=false`). WGSL `override`
-  constants in the vertex (`xright`/`ytop`) and fragment (`R`/`G`/`B`/`A`) stages are set via the pipeline's
-  `constants` (`WGPUConstantEntry`). **Dawn passes all 6 subcases, wgpu-native passes; yawgpu `pass=1
-  fail=5`**, **deterministic**.
-- **Observed:** every override constant reads back as **0** — neither the WGSL **default** (`= 1.0`) nor the
-  pipeline-provided `WGPUConstantEntry` value is applied. The fragment outputs `{0,0,0,0}`, so only the
-  single subcase whose expected value is all-zero passes; the "no constants → default white", "vertex
-  override collapses the triangle", and "fragment color override" subcases all fail with "got 0". So
-  pipeline-overridable constants are **not implemented** (treated as 0 regardless of default or pipeline
-  value).
-- **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK (`pass=1 fail=5`) — yawgpu's shared override-
-  constant handling.
-- **Also in compute pipelines:** the T56 (V27) `compute_pipeline/overrides` `basic` port reproduces the same
-  gap on the **compute** stage — a pipeline-provided `override` (`c1=1`) reads back `0` (`pass=0 fail=1`),
-  **cross-HAL** (Metal == Vulkan/MoltenVK); Dawn + wgpu-native pass. So this is yawgpu's shared
-  override-constant handling across **both render and compute** pipelines.
-- **Status:** **RESOLVED** (2026-06-08, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `fff8634` — "apply
-  pipeline-overridable constants during shader codegen"). Re-test: render `overrides` `pass=6` + compute
-  `compute_pipeline/overrides` `pass=1`, `fail=0` on **both** HALs (was render `pass=1 fail=5` / compute
-  `pass=0 fail=1`). Surfaced, not masked.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass).
+- **What:** the T50 `render_pipeline/overrides` (`pass=1 fail=5`) + T56 `compute_pipeline/overrides`
+  (`pass=0 fail=1`) ports — WGSL `override` constants read back `0` (neither the WGSL default nor the
+  pipeline `WGPUConstantEntry` value applied), in **both render and compute** pipelines.
+- **Resolved:** yawgpu `fff8634` (apply overridable constants in shader codegen); re-test render `pass=6` +
+  compute `pass=1` on both HALs.
 
 ---
 
 ## F-048 — yawgpu and wgpu-native: the stencil reference value is not masked to the stencil aspect's bit width
 
-- **Backend:** **yawgpu** (real-GPU Metal **and** Vulkan/MoltenVK — identical) **and wgpu-native**. **Not**
-  present in Dawn (passes all 30). A two-backend gap; Dawn is the only conformant one (same shape as F-045).
-- **Found by:** the T51 (V22) `render_pass/clear_value` `stencil_clear_value` port. The stencil aspect is
-  cleared to `stencilClearValue`, then a quad is drawn with `stencilCompare:'equal'` + a `stencilReference`;
-  green is drawn iff the cleared stencil equals the (masked) reference. **Dawn `pass=30`; yawgpu and
-  wgpu-native both `pass=24 fail=6`**, **deterministic**.
-- **Observed:** the 6 failing cases are exactly `stencilClearValue ∈ {258 (0x102), 65539 (0x10003)}` with
-  `applyStencilClearValueAsStencilReferenceValue=true` (the reference set to the **full, unmasked** clear
-  value). The cleared stencil **is** correctly masked to the 8-bit aspect (= 2 / 3), but the stencil
-  **reference** (258 / 65539) is **not** masked to 8 bits before the `equal` compare, so `cleared 2 !=
-  reference 258` → the stencil test fails → the green fragment isn't drawn → the color stays the red clear
-  (`(0,0)` R expected 0, got 255). The `applyAs=false` cases (reference pre-masked to 2 / 3) pass on **all**
-  backends, confirming the clear-value masking works — the gap is purely the **reference** masking.
-- **Expected (WebGPU):** the stencil reference value is masked to the number of bits in the stencil aspect
-  (8 bits here) before the comparison; `258 & 0xff = 2` equals the cleared `2`. Dawn does; the CTS encodes
-  this requirement.
-- **Cross-HAL (yawgpu):** Metal == Vulkan/MoltenVK byte-identical (`pass=24 fail=6`) — yawgpu's shared
-  stencil-reference handling. That wgpu-native exhibits the same gap suggests an easily-missed spec detail.
-- **Status:** **RESOLVED for yawgpu** (2026-06-08, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `9bc49dc` —
-  "mask the stencil reference to the stencil aspect's 8-bit width"). Re-test: `stencil_clear_value` `pass=30
-  fail=0` on **both** HALs (was `pass=24 fail=6`). **wgpu-native is still affected** (the 6 cases still fail
-  there). Surfaced, not masked.
+- **Backend:** yawgpu (cross-HAL) **and wgpu-native**. Not in Dawn (passes all 30).
+- **What:** the T51 `render_pass/clear_value` `stencil_clear_value` port — the stencil **reference** wasn't
+  masked to the 8-bit stencil aspect before the `equal` compare (the 6 cases with an unmasked out-of-range
+  reference 258/65539 failed; the clear-value masking worked; `pass=24 fail=6`). The CTS encodes the
+  masking requirement; Dawn is the reference.
+- **Status:** **RESOLVED for yawgpu** — yawgpu `9bc49dc` (mask the stencil reference to the 8-bit aspect
+  width); re-test `stencil_clear_value` `pass=30 fail=0` on both HALs. **wgpu-native is still affected.**
+  Surfaced, not masked.
 
 ---
 
 ## F-049 — yawgpu: render-bundle execution mishandles the viewport rect, bundle draw-args, and repeated/blended replay — cross-HAL
 
-- **Backend:** yawgpu (real-GPU Metal **and** Vulkan/MoltenVK — identical). **Not** present in Dawn or
-  wgpu-native (both pass all 4).
-- **Found by:** the T54 (V25) `command_buffer/render/render_bundle` port. **Dawn and wgpu-native pass all 4;
-  yawgpu `pass=1 fail=3`** (only `basic` passes), **deterministic**, **cross-HAL** (Metal == Vulkan/MoltenVK).
-- **Observed:**
-  - `basic` (one bundle, `draw(6)`, no viewport/args/blend) **passes**.
-  - `one_bundle_used_multiple_times` **fails**: the pass sets a `1×1` `setViewport(x,y,1,1,…)` before each
-    `executeBundles`, but the "should not have rendered" pixels are all filled with the draw color — i.e.
-    the **render-pass viewport rectangle (x/y/width/height) is ignored**, so each bundle execution fills the
-    whole target. (Distinct from [F-045](#f-045--yawgpu-and-wgpu-native-frag_depth-is-not-clamped-to-the-viewport-depth-range-before-the-depth-test),
-    which is the viewport *depth* range.)
-  - `two_bundles` **fails**: a 2nd bundle drawn with `draw(3, 1, 3, 1)` (`firstVertex=3, firstInstance=1`)
-    doesn't produce the expected top-right/`kColor1` result — the **bundle draw-args (`firstVertex`/
-    `firstInstance`) and/or the second bundle's draw** aren't applied as on a direct draw.
-  - `one_bundle_used_multiple_times_same_executeBundles` **fails**: a bundle replayed 3× in one
-    `executeBundles` with an **additive blend** reads back `kColor0` (×1) instead of `kColor0×3` — the
-    repeated bundle execution and/or the blend doesn't accumulate.
-- **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK byte-identical (`pass=1 fail=3`) — yawgpu's
-  shared render-bundle/viewport handling. **For yawgpu to localize** (the viewport-rect gap is the clearest
-  single cause; the other two involve render-bundle draw-args / blend / repeated replay).
-- **Status:** **RESOLVED** (2026-06-08, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `f82c2d6` — "thread
-  viewport/scissor through the subpass path", the same fix that resolved the F-046 cull/frontFace gap). The
-  ignored-viewport-rect root cause (the clearest of the three symptoms) was correct. Re-test: `render_bundle`
-  `pass=4 fail=0` on **both** HALs (was `pass=1 fail=3`). Surfaced, not masked.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 4).
+- **What:** the T54 `command_buffer/render/render_bundle` port — only `basic` passed (`pass=1 fail=3`): the
+  render-pass **viewport rect was ignored** (reused-bundle test filled the whole target), and the
+  two-bundle / blended-replay cases mis-applied bundle draw-args / blend.
+- **Resolved:** yawgpu `f82c2d6` (viewport/scissor threaded through the subpass path — same fix as F-046);
+  re-test `render_bundle` `pass=4 fail=0` on both HALs.
 
 ---
 
 ## F-050 — yawgpu: occlusion query returns zero even when samples pass — cross-HAL
 
-- **Backend:** yawgpu (real-GPU Metal **and** Vulkan/MoltenVK — identical). **Not** present in Dawn or
-  wgpu-native (both pass).
-- **Found by:** the T58 (V30) `command_buffer/queries/occlusionQuery` port (`occlusion_query,basic` +
-  `occlusion_query,empty`). A covering triangle is drawn inside `beginOcclusionQuery(0)`/
-  `endOcclusionQuery()`, then `resolveQuerySet` writes the result. **Dawn and wgpu-native pass both; yawgpu
-  `pass=1 fail=1`** — `empty` (no draw → 0) passes, `basic` fails, **deterministic**, **cross-HAL** (Metal ==
-  Vulkan/MoltenVK).
-- **Observed:** `occlusion_query,basic` resolves to **`0`** ("occlusion query result is 0, expected > 0
-  (covering draw)") — yawgpu's occlusion query never counts the passing samples (the result is always `0` /
-  not written). The `empty` case coincidentally passes because the correct result there is also `0`.
-- **Expected (WebGPU):** an occlusion query resolves to a non-zero sample count when any fragments pass the
-  depth/stencil/scissor tests inside the query. Dawn and wgpu-native do.
-- **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK (`pass=1 fail=1`) — yawgpu's shared
-  occlusion-query handling.
-- **Status:** **RESOLVED** (2026-06-08, real-GPU Metal **and** Vulkan/MoltenVK; yawgpu `37d36e6` — "execute
-  occlusion queries (Metal)" + `e70d18d` — "execute occlusion queries on Vulkan + robust resolve"). Re-test:
-  `occlusionQuery` `pass=2 fail=0` on **both** HALs (was `pass=1 fail=1`). Surfaced, not masked.
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass).
+- **What:** the T58 `command_buffer/queries/occlusionQuery` port — `occlusion_query,basic` resolved to `0`
+  for a covering draw (passing samples never counted; `empty` coincidentally passed; `pass=1 fail=1`).
+- **Resolved:** yawgpu `37d36e6`+`e70d18d` (occlusion-query execution on Metal + Vulkan); re-test
+  `occlusionQuery` `pass=2 fail=0` on both HALs.
 
 ---
 
