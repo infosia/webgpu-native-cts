@@ -97,7 +97,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **30 `api/operation`** files: `command_buffer/`
+  maximally-ported `buffer/mapping` — and **33 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil, depth_bias,
   indirect_draw, 3d_texture_slices, depth_clip_clamp}` (the color render-to-texture + draw-call +
@@ -108,7 +108,8 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   foundations),
   `compute/basic` (the compute foundation), `sampling/filter_mode` (the texture-sampling foundation),
   `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation),
-  `render_pass/{resolve, storeop2}` (the multisample-resolve + store-op foundation),
+  `render_pass/{resolve, storeop2, clear_value, storeOp, transient_attachment}` (the multisample-resolve +
+  store-op + stencil-clear-value + storeOp + transient-attachment foundations),
   `storage_texture/{read_only, read_write}` (the storage-texture read + write foundations), and
   `vertex_state/{index_format, correctness}` (the indexed-draw index-format + vertex-format-decode
   foundations).
@@ -120,18 +121,19 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 46 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 47 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
-- **yawgpu** — the primary conformance subject — has **four open findings** (all **cross-HAL**, Metal ==
+- **yawgpu** — the primary conformance subject — has **five open findings** (all **cross-HAL**, Metal ==
   Vulkan/MoltenVK): **F-044** — non-`float32` vertex formats decode to **zero** (only `float32x4` works;
   `vertex_state/correctness`); **F-045** — `frag_depth` is not clamped to the viewport depth range before the
   depth test (`rendering/depth_clip_clamp`; **also affects wgpu-native**, Dawn passes); **F-046** — face
-  culling / `front_facing` winding is mishandled (`render_pipeline/culling_tests`); and **F-047** —
-  pipeline-overridable `override` constants are ignored / read as zero (`render_pipeline/overrides`). It
-  **passes the rest of the ported suite** on real-GPU Metal **and** Vulkan (Mac via MoltenVK and native
-  Windows / NVIDIA RTX 5060 Ti). Every *other* finding the suite has surfaced against yawgpu was fixed and
+  culling / `front_facing` winding is mishandled (`render_pipeline/culling_tests`); **F-047** —
+  pipeline-overridable `override` constants are ignored / read as zero (`render_pipeline/overrides`); and
+  **F-048** — the stencil reference value is not masked to the stencil aspect's bit width
+  (`render_pass/clear_value`; **also affects wgpu-native**, Dawn passes). It **passes the rest of the ported
+  suite** on real-GPU Metal **and** Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti). Every *other* finding the suite has surfaced against yawgpu was fixed and
   re-confirmed on hardware (e.g. **F-043** — render-pass `depthSlice` ignored — fixed in `c6935f7`);
   `expectations/yawgpu.txt` carries no expected failures — nothing is masked (the open findings' cases stay
   surfaced/failing until fixed). (It also *runs* the `immediate_data_size` cases
@@ -146,9 +148,10 @@ state:
   whole-subresource `image_copy` readback after a non-zero-origin copy) and **F-028** (3D
   `copyTextureToTexture` leaves depth slices z≥1 zero; 2D-array copies pass), plus **F-036** (aborts
   when a constant-factor blend draws without `setBlendConstant`, which should default to `[0,0,0,0]`;
-  `color_target_state`, contained via `--isolate` + expectations), and **F-045** (`frag_depth` is not
+  `color_target_state`, contained via `--isolate` + expectations), **F-045** (`frag_depth` is not
   clamped to the viewport depth range before the depth test — `depth_clip_clamp`; shared with yawgpu, Dawn
-  passes).
+  passes), and **F-048** (the stencil reference value is not masked to the stencil aspect's bit width —
+  `clear_value`; shared with yawgpu, Dawn passes).
 
 Every divergence is reported and surfaced — never masked to make a test pass; yawgpu's were fixed and
 re-confirmed on hardware, wgpu-native's are contained via `--isolate` + expectations.

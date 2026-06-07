@@ -71,7 +71,10 @@ fail=8`);
 fail=10`); and
 [F-047](#f-047--yawgpu-pipeline-overridable-constants-are-ignored-read-as-zero--cross-hal)
 (pipeline-overridable `override` constants ignored, read as zero — `render_pipeline/overrides`, T50;
-cross-HAL `pass=1 fail=5`). All surfaced, not masked.
+cross-HAL `pass=1 fail=5`); and
+[F-048](#f-048--yawgpu-and-wgpu-native-the-stencil-reference-value-is-not-masked-to-the-stencil-aspects-bit-width)
+(stencil reference not masked to the stencil aspect's bit width — `render_pass/clear_value`, T51; cross-HAL,
+also affects **wgpu-native**, Dawn passes). All surfaced, not masked.
 
 The previous yawgpu finding,
 [F-043](#f-043--yawgpu-render-pass-depthslice-is-ignored--always-renders-to-slice-0-of-a-3d-texture--cross-hal)
@@ -1346,6 +1349,32 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   constant handling.
 - **Status:** **OPEN** (2026-06-07). For yawgpu to apply WGSL `override` defaults + pipeline `constants`
   values to overridable constants. **Surfaced, not masked** — no `expectations/yawgpu.txt` entry.
+
+---
+
+## F-048 — yawgpu and wgpu-native: the stencil reference value is not masked to the stencil aspect's bit width
+
+- **Backend:** **yawgpu** (real-GPU Metal **and** Vulkan/MoltenVK — identical) **and wgpu-native**. **Not**
+  present in Dawn (passes all 30). A two-backend gap; Dawn is the only conformant one (same shape as F-045).
+- **Found by:** the T51 (V22) `render_pass/clear_value` `stencil_clear_value` port. The stencil aspect is
+  cleared to `stencilClearValue`, then a quad is drawn with `stencilCompare:'equal'` + a `stencilReference`;
+  green is drawn iff the cleared stencil equals the (masked) reference. **Dawn `pass=30`; yawgpu and
+  wgpu-native both `pass=24 fail=6`**, **deterministic**.
+- **Observed:** the 6 failing cases are exactly `stencilClearValue ∈ {258 (0x102), 65539 (0x10003)}` with
+  `applyStencilClearValueAsStencilReferenceValue=true` (the reference set to the **full, unmasked** clear
+  value). The cleared stencil **is** correctly masked to the 8-bit aspect (= 2 / 3), but the stencil
+  **reference** (258 / 65539) is **not** masked to 8 bits before the `equal` compare, so `cleared 2 !=
+  reference 258` → the stencil test fails → the green fragment isn't drawn → the color stays the red clear
+  (`(0,0)` R expected 0, got 255). The `applyAs=false` cases (reference pre-masked to 2 / 3) pass on **all**
+  backends, confirming the clear-value masking works — the gap is purely the **reference** masking.
+- **Expected (WebGPU):** the stencil reference value is masked to the number of bits in the stencil aspect
+  (8 bits here) before the comparison; `258 & 0xff = 2` equals the cleared `2`. Dawn does; the CTS encodes
+  this requirement.
+- **Cross-HAL (yawgpu):** Metal == Vulkan/MoltenVK byte-identical (`pass=24 fail=6`) — yawgpu's shared
+  stencil-reference handling. That wgpu-native exhibits the same gap suggests an easily-missed spec detail.
+- **Status:** **OPEN** (2026-06-07). For yawgpu (and, separately, wgpu-native) to mask the stencil reference
+  to the stencil aspect's bit width before the compare. **Surfaced, not masked** — no expectations entry on
+  either backend.
 
 ---
 
