@@ -1350,8 +1350,13 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   value).
 - **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK (`pass=1 fail=5`) — yawgpu's shared override-
   constant handling.
+- **Also in compute pipelines:** the T56 (V27) `compute_pipeline/overrides` `basic` port reproduces the same
+  gap on the **compute** stage — a pipeline-provided `override` (`c1=1`) reads back `0` (`pass=0 fail=1`),
+  **cross-HAL** (Metal == Vulkan/MoltenVK); Dawn + wgpu-native pass. So this is yawgpu's shared
+  override-constant handling across **both render and compute** pipelines.
 - **Status:** **OPEN** (2026-06-07). For yawgpu to apply WGSL `override` defaults + pipeline `constants`
-  values to overridable constants. **Surfaced, not masked** — no `expectations/yawgpu.txt` entry.
+  values to overridable constants (render **and** compute). **Surfaced, not masked** — no
+  `expectations/yawgpu.txt` entry.
 
 ---
 
