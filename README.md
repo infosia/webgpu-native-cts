@@ -128,23 +128,20 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
-- **yawgpu** — the primary conformance subject — has **seven open findings** (all **cross-HAL**, Metal ==
-  Vulkan/MoltenVK): **F-044** — non-`float32` vertex formats decode to **zero** (only `float32x4` works;
-  `vertex_state/correctness`); **F-045** — `frag_depth` is not clamped to the viewport depth range before the
-  depth test (`rendering/depth_clip_clamp`; **also affects wgpu-native**, Dawn passes); **F-046** — face
-  culling / `front_facing` winding is mishandled (`render_pipeline/culling_tests`); **F-047** —
-  pipeline-overridable `override` constants are ignored / read as zero (in **both** render and compute
-  pipelines — `render_pipeline/overrides` + `compute_pipeline/overrides`);
-  **F-048** — the stencil reference value is not masked to the stencil aspect's bit width
-  (`render_pass/clear_value`; **also affects wgpu-native**, Dawn passes); **F-049** — render-bundle
-  execution mishandles the viewport rect / bundle draw-args / repeated-blended replay
-  (`command_buffer/render/render_bundle`); and **F-050** — occlusion query returns zero even when samples
-  pass (`command_buffer/queries/occlusionQuery`). It **passes the rest of the ported suite** on real-GPU
-  Metal
-  **and** Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti). Every *other* finding the suite has surfaced against yawgpu was fixed and
-  re-confirmed on hardware (e.g. **F-043** — render-pass `depthSlice` ignored — fixed in `c6935f7`);
-  `expectations/yawgpu.txt` carries no expected failures — nothing is masked (the open findings' cases stay
-  surfaced/failing until fixed). (It also *runs* the `immediate_data_size` cases
+- **yawgpu** — the primary conformance subject — has **one partially-open finding**: **F-045** —
+  `frag_depth` is not clamped to the viewport depth range before the depth test
+  (`rendering/depth_clip_clamp`). yawgpu fixed it on the **Metal** HAL (`155a854`) but the **Vulkan** HAL
+  slice is **still pending** (MoltenVK still fails); it **also affects wgpu-native** (Dawn passes). The
+  Tier-2 push (T47–T58) surfaced six other findings, **all now resolved** on both HALs in the 2026-06-08
+  yawgpu update (re-verified after a yawgpu lib rebuild + CTS relink): **F-044** (non-`float32` vertex
+  formats decoded to zero → `706087f`), **F-046** (face culling / `front_facing` winding → `f82c2d6`),
+  **F-047** (pipeline-overridable `override` constants ignored, render **and** compute → `fff8634`),
+  **F-048** (stencil reference not masked to the aspect bit width → `9bc49dc`; **wgpu-native still
+  affected**), **F-049** (render-bundle execution / ignored viewport rect → `f82c2d6`), and **F-050**
+  (occlusion query returned zero → `37d36e6`+`e70d18d`). It **passes the rest of the ported suite** on
+  real-GPU Metal **and** Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti);
+  `expectations/yawgpu.txt` carries no expected failures — nothing is masked (F-045's case stays
+  surfaced/failing until the Vulkan slice lands). (It also *runs* the `immediate_data_size` cases
   Dawn/wgpu-native skip.) The one Mac-only artifact — **F-033**, color `copyTextureToTexture` under MoltenVK
   — is a confirmed MoltenVK translation limitation, absent on native Vulkan; the **GLES** HAL is the only
   untested follow-up. See [FINDINGS](docs/FINDINGS.md) for the per-finding record (root cause + fix per
