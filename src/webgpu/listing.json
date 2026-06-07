@@ -12,6 +12,7 @@
     {"path":"api,operation,render_pass,resolve","tests":[{"name":"render_pass_resolve","cases":1,"subcases":12,"unimplemented":false}]},
     {"path":"api,operation,render_pass,storeop2","tests":[{"name":"storeOp_controls_whether_1x1_drawn_quad_is_stored","cases":2,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,render_pipeline,culling_tests","tests":[{"name":"culling","cases":6,"subcases":12,"unimplemented":false}]},
+    {"path":"api,operation,render_pipeline,primitive_topology","tests":[{"name":"basic","cases":5,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,render_pipeline,vertex_only_render_pipeline","tests":[{"name":"draw_depth_and_stencil_with_vertex_only_pipeline","cases":1,"subcases":0,"unimplemented":true}]},
     {"path":"api,operation,rendering,3d_texture_slices","tests":[{"name":"one_color_attachment,mip_levels","cases":6,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,rendering,basic","tests":[{"name":"clear","cases":1,"subcases":0,"unimplemented":false},{"name":"fullscreen_quad","cases":1,"subcases":0,"unimplemented":false},{"name":"large_draw","cases":1,"subcases":0,"unimplemented":true}]},
