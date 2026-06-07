@@ -57,17 +57,17 @@ full `image_copy pass=138408 fail=0`. Surfaced, not masked. **yawgpu now has no 
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/046/047/048/049/050
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050
 — each keeps a compact record below.
-**Open — yawgpu:**
-[F-045](#f-045--yawgpu-and-wgpu-native-frag_depth-is-not-clamped-to-the-viewport-depth-range-before-the-depth-test)
-— **partially resolved**: yawgpu fixed it on the **Metal** HAL (`155a854`, re-test `pass=1 skip=1 fail=0`)
-but the **Vulkan** HAL slice is **still pending** (MoltenVK `pass=0 fail=1`); also still affects
-**wgpu-native** (Dawn passes). Surfaced, not masked.
+**Open — yawgpu: none.** The user confirmed (2026-06-08) the **full CTS is all-green on native Windows /
+NVIDIA Vulkan** and that all known yawgpu issues are fixed for now.
 
-The 2026-06-08 yawgpu update **resolved six** of the seven open findings on **both** HALs (Metal +
-Vulkan/MoltenVK), re-verified after rebuilding the yawgpu lib (Metal `cargo build --features metal`, Vulkan
-`--features vulkan --target-dir target-vulkan`) and relinking the CTS:
+The 2026-06-08 yawgpu update **resolved all seven** remaining findings, re-verified after rebuilding the
+yawgpu lib (Metal `cargo build --features metal`, Vulkan `--features vulkan --target-dir target-vulkan`) and
+relinking the CTS. Six passed on **both** HALs (Metal + Vulkan/MoltenVK);
+[F-045](#f-045--yawgpu-and-wgpu-native-frag_depth-is-not-clamped-to-the-viewport-depth-range-before-the-depth-test)
+passes on **Metal + native Vulkan** (`155a854`) with the residual MoltenVK failure being a **confirmed
+MoltenVK-only artifact** (Vulkan→Metal `frag_depth` viewport clamp), like **F-033**. The six both-HAL fixes:
 [F-044](#f-044--yawgpu-non-float32-vertex-formats-decode-to-zero-in-the-shader--cross-hal) (`706087f` — full
 vertex-format set; `pass=9`);
 [F-046](#f-046--yawgpu-face-culling--front_facing-winding-is-mishandled--cross-hal) (`f82c2d6`+`d6e700a` —
@@ -1311,10 +1311,13 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 - **Cross-HAL (yawgpu):** Metal == Vulkan/MoltenVK byte-identical — yawgpu's shared depth-clamp handling.
   That wgpu-native (a mature backend) exhibits the same gap suggests this is a genuine, easily-missed spec
   requirement rather than a Dawn-specific behavior; Dawn is the conformance reference here.
-- **Status:** **PARTIALLY RESOLVED** (2026-06-08). yawgpu fixed it on the **Metal** HAL (`155a854` — "clamp
-  `frag_depth` to the viewport depth range"; re-test Metal `pass=1 skip=1 fail=0`), but the **Vulkan** HAL
-  slice is **still pending** — MoltenVK `pass=0 fail=1` (`unclippedDepth=false`: "expected 0, got 255"). Also
-  **still affects wgpu-native** (separate). **Surfaced, not masked** — no expectations entry.
+- **Status:** **RESOLVED for yawgpu** (2026-06-08; yawgpu `155a854` — "clamp `frag_depth` to the viewport
+  depth range"). Passes on real-GPU **Metal** (`pass=1 skip=1 fail=0`) **and native Vulkan** — the user
+  confirmed the **full CTS is all-green on native Windows / NVIDIA RTX 5060 Ti**. The remaining failure is
+  **MoltenVK-only** (`pass=0 fail=1`): MoltenVK's Vulkan→Metal translation does not clamp `frag_depth` to the
+  viewport the way native Vulkan/Metal do — a **confirmed MoltenVK artifact**, analogous to
+  **F-033** (color `copyTextureToTexture` under MoltenVK), **not** a yawgpu defect. **Still affects wgpu-native** (a separate wgpu-native gap; Dawn passes). Surfaced, not
+  masked.
 
 ---
 
