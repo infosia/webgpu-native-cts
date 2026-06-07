@@ -74,7 +74,10 @@ fail=10`); and
 cross-HAL `pass=1 fail=5`); and
 [F-048](#f-048--yawgpu-and-wgpu-native-the-stencil-reference-value-is-not-masked-to-the-stencil-aspects-bit-width)
 (stencil reference not masked to the stencil aspect's bit width — `render_pass/clear_value`, T51; cross-HAL,
-also affects **wgpu-native**, Dawn passes). All surfaced, not masked.
+also affects **wgpu-native**, Dawn passes); and
+[F-049](#f-049--yawgpu-render-bundle-execution-mishandles-the-viewport-rect-bundle-draw-args-and-repeatedblended-replay--cross-hal)
+(render-bundle execution mishandles the viewport rect / bundle draw-args / repeated-blended replay —
+`command_buffer/render/render_bundle`, T54; cross-HAL `pass=1 fail=3`). All surfaced, not masked.
 
 The previous yawgpu finding,
 [F-043](#f-043--yawgpu-render-pass-depthslice-is-ignored--always-renders-to-slice-0-of-a-3d-texture--cross-hal)
@@ -1375,6 +1378,32 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 - **Status:** **OPEN** (2026-06-07). For yawgpu (and, separately, wgpu-native) to mask the stencil reference
   to the stencil aspect's bit width before the compare. **Surfaced, not masked** — no expectations entry on
   either backend.
+
+---
+
+## F-049 — yawgpu: render-bundle execution mishandles the viewport rect, bundle draw-args, and repeated/blended replay — cross-HAL
+
+- **Backend:** yawgpu (real-GPU Metal **and** Vulkan/MoltenVK — identical). **Not** present in Dawn or
+  wgpu-native (both pass all 4).
+- **Found by:** the T54 (V25) `command_buffer/render/render_bundle` port. **Dawn and wgpu-native pass all 4;
+  yawgpu `pass=1 fail=3`** (only `basic` passes), **deterministic**, **cross-HAL** (Metal == Vulkan/MoltenVK).
+- **Observed:**
+  - `basic` (one bundle, `draw(6)`, no viewport/args/blend) **passes**.
+  - `one_bundle_used_multiple_times` **fails**: the pass sets a `1×1` `setViewport(x,y,1,1,…)` before each
+    `executeBundles`, but the "should not have rendered" pixels are all filled with the draw color — i.e.
+    the **render-pass viewport rectangle (x/y/width/height) is ignored**, so each bundle execution fills the
+    whole target. (Distinct from [F-045](#f-045--yawgpu-and-wgpu-native-frag_depth-is-not-clamped-to-the-viewport-depth-range-before-the-depth-test),
+    which is the viewport *depth* range.)
+  - `two_bundles` **fails**: a 2nd bundle drawn with `draw(3, 1, 3, 1)` (`firstVertex=3, firstInstance=1`)
+    doesn't produce the expected top-right/`kColor1` result — the **bundle draw-args (`firstVertex`/
+    `firstInstance`) and/or the second bundle's draw** aren't applied as on a direct draw.
+  - `one_bundle_used_multiple_times_same_executeBundles` **fails**: a bundle replayed 3× in one
+    `executeBundles` with an **additive blend** reads back `kColor0` (×1) instead of `kColor0×3` — the
+    repeated bundle execution and/or the blend doesn't accumulate.
+- **Cross-HAL (not HAL-specific):** Metal == Vulkan/MoltenVK byte-identical (`pass=1 fail=3`) — yawgpu's
+  shared render-bundle/viewport handling. **For yawgpu to localize** (the viewport-rect gap is the clearest
+  single cause; the other two involve render-bundle draw-args / blend / repeated replay).
+- **Status:** **OPEN** (2026-06-07). **Surfaced, not masked** — no `expectations/yawgpu.txt` entry.
 
 ---
 

@@ -97,8 +97,9 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
 - Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
   `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **33 `api/operation`** files: `command_buffer/`
-  `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture}`, `queue/writeBuffer`,
+  maximally-ported `buffer/mapping` — and **35 `api/operation`** files: `command_buffer/`
+  `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture, render/render_bundle,
+  programmable/state_tracking}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil, depth_bias,
   indirect_draw, 3d_texture_slices, depth_clip_clamp}` (the color render-to-texture + draw-call +
   blend-state + depth-test + stencil-test + depth-bias + indirect-draw + 3D-texture-slice + viewport
@@ -121,19 +122,21 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 47 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 48 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
-- **yawgpu** — the primary conformance subject — has **five open findings** (all **cross-HAL**, Metal ==
+- **yawgpu** — the primary conformance subject — has **six open findings** (all **cross-HAL**, Metal ==
   Vulkan/MoltenVK): **F-044** — non-`float32` vertex formats decode to **zero** (only `float32x4` works;
   `vertex_state/correctness`); **F-045** — `frag_depth` is not clamped to the viewport depth range before the
   depth test (`rendering/depth_clip_clamp`; **also affects wgpu-native**, Dawn passes); **F-046** — face
   culling / `front_facing` winding is mishandled (`render_pipeline/culling_tests`); **F-047** —
-  pipeline-overridable `override` constants are ignored / read as zero (`render_pipeline/overrides`); and
+  pipeline-overridable `override` constants are ignored / read as zero (`render_pipeline/overrides`);
   **F-048** — the stencil reference value is not masked to the stencil aspect's bit width
-  (`render_pass/clear_value`; **also affects wgpu-native**, Dawn passes). It **passes the rest of the ported
-  suite** on real-GPU Metal **and** Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti). Every *other* finding the suite has surfaced against yawgpu was fixed and
+  (`render_pass/clear_value`; **also affects wgpu-native**, Dawn passes); and **F-049** — render-bundle
+  execution mishandles the viewport rect / bundle draw-args / repeated-blended replay
+  (`command_buffer/render/render_bundle`). It **passes the rest of the ported suite** on real-GPU Metal
+  **and** Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti). Every *other* finding the suite has surfaced against yawgpu was fixed and
   re-confirmed on hardware (e.g. **F-043** — render-pass `depthSlice` ignored — fixed in `c6935f7`);
   `expectations/yawgpu.txt` carries no expected failures — nothing is masked (the open findings' cases stay
   surfaced/failing until fixed). (It also *runs* the `immediate_data_size` cases
