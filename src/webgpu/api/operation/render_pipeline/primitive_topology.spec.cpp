@@ -1,5 +1,5 @@
 // Ported from gpuweb/cts src/webgpu/api/operation/render_pipeline/primitive_topology.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Ports basic for the 5 topologies, non-indirect, no primitive-restart; indirect/restart/unaligned_vertex_count deferred.
+// Ports basic for the 5 topologies × indirect{false,true} × primitiveRestart{false,true} (strip-only restart); unaligned_vertex_count deferred (V18c).
 
 #include <array>
 #include <cmath>
@@ -156,8 +156,18 @@ std::vector<LocationCheck> locationTriangleStrip(bool valid) {
     };
 }
 
-// Port of upstream getDefaultTestLocations(topology) — non-restart path.
-std::vector<LocationCheck> getDefaultTestLocations(std::string_view topology) {
+// Port of upstream getPrimitiveRestartLineTestLocations — midpoints of {v1,v2} and {v5,v6} only.
+// With a restart index between [v3, 0xFFFFFFFF, v4], the strip breaks into {v1,v2} and {v5,v6}.
+std::vector<LocationCheck> locationPrimitiveRestartLine(bool valid) {
+    const std::array<uint8_t, 4> color = valid ? kValidPixelColor : kInvalidPixelColor;
+    return {
+        {getMidpoint(kVertexLocations[0], kVertexLocations[1]), color},
+        {getMidpoint(kVertexLocations[4], kVertexLocations[5]), color},
+    };
+}
+
+// Port of upstream getDefaultTestLocations(topology, primitiveRestart).
+std::vector<LocationCheck> getDefaultTestLocations(std::string_view topology, bool primitiveRestart) {
     std::vector<LocationCheck> result;
     auto append = [&](std::vector<LocationCheck> v) {
         for (auto& c : v) { result.push_back(std::move(c)); }
@@ -176,8 +186,8 @@ std::vector<LocationCheck> getDefaultTestLocations(std::string_view topology) {
         append(locationTriangleList(false));
         append(locationTriangleStrip(false));
     } else if (topology == "line-strip") {
-        // valid: line + lineStrip; invalid: triangleList, triangleStrip
-        append(locationLine(true));
+        // primitiveRestart: only {v1,v2} and {v5,v6} lines valid; {v2,v3} and {v4,v5} still valid (strip endpoints).
+        append(primitiveRestart ? locationPrimitiveRestartLine(true) : locationLine(true));
         append(locationLineStrip(true));
         append(locationTriangleList(false));
         append(locationTriangleStrip(false));
@@ -186,9 +196,9 @@ std::vector<LocationCheck> getDefaultTestLocations(std::string_view topology) {
         append(locationTriangleList(true));
         append(locationTriangleStrip(false));
     } else if (topology == "triangle-strip") {
-        // valid: triangleList + triangleStrip
+        // primitiveRestart: strip triangles {v2,v3,v4} and {v3,v4,v5} are cut by the restart index.
         append(locationTriangleList(true));
-        append(locationTriangleStrip(true));
+        append(locationTriangleStrip(!primitiveRestart));
     }
 
     return result;
@@ -335,7 +345,11 @@ void verifyResult(
 // ---------- test body ------------------------------------------------------
 
 void runBasic(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string topology = t.param<std::string>("topology");
+    const std::string topology       = t.param<std::string>("topology");
+    const bool indirect              = t.param<bool>("indirect");
+    const bool primitiveRestart      = t.param<bool>("primitiveRestart");
+
+    constexpr uint32_t kDrawCount = 6u;
 
     // Build vertex buffer: 6 vertices, each 4 floats (NDC x,y,z,w).
     const std::vector<float> vertexData = generateVertexBuffer();
@@ -366,23 +380,66 @@ void runBasic(AllFeaturesMaxLimitsGpuTest& t) {
     WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vb, 0, WGPU_WHOLE_SIZE);
-    wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
+
+    if (primitiveRestart) {
+        // Index buffer: [0, 1, 2, 0xFFFFFFFF, 3, 4, 5] — restart index splits the strip.
+        const std::array<uint32_t, 7> indices = {0u, 1u, 2u, 0xFFFFFFFFu, 3u, 4u, 5u};
+        WGPUBuffer indexBuffer = t.makeBufferWithContents(
+            indices.data(),
+            indices.size() * sizeof(uint32_t),
+            WGPUBufferUsage_Index);
+        wgpuRenderPassEncoderSetIndexBuffer(pass, indexBuffer, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
+
+        if (indirect) {
+            // drawIndexedIndirect: [indexCount=7, instanceCount=1, firstIndex=0, baseVertex=0, firstInstance=0]
+            const std::array<uint32_t, 5> indirectArgs = {kDrawCount + 1u, 1u, 0u, 0u, 0u};
+            WGPUBuffer indirectBuffer = t.makeBufferWithContents(
+                indirectArgs.data(),
+                indirectArgs.size() * sizeof(uint32_t),
+                WGPUBufferUsage_Indirect);
+            wgpuRenderPassEncoderDrawIndexedIndirect(pass, indirectBuffer, 0);
+        } else {
+            wgpuRenderPassEncoderDrawIndexed(pass, kDrawCount + 1u, 1, 0, 0, 0);
+        }
+    } else {
+        if (indirect) {
+            // drawIndirect: [vertexCount=6, instanceCount=1, firstVertex=0, firstInstance=0]
+            const std::array<uint32_t, 4> indirectArgs = {kDrawCount, 1u, 0u, 0u};
+            WGPUBuffer indirectBuffer = t.makeBufferWithContents(
+                indirectArgs.data(),
+                indirectArgs.size() * sizeof(uint32_t),
+                WGPUBufferUsage_Indirect);
+            wgpuRenderPassEncoderDrawIndirect(pass, indirectBuffer, 0);
+        } else {
+            wgpuRenderPassEncoderDraw(pass, kDrawCount, 1, 0, 0);
+        }
+    }
+
     wgpuRenderPassEncoderEnd(pass);
     submitEncoder(t, encoder);
 
-    const std::vector<LocationCheck> locations = getDefaultTestLocations(topology);
+    const std::vector<LocationCheck> locations = getDefaultTestLocations(topology, primitiveRestart);
     verifyResult(t, target, locations);
 }
 
 CTS_TEST(g, "basic")
     .params([](ParamsBuilder u) {
         return u.combine("topology", {
-            "point-list",
-            "line-list",
-            "line-strip",
-            "triangle-list",
-            "triangle-strip",
-        });
+                "point-list",
+                "line-list",
+                "line-strip",
+                "triangle-list",
+                "triangle-strip",
+            })
+            .combine("indirect", {false, true})
+            .combine("primitiveRestart", {false, true})
+            .filter([](const ParamRecord& p) {
+                // primitiveRestart=true is only valid for line-strip and triangle-strip.
+                const bool restart = valueAs<bool>(*findParam(p, "primitiveRestart"));
+                if (!restart) return true;
+                const std::string& topo = valueAs<std::string>(*findParam(p, "topology"));
+                return topo == "line-strip" || topo == "triangle-strip";
+            });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         runBasic(t);
