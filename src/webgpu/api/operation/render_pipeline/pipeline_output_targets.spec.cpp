@@ -1,7 +1,9 @@
 // Ported from gpuweb/cts src/webgpu/api/operation/render_pipeline/pipeline_output_targets.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Ports color,component_count for r8unorm/rg8unorm/rgba8unorm; format matrix + color,attachments + blend deferred.
+// Ports color,component_count for r8unorm/rg8unorm/rgba8unorm; color,attachments (attachmentCount=2, emptyAttachmentId∈{0,1}).
+// format matrix + blend deferred.
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <sstream>
@@ -183,6 +185,165 @@ void runColorComponentCountTest(AllFeaturesMaxLimitsGpuTest& t) {
         0,
         static_cast<size_t>(kBytesPerRow));
 }
+
+// attachmentsFloatWriteValues: per-attachment RGBA f32 values (matches upstream).
+//   index 0: {0.12, 0.34, 0.56, 0.0}  → rgba8unorm quantized ≈ {31, 87, 143, 0}
+//   index 1: {0.78, 0.90, 0.19, 1.0}  → rgba8unorm quantized ≈ {199, 230, 48, 255}
+struct AttachmentWriteValues {
+    float r, g, b, a;
+};
+constexpr std::array<AttachmentWriteValues, 2> kAttachmentsFloatWriteValues = {{
+    {0.12f, 0.34f, 0.56f, 0.0f},
+    {0.78f, 0.90f, 0.19f, 1.0f},
+}};
+
+// Fragment shader for emptyAttachmentId=0: outputs only @location(1) with attachmentsFloatWriteValues[1].
+constexpr std::string_view kFragShaderEmpty0 = R"(
+struct FragOut {
+  @location(1) color1 : vec4<f32>,
+}
+@fragment fn main() -> FragOut {
+  var out : FragOut;
+  out.color1 = vec4<f32>(0.78, 0.9, 0.19, 1.0);
+  return out;
+}
+)";
+
+// Fragment shader for emptyAttachmentId=1: outputs only @location(0) with attachmentsFloatWriteValues[0].
+constexpr std::string_view kFragShaderEmpty1 = R"(
+@fragment fn main() -> @location(0) vec4<f32> {
+  return vec4<f32>(0.12, 0.34, 0.56, 0.0);
+}
+)";
+
+void runColorAttachmentsTest(AllFeaturesMaxLimitsGpuTest& t) {
+    const int emptyAttachmentId = t.param<int>("emptyAttachmentId");
+    constexpr int kAttachmentCount = 2;
+    const int realSlot = 1 - emptyAttachmentId; // the non-empty slot (0 or 1)
+
+    // Fragment shader selected per emptyAttachmentId.
+    const std::string_view fragSrc = (emptyAttachmentId == 0) ? kFragShaderEmpty0 : kFragShaderEmpty1;
+
+    // Create the 1×1 rgba8unorm render target for the non-empty slot.
+    WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    texDesc.size          = WGPUExtent3D{1, 1, 1};
+    texDesc.mipLevelCount = 1;
+    texDesc.sampleCount   = 1;
+    texDesc.dimension     = WGPUTextureDimension_2D;
+    texDesc.format        = WGPUTextureFormat_RGBA8Unorm;
+    texDesc.usage         = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    WGPUTexture renderTarget = t.createTextureTracked(texDesc);
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    WGPUTextureView realView = t.createViewTracked(renderTarget, viewDesc);
+
+    // Build shaders.
+    WGPUShaderModule vertModule = t.createShaderModuleTracked(kVertexShader);
+    WGPUShaderModule fragModule = t.createShaderModuleTracked(fragSrc);
+
+    // Pipeline targets: 2 entries. The empty slot has format=Undefined; the real slot has rgba8unorm.
+    WGPUColorTargetState targets[kAttachmentCount];
+    for (int i = 0; i < kAttachmentCount; ++i) {
+        targets[i] = WGPU_COLOR_TARGET_STATE_INIT;
+        if (i == emptyAttachmentId) {
+            targets[i].format = WGPUTextureFormat_Undefined;
+        } else {
+            targets[i].format = WGPUTextureFormat_RGBA8Unorm;
+        }
+    }
+
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    fragment.module      = fragModule;
+    fragment.entryPoint  = stringView("main");
+    fragment.targetCount = static_cast<size_t>(kAttachmentCount);
+    fragment.targets     = targets;
+
+    WGPURenderPipelineDescriptor pipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    pipeDesc.vertex.module     = vertModule;
+    pipeDesc.vertex.entryPoint = stringView("main");
+    pipeDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pipeDesc.multisample.count  = 1;
+    pipeDesc.fragment           = &fragment;
+    WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipeDesc);
+
+    // Render pass: 2 color attachments. The empty slot has view=nullptr; the real slot is the target.
+    WGPURenderPassColorAttachment colorAttachments[kAttachmentCount];
+    for (int i = 0; i < kAttachmentCount; ++i) {
+        colorAttachments[i] = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        if (i == emptyAttachmentId) {
+            colorAttachments[i].view = nullptr;
+        } else {
+            colorAttachments[i].view       = realView;
+            colorAttachments[i].loadOp     = WGPULoadOp_Clear;
+            colorAttachments[i].storeOp    = WGPUStoreOp_Store;
+            colorAttachments[i].clearValue = WGPUColor{0.5, 0.5, 0.5, 0.5};
+        }
+    }
+
+    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    passDesc.colorAttachmentCount   = static_cast<size_t>(kAttachmentCount);
+    passDesc.colorAttachments       = colorAttachments;
+    passDesc.depthStencilAttachment = nullptr;
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass);
+
+    // Readback: bytesPerRow = 256, size 1×1×1; check bytes [0..3].
+    constexpr uint32_t kBytesPerRow = 256;
+    WGPUBufferDescriptor bufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bufDesc.size  = kBytesPerRow;
+    bufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer readback = t.createBufferTracked(bufDesc);
+
+    t.copyTextureToBuffer(encoder, renderTarget, readback, kBytesPerRow, WGPUExtent3D{1, 1, 1});
+    submit(t, encoder);
+
+    // Expected: attachmentsFloatWriteValues[realSlot] quantized round(clamp(c,0,1)*255), ±1 tolerance.
+    const AttachmentWriteValues& wv = kAttachmentsFloatWriteValues[static_cast<size_t>(realSlot)];
+    const std::array<uint8_t, 4> expected = {
+        static_cast<uint8_t>(std::lround(std::min(std::max(wv.r, 0.0f), 1.0f) * 255.0f)),
+        static_cast<uint8_t>(std::lround(std::min(std::max(wv.g, 0.0f), 1.0f) * 255.0f)),
+        static_cast<uint8_t>(std::lround(std::min(std::max(wv.b, 0.0f), 1.0f) * 255.0f)),
+        static_cast<uint8_t>(std::lround(std::min(std::max(wv.a, 0.0f), 1.0f) * 255.0f)),
+    };
+
+    t.expectGPUBufferValuesPassCheck(
+        readback,
+        [expected](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            if (len < 4) {
+                std::ostringstream msg;
+                msg << "readback buffer too small: " << len << " < 4";
+                return msg.str();
+            }
+            for (uint32_t ch = 0; ch < 4; ++ch) {
+                const int got = static_cast<int>(actual[ch]);
+                const int exp = static_cast<int>(expected[ch]);
+                if (std::abs(got - exp) > 1) {
+                    std::ostringstream msg;
+                    msg << "attachments mismatch at byte " << ch
+                        << ": expected " << exp << " (±1)"
+                        << ", got "      << got;
+                    return msg.str();
+                }
+            }
+            return std::nullopt;
+        },
+        0,
+        static_cast<size_t>(kBytesPerRow));
+}
+
+// color,attachments:
+//   format=rgba8unorm (fixed), attachmentCount=2 (fixed), emptyAttachmentId ∈ {0, 1} = 2 cases.
+CTS_TEST(g, "color,attachments")
+    .params([](ParamsBuilder u) {
+        return u.combine("emptyAttachmentId", {0, 1});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        runColorAttachmentsTest(t);
+    });
 
 // color,component_count:
 //   format is a case-level param (3 cases); componentCount is a subcase (filtered per format).

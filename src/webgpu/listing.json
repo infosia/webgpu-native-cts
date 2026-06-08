@@ -20,7 +20,7 @@
     {"path":"api,operation,render_pass,transient_attachment","tests":[{"name":"increasing_attachments_count","cases":1,"subcases":0,"unimplemented":false},{"name":"overlapping_transient_attachments","cases":1,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,render_pipeline,culling_tests","tests":[{"name":"culling","cases":6,"subcases":12,"unimplemented":false}]},
     {"path":"api,operation,render_pipeline,overrides","tests":[{"name":"basic","cases":1,"subcases":6,"unimplemented":false}]},
-    {"path":"api,operation,render_pipeline,pipeline_output_targets","tests":[{"name":"color,component_count","cases":3,"subcases":8,"unimplemented":false}]},
+    {"path":"api,operation,render_pipeline,pipeline_output_targets","tests":[{"name":"color,attachments","cases":2,"subcases":0,"unimplemented":false},{"name":"color,component_count","cases":3,"subcases":8,"unimplemented":false}]},
     {"path":"api,operation,render_pipeline,primitive_topology","tests":[{"name":"basic","cases":14,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,render_pipeline,sample_mask","tests":[{"name":"all_full","cases":1,"subcases":0,"unimplemented":false},{"name":"raster_subset","cases":1,"subcases":0,"unimplemented":false},{"name":"sample_mask_subset","cases":1,"subcases":0,"unimplemented":false},{"name":"frag_mask_subset","cases":1,"subcases":0,"unimplemented":false},{"name":"and_of_all","cases":1,"subcases":0,"unimplemented":false},{"name":"none","cases":1,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,render_pipeline,vertex_only_render_pipeline","tests":[{"name":"draw_depth_and_stencil_with_vertex_only_pipeline","cases":1,"subcases":0,"unimplemented":true}]},
