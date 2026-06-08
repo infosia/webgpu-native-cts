@@ -167,25 +167,29 @@ revisions](docs/UPSTREAM.md).
 | **yawgpu** | 4332 | 383 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips |
 | **wgpu-native** | 3407 | 756 | 338 | 214 | 214 crashes are eager-panics on invalid input (F-001–F-004 incl. F-003 mapping, F-007, F-013, F-017, F-019, F-021); 338 fails are missing-validation / uncaptured-error divergences (F-015 view-usage subset ≈ 324, F-012, F-003 mapping) |
 
-**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti) — a **T13-era `api,validation` snapshot**
-(4331 cases, 2026-06-01); yawgpu is clean on the current surface here too, matching Metal:
+**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti). yawgpu, re-measured **2026-06-08** on the
+current **4715-case** surface (same surface as the Metal table above), is clean — zero failures, matching
+Metal:
 
 | Backend | pass | skip | xfail | xpass | fail | crash |
 |---------|-----:|-----:|------:|------:|-----:|------:|
-| **yawgpu** | 4131 | 200 | 0 | 0 | 0 | 0 |
-| **wgpu-native** | 2260 | 1579 | 274 | 218 | 0 | 0 |
+| **yawgpu** | 3257 | 1458 | 0 | 0 | 0 | 0 |
 
-**At that snapshot yawgpu posted `pass=4131 skip=200`, zero failures, on both platforms** (matching
-Dawn's Metal numbers at that surface) — a clean cross-platform result. (Dawn is not yet built on
-Windows.) The `wgpu-native` row differs from
-its Metal numbers because the expectations file (`expectations/wgpu-native.txt`) was tuned on Metal and
-this NVIDIA Vulkan driver diverges: 218 cases the file lists as failures (202 `createTexture`, 16
-`createView`) actually **pass** here (reported as `xpass`), while 274 expected divergences are still
-contained (`xfail`, dominated by 229 `createView` view-usage-subset cases — F-015 — plus the 16
-`createBindGroupLayout` storage-texture aborts — F-017); feature-gated formats also skip differently
-because each adapter exposes a different optional-feature set. All `wgpu-native` aborts are contained by
-`--isolate` and reclassified via the expectations file, so an `--isolate --expectations` run still
-exits 0 on both platforms.
+**yawgpu posts `pass=3257 skip=1458`, zero failures** — a clean cross-platform result. The pass/skip
+split differs from its Metal row (`4332 / 383`) only because this NVIDIA Vulkan driver feature-gates more
+optional texture formats than Apple Metal, so more format cases skip; the case total (4715) and the
+zero-failure outcome are identical on both platforms. (Dawn is not yet built on Windows.)
+
+For reference, an earlier **T13-era snapshot** (4331-case surface, 2026-06-01) measured `wgpu-native` on
+the same GPU via `--isolate --expectations`: `pass=2260 skip=1579 xfail=274 xpass=218 fail=0 crash=0`. That
+row differed from its Metal numbers because the expectations file (`expectations/wgpu-native.txt`) was
+tuned on Metal and this NVIDIA Vulkan driver diverges: 218 cases the file lists as failures (202
+`createTexture`, 16 `createView`) actually **pass** here (reported as `xpass`), while 274 expected
+divergences are still contained (`xfail`, dominated by 229 `createView` view-usage-subset cases — F-015 —
+plus the 16 `createBindGroupLayout` storage-texture aborts — F-017); feature-gated formats also skip
+differently because each adapter exposes a different optional-feature set. All `wgpu-native` aborts are
+contained by `--isolate` and reclassified via the expectations file, so an `--isolate --expectations` run
+still exits 0 on both platforms.
 
 #### `api,operation` — Metal (in-process readback)
 
