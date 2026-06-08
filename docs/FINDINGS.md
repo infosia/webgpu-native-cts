@@ -39,11 +39,12 @@ never masked). The early validation/copy milestones (commit + result):
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054
 — each keeps a compact record below.
-**Open — yawgpu: none.** The three findings surfaced by this session's newly-added tests — F-051 (Metal
-multisampled-view crash; `sample_mask`), F-053 (multi-attachment 3D-slice render; `3d_texture_slices`), and
-F-054 (sparse/`null` color attachment; `pipeline_output_targets`) — are all fixed and re-verified: F-051 and
-F-054 pass on **both HALs** (Metal + MoltenVK), F-053 on Metal + native Windows/NVIDIA Vulkan. F-053's
-residual MoltenVK failure is a confirmed Vulkan→Metal translation artifact (like F-033 / F-045).
+**Open — yawgpu:** **F-055** — sampling a depth/stencil texture's aspect while the same texture is bound as
+a **read-only depth-stencil attachment** in the same render pass (`memory_sync/texture/readonly_depth_stencil`
+`sampling_while_testing`) reads back **wrong** values (the on-GPU check writes `0`), surfaced by the new T72
+port. **Cross-HAL** (Metal == MoltenVK). Dawn + wgpu-native pass. (The earlier session findings F-051 / F-053
+/ F-054 are all fixed: F-051 + F-054 pass on both HALs, F-053 on Metal + native Vulkan with a confirmed
+MoltenVK-only residual artifact.)
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -993,6 +994,24 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   slots. Dawn and wgpu-native pass.
 - **Status:** **RESOLVED** — yawgpu `793fc6d`-era update; re-test `color,attachments` `pass=2 fail=0` on
   **both HALs** (Metal + Vulkan/MoltenVK). Surfaced, not masked.
+
+---
+
+## F-055 — yawgpu: wrong values sampling a depth/stencil aspect while it is a read-only DS attachment — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK both fail). Not in Dawn or wgpu-native (both
+  pass).
+- **Found by:** the T72 `memory_sync/texture/readonly_depth_stencil` `sampling_while_testing` port
+  (`format=depth24plus-stencil8`, `depthReadOnly=true`, `stencilReadOnly=true`). A `3×3` depth-stencil
+  texture is filled (stencil `x+1`, depth `(y+1)/10`), then in one render pass it is bound as a **read-only**
+  depth+stencil attachment (depth/stencil tested) **and** its depth-only / stencil-only aspects are
+  **sampled** in the fragment shader; a check pass re-samples and writes `1` on match.
+- **Observed:** the check writes `0` (`resultTexture texel (0,0) expected 1, got 0`) — the sampled depth or
+  stencil aspect does not read back the expected value. `pass=0 fail=1`.
+- **Expected (WebGPU):** a read-only depth-stencil attachment may be concurrently sampled as a texture; both
+  reads see the stored contents. Dawn and wgpu-native pass.
+- **Status:** **OPEN** (yawgpu, cross-HAL). Likely yawgpu mishandles sampling a depth/stencil **aspect** of
+  a texture (or the read-only-DS + texture-read concurrency). Surfaced, not masked.
 
 ---
 
