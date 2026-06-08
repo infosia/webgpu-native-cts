@@ -124,17 +124,18 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 53 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 54 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
 - **yawgpu** — the primary conformance subject — passed the entire ported suite on Vulkan as of the
   2026-06-08 confirmation (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti).
   `expectations/yawgpu.txt` carries no expected failures — nothing is masked. (It also *runs* the
-  `immediate_data_size` cases Dawn/wgpu-native skip.) The two findings surfaced by newly-added tests are
-  both fixed: **F-051** (multisampled-texture-view crash; `sample_mask`) on both HALs, and **F-053**
-  (multi-attachment render to different slices of one 3D texture; `3d_texture_slices`) on Metal **and**
-  native Windows / NVIDIA Vulkan — so yawgpu again has **no open findings**. Three **Mac-only MoltenVK
+  `immediate_data_size` cases Dawn/wgpu-native skip.) Earlier findings from newly-added tests were fixed
+  (**F-051** multisampled-texture-view crash on both HALs; **F-053** multi-attachment 3D-slice render on
+  Metal + native Vulkan), and one new finding is open: **F-054** (cross-HAL — a render pass with a sparse /
+  `null` color attachment renders nothing to the non-null attachment; `pipeline_output_targets`). Three
+  **Mac-only MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`
   2D-view-on-3D-image `[mvk-error]`) — all confirmed MoltenVK Vulkan→Metal translation limitations, **absent

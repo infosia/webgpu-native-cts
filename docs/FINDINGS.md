@@ -39,11 +39,12 @@ never masked). The early validation/copy milestones (commit + result):
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053
 — each keeps a compact record below.
-**Open — yawgpu: none.** F-051 (Metal multisampled-view crash) and F-053 (multi-attachment 3D-slice render)
-were both fixed; F-051 is `sample_mask` `pass=6` on both HALs, and F-053 is green on the Metal HAL **and**
-on **native Windows / NVIDIA Vulkan** (user-confirmed 2026-06-08). F-053's residual MoltenVK failure (an
-explicit `vkCreateImageView` 2D-view-on-3D-image `[mvk-error]`) is a **confirmed MoltenVK-only translation
-artifact**, like F-033 / F-045 — not a yawgpu defect.
+**Open — yawgpu:** **F-054** — a render pass with a **sparse / `null` color attachment** (one slot null,
+another written) renders nothing to the non-null attachment (reads back `0`), surfaced by the new T65
+`pipeline_output_targets/color,attachments` port. **Cross-HAL** (Metal == MoltenVK). Dawn + wgpu-native
+pass. (F-051 — Metal multisampled-view crash — and F-053 — multi-attachment 3D-slice render — were both
+fixed: F-051 `sample_mask` `pass=6` on both HALs; F-053 green on Metal **and** native Windows/NVIDIA Vulkan,
+its MoltenVK residual a confirmed translation artifact.)
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -976,6 +977,23 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   (`[mvk-error] VK_ERROR_FEATURE_NOT_PRESENT: vkCreateImageView(): 2D views on 3D images can only be used as
   color attachments`) is a **confirmed MoltenVK-only Vulkan→Metal translation artifact** (like F-033 /
   F-045), **not** a yawgpu defect. Surfaced, not masked.
+
+---
+
+## F-054 — yawgpu: a render pass with a sparse / null color attachment renders nothing — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK both fail). Not in Dawn or wgpu-native (both
+  pass).
+- **Found by:** the T65 `render_pipeline/pipeline_output_targets` `color,attachments` port — a pipeline +
+  render pass with 2 color-attachment slots where one slot (`emptyAttachmentId`) is **null** (null pipeline
+  target `format=Undefined` + null render-pass attachment `view=nullptr`) and the other is a real
+  `rgba8unorm` attachment; the fragment writes only to the non-null `@location`.
+- **Observed:** the non-null attachment reads back **zero** (`expected 199 (±1), got 0` for
+  `emptyAttachmentId=0`; `expected 31, got 0` for `=1`) — nothing is written. `pass=0 fail=2`.
+- **Expected (WebGPU):** sparse color attachments are valid; the fragment's outputs go to the non-null
+  slots. Dawn and wgpu-native pass.
+- **Status:** **OPEN** (yawgpu, cross-HAL). Likely yawgpu mishandles a null attachment slot (attachment
+  index ↔ `@location` mapping, or skips the draw). Surfaced, not masked.
 
 ---
 
