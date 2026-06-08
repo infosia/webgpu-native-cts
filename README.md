@@ -205,13 +205,8 @@ the 3 `xfail` the contained **F-002** (`clearBuffer`) + **F-036** (`color_target
 fixture requests a fresh all-features device per test and Dawn caps live devices per process —
 `--isolate`/per-file resets the count; yawgpu has no such cap, so its combined run is clean.)
 
-The large *structural* ports, where the format axis is swept densely (cells are `pass / fail`):
-
-| Backend | `image_copy` (137256) | `copyTextureToTexture` color (30910) | `copy_depth_stencil` (216) | `image_copy` depth/stencil (1152) | findings |
-|---------|----------------------:|-------------------------------------:|---------------------------:|----------------------------------:|----------|
-| **Dawn** (oracle) | 137256 / 0 | 30910 / 0 | 216 / 0 | 1152 / 0 | — |
-| **yawgpu** | 137256 / 0 | 30910 / 0 | 216 / 0 | 1152 / 0 | — |
-| **wgpu-native** | 116772 / 1332 | 26236 / 738 | 216 / 0 | 1152 / 0 | F-027, F-028 (3D multi-slice copy/readback) |
+The large *structural* ports sweep the format axis densely; on Dawn and yawgpu they are clean, while
+wgpu-native surfaces the 3D multi-slice copy/readback findings F-027 and F-028.
 
 The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,
 `onSubmittedWorkDone`) pass on Dawn and yawgpu; on wgpu-native `clearBuffer:clear`'s `size=0` subcase
@@ -219,14 +214,15 @@ aborts (F-002, contained by `--isolate`). Run in one process, the command_buffer
 **no cross-test interference** — yawgpu is clean across the combined run (`pass=32785 skip=5 fail=0`); no
 test poisons another.
 
-**yawgpu on Windows/Vulkan** (NVIDIA RTX 5060 Ti, native — not MoltenVK; 2026-06-04): the operation ports
-**match Metal exactly** — `image_copy` color `137256 / 0`, `copyTextureToTexture` `copy_depth_stencil`
-`216 / 0` (F-031 fixed on the Vulkan HAL, `cac328a`), and `image_copy` depth/stencil `1152 / 0` (F-032
-fixed on the Vulkan HAL, `3c847ac`, up from a confirmed native `352 / 800` gap — byte-identical to the
-MoltenVK profile, i.e. a real HAL gap, since closed; see
+**yawgpu on Windows/Vulkan** (NVIDIA RTX 5060 Ti, native — not MoltenVK; 2026-06-08): the operation ports
+**match Metal exactly**, including the depth/stencil aspects fixed on the Vulkan HAL (F-031 `cac328a`,
+F-032 `3c847ac`; see
 [F-032](docs/FINDINGS.md#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)).
-The full ported suite on native Vulkan is green — all 7596 ported cases pass or skip
-(`pass=7208 skip=388 fail=0`, a per-case count). The only Mac-only artifact (F-033 color
+The full ported suite on native Vulkan is green — every ported case passes or skips, **`fail=0
+crash=0`**. A fresh end-to-end run (yawgpu `e70d18d`, all 48 file-level queries via `--workers 16`,
+`--expectations expectations/yawgpu.txt` with nothing masked) posts
+`pass=214039 skip=85698 fail=0 crash=0 xfail=0 xpass=0`, exit 0 in ~2m (a per-**subcase** leaf count;
+the same suite is `pass=7208 skip=388` at per-**case** granularity). The only Mac-only artifact (F-033 color
 `copyTextureToTexture` under MoltenVK) is a confirmed MoltenVK translation limitation, absent on native
 Vulkan.
 
