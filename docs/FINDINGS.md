@@ -37,14 +37,13 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053
 — each keeps a compact record below.
-**Open — yawgpu:** **F-051 is RESOLVED** (Metal multisampled-view crash fixed; `sample_mask` `pass=6` on
-both HALs — removed from the crash-list). **F-053** — multi-attachment render to different `depthSlice`s of
-one 3D texture — is **RESOLVED on the Metal HAL** (`pass=1`) but **still fails under MoltenVK** with an
-explicit `[mvk-error] VK_ERROR_FEATURE_NOT_PRESENT: vkCreateImageView(): 2D views on 3D images can only be
-used as color attachments` — a probable **MoltenVK Vulkan→Metal translation artifact** (like F-033 / F-045),
-**pending native-Windows/Vulkan confirmation**. Surfaced, not masked.
+**Open — yawgpu: none.** F-051 (Metal multisampled-view crash) and F-053 (multi-attachment 3D-slice render)
+were both fixed; F-051 is `sample_mask` `pass=6` on both HALs, and F-053 is green on the Metal HAL **and**
+on **native Windows / NVIDIA Vulkan** (user-confirmed 2026-06-08). F-053's residual MoltenVK failure (an
+explicit `vkCreateImageView` 2D-view-on-3D-image `[mvk-error]`) is a **confirmed MoltenVK-only translation
+artifact**, like F-033 / F-045 — not a yawgpu defect.
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -58,7 +57,10 @@ F-023 note; under the macOS sandbox Metal enumerates no adapters and every case 
 **Tooling / environment (not a backend conformance defect):** F-033 — color `copyTextureToTexture`
 pixel mismatches when yawgpu's Vulkan HAL is run on **Mac via MoltenVK**; a **confirmed** MoltenVK
 translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=7208 skip=388 fail=0`, all
-7596 cases), low priority.
+7596 cases), low priority. **F-045** (`frag_depth` not viewport-clamped) and **F-053** (multi-attachment
+render to different slices of one 3D texture — an explicit `vkCreateImageView` 2D-view-on-3D-image
+`[mvk-error]`) are the other two **confirmed MoltenVK-only** residuals: both pass on the Metal HAL and on
+native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→Metal translation.
 
 ---
 
@@ -969,11 +971,11 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   expected 11, got 0`) — nothing is written to the multi-attachment 3D slices. `pass=0 fail=1`.
 - **Expected (WebGPU):** each color attachment writes its fragment output to its `depthSlice`; slice `i`
   (covered texels) should hold location-`i`'s value. Dawn and wgpu-native pass.
-- **Status:** **RESOLVED on the Metal HAL** — yawgpu `c29dc78`-era update; re-test `pass=1 fail=0` on Metal.
-  **MoltenVK still fails** with `[mvk-error] VK_ERROR_FEATURE_NOT_PRESENT: vkCreateImageView(): 2D views on
-  3D images can only be used as color attachments` — a probable **MoltenVK Vulkan→Metal translation
-  artifact** (like F-033 / F-045), **pending native-Windows/Vulkan confirmation** to determine whether the
-  Vulkan HAL itself is green. Surfaced, not masked.
+- **Status:** **RESOLVED** — yawgpu `c29dc78`-era update; re-test `pass=1 fail=0` on the **Metal HAL** and
+  green on **native Windows / NVIDIA Vulkan** (user-confirmed 2026-06-08). The residual MoltenVK failure
+  (`[mvk-error] VK_ERROR_FEATURE_NOT_PRESENT: vkCreateImageView(): 2D views on 3D images can only be used as
+  color attachments`) is a **confirmed MoltenVK-only Vulkan→Metal translation artifact** (like F-033 /
+  F-045), **not** a yawgpu defect. Surfaced, not masked.
 
 ---
 
