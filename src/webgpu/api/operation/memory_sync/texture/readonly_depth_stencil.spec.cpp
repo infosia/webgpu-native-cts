@@ -6,6 +6,7 @@
 //   kDepthStencilFormats matrix (depth-only / stencil-only formats) (V32a-rest).
 
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -397,7 +398,7 @@ CTS_TEST(g, "sampling_while_testing")
                             return msg.str();
                         }
                         uint32_t value = 0;
-                        __builtin_memcpy(&value, actual + byteOffset, 4);
+                        std::memcpy(&value, actual + byteOffset, 4);
                         if (value != 1u) {
                             std::ostringstream msg;
                             msg << "resultTexture texel (" << x << "," << y
