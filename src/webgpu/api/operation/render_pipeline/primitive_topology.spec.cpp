@@ -1,5 +1,6 @@
 // Ported from gpuweb/cts src/webgpu/api/operation/render_pipeline/primitive_topology.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Ports basic for the 5 topologies × indirect{false,true} × primitiveRestart{false,true} (strip-only restart); unaligned_vertex_count deferred (V18c).
+// Ports: basic (5 topologies × indirect{false,true} × primitiveRestart{false,true}, strip-only restart)
+//        unaligned_vertex_count ({line-list,triangle-list} × indirect{false,true} × drawCount, V18c).
 
 #include <array>
 #include <cmath>
@@ -166,8 +167,22 @@ std::vector<LocationCheck> locationPrimitiveRestartLine(bool valid) {
     };
 }
 
-// Port of upstream getDefaultTestLocations(topology, primitiveRestart).
-std::vector<LocationCheck> getDefaultTestLocations(std::string_view topology, bool primitiveRestart) {
+// Port of upstream getDefaultTestLocations({topology, primitiveRestart, invalidateLastInList}).
+// invalidateLastInList: when true, the last element of the line-list / triangle-list location
+// vector has its expected color forced to kInvalidPixelColor (port of maybeInvalidateLast).
+// Applied only to line-list and triangle-list; existing callers pass false (basic is unchanged).
+std::vector<LocationCheck> getDefaultTestLocations(
+        std::string_view topology,
+        bool primitiveRestart,
+        bool invalidateLastInList = false) {
+    // maybeInvalidateLast: if invalidateLastInList, force the last location to kInvalidPixelColor.
+    auto maybeInvalidateLast = [invalidateLastInList](std::vector<LocationCheck> locs) {
+        if (invalidateLastInList && !locs.empty()) {
+            locs.back().expected = kInvalidPixelColor;
+        }
+        return locs;
+    };
+
     std::vector<LocationCheck> result;
     auto append = [&](std::vector<LocationCheck> v) {
         for (auto& c : v) { result.push_back(std::move(c)); }
@@ -180,8 +195,8 @@ std::vector<LocationCheck> getDefaultTestLocations(std::string_view topology, bo
         append(locationTriangleList(false));
         append(locationTriangleStrip(false));
     } else if (topology == "line-list") {
-        // valid: line; invalid: lineStrip, triangleList, triangleStrip
-        append(locationLine(true));
+        // valid: line (last may be invalidated); invalid: lineStrip, triangleList, triangleStrip
+        append(maybeInvalidateLast(locationLine(true)));
         append(locationLineStrip(false));
         append(locationTriangleList(false));
         append(locationTriangleStrip(false));
@@ -192,8 +207,8 @@ std::vector<LocationCheck> getDefaultTestLocations(std::string_view topology, bo
         append(locationTriangleList(false));
         append(locationTriangleStrip(false));
     } else if (topology == "triangle-list") {
-        // valid: triangleList; invalid: triangleStrip
-        append(locationTriangleList(true));
+        // valid: triangleList (last may be invalidated); invalid: triangleStrip
+        append(maybeInvalidateLast(locationTriangleList(true)));
         append(locationTriangleStrip(false));
     } else if (topology == "triangle-strip") {
         // primitiveRestart: strip triangles {v2,v3,v4} and {v3,v4,v5} are cut by the restart index.
@@ -344,13 +359,15 @@ void verifyResult(
 
 // ---------- test body ------------------------------------------------------
 
-void runBasic(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string topology       = t.param<std::string>("topology");
-    const bool indirect              = t.param<bool>("indirect");
-    const bool primitiveRestart      = t.param<bool>("primitiveRestart");
-
-    constexpr uint32_t kDrawCount = 6u;
-
+// Shared render helper: runs a render pass with the given parameters and verifies testLocations.
+// drawCount: number of vertices to draw (default 6). primitiveRestart: use index buffer with 0xFFFFFFFF.
+void runTopologyTest(
+        AllFeaturesMaxLimitsGpuTest& t,
+        const std::string& topology,
+        bool indirect,
+        bool primitiveRestart,
+        uint32_t drawCount,
+        const std::vector<LocationCheck>& testLocations) {
     // Build vertex buffer: 6 vertices, each 4 floats (NDC x,y,z,w).
     const std::vector<float> vertexData = generateVertexBuffer();
     WGPUBuffer vb = t.makeBufferWithContents(
@@ -392,34 +409,54 @@ void runBasic(AllFeaturesMaxLimitsGpuTest& t) {
 
         if (indirect) {
             // drawIndexedIndirect: [indexCount=7, instanceCount=1, firstIndex=0, baseVertex=0, firstInstance=0]
-            const std::array<uint32_t, 5> indirectArgs = {kDrawCount + 1u, 1u, 0u, 0u, 0u};
+            const std::array<uint32_t, 5> indirectArgs = {drawCount + 1u, 1u, 0u, 0u, 0u};
             WGPUBuffer indirectBuffer = t.makeBufferWithContents(
                 indirectArgs.data(),
                 indirectArgs.size() * sizeof(uint32_t),
                 WGPUBufferUsage_Indirect);
             wgpuRenderPassEncoderDrawIndexedIndirect(pass, indirectBuffer, 0);
         } else {
-            wgpuRenderPassEncoderDrawIndexed(pass, kDrawCount + 1u, 1, 0, 0, 0);
+            wgpuRenderPassEncoderDrawIndexed(pass, drawCount + 1u, 1, 0, 0, 0);
         }
     } else {
         if (indirect) {
-            // drawIndirect: [vertexCount=6, instanceCount=1, firstVertex=0, firstInstance=0]
-            const std::array<uint32_t, 4> indirectArgs = {kDrawCount, 1u, 0u, 0u};
+            // drawIndirect: [vertexCount, instanceCount=1, firstVertex=0, firstInstance=0]
+            const std::array<uint32_t, 4> indirectArgs = {drawCount, 1u, 0u, 0u};
             WGPUBuffer indirectBuffer = t.makeBufferWithContents(
                 indirectArgs.data(),
                 indirectArgs.size() * sizeof(uint32_t),
                 WGPUBufferUsage_Indirect);
             wgpuRenderPassEncoderDrawIndirect(pass, indirectBuffer, 0);
         } else {
-            wgpuRenderPassEncoderDraw(pass, kDrawCount, 1, 0, 0);
+            wgpuRenderPassEncoderDraw(pass, drawCount, 1, 0, 0);
         }
     }
 
     wgpuRenderPassEncoderEnd(pass);
     submitEncoder(t, encoder);
 
+    verifyResult(t, target, testLocations);
+}
+
+void runBasic(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string topology       = t.param<std::string>("topology");
+    const bool indirect              = t.param<bool>("indirect");
+    const bool primitiveRestart      = t.param<bool>("primitiveRestart");
+
+    constexpr uint32_t kDefaultDrawCount = 6u;
     const std::vector<LocationCheck> locations = getDefaultTestLocations(topology, primitiveRestart);
-    verifyResult(t, target, locations);
+    runTopologyTest(t, topology, indirect, primitiveRestart, kDefaultDrawCount, locations);
+}
+
+void runUnalignedVertexCount(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string topology  = t.param<std::string>("topology");
+    const bool indirect         = t.param<bool>("indirect");
+    const uint32_t drawCount    = static_cast<uint32_t>(t.param<uint64_t>("drawCount"));
+
+    // invalidateLastInList=true: the last list-primitive check location is forced to kInvalidPixelColor.
+    const std::vector<LocationCheck> testLocations =
+        getDefaultTestLocations(topology, /*primitiveRestart*/ false, /*invalidateLastInList*/ true);
+    runTopologyTest(t, topology, indirect, /*primitiveRestart*/ false, drawCount, testLocations);
 }
 
 CTS_TEST(g, "basic")
@@ -443,6 +480,28 @@ CTS_TEST(g, "basic")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         runBasic(t);
+    });
+
+// Drawing with a vertex count that is not a multiple of the primitive's vertex count is not an
+// error. The last (incomplete) primitive is simply not drawn.
+// topology{line-list, triangle-list} × indirect{false,true} × drawCount
+//   (line-list: {5}; triangle-list: {5, 4}) = 6 cases.
+CTS_TEST(g, "unaligned_vertex_count")
+    .params([](ParamsBuilder u) {
+        return u.combine("topology", {"line-list", "triangle-list"})
+            .combine("indirect", {false, true})
+            .expand("drawCount", [](const ParamRecord& p) -> std::vector<Value> {
+                const std::string topo = valueAs<std::string>(*findParam(p, "topology"));
+                if (topo == "line-list") {
+                    return {Value{uint64_t{5u}}};
+                } else {
+                    // triangle-list: drawCount=5 and drawCount=4
+                    return {Value{uint64_t{5u}}, Value{uint64_t{4u}}};
+                }
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        runUnalignedVertexCount(t);
     });
 
 } // namespace
