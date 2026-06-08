@@ -45,6 +45,11 @@ never masked). The early validation/copy milestones (commit + result):
 cases on MoltenVK, so the full CTS remains all-green on native Windows / NVIDIA **Vulkan** (the user
 confirmed that 2026-06-08; F-051 does not affect Vulkan). Surfaced, not masked (added to
 `expectations/yawgpu.crash.txt` for `--crash-list` isolation so the suite stays runnable).
+**F-053** — rendering to **multiple color attachments that target different `depthSlice`s of the same 3D
+texture** in one pass writes nothing (slice 0 reads `0`), surfaced by the new T62
+`3d_texture_slices/multiple_color_attachments,same_mip_level` port. **Cross-HAL** (Metal == MoltenVK).
+Single-attachment 3D-slice rendering (F-043) works; this multi-attachment variant does not. Surfaced, not
+masked.
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -961,6 +966,22 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 - **Expected (WebGPU):** the final per-sample coverage is the logical AND of the rasterization mask, the
   pipeline `multisample.mask`, and the fragment `@builtin(sample_mask)` output. Dawn is the reference.
 - **Status:** **OPEN** (wgpu-native defect). Surfaced, not masked.
+
+---
+
+## F-053 — yawgpu: cannot render to multiple color attachments targeting different slices of one 3D texture — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK both fail). Not in Dawn or wgpu-native (both
+  pass).
+- **Found by:** the T62 `rendering/3d_texture_slices` `multiple_color_attachments,same_mip_level` port — a
+  single render pass with 4 color attachments, each bound to a different `depthSlice` (0..3) of one
+  `4×4×16` `rgba8unorm` 3D texture, drawing a 4-output fragment shader.
+- **Observed:** the rendered slices read back **zero** (`rgba8unorm mismatch at (0,0,0) channel 0:
+  expected 11, got 0`) — nothing is written to the multi-attachment 3D slices. `pass=0 fail=1`.
+- **Expected (WebGPU):** each color attachment writes its fragment output to its `depthSlice`; slice `i`
+  (covered texels) should hold location-`i`'s value. Dawn and wgpu-native pass.
+- **Status:** **OPEN** (yawgpu, cross-HAL). The single-attachment 3D-slice path (F-043) is fixed and
+  passes; this is a distinct multi-attachment defect. Surfaced, not masked.
 
 ---
 

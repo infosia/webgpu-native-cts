@@ -124,19 +124,20 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 52 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 53 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
-- **yawgpu** — the primary conformance subject — **passes the entire ported suite on Vulkan** (Mac via
-  MoltenVK and native Windows / NVIDIA RTX 5060 Ti; the full CTS is all-green on native Vulkan).
+- **yawgpu** — the primary conformance subject — passed the entire ported suite on Vulkan as of the
+  2026-06-08 confirmation (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti).
   `expectations/yawgpu.txt` carries no expected failures — nothing is masked. (It also *runs* the
-  `immediate_data_size` cases Dawn/wgpu-native skip.) One **Metal-HAL-only** finding is open — **F-051**
-  (the Metal HAL crashes creating a view of a multisampled texture; `sample_mask`) — Vulkan/MoltenVK pass it,
-  so native Vulkan stays green. Two **Mac-only MoltenVK artifacts** also remain — **F-033** (color
-  `copyTextureToTexture`) and **F-045** (`frag_depth` not viewport-clamped) — confirmed MoltenVK Vulkan→Metal
-  translation limitations, **absent on native Vulkan**, not yawgpu defects; the **GLES** HAL is the only
-  untested follow-up. See [FINDINGS](docs/FINDINGS.md) for the per-finding record.
+  `immediate_data_size` cases Dawn/wgpu-native skip.) Two open findings were surfaced by newly-added tests:
+  **F-053** (cross-HAL — cannot render to multiple color attachments targeting different slices of one 3D
+  texture; `3d_texture_slices`) and **F-051** (Metal-HAL-only — crashes creating a view of a multisampled
+  texture; `sample_mask`; Vulkan/MoltenVK pass it). Two **Mac-only MoltenVK artifacts** also remain —
+  **F-033** (color `copyTextureToTexture`) and **F-045** (`frag_depth` not viewport-clamped) — confirmed
+  MoltenVK Vulkan→Metal translation limitations, not yawgpu defects; the **GLES** HAL is the only untested
+  follow-up. See [FINDINGS](docs/FINDINGS.md) for the per-finding record.
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
