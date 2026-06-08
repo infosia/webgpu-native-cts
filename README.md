@@ -131,13 +131,14 @@ state:
 - **yawgpu** — the primary conformance subject — passed the entire ported suite on Vulkan as of the
   2026-06-08 confirmation (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti).
   `expectations/yawgpu.txt` carries no expected failures — nothing is masked. (It also *runs* the
-  `immediate_data_size` cases Dawn/wgpu-native skip.) Two open findings were surfaced by newly-added tests:
-  **F-053** (cross-HAL — cannot render to multiple color attachments targeting different slices of one 3D
-  texture; `3d_texture_slices`) and **F-051** (Metal-HAL-only — crashes creating a view of a multisampled
-  texture; `sample_mask`; Vulkan/MoltenVK pass it). Two **Mac-only MoltenVK artifacts** also remain —
-  **F-033** (color `copyTextureToTexture`) and **F-045** (`frag_depth` not viewport-clamped) — confirmed
-  MoltenVK Vulkan→Metal translation limitations, not yawgpu defects; the **GLES** HAL is the only untested
-  follow-up. See [FINDINGS](docs/FINDINGS.md) for the per-finding record.
+  `immediate_data_size` cases Dawn/wgpu-native skip.) The two findings surfaced by newly-added tests are now
+  fixed on Metal — **F-051** (multisampled-texture-view crash; `sample_mask`) is fully resolved (both HALs),
+  and **F-053** (multi-attachment render to different slices of one 3D texture; `3d_texture_slices`) is
+  resolved on Metal. Three **Mac-only MoltenVK residuals** remain — **F-033** (color `copyTextureToTexture`),
+  **F-045** (`frag_depth` not viewport-clamped), and the **F-053** MoltenVK residual (an explicit
+  `vkCreateImageView` 2D-view-on-3D-image `[mvk-error]`) — probable MoltenVK Vulkan→Metal translation
+  limitations, pending native-Vulkan confirmation; the **GLES** HAL is the only untested follow-up. See
+  [FINDINGS](docs/FINDINGS.md) for the per-finding record.
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the

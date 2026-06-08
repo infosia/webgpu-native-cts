@@ -2,10 +2,9 @@
 # Same line format as --expectations: exact case query, or a line ending ':*' for a prefix.
 # Cases listed here are forked into a child process; all others run in-process.
 #
+# yawgpu has NO known crashes on the ported suite (crash=0 across all file-level queries;
+# see docs/FINDINGS.md and expectations/yawgpu.txt). This list is therefore empty.
+# (F-051 — the Metal-HAL multisampled-texture-view crash — was fixed in yawgpu; sample_mask now
+#  passes 6/6 on both HALs, so it was removed from this list.)
 # Regenerate after a yawgpu revision bump with:
 #   cts.exe <queries> --isolate --emit-crash-list expectations/yawgpu.crash.txt
-#
-# F-051 (Metal HAL only): creating a default view of a multisampled texture aborts with
-#   "MTLTextureType2DMultisample not compatible with texture view textureType (MTLTextureType2D)".
-#   yawgpu's Vulkan HAL (MoltenVK / native Windows) passes all 6 cases. See docs/FINDINGS.md.
-webgpu:api,operation,render_pipeline,sample_mask:*

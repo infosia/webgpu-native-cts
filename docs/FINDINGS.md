@@ -37,19 +37,14 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051
 — each keeps a compact record below.
-**Open — yawgpu:** **F-051** — the Metal HAL **crashes** creating a default `createView()` of a
-**multisampled** texture (it builds a non-multisample `MTLTextureType2D` view), surfaced by the new T59
-`render_pipeline/sample_mask` MSAA port. **Metal-HAL-only**: yawgpu's Vulkan HAL passes all 6 `sample_mask`
-cases on MoltenVK, so the full CTS remains all-green on native Windows / NVIDIA **Vulkan** (the user
-confirmed that 2026-06-08; F-051 does not affect Vulkan). Surfaced, not masked (added to
-`expectations/yawgpu.crash.txt` for `--crash-list` isolation so the suite stays runnable).
-**F-053** — rendering to **multiple color attachments that target different `depthSlice`s of the same 3D
-texture** in one pass writes nothing (slice 0 reads `0`), surfaced by the new T62
-`3d_texture_slices/multiple_color_attachments,same_mip_level` port. **Cross-HAL** (Metal == MoltenVK).
-Single-attachment 3D-slice rendering (F-043) works; this multi-attachment variant does not. Surfaced, not
-masked.
+**Open — yawgpu:** **F-051 is RESOLVED** (Metal multisampled-view crash fixed; `sample_mask` `pass=6` on
+both HALs — removed from the crash-list). **F-053** — multi-attachment render to different `depthSlice`s of
+one 3D texture — is **RESOLVED on the Metal HAL** (`pass=1`) but **still fails under MoltenVK** with an
+explicit `[mvk-error] VK_ERROR_FEATURE_NOT_PRESENT: vkCreateImageView(): 2D views on 3D images can only be
+used as color attachments` — a probable **MoltenVK Vulkan→Metal translation artifact** (like F-033 / F-045),
+**pending native-Windows/Vulkan confirmation**. Surfaced, not masked.
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -936,20 +931,14 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
 
 ## F-051 — yawgpu Metal HAL: crash creating a default view of a multisampled texture — Metal-HAL-only
 
-- **Backend:** yawgpu **Metal HAL only**. yawgpu's Vulkan HAL (MoltenVK) passes all 6 cases; Dawn passes all
-  6. Not a wgpu-native issue (wgpu-native has a different sample_mask defect, F-052).
-- **Found by:** the T59 `render_pipeline/sample_mask` MSAA port. Every case creates a `sampleCount=4`
-  `rgba8unorm` render target and binds its default `createView()` as a `texture_multisampled_2d<f32>` in the
-  per-sample readback compute pass.
-- **Observed:** yawgpu's Metal HAL **aborts** at view creation:
-  `_mtlValidateArgumentsForTextureViewOnDevice … source texture textureType (MTLTextureType2DMultisample)
-  not compatible with texture view textureType (MTLTextureType2D)`. The Metal HAL hardcodes
-  `MTLTextureType2D` for the view and does not propagate the source texture's multisample-ness.
-- **Expected (WebGPU):** the default view of a multisampled 2D texture is a `2d` view whose underlying Metal
-  texture type must be `MTLTextureType2DMultisample`. Dawn and yawgpu-Vulkan/MoltenVK do this correctly.
-- **Status:** **OPEN** (yawgpu Metal HAL). Surfaced, not masked — added to `expectations/yawgpu.crash.txt`
-  (`render_pipeline,sample_mask:*`) so a full Metal run isolates the 6 cases via `--crash-list` and stays
-  runnable. Cross-HAL classification: **Metal-only** (Vulkan/MoltenVK green), like F-037.
+- **Backend:** yawgpu **Metal HAL only** (Vulkan/MoltenVK + Dawn always passed). Distinct from the
+  wgpu-native sample_mask defect (F-052).
+- **What:** the T59 `render_pipeline/sample_mask` MSAA port — yawgpu's Metal HAL aborted creating a default
+  `createView()` of a `sampleCount=4` texture (`_mtlValidateArgumentsForTextureViewOnDevice … textureType
+  (MTLTextureType2DMultisample) not compatible with texture view textureType (MTLTextureType2D)`); it
+  hardcoded `MTLTextureType2D` instead of propagating the source's multisample-ness.
+- **Resolved:** yawgpu `c29dc78`-era update; re-test `sample_mask` `pass=6 fail=0 crash=0` on both HALs
+  (Metal + MoltenVK). Removed from `expectations/yawgpu.crash.txt`. Surfaced, not masked.
 
 ---
 
@@ -980,8 +969,11 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   expected 11, got 0`) — nothing is written to the multi-attachment 3D slices. `pass=0 fail=1`.
 - **Expected (WebGPU):** each color attachment writes its fragment output to its `depthSlice`; slice `i`
   (covered texels) should hold location-`i`'s value. Dawn and wgpu-native pass.
-- **Status:** **OPEN** (yawgpu, cross-HAL). The single-attachment 3D-slice path (F-043) is fixed and
-  passes; this is a distinct multi-attachment defect. Surfaced, not masked.
+- **Status:** **RESOLVED on the Metal HAL** — yawgpu `c29dc78`-era update; re-test `pass=1 fail=0` on Metal.
+  **MoltenVK still fails** with `[mvk-error] VK_ERROR_FEATURE_NOT_PRESENT: vkCreateImageView(): 2D views on
+  3D images can only be used as color attachments` — a probable **MoltenVK Vulkan→Metal translation
+  artifact** (like F-033 / F-045), **pending native-Windows/Vulkan confirmation** to determine whether the
+  Vulkan HAL itself is green. Surfaced, not masked.
 
 ---
 
