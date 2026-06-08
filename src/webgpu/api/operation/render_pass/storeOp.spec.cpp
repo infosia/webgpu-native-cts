@@ -234,6 +234,67 @@ void runColorAttachmentOnly(AllFeaturesMaxLimitsGpuTest& t) {
     expectColorTexture2x2(t, colorTexture, expected, kColorOnlyTolerance);
 }
 
+// Verify all 4 texels of the 2x2 stencil8 texture (stencil aspect, 1 byte/texel).
+// expectedStencil: the uint8 stencil value each texel should have.
+void expectStencilTexture2x2(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture stencilTexture,
+    uint8_t expectedStencil) {
+    // stencil8: 1 byte/texel, bytesPerRow = align(kWidth * 1, 256) = 256, total = 256 * 2 = 512.
+    constexpr uint32_t kStencilBytesPerPixel = 1;
+    constexpr uint32_t kStencilBytesPerRow = kBytesPerRowAlignment;  // align(2*1, 256) = 256
+    const uint64_t byteLength = static_cast<uint64_t>(kStencilBytesPerRow) * kHeight;
+
+    WGPUBufferDescriptor bufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bufDesc.size = byteLength;
+    bufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer buffer = t.createBufferTracked(bufDesc);
+
+    WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    source.texture = stencilTexture;
+    source.mipLevel = 0;
+    source.origin = WGPUOrigin3D{0, 0, 0};
+    source.aspect = WGPUTextureAspect_StencilOnly;
+
+    WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+    destination.buffer = buffer;
+    destination.layout.offset = 0;
+    destination.layout.bytesPerRow = kStencilBytesPerRow;
+    destination.layout.rowsPerImage = kHeight;
+
+    WGPUExtent3D copyExtent = WGPUExtent3D{kWidth, kHeight, 1};
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &copyExtent);
+    submit(t, encoder);
+
+    t.expectGPUBufferValuesPassCheck(
+        buffer,
+        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            for (uint32_t row = 0; row < kHeight; ++row) {
+                for (uint32_t col = 0; col < kWidth; ++col) {
+                    const uint64_t offset =
+                        static_cast<uint64_t>(row) * kStencilBytesPerRow
+                        + static_cast<uint64_t>(col) * kStencilBytesPerPixel;
+                    if (offset + kStencilBytesPerPixel > len) {
+                        std::ostringstream msg;
+                        msg << "stencil texel offset out of range at (" << col << "," << row << ")";
+                        return msg.str();
+                    }
+                    if (actual[offset] != expectedStencil) {
+                        std::ostringstream msg;
+                        msg << "stencil8 mismatch at (" << col << "," << row
+                            << "): expected " << static_cast<int>(expectedStencil)
+                            << " got " << static_cast<int>(actual[offset]);
+                        return msg.str();
+                    }
+                }
+            }
+            return std::nullopt;
+        },
+        0,
+        static_cast<size_t>(byteLength));
+}
+
 // color_attachment_with_depth_stencil_attachment: empty render pass on a 2x2 rgba8unorm color
 // target and a 2x2 depth32float depth target. Verify color and depth independently.
 void runColorWithDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
@@ -302,6 +363,128 @@ void runColorWithDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
     expectDepthTexture2x2(t, depthTexture, expectedDepth);
 }
 
+// multiple_color_attachments: fixed colorAttachments=2, storeOperation1 x storeOperation2 matrix.
+// Each attachment cleared to {1,1,1,1}; even index uses storeOp1, odd index uses storeOp2.
+// Empty render pass. Verify per-attachment: store→{255,255,255,255}, discard→{0,0,0,0}.
+void runMultipleColorAttachments(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string storeOpStr1 = t.param<std::string>("storeOperation1");
+    const std::string storeOpStr2 = t.param<std::string>("storeOperation2");
+    const WGPUStoreOp storeOp1 = parseStoreOp(storeOpStr1);
+    const WGPUStoreOp storeOp2 = parseStoreOp(storeOpStr2);
+
+    constexpr uint32_t kNumAttachments = 2;
+
+    // Create 2 rgba8unorm render targets.
+    WGPUTexture colorTextures[kNumAttachments];
+    WGPUTextureView colorViews[kNumAttachments];
+    for (uint32_t i = 0; i < kNumAttachments; ++i) {
+        WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        texDesc.size = WGPUExtent3D{kWidth, kHeight, 1};
+        texDesc.mipLevelCount = 1;
+        texDesc.sampleCount = 1;
+        texDesc.dimension = WGPUTextureDimension_2D;
+        texDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        texDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+        colorTextures[i] = t.createTextureTracked(texDesc);
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        colorViews[i] = t.createViewTracked(colorTextures[i], viewDesc);
+    }
+
+    // Set up color attachments: even index uses storeOp1, odd index uses storeOp2.
+    WGPURenderPassColorAttachment colorAttachments[kNumAttachments];
+    for (uint32_t i = 0; i < kNumAttachments; ++i) {
+        colorAttachments[i] = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        colorAttachments[i].view = colorViews[i];
+        colorAttachments[i].loadOp = WGPULoadOp_Clear;
+        colorAttachments[i].storeOp = (i % 2 == 0) ? storeOp1 : storeOp2;
+        colorAttachments[i].clearValue = WGPUColor{1.0, 1.0, 1.0, 1.0};
+    }
+
+    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    passDesc.colorAttachmentCount = kNumAttachments;
+    passDesc.colorAttachments = colorAttachments;
+
+    // Empty render pass: no pipeline, no draw.
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    wgpuRenderPassEncoderEnd(pass);
+    submit(t, encoder);
+
+    // Verify each attachment independently.
+    constexpr std::array<uint8_t, 4> kStored = {255, 255, 255, 255};
+    constexpr std::array<uint8_t, 4> kDiscarded = {0, 0, 0, 0};
+
+    for (uint32_t i = 0; i < kNumAttachments; ++i) {
+        const std::string& opStr = (i % 2 == 0) ? storeOpStr1 : storeOpStr2;
+        const std::array<uint8_t, 4>& expected = (opStr == "store") ? kStored : kDiscarded;
+        expectColorTexture2x2(t, colorTextures[i], expected, 0);
+    }
+}
+
+// depth_stencil_attachment_only: colorAttachmentCount=0, depth32float or stencil8 attachment.
+// depth32float: depthClearValue 1.0, depthLoadOp clear, depthStoreOp=param (stencil Undefined).
+// stencil8: stencilClearValue 1, stencilLoadOp clear, stencilStoreOp=param (depth Undefined).
+// Empty render pass. Verify: store keeps clear value, discard produces 0.
+void runDepthStencilAttachmentOnly(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string formatStr = t.param<std::string>("depthStencilFormat");
+    const std::string storeOpStr = t.param<std::string>("storeOperation");
+    const WGPUStoreOp storeOp = parseStoreOp(storeOpStr);
+
+    const bool isDepth32float = (formatStr == "depth32float");
+    const WGPUTextureFormat texFormat = isDepth32float
+        ? WGPUTextureFormat_Depth32Float
+        : WGPUTextureFormat_Stencil8;
+
+    // Create 2x2 depth-or-stencil render target.
+    WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    texDesc.size = WGPUExtent3D{kWidth, kHeight, 1};
+    texDesc.mipLevelCount = 1;
+    texDesc.sampleCount = 1;
+    texDesc.dimension = WGPUTextureDimension_2D;
+    texDesc.format = texFormat;
+    texDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    WGPUTexture dsTexture = t.createTextureTracked(texDesc);
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    WGPUTextureView dsView = t.createViewTracked(dsTexture, viewDesc);
+
+    // Build depth-stencil attachment, setting only the relevant aspect fields.
+    WGPURenderPassDepthStencilAttachment dsAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    dsAttachment.view = dsView;
+    if (isDepth32float) {
+        // depth32float: only depth aspect; stencil fields remain Undefined.
+        dsAttachment.depthClearValue = 1.0f;
+        dsAttachment.depthLoadOp = WGPULoadOp_Clear;
+        dsAttachment.depthStoreOp = storeOp;
+    } else {
+        // stencil8: only stencil aspect; depth fields remain Undefined.
+        dsAttachment.stencilClearValue = 1;
+        dsAttachment.stencilLoadOp = WGPULoadOp_Clear;
+        dsAttachment.stencilStoreOp = storeOp;
+    }
+
+    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    passDesc.colorAttachmentCount = 0;
+    passDesc.colorAttachments = nullptr;
+    passDesc.depthStencilAttachment = &dsAttachment;
+
+    // Empty render pass: no pipeline, no draw.
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    wgpuRenderPassEncoderEnd(pass);
+    submit(t, encoder);
+
+    // Verify the stored/discarded value.
+    if (isDepth32float) {
+        const float expectedDepth = (storeOpStr == "store") ? 1.0f : 0.0f;
+        expectDepthTexture2x2(t, dsTexture, expectedDepth);
+    } else {
+        const uint8_t expectedStencil = (storeOpStr == "store") ? 1 : 0;
+        expectStencilTexture2x2(t, dsTexture, expectedStencil);
+    }
+}
+
 CTS_TEST(g, "color_attachment_only")
     .params([](ParamsBuilder u) {
         return u.combine("storeOp", {Value("store"), Value("discard")});
@@ -318,6 +501,26 @@ CTS_TEST(g, "color_attachment_with_depth_stencil_attachment")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         runColorWithDepthStencil(t);
+    });
+
+CTS_TEST(g, "multiple_color_attachments")
+    .params([](ParamsBuilder u) {
+        return u
+            .combine("storeOperation1", {Value("store"), Value("discard")})
+            .combine("storeOperation2", {Value("store"), Value("discard")});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        runMultipleColorAttachments(t);
+    });
+
+CTS_TEST(g, "depth_stencil_attachment_only")
+    .params([](ParamsBuilder u) {
+        return u
+            .combine("depthStencilFormat", {Value("depth32float"), Value("stencil8")})
+            .combine("storeOperation", {Value("store"), Value("discard")});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        runDepthStencilAttachmentOnly(t);
     });
 
 } // namespace

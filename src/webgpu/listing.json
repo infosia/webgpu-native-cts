@@ -15,7 +15,7 @@
     {"path":"api,operation,queue,writeBuffer","tests":[{"name":"array_types","cases":16,"subcases":0,"unimplemented":false},{"name":"multiple_writes_at_different_offsets_and_sizes","cases":1,"subcases":8,"unimplemented":false}]},
     {"path":"api,operation,render_pass,clear_value","tests":[{"name":"stencil_clear_value","cases":30,"subcases":0,"unimplemented":false},{"name":"loaded","cases":1,"subcases":0,"unimplemented":true}]},
     {"path":"api,operation,render_pass,resolve","tests":[{"name":"render_pass_resolve","cases":1,"subcases":12,"unimplemented":false}]},
-    {"path":"api,operation,render_pass,storeOp","tests":[{"name":"color_attachment_only","cases":2,"subcases":0,"unimplemented":false},{"name":"color_attachment_with_depth_stencil_attachment","cases":4,"subcases":0,"unimplemented":false}]},
+    {"path":"api,operation,render_pass,storeOp","tests":[{"name":"color_attachment_only","cases":2,"subcases":0,"unimplemented":false},{"name":"color_attachment_with_depth_stencil_attachment","cases":4,"subcases":0,"unimplemented":false},{"name":"multiple_color_attachments","cases":4,"subcases":0,"unimplemented":false},{"name":"depth_stencil_attachment_only","cases":4,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,render_pass,storeop2","tests":[{"name":"storeOp_controls_whether_1x1_drawn_quad_is_stored","cases":2,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,render_pass,transient_attachment","tests":[{"name":"increasing_attachments_count","cases":1,"subcases":0,"unimplemented":false},{"name":"overlapping_transient_attachments","cases":1,"subcases":0,"unimplemented":false}]},
     {"path":"api,operation,render_pipeline,culling_tests","tests":[{"name":"culling","cases":6,"subcases":12,"unimplemented":false}]},
