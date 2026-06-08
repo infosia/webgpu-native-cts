@@ -39,8 +39,12 @@ never masked). The early validation/copy milestones (commit + result):
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050
 — each keeps a compact record below.
-**Open — yawgpu: none.** The user confirmed (2026-06-08) the **full CTS is all-green on native Windows /
-NVIDIA Vulkan** and that all known yawgpu issues are fixed for now.
+**Open — yawgpu:** **F-051** — the Metal HAL **crashes** creating a default `createView()` of a
+**multisampled** texture (it builds a non-multisample `MTLTextureType2D` view), surfaced by the new T59
+`render_pipeline/sample_mask` MSAA port. **Metal-HAL-only**: yawgpu's Vulkan HAL passes all 6 `sample_mask`
+cases on MoltenVK, so the full CTS remains all-green on native Windows / NVIDIA **Vulkan** (the user
+confirmed that 2026-06-08; F-051 does not affect Vulkan). Surfaced, not masked (added to
+`expectations/yawgpu.crash.txt` for `--crash-list` isolation so the suite stays runnable).
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -49,7 +53,7 @@ per-**case**; the per-test `pass=…` totals in the records are per-**subcase**)
 untested follow-up.
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028, F-036 (abort when a constant-factor blend draws without `setBlendConstant`; `color_target_state`,
-T31) (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
+T31), **F-052** (ignores the pipeline `multisample.mask` — `sample_mask`, T59) (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
 **Tooling / environment (not a backend conformance defect):** F-033 — color `copyTextureToTexture`
 pixel mismatches when yawgpu's Vulkan HAL is run on **Mac via MoltenVK**; a **confirmed** MoltenVK
@@ -922,6 +926,41 @@ translation artifact — native Windows/Vulkan does **not** exhibit it (`pass=72
   for a covering draw (passing samples never counted; `empty` coincidentally passed; `pass=1 fail=1`).
 - **Resolved:** yawgpu `37d36e6`+`e70d18d` (occlusion-query execution on Metal + Vulkan); re-test
   `occlusionQuery` `pass=2 fail=0` on both HALs.
+
+---
+
+## F-051 — yawgpu Metal HAL: crash creating a default view of a multisampled texture — Metal-HAL-only
+
+- **Backend:** yawgpu **Metal HAL only**. yawgpu's Vulkan HAL (MoltenVK) passes all 6 cases; Dawn passes all
+  6. Not a wgpu-native issue (wgpu-native has a different sample_mask defect, F-052).
+- **Found by:** the T59 `render_pipeline/sample_mask` MSAA port. Every case creates a `sampleCount=4`
+  `rgba8unorm` render target and binds its default `createView()` as a `texture_multisampled_2d<f32>` in the
+  per-sample readback compute pass.
+- **Observed:** yawgpu's Metal HAL **aborts** at view creation:
+  `_mtlValidateArgumentsForTextureViewOnDevice … source texture textureType (MTLTextureType2DMultisample)
+  not compatible with texture view textureType (MTLTextureType2D)`. The Metal HAL hardcodes
+  `MTLTextureType2D` for the view and does not propagate the source texture's multisample-ness.
+- **Expected (WebGPU):** the default view of a multisampled 2D texture is a `2d` view whose underlying Metal
+  texture type must be `MTLTextureType2DMultisample`. Dawn and yawgpu-Vulkan/MoltenVK do this correctly.
+- **Status:** **OPEN** (yawgpu Metal HAL). Surfaced, not masked — added to `expectations/yawgpu.crash.txt`
+  (`render_pipeline,sample_mask:*`) so a full Metal run isolates the 6 cases via `--crash-list` and stays
+  runnable. Cross-HAL classification: **Metal-only** (Vulkan/MoltenVK green), like F-037.
+
+---
+
+## F-052 — wgpu-native: the pipeline `multisample.mask` is ignored
+
+- **Backend:** wgpu-native (Metal, real-GPU). Not in Dawn (passes all 6) or yawgpu (Vulkan/MoltenVK passes
+  all 6; Metal blocked separately by F-051).
+- **Found by:** the T59 `render_pipeline/sample_mask` MSAA port — `pass=3 fail=3`.
+- **Observed:** every case whose pipeline `multisample.mask != 0xF` fails (`sample_mask_subset`,
+  `and_of_all`, `none`); every case with `mask == 0xF` passes (`all_full`, `raster_subset`,
+  `frag_mask_subset`). Masked-out samples are still written (e.g. `none`/`mask=0` reads back the drawn
+  texel colors instead of clear `0`). The fragment `@builtin(sample_mask)` output and the rasterization
+  mask are honored; only the pipeline `multisample.mask` is not AND-ed into the coverage.
+- **Expected (WebGPU):** the final per-sample coverage is the logical AND of the rasterization mask, the
+  pipeline `multisample.mask`, and the fragment `@builtin(sample_mask)` output. Dawn is the reference.
+- **Status:** **OPEN** (wgpu-native defect). Surfaced, not masked.
 
 ---
 

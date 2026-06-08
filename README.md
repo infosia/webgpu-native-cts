@@ -124,18 +124,19 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 49 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 52 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
-- **yawgpu** — the primary conformance subject — **passes the entire ported suite with no open findings**,
-  on real-GPU Metal **and** Vulkan (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti; the full CTS
-  is all-green on native Vulkan). `expectations/yawgpu.txt` carries no expected failures — nothing is masked.
-  (It also *runs* the `immediate_data_size` cases Dawn/wgpu-native skip.) Two **Mac-only MoltenVK artifacts**
-  remain — **F-033** (color `copyTextureToTexture`) and **F-045** (`frag_depth` not viewport-clamped) — both
-  confirmed MoltenVK Vulkan→Metal translation limitations, **absent on native Vulkan**, not yawgpu defects;
-  the **GLES** HAL is the only untested follow-up. See [FINDINGS](docs/FINDINGS.md) for the per-finding
-  record.
+- **yawgpu** — the primary conformance subject — **passes the entire ported suite on Vulkan** (Mac via
+  MoltenVK and native Windows / NVIDIA RTX 5060 Ti; the full CTS is all-green on native Vulkan).
+  `expectations/yawgpu.txt` carries no expected failures — nothing is masked. (It also *runs* the
+  `immediate_data_size` cases Dawn/wgpu-native skip.) One **Metal-HAL-only** finding is open — **F-051**
+  (the Metal HAL crashes creating a view of a multisampled texture; `sample_mask`) — Vulkan/MoltenVK pass it,
+  so native Vulkan stays green. Two **Mac-only MoltenVK artifacts** also remain — **F-033** (color
+  `copyTextureToTexture`) and **F-045** (`frag_depth` not viewport-clamped) — confirmed MoltenVK Vulkan→Metal
+  translation limitations, **absent on native Vulkan**, not yawgpu defects; the **GLES** HAL is the only
+  untested follow-up. See [FINDINGS](docs/FINDINGS.md) for the per-finding record.
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
   F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
@@ -145,8 +146,9 @@ state:
   when a constant-factor blend draws without `setBlendConstant`, which should default to `[0,0,0,0]`;
   `color_target_state`, contained via `--isolate` + expectations), **F-045** (`frag_depth` is not
   clamped to the viewport depth range before the depth test — `depth_clip_clamp`; shared with yawgpu, Dawn
-  passes), and **F-048** (the stencil reference value is not masked to the stencil aspect's bit width —
-  `clear_value`; shared with yawgpu, Dawn passes).
+  passes), **F-048** (the stencil reference value is not masked to the stencil aspect's bit width —
+  `clear_value`; shared with yawgpu, Dawn passes), and **F-052** (ignores the pipeline `multisample.mask` —
+  `sample_mask`; Dawn passes).
 
 Every divergence is reported and surfaced — never masked to make a test pass; yawgpu's were fixed and
 re-confirmed on hardware, wgpu-native's are contained via `--isolate` + expectations.
