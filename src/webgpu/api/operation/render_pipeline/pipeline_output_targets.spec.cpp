@@ -367,4 +367,162 @@ CTS_TEST(g, "color,component_count")
         runColorComponentCountTest(t);
     });
 
+// Fragment shader for color,component_count,blend: always outputs vec4f(0.0, 1.0, 0.0, 0.498).
+// (Same for all 5 subcases — only blend factors differ.)
+constexpr std::string_view kBlendFragShader = R"(
+@fragment fn main() -> @location(0) vec4<f32> {
+  return vec4<f32>(0.0, 1.0, 0.0, 0.498);
+}
+)";
+
+// Blend subcase parameters for color,component_count,blend (rgba8unorm, output=[0,1,0,0.498]).
+// Format = rgba8unorm (fixed).  Load value = {1.0, 0.0, 0.0, 1.0}.
+// Upstream table (fragment output has alpha — the 5 length-4 entries):
+//   0: colorSrc=one,              colorDst=one-minus-src-alpha, alphaSrc=one,  alphaDst=zero     → {0.502,1,0,0.498}
+//   1: colorSrc=src-alpha,        colorDst=one-minus-src-alpha, alphaSrc=one,  alphaDst=zero     → {0.502,0.498,0,0.498}
+//   2: colorSrc=dst-alpha,        colorDst=zero,               alphaSrc=one,  alphaDst=zero     → {0,1,0,0.498}
+//   3: colorSrc=dst-alpha,        colorDst=zero,               alphaSrc=zero, alphaDst=src      → {0,1,0,0.498}
+//   4: colorSrc=one-minus-dst-alpha, colorDst=dst-alpha,       alphaSrc=zero, alphaDst=dst-alpha→ {1,0,0,1}
+// Quantized to rgba8unorm (round(c*255), ±1):
+//   0→{128,255,0,127}, 1→{128,127,0,127}, 2→{0,255,0,127}, 3→{0,255,0,127}, 4→{255,0,0,255}
+struct BlendSubcase {
+    WGPUBlendFactor   colorSrcFactor;
+    WGPUBlendFactor   colorDstFactor;
+    WGPUBlendFactor   alphaSrcFactor;
+    WGPUBlendFactor   alphaDstFactor;
+    std::array<uint8_t, 4> expected; // rgba8unorm quantized result
+};
+
+// NOLINTNEXTLINE(cert-err58-cpp)
+static const std::array<BlendSubcase, 5> kBlendSubcases = {{
+    // 0: one / one-minus-src-alpha, one / zero → {0.502, 1, 0, 0.498} → {128, 255, 0, 127}
+    { WGPUBlendFactor_One,             WGPUBlendFactor_OneMinusSrcAlpha, WGPUBlendFactor_One,  WGPUBlendFactor_Zero,     {128, 255, 0, 127} },
+    // 1: src-alpha / one-minus-src-alpha, one / zero → {0.502, 0.498, 0, 0.498} → {128, 127, 0, 127}
+    { WGPUBlendFactor_SrcAlpha,        WGPUBlendFactor_OneMinusSrcAlpha, WGPUBlendFactor_One,  WGPUBlendFactor_Zero,     {128, 127, 0, 127} },
+    // 2: dst-alpha / zero, one / zero → {0, 1, 0, 0.498} → {0, 255, 0, 127}
+    { WGPUBlendFactor_DstAlpha,        WGPUBlendFactor_Zero,             WGPUBlendFactor_One,  WGPUBlendFactor_Zero,     {  0, 255, 0, 127} },
+    // 3: dst-alpha / zero, zero / src → {0, 1, 0, 0.498} → {0, 255, 0, 127}
+    { WGPUBlendFactor_DstAlpha,        WGPUBlendFactor_Zero,             WGPUBlendFactor_Zero, WGPUBlendFactor_Src,      {  0, 255, 0, 127} },
+    // 4: one-minus-dst-alpha / dst-alpha, zero / dst-alpha → {1, 0, 0, 1} → {255, 0, 0, 255}
+    { WGPUBlendFactor_OneMinusDstAlpha, WGPUBlendFactor_DstAlpha,        WGPUBlendFactor_Zero, WGPUBlendFactor_DstAlpha, {255,   0, 0, 255} },
+}};
+
+void runColorComponentCountBlendTest(AllFeaturesMaxLimitsGpuTest& t) {
+    const int subcaseIdx = t.param<int>("subcaseIdx");
+
+    const BlendSubcase& sc = kBlendSubcases[static_cast<size_t>(subcaseIdx)];
+
+    // Create the 1×1 rgba8unorm render target.
+    WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    texDesc.size          = WGPUExtent3D{1, 1, 1};
+    texDesc.mipLevelCount = 1;
+    texDesc.sampleCount   = 1;
+    texDesc.dimension     = WGPUTextureDimension_2D;
+    texDesc.format        = WGPUTextureFormat_RGBA8Unorm;
+    texDesc.usage         = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+    WGPUTexture renderTarget = t.createTextureTracked(texDesc);
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    WGPUTextureView view = t.createViewTracked(renderTarget, viewDesc);
+
+    // Build shaders: vertex = kVertexShader, fragment = kBlendFragShader (same for all subcases).
+    WGPUShaderModule vertModule = t.createShaderModuleTracked(kVertexShader);
+    WGPUShaderModule fragModule = t.createShaderModuleTracked(kBlendFragShader);
+
+    // Blend state — kept in a local variable so the pointer in WGPUColorTargetState stays valid
+    // throughout pipeline creation (must not dangle).
+    WGPUBlendState blendState = WGPU_BLEND_STATE_INIT;
+    blendState.color.operation = WGPUBlendOperation_Add;
+    blendState.color.srcFactor = sc.colorSrcFactor;
+    blendState.color.dstFactor = sc.colorDstFactor;
+    blendState.alpha.operation = WGPUBlendOperation_Add;
+    blendState.alpha.srcFactor = sc.alphaSrcFactor;
+    blendState.alpha.dstFactor = sc.alphaDstFactor;
+
+    WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+    colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+    colorTarget.blend  = &blendState;
+
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    fragment.module      = fragModule;
+    fragment.entryPoint  = stringView("main");
+    fragment.targetCount = 1;
+    fragment.targets     = &colorTarget;
+
+    WGPURenderPipelineDescriptor pipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    // layout:auto — pipeDesc.layout is null after INIT.
+    pipeDesc.vertex.module      = vertModule;
+    pipeDesc.vertex.entryPoint  = stringView("main");
+    pipeDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pipeDesc.multisample.count  = 1;
+    pipeDesc.fragment           = &fragment;
+    WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipeDesc);
+
+    // Render pass: load value {1,0,0,1}, loadOp:Clear, storeOp:Store.
+    WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    colorAttachment.view       = view;
+    colorAttachment.loadOp     = WGPULoadOp_Clear;
+    colorAttachment.storeOp    = WGPUStoreOp_Store;
+    colorAttachment.clearValue = WGPUColor{1.0, 0.0, 0.0, 1.0};
+
+    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    passDesc.colorAttachmentCount   = 1;
+    passDesc.colorAttachments       = &colorAttachment;
+    passDesc.depthStencilAttachment = nullptr;
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass);
+
+    // Readback: bytesPerRow = 256, size 1×1×1.
+    constexpr uint32_t kBytesPerRow = 256;
+    WGPUBufferDescriptor bufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bufDesc.size  = kBytesPerRow;
+    bufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer readback = t.createBufferTracked(bufDesc);
+
+    t.copyTextureToBuffer(encoder, renderTarget, readback, kBytesPerRow, WGPUExtent3D{1, 1, 1});
+    submit(t, encoder);
+
+    // Verify: check 4 RGBA bytes with ±1 tolerance.
+    const std::array<uint8_t, 4> expected = sc.expected;
+    t.expectGPUBufferValuesPassCheck(
+        readback,
+        [expected, subcaseIdx](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            if (len < 4) {
+                std::ostringstream msg;
+                msg << "readback buffer too small: " << len << " < 4";
+                return msg.str();
+            }
+            for (uint32_t ch = 0; ch < 4; ++ch) {
+                const int got = static_cast<int>(actual[ch]);
+                const int exp = static_cast<int>(expected[ch]);
+                if (std::abs(got - exp) > 1) {
+                    std::ostringstream msg;
+                    msg << "blend mismatch (subcase " << subcaseIdx << ") at byte " << ch
+                        << ": expected " << exp << " (±1)"
+                        << ", got "      << got;
+                    return msg.str();
+                }
+            }
+            return std::nullopt;
+        },
+        0,
+        static_cast<size_t>(kBytesPerRow));
+}
+
+// color,component_count,blend:
+//   format=rgba8unorm (fixed), fragment output=vec4f(0,1,0,0.498), load={1,0,0,1}.
+//   5 subcases covering the has-alpha blend factor combinations (upstream length-4 output entries).
+CTS_TEST(g, "color,component_count,blend")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases()
+            .combine("subcaseIdx", {0, 1, 2, 3, 4});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        runColorComponentCountBlendTest(t);
+    });
+
 } // namespace
