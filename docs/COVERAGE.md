@@ -48,10 +48,12 @@ of `non_filterable_texture`'s 160 cases). **Batch 2** (commit `8f01f97`) ported 
 `texture/rg11b10ufloat_renderable`, `getBindGroupLayout`, `shader_module/entry_point` — all Dawn-green (full
 matrices: `depth_stencil_state` 1600, `entry_point` 1242, `misc` 744 cases). Review fixes: a
 `timestamp-query` feature gate on the `begin*Pass` mismatched-device case; `encoder_state`'s
-`pass_end_invalid_order` left `.unimplemented()` (native eager vs JS lazy error model). It surfaced two more
-yawgpu findings: **F-058** (over-requires `depthCompare`+`depthWriteEnabled`; `depth_stencil_state`, 10) and
-**F-059** (storage-texture-format support gap; `render_pipeline/misc` `storage_texture,format`, ~366) — both
-cross-HAL. wgpu-native shows expected validation gaps + aborts on several of these groups (the panic family,
+`pass_end_invalid_order` left `.unimplemented()` (native eager vs JS lazy error model). It surfaced three more
+yawgpu findings (all cross-HAL): **F-058** (over-requires `depthCompare`+`depthWriteEnabled`;
+`depth_stencil_state`, 10), **F-059** (storage-texture-format support gap; `render_pipeline/misc`
+`storage_texture,format`, ~366) — **both now fixed** (yawgpu `8b42e5d`; `depth_stencil_state` `pass=1600`,
+`storage_texture,format` `pass=720` on both HALs) — and **F-060** (WGSL errors on `texture_external`;
+`render_pipeline/misc` `external_texture`, 2 cases; **OPEN**). wgpu-native shows expected validation gaps + aborts on several of these groups (the panic family,
 contained via `--isolate`; to be added to the Windows-generated `expectations/wgpu-native.{txt,crash.txt}`
 on the next regen).
 

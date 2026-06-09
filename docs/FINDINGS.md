@@ -37,19 +37,15 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059
 — each keeps a compact record below.
-**Open — yawgpu (all cross-HAL, surfaced by the `api/validation` Workflow bulk ports; Dawn passes all):**
-**F-057** — the WGSL compiler **errors on `texture_cube_array<f32>`** (float cube-array sampled texture),
-producing an error shader module (`non_filterable_texture`, 8/160 cases — the `sampleType=float,
-viewDimension=cube-array` rows). **F-058** — render-pipeline depth-stencil validation **over-requires
-`depthCompare` + `depthWriteEnabled`** even when the depth aspect is not used (`render_pipeline/depth_stencil_state`,
-10 cases). **F-059** — **storage-texture-format support gap**: render-pipeline (auto-layout) validation
-rejects many storage-texture formats the spec accepts (`pipeline auto layout storage texture format is
-unsupported` / `must support read-write storage access`), and some storage-texture WGSL types error the
-shader module (`render_pipeline/misc` `storage_texture,format`, ~366 cases). (Earlier session findings F-051
-/ F-053 / F-054 / F-055 are all fixed and re-verified: F-051/F-054/F-055 on both HALs, F-053 on Metal +
-native Vulkan with a confirmed MoltenVK-only residual.)
+**Open — yawgpu:** **F-060** — the WGSL compiler **errors on `texture_external`** (the external-texture
+type), producing an error shader module; **cross-HAL** (Metal == MoltenVK). Surfaced by the
+`api,validation,render_pipeline,misc` `external_texture` port (2 cases). Dawn passes both. (The validation-
+bulk findings **F-057 / F-058 / F-059 are all fixed and re-verified on both HALs**: `non_filterable_texture`
+`pass=160`, `depth_stencil_state` `pass=1600`, `storage_texture,format` `pass=720`. Earlier session findings
+F-051 / F-053 / F-054 / F-055 are also fixed — F-051/F-054/F-055 on both HALs, F-053 on Metal + native
+Vulkan with a confirmed MoltenVK-only residual.)
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -1060,8 +1056,8 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   WGSL frontend rejects/mishandles `texture_cube_array<f32>`.
 - **Expected (WebGPU):** `texture_cube_array<f32>` is a valid filterable sampled-texture type; the shader
   compiles and the pipeline is valid. Dawn accepts it.
-- **Status:** **OPEN** (yawgpu, cross-HAL — shared WGSL frontend). Likely a gap in yawgpu's cube-array
-  float texture type handling. Surfaced, not masked.
+- **Status:** **RESOLVED** — yawgpu `8b42e5d`-era update; re-test `non_filterable_texture` `pass=160 fail=0`
+  on **both HALs** (Metal + MoltenVK). Surfaced, not masked.
 
 ---
 
@@ -1075,7 +1071,8 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   depth aspect is not actively read/written). yawgpu **over-validates**.
 - **Expected (WebGPU):** `depthCompare`/`depthWriteEnabled` are only required when the depth aspect is used;
   Dawn accepts the 10 cases.
-- **Status:** **OPEN** (yawgpu, cross-HAL — shared pipeline validation). Surfaced, not masked.
+- **Status:** **RESOLVED** — yawgpu `8b42e5d`-era update; re-test `depth_stencil_state` `pass=1600 fail=0`
+  on **both HALs** (Metal + MoltenVK). Surfaced, not masked.
 
 ---
 
@@ -1093,8 +1090,23 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   both in pipeline-layout validation and in the WGSL frontend.
 - **Expected (WebGPU):** the spec's storage-capable formats (and read-write where the feature is present)
   are valid in an auto-layout render pipeline; Dawn accepts all 744.
-- **Status:** **OPEN** (yawgpu, cross-HAL — shared validation + WGSL frontend). A broad support gap, not a
-  single subtle bug. Surfaced, not masked.
+- **Status:** **RESOLVED** — yawgpu `8b42e5d`-era update; re-test `render_pipeline/misc`
+  `storage_texture,format` `pass=720 fail=0` on **both HALs** (Metal + MoltenVK). Surfaced, not masked.
+
+---
+
+## F-060 — yawgpu: WGSL compiler errors on `texture_external` (external-texture type) — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK both fail 2). Not in Dawn (passes both).
+- **Found by:** the `api,validation,render_pipeline,misc` `external_texture` test (2 cases, `isAsync`
+  {false,true}).
+- **Observed:** a render pipeline whose WGSL binds a `texture_external` fails:
+  `unexpected validation error: render pipeline vertex shader module must not be an error module` — yawgpu's
+  WGSL frontend rejects/mishandles `texture_external` (same failure shape as the resolved F-057
+  cube-array-float case). Dawn compiles it.
+- **Expected (WebGPU):** `texture_external` is a valid WGSL sampled-texture type; the shader compiles. Dawn
+  accepts it.
+- **Status:** **OPEN** (yawgpu, cross-HAL — shared WGSL frontend). Surfaced, not masked.
 
 ---
 
