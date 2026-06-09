@@ -124,7 +124,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 55 cross-backend findings to date (all yawgpu findings
+**Conformance outcome.** The suite has surfaced 56 cross-backend findings to date (all yawgpu findings
 fixed); the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
@@ -153,8 +153,10 @@ state:
   `color_target_state`, contained via `--isolate` + expectations), **F-045** (`frag_depth` is not
   clamped to the viewport depth range before the depth test — `depth_clip_clamp`; shared with yawgpu, Dawn
   passes), **F-048** (the stencil reference value is not masked to the stencil aspect's bit width —
-  `clear_value`; shared with yawgpu, Dawn passes), and **F-052** (ignores the pipeline `multisample.mask` —
-  `sample_mask`; Dawn passes).
+  `clear_value`; shared with yawgpu, Dawn passes), **F-052** (ignores the pipeline `multisample.mask` —
+  `sample_mask`; Dawn passes), and **F-056** (aborts on a **mixed read-only/written** depth-stencil
+  attachment that is also sampled — over-strict per-texture usage-conflict validation;
+  `memory_sync/texture/readonly_depth_stencil`; Dawn + yawgpu pass).
 
 Every divergence is reported and surfaced — never masked to make a test pass; yawgpu's were fixed and
 re-confirmed on hardware, wgpu-native's are contained via `--isolate` + expectations.

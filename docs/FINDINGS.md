@@ -53,7 +53,10 @@ per-**case**; the per-test `pass=…` totals in the records are per-**subcase**)
 untested follow-up.
 **Open — wgpu-native only:** F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027,
 F-028, F-036 (abort when a constant-factor blend draws without `setBlendConstant`; `color_target_state`,
-T31), **F-052** (ignores the pipeline `multisample.mask` — `sample_mask`, T59) (full detail retained). *(Real-GPU verification runs with the Bash sandbox disabled — see the
+T31), **F-052** (ignores the pipeline `multisample.mask` — `sample_mask`, T59), **F-056** (aborts on a
+**mixed read-only/written** depth-stencil attachment that is also sampled — over-strict per-texture
+usage-conflict validation; `memory_sync/texture/readonly_depth_stencil`, T74) (full detail retained).
+*(Real-GPU verification runs with the Bash sandbox disabled — see the
 F-023 note; under the macOS sandbox Metal enumerates no adapters and every case false-fails.)*
 **Tooling / environment (not a backend conformance defect):** F-033 — color `copyTextureToTexture`
 pixel mismatches when yawgpu's Vulkan HAL is run on **Mac via MoltenVK**; a **confirmed** MoltenVK
@@ -1014,6 +1017,29 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   on **both HALs** (Metal + Vulkan/MoltenVK) and on native Windows/NVIDIA Vulkan (user-confirmed). Surfaced,
   not masked. (The MSVC-portability of the test itself — `__builtin_memcpy` → `std::memcpy` — was fixed in
   `726bb13`.)
+
+---
+
+## F-056 — wgpu-native: aborts on a mixed read-only/written depth-stencil attachment that is also sampled
+
+- **Backend:** wgpu-native (`9176708`). **Not** in Dawn or yawgpu (Metal + Vulkan/MoltenVK all pass).
+- **Found by:** the T74 `memory_sync/texture/readonly_depth_stencil` `sampling_while_testing` matrix — the
+  two **mixed** combos `(depthReadOnly=true, stencilReadOnly=false)` and `(false, true)`, where one aspect
+  is read-only **and sampled** while the other aspect is written in the same render pass. The both-read-only
+  and both-written combos pass.
+- **Observed:** wgpu-native **panics and aborts the process** (`signal 6`):
+  `panicked … Error in wgpuQueueSubmit: Validation Error — Attempted to use Texture … with conflicting
+  usages. Current usage TextureUses(RESOURCE) and new usage TextureUses(DEPTH_STENCIL_WRITE). … is an
+  exclusive usage …` → `fatal runtime error … aborting`. Its usage-scope validation treats the texture's
+  `DEPTH_STENCIL_WRITE` (on the written aspect) as conflicting with the `RESOURCE` sample of the
+  **read-only aspect** — it does **not** track usage **per aspect**, and it **aborts** instead of returning
+  a graceful validation error.
+- **Expected (WebGPU):** a depth-stencil texture may have one aspect read-only (and concurrently sampled)
+  while the other aspect is written; the aspects are distinct subresources. Dawn and yawgpu accept it.
+- **Status:** open; tracked as a **wgpu-native defect** (the abort family, like F-001/F-002/F-036). Contained
+  via `--isolate` (the 2 mixed cases crash, the other 2 pass). Surfaced, not masked. **TODO:** add the 2
+  cases to `expectations/wgpu-native.crash.txt` on the next Windows `--emit-crash-list` regeneration (the
+  list is Windows-generated and currently `api,validation`-only).
 
 ---
 
