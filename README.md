@@ -140,12 +140,12 @@ state:
   DS attachment + concurrent depth/stencil sampling; `memory_sync/texture`) and F-053 (multi-attachment
   3D-slice render; `3d_texture_slices`) are all fixed; the `api/validation` Workflow
   bulk-port findings **F-057** (`texture_cube_array<f32>` shader error), **F-058** (depth-stencil state
-  over-validation), and **F-059** (storage-texture-format support gap) are now **fixed and re-verified on
-  both HALs**. Open findings, all cross-HAL and surfaced by the `api/validation` bulk ports (Dawn passes all): **F-060**
-  (WGSL errors on `texture_external`; `render_pipeline/misc`), **F-061** (over-rejects compatible
+  over-validation), **F-059** (storage-texture-format support gap), **F-061** (over-rejects compatible
   pipeline-layout binding kinds; `resource_compatibility`), **F-062** (over-rejects compatible render-bundle
-  attachment signatures; `render_bundle`), **F-063** (inter-stage interpolation-sampling mis-validated;
-  `inter_stage`). Three **Mac-only
+  attachment signatures; `render_bundle`), and **F-063** (inter-stage interpolation-sampling mis-validated;
+  `inter_stage`) are now **fixed and re-verified on both HALs**. One open finding, cross-HAL and surfaced by
+  the `api/validation` bulk ports (Dawn passes): **F-060** (WGSL errors on `texture_external`;
+  `render_pipeline/misc`, 2 cases). Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`

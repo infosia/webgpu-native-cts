@@ -64,7 +64,9 @@ review fixes (render-bundle DS-readonly mismatch; resolveQuerySet's encoder-comm
 finish()** not eager; queue/submit invalid-CB via double-finish). It surfaced three more cross-HAL yawgpu
 findings: **F-061** (over-rejects compatible pipeline-layout binding kinds, 80), **F-062** (over-rejects
 compatible render-bundle attachment signatures, 30), **F-063** (inter-stage interpolation-sampling
-mis-validated, 12).
+mis-validated, 12) — **all three now fixed and re-verified on both HALs** (2026-06-09:
+`resource_compatibility` `pass=123`, `render_bundle` `pass=21`, `inter_stage` `pass=26`, fail=0 on Metal and
+Vulkan/MoltenVK).
 
 Notes on the pre-classified rows:
 
