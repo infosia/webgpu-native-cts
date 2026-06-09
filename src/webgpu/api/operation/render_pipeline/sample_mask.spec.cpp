@@ -1,6 +1,6 @@
 // Ported from gpuweb/cts src/webgpu/api/operation/render_pipeline/sample_mask.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Ports the fragment_output_mask test: flat fragment entry, sampleCount=4, color attachment only.
-// Deferred: sampleCount=1, depth/stencil per-sample checks, interp entry, full matrix, alpha_to_coverage_mask.
+// Ports the fragment_output_mask test: flat fragment entry, sampleCount=4, color + depth + stencil per-sample checks.
+// Deferred: sampleCount=1, interp entry, full matrix, alpha_to_coverage_mask.
 
 #include <array>
 #include <cstdint>
@@ -27,6 +27,13 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpu
 constexpr uint32_t kSampleCount       = 4;
 constexpr uint32_t kRenderTargetSize  = 1;
 constexpr WGPUTextureFormat kFormat   = WGPUTextureFormat_RGBA8Unorm;
+constexpr WGPUTextureFormat kDSFormat = WGPUTextureFormat_Depth24PlusStencil8;
+
+// Depth/stencil constants (match upstream kDepth*/kStencil* consts).
+constexpr float    kDepthClearValue       = 1.0f;
+constexpr float    kDepthWriteValue       = 0.0f;
+constexpr uint32_t kStencilClearValue     = 0u;
+constexpr uint32_t kStencilReferenceValue = 0xffu;
 
 // kColors[i] = rgba8 bytes for sample i: Red, Green, Blue, Yellow
 // These match upstream kColors[0..3].
@@ -122,7 +129,7 @@ struct FragmentOutput1 {
 }
 )";
 
-// Per-sample readback compute shader:
+// Per-sample readback compute shader (color):
 // mirrors upstream copy2DTextureToBufferUsingComputePass (type f32, componentCount 4, sampleCount 4, 1x1).
 constexpr std::string_view kReadbackComputeShader = R"(
 @group(0) @binding(0) var src: texture_multisampled_2d<f32>;
@@ -132,6 +139,32 @@ constexpr std::string_view kReadbackComputeShader = R"(
   for (var s = 0u; s < 4u; s = s + 1u) {
     let v = textureLoad(src, vec2<i32>(0, 0), s);
     for (var c = 0u; c < 4u; c = c + 1u) { dst[s * 4u + c] = v[c]; }
+  }
+}
+)";
+
+// Per-sample depth readback compute shader:
+// depth aspect bound as texture_multisampled_2d<f32>; reads .r of each sample into a 4-f32 buffer.
+constexpr std::string_view kDepthReadbackComputeShader = R"(
+@group(0) @binding(0) var src: texture_multisampled_2d<f32>;
+@group(0) @binding(1) var<storage, read_write> dst: array<f32>;
+
+@compute @workgroup_size(1) fn main() {
+  for (var s = 0u; s < 4u; s = s + 1u) {
+    dst[s] = textureLoad(src, vec2<i32>(0, 0), s).r;
+  }
+}
+)";
+
+// Per-sample stencil readback compute shader:
+// stencil aspect bound as texture_multisampled_2d<u32>; reads .r of each sample into a 4-u32 buffer.
+constexpr std::string_view kStencilReadbackComputeShader = R"(
+@group(0) @binding(0) var src: texture_multisampled_2d<u32>;
+@group(0) @binding(1) var<storage, read_write> dst: array<u32>;
+
+@compute @workgroup_size(1) fn main() {
+  for (var s = 0u; s < 4u; s = s + 1u) {
+    dst[s] = textureLoad(src, vec2<i32>(0, 0), s).r;
   }
 }
 )";
@@ -209,9 +242,37 @@ void runSampleMaskTest(
     WGPUTextureView rtView = t.createViewTracked(renderTarget, rtViewDesc);
 
     // ------------------------------------------------------------------
+    // 3b. Multisampled 1x1 depth-stencil texture (sampleCount=4, depth24plus-stencil8,
+    //     RENDER_ATTACHMENT | TEXTURE_BINDING)
+    // ------------------------------------------------------------------
+    WGPUTextureDescriptor dsTexDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    dsTexDesc.size          = WGPUExtent3D{kRenderTargetSize, kRenderTargetSize, 1};
+    dsTexDesc.mipLevelCount = 1;
+    dsTexDesc.sampleCount   = kSampleCount;
+    dsTexDesc.dimension     = WGPUTextureDimension_2D;
+    dsTexDesc.format        = kDSFormat;
+    dsTexDesc.usage         = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+    WGPUTexture dsTexture   = t.createTextureTracked(dsTexDesc);
+
+    // Full combined view (used for render pass depth-stencil attachment)
+    WGPUTextureViewDescriptor dsCombinedViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    WGPUTextureView dsView = t.createViewTracked(dsTexture, dsCombinedViewDesc);
+
+    // Depth-only aspect view (bound as texture_multisampled_2d<f32> in compute readback)
+    WGPUTextureViewDescriptor dsDepthViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    dsDepthViewDesc.aspect = WGPUTextureAspect_DepthOnly;
+    WGPUTextureView dsDepthView = t.createViewTracked(dsTexture, dsDepthViewDesc);
+
+    // Stencil-only aspect view (bound as texture_multisampled_2d<u32> in compute readback)
+    WGPUTextureViewDescriptor dsStencilViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    dsStencilViewDesc.aspect = WGPUTextureAspect_StencilOnly;
+    WGPUTextureView dsStencilView = t.createViewTracked(dsTexture, dsStencilViewDesc);
+
+    // ------------------------------------------------------------------
     // 4. Render pipeline: layout auto, vmain, fmain__fragment_output_mask__flat,
     //    triangle-list, multisample{count=4, mask=sampleMask, alphaToCoverage=false}.
-    //    No depthStencil attachment (color only).
+    //    depthStencil: depth24plus-stencil8, depthWriteEnabled, depthCompare always,
+    //    stencilFront/Back {compare always, passOp replace}.
     // ------------------------------------------------------------------
     WGPUShaderModule shaderModule = t.createShaderModuleTracked(kSampleMaskShader);
 
@@ -224,6 +285,19 @@ void runSampleMaskTest(
     fragment.targetCount = 1;
     fragment.targets     = &colorTarget;
 
+    WGPUDepthStencilState dsState = WGPU_DEPTH_STENCIL_STATE_INIT;
+    dsState.format               = kDSFormat;
+    dsState.depthWriteEnabled    = WGPUOptionalBool_True;
+    dsState.depthCompare         = WGPUCompareFunction_Always;
+    dsState.stencilFront.compare  = WGPUCompareFunction_Always;
+    dsState.stencilFront.failOp   = WGPUStencilOperation_Keep;
+    dsState.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
+    dsState.stencilFront.passOp   = WGPUStencilOperation_Replace;
+    dsState.stencilBack.compare   = WGPUCompareFunction_Always;
+    dsState.stencilBack.failOp    = WGPUStencilOperation_Keep;
+    dsState.stencilBack.depthFailOp = WGPUStencilOperation_Keep;
+    dsState.stencilBack.passOp    = WGPUStencilOperation_Replace;
+
     WGPURenderPipelineDescriptor pipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
     // layout = null → auto layout
     pipeDesc.layout                             = nullptr;
@@ -234,6 +308,7 @@ void runSampleMaskTest(
     pipeDesc.multisample.mask                   = sampleMask;
     pipeDesc.multisample.alphaToCoverageEnabled = false;
     pipeDesc.fragment                           = &fragment;
+    pipeDesc.depthStencil                       = &dsState;
     WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipeDesc);
 
     // ------------------------------------------------------------------
@@ -268,7 +343,8 @@ void runSampleMaskTest(
     wgpuBindGroupLayoutRelease(renderBGL);
 
     // ------------------------------------------------------------------
-    // 6. Render pass: clear {0,0,0,0}, draw instanced quads per rasterizationMask bit.
+    // 6. Render pass: clear color {0,0,0,0}, clear depth=1.0, clear stencil=0,
+    //    draw instanced quads per rasterizationMask bit.
     //    Upstream getTargetTexture sampleCount==4 branch:
     //      bit0 → draw(6,1,0,1)  top-left quad     → sample 0 → kColors[0] Red
     //      bit1 → draw(6,1,0,2)  top-right quad    → sample 1 → kColors[1] Green
@@ -282,15 +358,27 @@ void runSampleMaskTest(
         colorAttachment.storeOp     = WGPUStoreOp_Store;
         colorAttachment.clearValue  = WGPUColor{0.0, 0.0, 0.0, 0.0};
 
+        WGPURenderPassDepthStencilAttachment dsAttachment =
+            WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+        dsAttachment.view              = dsView;
+        dsAttachment.depthLoadOp       = WGPULoadOp_Clear;
+        dsAttachment.depthStoreOp      = WGPUStoreOp_Store;
+        dsAttachment.depthClearValue   = kDepthClearValue;
+        dsAttachment.stencilLoadOp     = WGPULoadOp_Clear;
+        dsAttachment.stencilStoreOp    = WGPUStoreOp_Store;
+        dsAttachment.stencilClearValue = kStencilClearValue;
+
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount    = 1;
         passDesc.colorAttachments        = &colorAttachment;
-        passDesc.depthStencilAttachment  = nullptr;
+        passDesc.depthStencilAttachment  = &dsAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, renderBG, 0, nullptr);
+        // Set stencil reference value (0xff) before draws (upstream setStencilReference).
+        wgpuRenderPassEncoderSetStencilReference(pass, kStencilReferenceValue);
         // Instanced draws: instance index selects sample center + uvsFlat entry.
         if ((rasterizationMask & 1u) != 0u) { wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 1); }
         if ((rasterizationMask & 2u) != 0u) { wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 2); }
@@ -374,6 +462,159 @@ void runSampleMaskTest(
         readbackBuffer,
         expected.data(),
         expected.size() * sizeof(float));
+
+    // ------------------------------------------------------------------
+    // 9. Depth readback via compute pass:
+    //    depth aspect view (WGPUTextureAspect_DepthOnly) as texture_multisampled_2d<f32>
+    //    → 4-f32 storage buffer (16 bytes).
+    // ------------------------------------------------------------------
+    constexpr uint64_t kDepthReadbackSize   = kSampleCount * sizeof(float);
+    constexpr uint64_t kStencilReadbackSize = kSampleCount * sizeof(uint32_t);
+
+    WGPUBufferDescriptor depthBufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    depthBufDesc.size  = kDepthReadbackSize;
+    depthBufDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+    WGPUBuffer depthReadbackBuffer = t.createBufferTracked(depthBufDesc);
+
+    {
+        WGPUShaderModule depthCompModule =
+            t.createShaderModuleTracked(kDepthReadbackComputeShader);
+
+        WGPUComputePipelineDescriptor depthCompPipeDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        depthCompPipeDesc.layout             = nullptr;
+        depthCompPipeDesc.compute.module     = depthCompModule;
+        depthCompPipeDesc.compute.entryPoint = stringView("main");
+        WGPUComputePipeline depthCompPipeline =
+            t.createComputePipelineTracked(depthCompPipeDesc);
+
+        WGPUBindGroupLayout depthCompBGL =
+            wgpuComputePipelineGetBindGroupLayout(depthCompPipeline, 0);
+
+        std::array<WGPUBindGroupEntry, 2> depthEntries;
+        depthEntries[0] = WGPU_BIND_GROUP_ENTRY_INIT;
+        depthEntries[0].binding     = 0;
+        depthEntries[0].textureView = dsDepthView;
+
+        depthEntries[1] = WGPU_BIND_GROUP_ENTRY_INIT;
+        depthEntries[1].binding = 1;
+        depthEntries[1].buffer  = depthReadbackBuffer;
+        depthEntries[1].offset  = 0;
+        depthEntries[1].size    = kDepthReadbackSize;
+
+        WGPUBindGroupDescriptor depthBGDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        depthBGDesc.layout     = depthCompBGL;
+        depthBGDesc.entryCount = depthEntries.size();
+        depthBGDesc.entries    = depthEntries.data();
+        WGPUBindGroup depthBG = t.createBindGroupTracked(depthBGDesc);
+        wgpuBindGroupLayoutRelease(depthCompBGL);
+
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPUComputePassDescriptor cpDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder cp = wgpuCommandEncoderBeginComputePass(encoder, &cpDesc);
+        wgpuComputePassEncoderSetPipeline(cp, depthCompPipeline);
+        wgpuComputePassEncoderSetBindGroup(cp, 0, depthBG, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(cp, 1, 1, 1);
+        wgpuComputePassEncoderEnd(cp);
+        WGPUCommandBuffer cmdBuf = t.finishTracked(encoder);
+        wgpuQueueSubmit(t.queue(), 1, &cmdBuf);
+    }
+
+    // ------------------------------------------------------------------
+    // 10. Stencil readback via compute pass:
+    //     stencil aspect view (WGPUTextureAspect_StencilOnly) as texture_multisampled_2d<u32>
+    //     → 4-u32 storage buffer (16 bytes).
+    // ------------------------------------------------------------------
+    WGPUBufferDescriptor stencilBufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    stencilBufDesc.size  = kStencilReadbackSize;
+    stencilBufDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+    WGPUBuffer stencilReadbackBuffer = t.createBufferTracked(stencilBufDesc);
+
+    {
+        WGPUShaderModule stencilCompModule =
+            t.createShaderModuleTracked(kStencilReadbackComputeShader);
+
+        WGPUComputePipelineDescriptor stencilCompPipeDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        stencilCompPipeDesc.layout             = nullptr;
+        stencilCompPipeDesc.compute.module     = stencilCompModule;
+        stencilCompPipeDesc.compute.entryPoint = stringView("main");
+        WGPUComputePipeline stencilCompPipeline =
+            t.createComputePipelineTracked(stencilCompPipeDesc);
+
+        WGPUBindGroupLayout stencilCompBGL =
+            wgpuComputePipelineGetBindGroupLayout(stencilCompPipeline, 0);
+
+        std::array<WGPUBindGroupEntry, 2> stencilEntries;
+        stencilEntries[0] = WGPU_BIND_GROUP_ENTRY_INIT;
+        stencilEntries[0].binding     = 0;
+        stencilEntries[0].textureView = dsStencilView;
+
+        stencilEntries[1] = WGPU_BIND_GROUP_ENTRY_INIT;
+        stencilEntries[1].binding = 1;
+        stencilEntries[1].buffer  = stencilReadbackBuffer;
+        stencilEntries[1].offset  = 0;
+        stencilEntries[1].size    = kStencilReadbackSize;
+
+        WGPUBindGroupDescriptor stencilBGDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        stencilBGDesc.layout     = stencilCompBGL;
+        stencilBGDesc.entryCount = stencilEntries.size();
+        stencilBGDesc.entries    = stencilEntries.data();
+        WGPUBindGroup stencilBG = t.createBindGroupTracked(stencilBGDesc);
+        wgpuBindGroupLayoutRelease(stencilCompBGL);
+
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPUComputePassDescriptor cpDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder cp = wgpuCommandEncoderBeginComputePass(encoder, &cpDesc);
+        wgpuComputePassEncoderSetPipeline(cp, stencilCompPipeline);
+        wgpuComputePassEncoderSetBindGroup(cp, 0, stencilBG, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(cp, 1, 1, 1);
+        wgpuComputePassEncoderEnd(cp);
+        WGPUCommandBuffer cmdBuf = t.finishTracked(encoder);
+        wgpuQueueSubmit(t.queue(), 1, &cmdBuf);
+    }
+
+    // ------------------------------------------------------------------
+    // 11. Verify depth (4 f32): covered → kDepthWriteValue (0.0), else kDepthClearValue (1.0).
+    //     Verify stencil (4 u32): covered → kStencilReferenceValue (255), else kStencilClearValue (0).
+    //     covered = (rasterizationMask & sampleMask & fragmentShaderOutputMask & (1u<<i)) != 0.
+    // ------------------------------------------------------------------
+    std::array<float, 4> expectedDepth = {};
+    std::array<uint32_t, 4> expectedStencil = {};
+    for (uint32_t i = 0; i < kSampleCount; ++i) {
+        const bool covered =
+            (rasterizationMask & sampleMask & fragmentShaderOutputMask & (1u << i)) != 0u;
+        expectedDepth[i]   = covered ? kDepthWriteValue : kDepthClearValue;
+        expectedStencil[i] = covered ? kStencilReferenceValue : kStencilClearValue;
+    }
+
+    // Use expectGPUBufferValuesPassCheck for depth (small tolerance for f32 precision).
+    t.expectGPUBufferValuesPassCheck(
+        depthReadbackBuffer,
+        [expectedDepth](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            if (len < kSampleCount * sizeof(float)) {
+                return std::string("depth readback buffer too small");
+            }
+            for (uint32_t i = 0; i < kSampleCount; ++i) {
+                float got = 0.0f;
+                std::memcpy(&got, actual + i * sizeof(float), sizeof(float));
+                float exp = expectedDepth[i];
+                float diff = got - exp;
+                if (diff < 0.0f) diff = -diff;
+                if (diff > 1e-5f) {
+                    std::ostringstream msg;
+                    msg << "depth sample " << i << ": got " << got << ", expected " << exp;
+                    return msg.str();
+                }
+            }
+            return std::nullopt;
+        },
+        0,
+        kDepthReadbackSize);
+
+    // Stencil: exact u32 compare.
+    t.expectGPUBufferValuesEqual(
+        stencilReadbackBuffer,
+        expectedStencil.data(),
+        expectedStencil.size() * sizeof(uint32_t));
 }
 
 // -----------------------------------------------------------------------------
