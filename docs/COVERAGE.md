@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 6 | 4 | 0 | 0 | 119 |
+| `api/validation` | 129 | 14 | 6 | 0 | 0 | 109 |
 | `api/operation` | 72 | 14 | 30 | 4 | 0 | 24 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
@@ -32,7 +32,18 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **11** | **4** | **16** | **446** | **206** |
+| **Total** | **683** | **28** | **36** | **20** | **446** | **153** |
+
+**Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
+Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
+oracle-verifies + all-backend-sweeps + commits). **Batch 1** (commit `7088b2a`) ported 10 files —
+`query_set/{create,destroy}`, `encoding/cmds/debug`, `texture/{float32_filterable,destroy,bgra8unorm_storage}`,
+`debugMarker`, `queue/destroyed/query_set`, `non_filterable_texture`, `dispatch` — all Dawn-green (0 fail).
+`dispatch` (both tests) and the `bgra8unorm_storage` canvas-context cases are `.unimplemented()` (no native
+C analog). It surfaced **F-057** (yawgpu cross-HAL: `texture_cube_array<f32>` errors the shader module — 8
+of `non_filterable_texture`'s 160 cases). wgpu-native shows expected validation gaps + aborts on several of
+these groups (the panic family, contained via `--isolate`; to be added to the Windows-generated
+`expectations/wgpu-native.{txt,crash.txt}` on the next regen).
 
 Notes on the pre-classified rows:
 

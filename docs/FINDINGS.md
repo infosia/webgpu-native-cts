@@ -39,12 +39,12 @@ never masked). The early validation/copy milestones (commit + result):
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055
 — each keeps a compact record below.
-**Open — yawgpu: none.** Every finding surfaced by this session's newly-added tests is fixed and
-re-verified: F-051 (Metal multisampled-view crash; `sample_mask`), F-053 (multi-attachment 3D-slice render;
-`3d_texture_slices`), F-054 (sparse/`null` color attachment; `pipeline_output_targets`), and F-055 (read-only
-DS attachment + concurrent depth/stencil-aspect sampling; `memory_sync/texture/readonly_depth_stencil`).
-F-051/F-054/F-055 pass on **both HALs** (Metal + MoltenVK); F-053 on Metal + native Windows/NVIDIA Vulkan
-with a confirmed MoltenVK-only residual artifact.
+**Open — yawgpu:** **F-057** — yawgpu's WGSL compiler **errors on `texture_cube_array<f32>`** (a float
+cube-array sampled texture), producing an error shader module that breaks any pipeline binding one;
+**cross-HAL** (Metal == MoltenVK). Surfaced by the new `api,validation,non_filterable_texture` port (8/160
+cases — exactly the `sampleType=float, viewDimension=cube-array` rows; sint/uint cube-array compile fine).
+Dawn passes all 160. (Earlier session findings F-051 / F-053 / F-054 / F-055 are all fixed and re-verified:
+F-051/F-054/F-055 on both HALs, F-053 on Metal + native Vulkan with a confirmed MoltenVK-only residual.)
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -1040,6 +1040,23 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   via `--isolate` (the 2 mixed cases crash, the other 2 pass). Surfaced, not masked. **TODO:** add the 2
   cases to `expectations/wgpu-native.crash.txt` on the next Windows `--emit-crash-list` regeneration (the
   list is Windows-generated and currently `api,validation`-only).
+
+---
+
+## F-057 — yawgpu: WGSL compiler errors on `texture_cube_array<f32>` (float cube-array sampled texture) — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK both fail). Not in Dawn (passes all 160).
+- **Found by:** the `api,validation,non_filterable_texture` port (`non_filterable_texture_with_filtering_sampler`).
+  Exactly the **8** `sampleType=float, viewDimension=cube-array` rows fail (compute/render × async ×
+  sameGroup); the `sint`/`uint` cube-array rows and all other view dimensions compile fine.
+- **Observed:** creating a pipeline whose shader declares a **float cube-array** texture
+  (`texture_cube_array<f32>`) fails: `unexpected validation error: compute/render pipeline shader module
+  must not be an error module`. The WGSL shader module became an **error module** at creation — yawgpu's
+  WGSL frontend rejects/mishandles `texture_cube_array<f32>`.
+- **Expected (WebGPU):** `texture_cube_array<f32>` is a valid filterable sampled-texture type; the shader
+  compiles and the pipeline is valid. Dawn accepts it.
+- **Status:** **OPEN** (yawgpu, cross-HAL — shared WGSL frontend). Likely a gap in yawgpu's cube-array
+  float texture type handling. Surfaced, not masked.
 
 ---
 
