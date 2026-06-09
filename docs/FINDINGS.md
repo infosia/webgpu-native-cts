@@ -39,12 +39,17 @@ never masked). The early validation/copy milestones (commit + result):
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055
 — each keeps a compact record below.
-**Open — yawgpu:** **F-057** — yawgpu's WGSL compiler **errors on `texture_cube_array<f32>`** (a float
-cube-array sampled texture), producing an error shader module that breaks any pipeline binding one;
-**cross-HAL** (Metal == MoltenVK). Surfaced by the new `api,validation,non_filterable_texture` port (8/160
-cases — exactly the `sampleType=float, viewDimension=cube-array` rows; sint/uint cube-array compile fine).
-Dawn passes all 160. (Earlier session findings F-051 / F-053 / F-054 / F-055 are all fixed and re-verified:
-F-051/F-054/F-055 on both HALs, F-053 on Metal + native Vulkan with a confirmed MoltenVK-only residual.)
+**Open — yawgpu (all cross-HAL, surfaced by the `api/validation` Workflow bulk ports; Dawn passes all):**
+**F-057** — the WGSL compiler **errors on `texture_cube_array<f32>`** (float cube-array sampled texture),
+producing an error shader module (`non_filterable_texture`, 8/160 cases — the `sampleType=float,
+viewDimension=cube-array` rows). **F-058** — render-pipeline depth-stencil validation **over-requires
+`depthCompare` + `depthWriteEnabled`** even when the depth aspect is not used (`render_pipeline/depth_stencil_state`,
+10 cases). **F-059** — **storage-texture-format support gap**: render-pipeline (auto-layout) validation
+rejects many storage-texture formats the spec accepts (`pipeline auto layout storage texture format is
+unsupported` / `must support read-write storage access`), and some storage-texture WGSL types error the
+shader module (`render_pipeline/misc` `storage_texture,format`, ~366 cases). (Earlier session findings F-051
+/ F-053 / F-054 / F-055 are all fixed and re-verified: F-051/F-054/F-055 on both HALs, F-053 on Metal +
+native Vulkan with a confirmed MoltenVK-only residual.)
 
 Every resolved finding keeps a **short** record below (one-line what + the yawgpu fix commit); the full
 diagnosis is in that commit and in this file's git history. The full ported suite is green on native
@@ -1057,6 +1062,39 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   compiles and the pipeline is valid. Dawn accepts it.
 - **Status:** **OPEN** (yawgpu, cross-HAL — shared WGSL frontend). Likely a gap in yawgpu's cube-array
   float texture type handling. Surfaced, not masked.
+
+---
+
+## F-058 — yawgpu: render-pipeline depth-stencil state over-requires depthCompare + depthWriteEnabled — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK both fail 10). Not in Dawn (passes all 1600).
+- **Found by:** the `api,validation,render_pipeline,depth_stencil_state` port (10 cases).
+- **Observed:** `unexpected validation error: render pipeline depth format requires depthCompare and
+  depthWriteEnabled` — yawgpu rejects a render pipeline whose `depthStencil` uses a depth format but omits
+  `depthCompare`/`depthWriteEnabled`, even in the cases where the WebGPU spec permits omitting them (the
+  depth aspect is not actively read/written). yawgpu **over-validates**.
+- **Expected (WebGPU):** `depthCompare`/`depthWriteEnabled` are only required when the depth aspect is used;
+  Dawn accepts the 10 cases.
+- **Status:** **OPEN** (yawgpu, cross-HAL — shared pipeline validation). Surfaced, not masked.
+
+---
+
+## F-059 — yawgpu: storage-texture-format support gap in render-pipeline validation + WGSL — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK both fail ~366). Not in Dawn (passes all 744).
+- **Found by:** the `api,validation,render_pipeline,misc` port — the `storage_texture,format` test
+  (~366/744 cases).
+- **Observed:** yawgpu rejects many storage-texture formats that the spec accepts:
+  `unexpected validation error: pipeline auto layout storage texture format is unsupported` (~246),
+  `storage texture binding format must support read-write storage access` (~36),
+  `render pipeline auto layout storage texture format/access is unsupported` (~12); and ~74 cases produce
+  `render pipeline vertex shader module must not be an error module` (the storage-texture WGSL type fails to
+  compile). yawgpu's storage-texture-format support (write-only / read-write) is **narrower than the spec**,
+  both in pipeline-layout validation and in the WGSL frontend.
+- **Expected (WebGPU):** the spec's storage-capable formats (and read-write where the feature is present)
+  are valid in an auto-layout render pipeline; Dawn accepts all 744.
+- **Status:** **OPEN** (yawgpu, cross-HAL — shared validation + WGSL frontend). A broad support gap, not a
+  single subtle bug. Surfaced, not masked.
 
 ---
 

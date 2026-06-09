@@ -124,7 +124,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 57 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 59 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
@@ -134,9 +134,11 @@ state:
   `immediate_data_size` cases Dawn/wgpu-native skip.) The render-path findings F-051 (multisampled-texture-view
   crash; `sample_mask`), F-054 (sparse / `null` color attachment; `pipeline_output_targets`), F-055 (read-only
   DS attachment + concurrent depth/stencil sampling; `memory_sync/texture`) and F-053 (multi-attachment
-  3D-slice render; `3d_texture_slices`) are all fixed; one new finding is open: **F-057** (cross-HAL — the
-  WGSL compiler errors on `texture_cube_array<f32>`, breaking pipelines that bind a float cube-array;
-  `non_filterable_texture`). Three **Mac-only
+  3D-slice render; `3d_texture_slices`) are all fixed; three new findings are open, all cross-HAL and
+  surfaced by the `api/validation` Workflow bulk ports (Dawn passes all): **F-057** (the WGSL compiler errors
+  on `texture_cube_array<f32>`; `non_filterable_texture`), **F-058** (render-pipeline depth-stencil state
+  over-requires `depthCompare`+`depthWriteEnabled`; `depth_stencil_state`), and **F-059** (storage-texture-
+  format support gap in render-pipeline validation + WGSL; `render_pipeline/misc`). Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`

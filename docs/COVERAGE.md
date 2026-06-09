@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 14 | 6 | 0 | 0 | 109 |
+| `api/validation` | 129 | 28 | 7 | 0 | 0 | 94 |
 | `api/operation` | 72 | 14 | 30 | 4 | 0 | 24 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **28** | **36** | **20** | **446** | **153** |
+| **Total** | **683** | **42** | **37** | **20** | **446** | **138** |
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -41,9 +41,19 @@ oracle-verifies + all-backend-sweeps + commits). **Batch 1** (commit `7088b2a`) 
 `debugMarker`, `queue/destroyed/query_set`, `non_filterable_texture`, `dispatch` — all Dawn-green (0 fail).
 `dispatch` (both tests) and the `bgra8unorm_storage` canvas-context cases are `.unimplemented()` (no native
 C analog). It surfaced **F-057** (yawgpu cross-HAL: `texture_cube_array<f32>` errors the shader module — 8
-of `non_filterable_texture`'s 160 cases). wgpu-native shows expected validation gaps + aborts on several of
-these groups (the panic family, contained via `--isolate`; to be added to the Windows-generated
-`expectations/wgpu-native.{txt,crash.txt}` on the next regen).
+of `non_filterable_texture`'s 160 cases). **Batch 2** (commit `8f01f97`) ported 15 more —
+`render_pipeline/{primitive_state,float32_blendable,multisample_state,misc,depth_stencil_state}`,
+`encoding/{beginComputePass,beginRenderPass,encoder_state}`,
+`encoding/cmds/{render/setPipeline,render/setIndexBuffer,render/setVertexBuffer,index_access}`,
+`texture/rg11b10ufloat_renderable`, `getBindGroupLayout`, `shader_module/entry_point` — all Dawn-green (full
+matrices: `depth_stencil_state` 1600, `entry_point` 1242, `misc` 744 cases). Review fixes: a
+`timestamp-query` feature gate on the `begin*Pass` mismatched-device case; `encoder_state`'s
+`pass_end_invalid_order` left `.unimplemented()` (native eager vs JS lazy error model). It surfaced two more
+yawgpu findings: **F-058** (over-requires `depthCompare`+`depthWriteEnabled`; `depth_stencil_state`, 10) and
+**F-059** (storage-texture-format support gap; `render_pipeline/misc` `storage_texture,format`, ~366) — both
+cross-HAL. wgpu-native shows expected validation gaps + aborts on several of these groups (the panic family,
+contained via `--isolate`; to be added to the Windows-generated `expectations/wgpu-native.{txt,crash.txt}`
+on the next regen).
 
 Notes on the pre-classified rows:
 
