@@ -37,12 +37,13 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/061/062/063
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063
 — each keeps a compact record below.
-**Open — yawgpu (cross-HAL, surfaced by the `api/validation` Workflow bulk ports; Dawn passes all):**
-**F-060** — the WGSL compiler errors on `texture_external` (`render_pipeline/misc` `external_texture`, 2).
-**F-061 / F-062 / F-063 are now fixed and re-verified on both HALs** (Metal == Vulkan/MoltenVK, 2026-06-09):
-`resource_compatibility` `pass=123 fail=0`, `render_bundle` `pass=21 fail=0`, `inter_stage` `pass=26 fail=0`.
+**No open yawgpu findings.** The `api/validation` Workflow bulk ports surfaced **F-060/F-061/F-062/F-063**
+(all cross-HAL; Dawn passed all) — **all four are now fixed and re-verified on both HALs** (Metal ==
+Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2 fail=0` (F-060, yawgpu `fa97027`),
+`resource_compatibility` `pass=123 fail=0` (F-061), `render_bundle` `pass=21 fail=0` (F-062), `inter_stage`
+`pass=26 fail=0` (F-063).
 (The validation-
 bulk findings **F-057 / F-058 / F-059 are all fixed and re-verified on both HALs**: `non_filterable_texture`
 `pass=160`, `depth_stencil_state` `pass=1600`, `storage_texture,format` `pass=720`. Earlier session findings
@@ -1108,7 +1109,10 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   cube-array-float case). Dawn compiles it.
 - **Expected (WebGPU):** `texture_external` is a valid WGSL sampled-texture type; the shader compiles. Dawn
   accepts it.
-- **Status:** **OPEN** (yawgpu, cross-HAL — shared WGSL frontend). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `fa97027`, 2026-06-09). Re-verified both HALs: `external_texture`
+  `pass=2 fail=0` on Metal and Vulkan/MoltenVK. The fix lands full external-texture support on the **Metal**
+  HAL; on Vulkan the prior SPIR-V hack was replaced with an honest rejection at the operation level (the
+  validation test — shader/pipeline creation — passes on both). Surfaced, not masked.
 
 ---
 

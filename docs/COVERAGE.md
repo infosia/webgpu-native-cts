@@ -52,8 +52,9 @@ matrices: `depth_stencil_state` 1600, `entry_point` 1242, `misc` 744 cases). Rev
 yawgpu findings (all cross-HAL): **F-058** (over-requires `depthCompare`+`depthWriteEnabled`;
 `depth_stencil_state`, 10), **F-059** (storage-texture-format support gap; `render_pipeline/misc`
 `storage_texture,format`, ~366) — **both now fixed** (yawgpu `8b42e5d`; `depth_stencil_state` `pass=1600`,
-`storage_texture,format` `pass=720` on both HALs) — and **F-060** (WGSL errors on `texture_external`;
-`render_pipeline/misc` `external_texture`, 2 cases; **OPEN**). wgpu-native shows expected validation gaps + aborts on several of these groups (the panic family,
+`storage_texture,format` `pass=720` on both HALs) — and **F-060** (WGSL errored on `texture_external`;
+`render_pipeline/misc` `external_texture`, 2 cases; **fixed** yawgpu `fa97027`, re-verified `pass=2 fail=0`
+on both HALs 2026-06-09). wgpu-native shows expected validation gaps + aborts on several of these groups (the panic family,
 contained via `--isolate`; to be added to the Windows-generated `expectations/wgpu-native.{txt,crash.txt}`
 on the next regen). **Batch 3** (commit `4b7c350` + fixes `376d9c3`) ported 15 more —
 `render_pipeline/{shader_module,inter_stage,resource_compatibility,overrides}`, `shader_module/overrides`,
