@@ -417,26 +417,23 @@ CTS_TEST(g, "depth_stencil_readonly_mismatch")
         WGPURenderPassDepthStencilAttachment dsAtt = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
         dsAtt.view = dsView;
 
-        if (hasDepth) {
-            if (passDepthReadOnly) {
-                dsAtt.depthReadOnly = WGPU_TRUE;
-                // leave depthLoadOp/depthStoreOp as Undefined (required for read-only)
-            } else {
-                dsAtt.depthLoadOp     = WGPULoadOp_Load;
-                dsAtt.depthStoreOp    = WGPUStoreOp_Store;
-                dsAtt.depthClearValue = 0.0f;
-            }
+        // Set depthReadOnly/stencilReadOnly unconditionally, mirroring the upstream which always
+        // passes these flags to the descriptor regardless of whether the format has that aspect.
+        // Only the load/store ops are conditioned on the format actually having the aspect AND
+        // the aspect not being read-only (matching upstream gpu_test.ts createEncoder logic).
+        dsAtt.depthReadOnly   = passDepthReadOnly   ? WGPU_TRUE : WGPU_FALSE;
+        dsAtt.stencilReadOnly = passStencilReadOnly ? WGPU_TRUE : WGPU_FALSE;
+
+        if (hasDepth && !passDepthReadOnly) {
+            dsAtt.depthLoadOp     = WGPULoadOp_Clear;
+            dsAtt.depthStoreOp    = WGPUStoreOp_Discard;
+            dsAtt.depthClearValue = 0.0f;
         }
 
-        if (hasStencil) {
-            if (passStencilReadOnly) {
-                dsAtt.stencilReadOnly = WGPU_TRUE;
-                // leave stencilLoadOp/stencilStoreOp as Undefined (required for read-only)
-            } else {
-                dsAtt.stencilLoadOp     = WGPULoadOp_Load;
-                dsAtt.stencilStoreOp    = WGPUStoreOp_Store;
-                dsAtt.stencilClearValue = 0;
-            }
+        if (hasStencil && !passStencilReadOnly) {
+            dsAtt.stencilLoadOp     = WGPULoadOp_Clear;
+            dsAtt.stencilStoreOp    = WGPUStoreOp_Discard;
+            dsAtt.stencilClearValue = 1;
         }
 
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;

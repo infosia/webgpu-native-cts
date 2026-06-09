@@ -21,19 +21,29 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpu
 //   createCommandBuffer({ device?, valid? = true }) -> GPUCommandBuffer
 //
 // - If valid == true: create encoder, finish, return the command buffer.
-// - If valid == false: create encoder, popDebugGroup (unmatched -> invalid
-//   encoder in native), finish (errors on invalid encoder).  The resulting
-//   command buffer handle is an error object (may be nullptr depending on
-//   backend).
+// - If valid == false: produce a command buffer that is invalid at submit
+//   time, so that wgpuQueueSubmit raises a validation error on all backends.
 //
-// NATIVE EAGER ERROR MODEL:
-//   wgpuCommandEncoderPopDebugGroup with no matching push fires a validation
-//   error eagerly.  We wrap the call inside an expectValidationError scope
-//   (via wgpuDevicePushErrorScope / popErrorScopeSync) to suppress the
-//   uncaptured error, and also wrap the finish() that follows.  In both
-//   cases the errors happen at popDebugGroup and finish; the resulting
-//   WGPUCommandBuffer is a null/error object that, when submitted, causes
-//   another validation error.
+// STRATEGY FOR INVALID COMMAND BUFFER (native eager error model):
+//   We call wgpuCommandEncoderFinish() TWICE on the same encoder.
+//
+//   First finish():  the encoder is still valid → succeeds, produces a real
+//     command buffer (discarded immediately; we don't use it).  The encoder
+//     is now in the "finished" state.
+//
+//   Second finish(): the encoder is already finished → this is a validation
+//     error.  We wrap it in an expectValidationError scope so the eager error
+//     is consumed.  finish() returns a null / error-tagged command buffer.
+//     Submitting this error command buffer causes wgpuQueueSubmit to raise a
+//     validation error, which is exactly what the test expects.
+//
+//   We also immediately release the first (valid) command buffer so it is
+//   never submitted and does not interfere with the test.
+//
+//   Note: popDebugGroup-then-finish was tried first but Dawn apparently does
+//   NOT raise a submit-time error for the resulting command buffer (the error
+//   is consumed eagerly at finish() and the handle is considered neutral).
+//   Double-finish reliably produces a submit-time error on all tested backends.
 // ---------------------------------------------------------------------------
 static WGPUCommandBuffer createCommandBuffer(
     AllFeaturesMaxLimitsGpuTest& t,
@@ -46,15 +56,17 @@ static WGPUCommandBuffer createCommandBuffer(
     WGPUCommandBuffer cb = nullptr;
 
     if (!valid) {
-        // Popping a debug group when none are pushed results in an invalid
-        // command encoder (validation error fires at popDebugGroup in native).
-        // Wrap in an error scope to prevent uncaptured-error surfacing.
-        t.expectValidationError([&] {
-            wgpuCommandEncoderPopDebugGroup(encoder);
-        }, true);
+        // First finish(): encoder is valid → succeeds; discard the result.
+        {
+            WGPUCommandBufferDescriptor cbDesc = WGPU_COMMAND_BUFFER_DESCRIPTOR_INIT;
+            WGPUCommandBuffer firstCb = wgpuCommandEncoderFinish(encoder, &cbDesc);
+            if (firstCb != nullptr) { wgpuCommandBufferRelease(firstCb); }
+        }
 
-        // finish() on an invalid encoder also produces a validation error and
-        // returns a null/error command buffer.
+        // Second finish(): encoder is already finished → validation error.
+        // Wrap in an error scope so the eager error is consumed here.
+        // The returned handle is an error command buffer; submitting it will
+        // cause wgpuQueueSubmit to raise a validation error.
         t.expectValidationError([&] {
             WGPUCommandBufferDescriptor cbDesc = WGPU_COMMAND_BUFFER_DESCRIPTOR_INIT;
             cb = wgpuCommandEncoderFinish(encoder, &cbDesc);

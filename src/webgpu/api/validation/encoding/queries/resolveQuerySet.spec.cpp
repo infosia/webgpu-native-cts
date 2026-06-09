@@ -66,11 +66,11 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpu
 // - {invalid, destroyed} GPUQuerySet results in validation error.
 // - {invalid, destroyed} destination buffer results in validation error.
 //
-// EAGER ERROR NOTE:
-//   In the native C API, wgpuCommandEncoderResolveQuerySet with an invalid
-//   (error) queryset or buffer fires the validation error eagerly at that call,
-//   tainting the encoder. finish() then also errors because the encoder is
-//   tainted. For 'destroyed' resources the error surfaces at submit time.
+// DEFERRED ERROR NOTE:
+//   In Dawn's native command encoder, validation errors encountered during
+//   encoding (e.g. using an error/invalid queryset or buffer) are deferred
+//   until finish() rather than fired immediately at the encoding call.
+//   For 'destroyed' resources the error surfaces at submit time.
 //   This matches the JS 'invalid → finish error, destroyed → submit error'
 //   semantics of validateFinishAndSubmit(shouldBeValid, shouldSubmitSuccess).
 // ---------------------------------------------------------------------------
@@ -107,17 +107,16 @@ CTS_TEST(g, "queryset_and_destination_buffer_state")
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
 
-        // For invalid resources the error fires eagerly at this call.
+        // Encoding itself does not eagerly raise errors; errors from invalid
+        // (error-object) resources are deferred to finish().
+        wgpuCommandEncoderResolveQuerySet(encoder, querySet, 0, 1, destination, 0);
+
         if (!shouldBeValid) {
-            t.expectValidationError([&] {
-                wgpuCommandEncoderResolveQuerySet(encoder, querySet, 0, 1, destination, 0);
-            }, true);
-            // finish() will also error because the encoder is tainted.
+            // finish() errors because an error-object resource was used.
             t.expectValidationError([&] {
                 t.finishTracked(encoder);
             }, true);
         } else {
-            wgpuCommandEncoderResolveQuerySet(encoder, querySet, 0, 1, destination, 0);
             WGPUCommandBuffer cb = t.finishTracked(encoder);
             // submit errors iff a resource was destroyed.
             t.expectValidationError([&] {
