@@ -95,13 +95,14 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   test-prefix lines) so a run with known divergences still exits 0.
 - All three backends — **wgpu-native, yawgpu, Dawn** — build link-agnostically and run on a real GPU.
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
-- Ported so far: **50 `api/validation` files** (42 complete, 8 partial) — the original hand-ported
+- Ported so far: **65 `api/validation` files** (56 complete, 9 partial) — the original hand-ported
   vertical slice (`createTexture`, `createView`, `createBindGroupLayout`, `createPipelineLayout`,
-  `clearBuffer`, `copyBufferToBuffer`, plus a maximally-ported `buffer/mapping`) **plus 40 files from
-  three parallel Workflow bulk-port batches** (`query_set/*`, `texture/*`, `render_pipeline/*` state,
+  `clearBuffer`, `copyBufferToBuffer`, plus a maximally-ported `buffer/mapping`) **plus 55 files from
+  four parallel Workflow bulk-port batches** (`query_set/*`, `texture/*`, `render_pipeline/*` state,
   `encoding/*` + `encoding/cmds/*`, `shader_module/*`, `getBindGroupLayout`, `queue/*`,
-  `resource_compatibility`, `render_bundle`, `inter_stage`, … — see [COVERAGE](docs/COVERAGE.md) for
-  the full list) — and **38 `api/operation`** files: `command_buffer/`
+  `resource_compatibility`, `render_bundle`, `inter_stage`, `error_scope`, `image_copy/buffer_related`,
+  `layout_shader_compat`, … — see [COVERAGE](docs/COVERAGE.md) for the full list) — and **38
+  `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture, render/render_bundle,
   programmable/state_tracking, queries/occlusionQuery}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil, depth_bias,
@@ -144,7 +145,12 @@ state:
   `texture_external`; `render_pipeline/misc`), **F-061** (over-rejects compatible pipeline-layout binding
   kinds; `resource_compatibility`), **F-062** (over-rejects compatible render-bundle attachment signatures;
   `render_bundle`), and **F-063** (inter-stage interpolation-sampling mis-validated; `inter_stage`) are now
-  **all fixed and re-verified on both HALs** — yawgpu has **no open findings**. Three **Mac-only
+  **all fixed and re-verified on both HALs**. The batch-4 bulk port then surfaced four more cross-HAL findings,
+  currently **open** (Dawn passes all it can oracle): **F-064** (WGSL frontend errors immediate-data shader
+  modules; `pipeline/immediates` — Dawn skips, no oracle), **F-065** (error-scope reports OOM as a validation
+  error; `error_scope`), **F-066** (`setViewport` rejects an in-bounds viewport;
+  `encoding/cmds/render/dynamic_state`), and **F-067** (under-validates depth/stencil buffer copies + buffer
+  device-mismatch; `image_copy/buffer_related`). Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`

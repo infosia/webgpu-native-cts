@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 42 | 8 | 0 | 0 | 79 |
+| `api/validation` | 129 | 56 | 9 | 0 | 0 | 64 |
 | `api/operation` | 72 | 14 | 30 | 4 | 0 | 24 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **56** | **38** | **20** | **446** | **123** |
+| **Total** | **683** | **70** | **39** | **20** | **446** | **108** |
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -68,6 +68,19 @@ compatible render-bundle attachment signatures, 30), **F-063** (inter-stage inte
 mis-validated, 12) — **all three now fixed and re-verified on both HALs** (2026-06-09:
 `resource_compatibility` `pass=123`, `render_bundle` `pass=21`, `inter_stage` `pass=26`, fail=0 on Metal and
 Vulkan/MoltenVK).
+
+**Batch 4** (commit `e0313c5`) ported 15 more — `buffer/threading` (upstream all-TODO stub, 0 cases),
+`encoding/queries/{general,begin_end}`, `queue/{writeTexture,destroyed/texture,buffer_mapped}`,
+`pipeline/immediates`, `encoding/cmds/{setImmediates,render/{indirect_draw,dynamic_state,state_tracking}}`,
+`error_scope`, `render_pass/resolve`, `image_copy/buffer_related`, `layout_shader_compat` — **all Dawn-green**
+after two review fixes (resolve `getErrorTextureView` swallows the view-creation error in a validation scope;
+`image_copy/buffer_related` predicts failure for an aspect-`all` copy of a combined depth+stencil format).
+`setImmediates` is `.skip()` on all backends (the `wgpuXxxSetImmediates` entry points are not exported at this
+revision). It surfaced four cross-HAL yawgpu findings (Dawn passes all it can oracle): **F-064** (WGSL frontend
+errors immediate-data shader modules; `pipeline/immediates`, 4 — Dawn skips, no oracle), **F-065** (error-scope
+reports OOM as a validation error / filters miss the type; `error_scope`, 7), **F-066** (`setViewport` rejects
+an in-bounds viewport; `dynamic_state`, 2), **F-067** (under-validates depth/stencil buffer copies + buffer
+device-mismatch; `image_copy/buffer_related`, Metal 15 / MoltenVK 8).
 
 Notes on the pre-classified rows:
 

@@ -39,11 +39,18 @@ never masked). The early validation/copy milestones (commit + result):
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063
 — each keeps a compact record below.
-**No open yawgpu findings.** The `api/validation` Workflow bulk ports surfaced **F-060/F-061/F-062/F-063**
-(all cross-HAL; Dawn passed all) — **all four are now fixed and re-verified on both HALs** (Metal ==
-Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2 fail=0` (F-060, yawgpu `fa97027`),
-`resource_compatibility` `pass=123 fail=0` (F-061), `render_bundle` `pass=21 fail=0` (F-062), `inter_stage`
-`pass=26 fail=0` (F-063).
+**Open — yawgpu (all cross-HAL, surfaced by the `api/validation` Workflow batch-4 bulk port; Dawn passes
+all that it can oracle):** **F-064** (WGSL frontend errors immediate-data shader modules — `pipeline/immediates`,
+4; Dawn skips so no oracle), **F-065** (error-scope reports out-of-memory as a validation error and
+out-of-memory/internal filters miss the expected type — `error_scope`, 7), **F-066** (`setViewport` rejects an
+in-bounds viewport as out-of-bounds — `encoding/cmds/render/dynamic_state`, 2), **F-067** (under-validates
+depth/stencil buffer copies: aspect-`all` on a combined depth+stencil format, buffer device-mismatch, and the
+256-byte `bytesPerRow` alignment for DS formats — `image_copy/buffer_related`, Metal 15 / MoltenVK 8).
+
+The earlier `api/validation` bulk-port findings **F-060/F-061/F-062/F-063** (all cross-HAL; Dawn passed all) are
+**all fixed and re-verified on both HALs** (Metal == Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2
+fail=0` (F-060, yawgpu `fa97027`), `resource_compatibility` `pass=123 fail=0` (F-061), `render_bundle` `pass=21
+fail=0` (F-062), `inter_stage` `pass=26 fail=0` (F-063).
 (The validation-
 bulk findings **F-057 / F-058 / F-059 are all fixed and re-verified on both HALs**: `non_filterable_texture`
 `pass=160`, `depth_stencil_state` `pass=1600`, `storage_texture,format` `pass=720`. Earlier session findings
@@ -1150,6 +1157,63 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   interpolation-sampling compatibility rule is both too strict and too lax in different spots.
 - **Status:** **RESOLVED** (yawgpu, 2026-06-09). Re-verified both HALs: `inter_stage` `pass=26 fail=0`
   on Metal and Vulkan/MoltenVK. Surfaced, not masked.
+
+---
+
+## F-064 — yawgpu: WGSL frontend errors immediate-data shader modules — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK both fail 4). Dawn **skips** (this Dawn build
+  reports `maxImmediateSize == 0`, so the test feature-gates off) — no direct oracle.
+- **Found by:** `api,validation,pipeline,immediates` `pipeline_creation_immediate_size_mismatch` (4 cases,
+  compute/render × isAsync).
+- **Observed:** `unexpected validation error: compute/render pipeline … shader module must not be an error
+  module` — yawgpu advertises `maxImmediateSize > 0` (so the port runs the test rather than skipping) but its
+  WGSL frontend cannot compile a shader that declares immediate data, erroring the module. Same WGSL-frontend
+  family as the resolved F-057 / F-060.
+- **Expected (WebGPU):** if a backend reports immediate-data support, the immediate-data WGSL must compile;
+  pipeline creation then fails (or not) on the size-mismatch rule the test targets — not on the shader module.
+- **Status:** **OPEN** (yawgpu, cross-HAL). Oracle-limited (Dawn skips). Surfaced, not masked.
+
+---
+
+## F-065 — yawgpu: error-scope out-of-memory type / filter handling — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == MoltenVK both fail 7). Not in Dawn (passes all 17).
+- **Found by:** `api,validation,error_scope` (`simple`, `parent_scope`, `current_scope`; 7 cases).
+- **Observed:** for an out-of-memory-triggering allocation yawgpu reports a **validation** error (`type=1`)
+  instead of `out-of-memory` (`captured error type mismatch — expected out-of-memory, got type=1`), and
+  `out-of-memory` / `internal` filtered scopes do not catch the expected type (`expected an uncaptured error,
+  got none` / `scope did not catch the expected error type`). Dawn classifies and filters these correctly.
+- **Expected (WebGPU):** an OOM allocation surfaces a `GPUOutOfMemoryError`, caught only by an
+  `'out-of-memory'`-filtered scope; mismatched filters let it propagate as uncaptured.
+- **Status:** **OPEN** (yawgpu, cross-HAL — error-reporting model). Surfaced, not masked.
+
+---
+
+## F-066 — yawgpu: setViewport rejects an in-bounds viewport as out-of-bounds — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == MoltenVK both fail 2). Not in Dawn (passes).
+- **Found by:** `api,validation,encoding,cmds,render,dynamic_state` `setViewport,xy_rect_contained_in_bounds`
+  (2 cases).
+- **Observed:** `unexpected validation error: render pass viewport rectangle exceeds device bounds` — yawgpu
+  rejects a viewport rectangle that **is** contained within the allowed bounds; Dawn accepts it. yawgpu's
+  viewport-bounds validation is too strict.
+- **Status:** **OPEN** (yawgpu, cross-HAL). Surfaced, not masked.
+
+---
+
+## F-067 — yawgpu: under-validates depth/stencil buffer copies & buffer device-mismatch — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL; Metal fails 15, MoltenVK fails 8 — the gap is MoltenVK feature-gating the
+  single-aspect DS formats). Not in Dawn (passes all 692).
+- **Found by:** `api,validation,image_copy,buffer_related` (`buffer,device_mismatch`, `bytes_per_row_alignment`).
+- **Observed:** `expected validation error, got none` — yawgpu accepts copies the spec/Dawn reject:
+  (a) an aspect-`all` buffer copy of a **combined** depth+stencil format (`depth24plus-stencil8`,
+  `depth32float-stencil8`); (b) a `copyBufferToTexture` / `copyTextureToBuffer` whose buffer is from a
+  **mismatched device**; (c) [Metal only] a non-256-aligned `bytesPerRow` for single-aspect DS formats
+  (`stencil8`, `depth16unorm`, `depth32float`) — MoltenVK feature-gates those formats so they don't surface
+  there.
+- **Status:** **OPEN** (yawgpu, cross-HAL — buffer/texture-copy validation gaps). Surfaced, not masked.
 
 ---
 
