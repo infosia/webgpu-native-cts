@@ -124,18 +124,19 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 55 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 55 cross-backend findings to date (all yawgpu findings
+fixed); the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
 - **yawgpu** — the primary conformance subject — passed the entire ported suite on Vulkan as of the
   2026-06-08 confirmation (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti).
   `expectations/yawgpu.txt` carries no expected failures — nothing is masked. (It also *runs* the
-  `immediate_data_size` cases Dawn/wgpu-native skip.) Earlier session findings F-051
-  (multisampled-texture-view crash; `sample_mask`), F-053 (multi-attachment 3D-slice render;
-  `3d_texture_slices`), F-054 (sparse / `null` color attachment; `pipeline_output_targets`) are all fixed;
-  one new finding is open: **F-055** (cross-HAL — wrong values sampling a depth/stencil aspect while it is a
-  **read-only** depth-stencil attachment; `memory_sync/texture/readonly_depth_stencil`). Three **Mac-only
+  `immediate_data_size` cases Dawn/wgpu-native skip.) All findings surfaced by this session's newly-added
+  tests are fixed, so yawgpu again has **no open findings**: F-051 (multisampled-texture-view crash;
+  `sample_mask`), F-054 (sparse / `null` color attachment; `pipeline_output_targets`), and F-055 (read-only
+  DS attachment + concurrent depth/stencil sampling; `memory_sync/texture`) pass on **both HALs**; F-053
+  (multi-attachment 3D-slice render; `3d_texture_slices`) on Metal + native Vulkan. Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`
