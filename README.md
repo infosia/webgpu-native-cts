@@ -95,9 +95,13 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   test-prefix lines) so a run with known divergences still exits 0.
 - All three backends — **wgpu-native, yawgpu, Dawn** — build link-agnostically and run on a real GPU.
   Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
-- Ported so far: 10 `api/validation` files — **6 complete** (`createTexture`, `createView`,
-  `createBindGroupLayout`, `createPipelineLayout`, `clearBuffer`, `copyBufferToBuffer`) plus a
-  maximally-ported `buffer/mapping` — and **38 `api/operation`** files: `command_buffer/`
+- Ported so far: **50 `api/validation` files** (42 complete, 8 partial) — the original hand-ported
+  vertical slice (`createTexture`, `createView`, `createBindGroupLayout`, `createPipelineLayout`,
+  `clearBuffer`, `copyBufferToBuffer`, plus a maximally-ported `buffer/mapping`) **plus 40 files from
+  three parallel Workflow bulk-port batches** (`query_set/*`, `texture/*`, `render_pipeline/*` state,
+  `encoding/*` + `encoding/cmds/*`, `shader_module/*`, `getBindGroupLayout`, `queue/*`,
+  `resource_compatibility`, `render_bundle`, `inter_stage`, … — see [COVERAGE](docs/COVERAGE.md) for
+  the full list) — and **38 `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture, render/render_bundle,
   programmable/state_tracking, queries/occlusionQuery}`, `queue/writeBuffer`,
   `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil, depth_bias,
@@ -173,6 +177,12 @@ Per-backend comparison, each case isolated — `--isolate` (one subprocess per c
 revisions](docs/UPSTREAM.md).
 
 #### `api,validation` — 4715 cases across 10 files
+
+> The full per-backend **isolated** measurement table below covers the original hand-ported
+> vertical-slice files. The **40 files added by the three Workflow bulk-port batches** are verified
+> separately — every batch is **Dawn-green** (the oracle passes all cases, 0 fail) and **swept on
+> yawgpu across both HALs** (Metal + MoltenVK), which is how findings **F-057…F-063** were surfaced.
+> They are folded into the full per-backend isolated/expectations table on the next Windows regen.
 
 **Real-GPU Metal** (Apple Silicon):
 
