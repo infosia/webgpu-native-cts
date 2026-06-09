@@ -39,9 +39,15 @@ never masked). The early validation/copy milestones (commit + result):
 
 **Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059
 — each keeps a compact record below.
-**Open — yawgpu:** **F-060** — the WGSL compiler **errors on `texture_external`** (the external-texture
-type), producing an error shader module; **cross-HAL** (Metal == MoltenVK). Surfaced by the
-`api,validation,render_pipeline,misc` `external_texture` port (2 cases). Dawn passes both. (The validation-
+**Open — yawgpu (all cross-HAL, surfaced by the `api/validation` Workflow bulk ports; Dawn passes all):**
+**F-060** — the WGSL compiler errors on `texture_external` (`render_pipeline/misc` `external_texture`, 2).
+**F-061** — render-pipeline validation **over-rejects compatible pipeline-layout binding kinds** (`pipeline
+layout binding kind is incompatible with the shader binding`; `render_pipeline/resource_compatibility`, 80).
+**F-062** — render-bundle validation **over-rejects compatible attachment signatures** (`render bundle
+attachment signature is incompatible with the render pass`; `encoding/render_bundle`, 30). **F-063** —
+inter-stage **interpolation-sampling compatibility** is mis-validated (8 over-reject `inter-stage
+interpolation sampling is incompatible` + 4 under-validate `got none`; `render_pipeline/inter_stage`, 12).
+(The validation-
 bulk findings **F-057 / F-058 / F-059 are all fixed and re-verified on both HALs**: `non_filterable_texture`
 `pass=160`, `depth_stencil_state` `pass=1600`, `storage_texture,format` `pass=720`. Earlier session findings
 F-051 / F-053 / F-054 / F-055 are also fixed — F-051/F-054/F-055 on both HALs, F-053 on Metal + native
@@ -1107,6 +1113,40 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Expected (WebGPU):** `texture_external` is a valid WGSL sampled-texture type; the shader compiles. Dawn
   accepts it.
 - **Status:** **OPEN** (yawgpu, cross-HAL — shared WGSL frontend). Surfaced, not masked.
+
+---
+
+## F-061 — yawgpu: render-pipeline over-rejects compatible pipeline-layout binding kinds — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == MoltenVK both fail 80). Not in Dawn (passes all).
+- **Found by:** `api,validation,render_pipeline,resource_compatibility` (80/~15754 cases).
+- **Observed:** `unexpected validation error: pipeline layout binding kind is incompatible with the shader
+  binding` — yawgpu rejects an explicit pipeline layout whose binding kind IS compatible with the shader's
+  resource binding (the spec/Dawn accept it). yawgpu **over-validates** binding-kind compatibility.
+- **Status:** **OPEN** (yawgpu, cross-HAL — shared pipeline validation). Surfaced, not masked.
+
+---
+
+## F-062 — yawgpu: render-bundle over-rejects compatible attachment signatures — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == MoltenVK both fail 30). Not in Dawn (passes all).
+- **Found by:** `api,validation,encoding,render_bundle` (30 cases).
+- **Observed:** `unexpected validation error: render bundle attachment signature is incompatible with the
+  render pass` — yawgpu rejects executing a render bundle whose attachment signature IS compatible with the
+  render pass; Dawn accepts it. yawgpu **over-validates** the bundle/pass attachment-signature match.
+- **Status:** **OPEN** (yawgpu, cross-HAL). Surfaced, not masked.
+
+---
+
+## F-063 — yawgpu: inter-stage interpolation-sampling compatibility mis-validated — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, Metal == MoltenVK both fail 12). Not in Dawn (passes all).
+- **Found by:** `api,validation,render_pipeline,inter_stage` (12 cases).
+- **Observed:** 8 cases `unexpected validation error: render pipeline inter-stage interpolation sampling is
+  incompatible` (over-reject valid inter-stage interpolation pairings) + 4 cases `expected validation error,
+  got none` (under-validate — yawgpu misses a genuinely-incompatible pairing). yawgpu's inter-stage
+  interpolation-sampling compatibility rule is both too strict and too lax in different spots.
+- **Status:** **OPEN** (yawgpu, cross-HAL). Surfaced, not masked.
 
 ---
 

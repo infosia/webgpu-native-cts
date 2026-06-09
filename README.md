@@ -124,7 +124,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 60 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 63 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
@@ -137,8 +137,11 @@ state:
   3D-slice render; `3d_texture_slices`) are all fixed; the `api/validation` Workflow
   bulk-port findings **F-057** (`texture_cube_array<f32>` shader error), **F-058** (depth-stencil state
   over-validation), and **F-059** (storage-texture-format support gap) are now **fixed and re-verified on
-  both HALs**. One new finding is open: **F-060** (cross-HAL — the WGSL compiler errors on `texture_external`;
-  `render_pipeline/misc`). Three **Mac-only
+  both HALs**. Open findings, all cross-HAL and surfaced by the `api/validation` bulk ports (Dawn passes all): **F-060**
+  (WGSL errors on `texture_external`; `render_pipeline/misc`), **F-061** (over-rejects compatible
+  pipeline-layout binding kinds; `resource_compatibility`), **F-062** (over-rejects compatible render-bundle
+  attachment signatures; `render_bundle`), **F-063** (inter-stage interpolation-sampling mis-validated;
+  `inter_stage`). Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`

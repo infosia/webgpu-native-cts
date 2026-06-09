@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 28 | 7 | 0 | 0 | 94 |
+| `api/validation` | 129 | 42 | 8 | 0 | 0 | 79 |
 | `api/operation` | 72 | 14 | 30 | 4 | 0 | 24 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **42** | **37** | **20** | **446** | **138** |
+| **Total** | **683** | **56** | **38** | **20** | **446** | **123** |
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -55,7 +55,16 @@ yawgpu findings (all cross-HAL): **F-058** (over-requires `depthCompare`+`depthW
 `storage_texture,format` `pass=720` on both HALs) — and **F-060** (WGSL errors on `texture_external`;
 `render_pipeline/misc` `external_texture`, 2 cases; **OPEN**). wgpu-native shows expected validation gaps + aborts on several of these groups (the panic family,
 contained via `--isolate`; to be added to the Windows-generated `expectations/wgpu-native.{txt,crash.txt}`
-on the next regen).
+on the next regen). **Batch 3** (commit `4b7c350` + fixes `376d9c3`) ported 15 more —
+`render_pipeline/{shader_module,inter_stage,resource_compatibility,overrides}`, `shader_module/overrides`,
+`encoding/{createRenderBundleEncoder,render_bundle,cmds/{compute_pass,copyBufferToBuffer,setBindGroup},queries/resolveQuerySet}`,
+`queue/{submit,writeBuffer,destroyed/buffer}` (+ `encoding/cmds/render_pass`, an upstream 0-test stub) —
+all Dawn-green (full matrices: `resource_compatibility` 15754, `createRenderBundleEncoder` 550). Three
+review fixes (render-bundle DS-readonly mismatch; resolveQuerySet's encoder-command errors **defer to
+finish()** not eager; queue/submit invalid-CB via double-finish). It surfaced three more cross-HAL yawgpu
+findings: **F-061** (over-rejects compatible pipeline-layout binding kinds, 80), **F-062** (over-rejects
+compatible render-bundle attachment signatures, 30), **F-063** (inter-stage interpolation-sampling
+mis-validated, 12).
 
 Notes on the pre-classified rows:
 
