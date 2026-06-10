@@ -445,13 +445,13 @@ CTS_TEST(g, "setBlendConstant")
             });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const double r = t.param<double>("r");
-        const double g = t.param<double>("g");
-        const double b = t.param<double>("b");
-        const double a = t.param<double>("a");
+        const double red   = t.param<double>("r");
+        const double green = t.param<double>("g");
+        const double blue  = t.param<double>("b");
+        const double alpha = t.param<double>("a");
 
         DummyRenderPassEncoders encoders = createDummyRenderPassEncoder(t);
-        WGPUColor color = WGPUColor{r, g, b, a};
+        WGPUColor color = WGPUColor{red, green, blue, alpha};
         wgpuRenderPassEncoderSetBlendConstant(encoders.pass, &color);
         wgpuRenderPassEncoderEnd(encoders.pass);
         wgpuRenderPassEncoderRelease(encoders.pass);

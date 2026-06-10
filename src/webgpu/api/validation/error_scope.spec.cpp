@@ -279,7 +279,10 @@ CTS_TEST(g, "simple")
             }
             WGPUDevice   dev2   = dr2.device;
             WGPUQueue    queue2 = wgpuDeviceGetQueue(dev2);
-            WGPULimits   limits = gotLimits2 ? limitsForOom : WGPU_LIMITS_INIT;
+            WGPULimits   limits = WGPU_LIMITS_INIT;
+            if (gotLimits2) {
+                limits = limitsForOom;
+            }
 
             // Push scope with 'errorFilter' — won't match 'errorType'.
             wgpuDevicePushErrorScope(dev2, filterFromString(errorFilter));

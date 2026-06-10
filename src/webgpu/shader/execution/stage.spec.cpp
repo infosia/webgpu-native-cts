@@ -219,17 +219,17 @@ fn frag_main() -> @location(0) vec4f {
                 if (len < 4) {
                     return "readback buffer too small (need >= 4 bytes)";
                 }
-                const uint8_t r = actual[0];
-                const uint8_t g = actual[1];
-                const uint8_t b = actual[2];
-                const uint8_t a = actual[3];
-                if (r != 0x00u || g != 0xffu || b != 0x00u || a != 0xffu) {
+                const uint8_t red   = actual[0];
+                const uint8_t green = actual[1];
+                const uint8_t blue  = actual[2];
+                const uint8_t alpha = actual[3];
+                if (red != 0x00u || green != 0xffu || blue != 0x00u || alpha != 0xffu) {
                     std::ostringstream msg;
                     msg << "pixel[0,0] expected rgba={0,255,0,255}, got {"
-                        << static_cast<int>(r) << ","
-                        << static_cast<int>(g) << ","
-                        << static_cast<int>(b) << ","
-                        << static_cast<int>(a) << "}";
+                        << static_cast<int>(red) << ","
+                        << static_cast<int>(green) << ","
+                        << static_cast<int>(blue) << ","
+                        << static_cast<int>(alpha) << "}";
                     return msg.str();
                 }
                 return std::nullopt;
