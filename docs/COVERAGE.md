@@ -25,14 +25,14 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
 | `api/validation` | 129 | 56 | 9 | 0 | 0 | 64 |
-| `api/operation` | 72 | 18 | 31 | 6 | 0 | 17 |
+| `api/operation` | 72 | 22 | 32 | 6 | 0 | 12 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 11 | 0 | 0 | 228 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **85** | **40** | **22** | **435** | **101** |
+| **Total** | **683** | **89** | **41** | **22** | **435** | **96** |
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -102,6 +102,18 @@ files Dawn-green (920/920 on `map`+`map_oom` after the adaptations). Surfaced **
 zero-size map ranges fail), **F-073** (yawgpu cross-HAL: panic-abort on OOM-sized `mappedAtCreation`),
 **F-074** (yawgpu MoltenVK: `queue.writeBuffer` ordering vs prior submits at queue-op boundaries), and
 wgpu-native **F-075** (mapping broadly broken, 586 fail/crash).
+
+**Batch Y-3 / phase Y3 (texture-view reinterpretation / swizzle / sampling)** ported
+`texture_view/{texture_component_swizzle, format_reinterpretation}`, `sampling/{sampler_texture,
+anisotropy}` and `rendering/robust_access_index` (upstream itself is an empty stub → partial). All
+Dawn-green after two review fixes (anisotropy: vertex+fragment WGSL must be two modules, not one
+concatenated module; sampler_texture: readback buffer needs `CopySrc` for the harness staging copy).
+`texture_component_swizzle` (529 cases / 52326 subcases) passes Dawn fully; yawgpu and wgpu-native lack
+the `texture-component-swizzle` feature, so it is Dawn-only oracle for now. `format_reinterpretation` is
+green on all three backends and both yawgpu HALs. Surfaced **F-076** (yawgpu: anisotropic filtering —
+Metal clamp inconsistency, MoltenVK error-command-buffer; wgpu-native passes) and **F-077** (shared-naga:
+max-bindings shader rejected by naga but accepted by Tint; yawgpu panics in the MSL writer instead of
+surfacing the error).
 
 Notes on the pre-classified rows:
 

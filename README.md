@@ -101,7 +101,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   four parallel Workflow bulk-port batches** (`query_set/*`, `texture/*`, `render_pipeline/*` state,
   `encoding/*` + `encoding/cmds/*`, `shader_module/*`, `getBindGroupLayout`, `queue/*`,
   `resource_compatibility`, `render_bundle`, `inter_stage`, `error_scope`, `image_copy/buffer_related`,
-  `layout_shader_compat`, … — see [COVERAGE](docs/COVERAGE.md) for the full list) — and **43
+  `layout_shader_compat`, … — see [COVERAGE](docs/COVERAGE.md) for the full list) — and **48
   `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture, render/render_bundle,
   programmable/state_tracking, queries/occlusionQuery}`, `queue/writeBuffer`,
@@ -113,7 +113,10 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   vertex_only_render_pipeline}` (the face-culling + primitive-topology + fragment-output + override-constant
   foundations),
   `compute/basic` + `compute_pipeline/overrides` (the compute + override-constant foundations),
-  `sampling/filter_mode` (the texture-sampling foundation),
+  `sampling/{filter_mode, sampler_texture, anisotropy}` (the texture-sampling foundations),
+  `texture_view/{format_reinterpretation, texture_component_swizzle}` (the view-reinterpretation +
+  component-swizzle foundations; swizzle is 52k subcases, Dawn-only oracle until yawgpu/wgpu-native gain
+  the feature),
   `memory_sync/buffer/{single_buffer, multiple_buffers}` (the buffer-synchronization foundations),
   `buffers/{map, map_oom, createBindGroup, threading}` (the buffer-mapping foundation),
   `render_pass/{resolve, storeop2, clear_value, storeOp, transient_attachment}` (the multisample-resolve +
@@ -133,7 +136,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 71 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 73 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
@@ -164,7 +167,11 @@ state:
   `buffers,map` — Metal-only), **F-073** (panic-abort on an OOM-sized `mappedAtCreation` buffer;
   `buffers,map_oom` — cross-HAL), and **F-074** (`queue.writeBuffer` not ordered behind prior submits at
   queue-op boundaries; `memory_sync/buffer/multiple_buffers` — MoltenVK-only, native-Vulkan confirm
-  pending). Three **Mac-only
+  pending). The texture-view/sampling batch (Y-3) surfaced two more, currently **open**: **F-076**
+  (anisotropic-filter `maxAnisotropy` clamping broken on both HALs in different ways;
+  `sampling/anisotropy` — wgpu-native passes) and **F-077** (max-bindings shader rejected by naga where
+  Tint accepts it, and yawgpu panic-aborts in the MSL writer instead of erroring;
+  `sampling/sampler_texture`). Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`

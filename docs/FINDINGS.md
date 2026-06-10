@@ -60,6 +60,13 @@ buffer — `buffers,map_oom`, cross-HAL), **F-074** (`queue.writeBuffer` orderin
 `memory_sync/buffer/multiple_buffers`, MoltenVK-only, 21 cases, native-Vulkan confirm pending). Plus
 **F-075** (wgpu-native: buffer mapping broadly broken, 586 fail/crash).
 
+**Open — yawgpu (texture-view/sampling batch Y-3, phase Y3; Dawn green incl. 52326/52326 on
+`texture_component_swizzle`):** **F-076** (anisotropic filtering: Metal clamp inconsistency + MoltenVK
+error-command-buffer — `sampling/anisotropy`; wgpu-native passes), **F-077** (max-bindings shader:
+naga-lineage validation rejection that Tint accepts, and yawgpu panics in the MSL writer instead of
+erroring — `sampling/sampler_texture`). `texture_component_swizzle` is skipped by yawgpu and wgpu-native
+(feature not implemented) — Dawn-only oracle for now.
+
 The earlier `api/validation` bulk-port findings **F-060/F-061/F-062/F-063** (all cross-HAL; Dawn passed all) are
 **all fixed and re-verified on both HALs** (Metal == Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2
 fail=0` (F-060, yawgpu `fa97027`), `resource_compatibility` `pass=123 fail=0` (F-061), `render_bundle` `pass=21
@@ -1343,6 +1350,37 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 - **Observed:** widespread mapAsync/getMappedRange failures and process aborts on Metal.
 - **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
   `expectations/wgpu-native.*` on regen). Not masked.
+
+---
+
+## F-076 — yawgpu: anisotropic filtering broken — both HALs, differently
+
+- **Backend:** yawgpu only (wgpu-native passes all 3 cases; Dawn passes all 3).
+- **Found by:** `api,operation,sampling,anisotropy` (batch Y-3, phase Y3 port).
+- **Observed:** on **Metal**, `anisotropic_filter_checkerboard` fails with
+  `Render results with sampler.maxAnisotropy being 16 and 1024 should be the same.` — values above the
+  hardware maximum are not clamped consistently, so two samplers that must behave identically render
+  differently. On **MoltenVK**, all 3 cases (including `anisotropic_filter_mipmap_color`, which passes on
+  Metal) fail with `queue submit cannot use an error command buffer` — an out-of-range `maxAnisotropy`
+  appears to error sampler/pipeline creation instead of being clamped.
+- **Status:** **OPEN** (yawgpu — sampler `maxAnisotropy` clamping on both HALs). Surfaced, not masked.
+
+---
+
+## F-077 — shared-naga: max-bindings shader invalid; yawgpu panics in the MSL writer instead of erroring
+
+- **Backend:** naga lineage + yawgpu error-handling. Dawn (Tint) passes the same generated shader
+  (1/1). wgpu-native (upstream naga) **aborts** the process; yawgpu (naga fork) **panics** at
+  `naga/src/back/msl/writer.rs:391` `unreachable: module is not valid` inside
+  `createRenderPipelineTracked` — i.e. naga validation rejected the module but yawgpu-core still invoked
+  the MSL backend, converting a should-be-graceful `createShaderModule`/pipeline error into a
+  non-unwinding panic → process abort. On MoltenVK (SPIR-V writer) yawgpu fails gracefully
+  (`queue submit cannot use an error command buffer`).
+- **Found by:** `api,operation,sampling,sampler_texture` `sample_texture_combos` — a generated WGSL using
+  the device's full `maxSampledTexturesPerShaderStage` × `maxSamplersPerShaderStage` binding matrix.
+- **Status:** **OPEN** — two actionables: (naga fork) module wrongly fails validation; (yawgpu-core)
+  pipeline creation must gate on shader validation result instead of reaching the backend writer.
+  Surfaced, not masked.
 
 ---
 
