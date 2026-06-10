@@ -37,35 +37,26 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063
-— each keeps a compact record below.
-**Open — yawgpu (all cross-HAL, surfaced by the `api/validation` Workflow batch-4 bulk port; Dawn passes
-all that it can oracle):** **F-064** (WGSL frontend errors immediate-data shader modules — `pipeline/immediates`,
-4; Dawn skips so no oracle), **F-065** (error-scope reports out-of-memory as a validation error and
-out-of-memory/internal filters miss the expected type — `error_scope`, 7), **F-066** (`setViewport` rejects an
-in-bounds viewport as out-of-bounds — `encoding/cmds/render/dynamic_state`, 2), **F-067** (under-validates
-depth/stencil buffer copies: aspect-`all` on a combined depth+stencil format, buffer device-mismatch, and the
-256-byte `bytesPerRow` alignment for DS formats — `image_copy/buffer_related`, Metal 15 / MoltenVK 8).
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/069/072/073/074/076/077
+— each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`d376a1b`) fixed the ten
+findings F-064–F-067, F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK.
 
-**Open — yawgpu (shader/execution batch Y-1, phase S1; Dawn green, wgpu-native green on both groups):**
-**F-068** (indirect-draw vertex robustness broken — `robust_access_vertex`, Metal 89 / MoltenVK 129 unique
-cases, cross-HAL), **F-069** (workgroup-memory loads read zeros — `memory_layout`, 55 yawgpu-only cases,
-Metal-dominant). Shared-naga and wgpu-native-only observations from the same batch: **F-070** (naga lineage:
-workgroup `write_layout`, `struct_inner_align`, matCx3 padding [MSL], `shadow:loop`), **F-071** (wgpu-native
-`zero_init` 3930 subcase failures).
+**Open — yawgpu:**
+- **F-068** (indirect-draw vertex robustness broken — `shader,execution,robust_access_vertex`, cross-HAL,
+  nondeterministic case counts; no fix attempted yet).
+- **Regressions introduced by the 2026-06-11 update (all cross-HAL, Metal == MoltenVK):** **F-078**
+  (`shader,execution,robust_access` compute pipelines all error — 1068 subcases that were green the day
+  before), **F-079** (destroyed-resource errors fire as uncaptured errors outside the expected validation
+  point — `setBindGroup` 6 + `queue/destroyed/query_set` 1), **F-080** (filtering sampler +
+  `unfilterable-float` texture no longer rejected — `non_filterable_texture`, 32; F-057-area regression),
+  **F-081** (external-texture pipelines error "missing params buffer slot" — `render_pipeline/misc`, 2;
+  F-060-area regression).
 
-**Open — yawgpu (buffer-mapping/sync batch Y-2, phase Y2; Dawn green):** **F-072** (zero-size map ranges
-fail — `buffers,map`, Metal-only, ~93 cases), **F-073** (panic-abort on OOM-sized `mappedAtCreation`
-buffer — `buffers,map_oom`, cross-HAL), **F-074** (`queue.writeBuffer` ordering vs prior submits —
-`memory_sync/buffer/multiple_buffers`, MoltenVK-only, 21 cases, native-Vulkan confirm pending). Plus
-**F-075** (wgpu-native: buffer mapping broadly broken, 586 fail/crash).
-
-**Open — yawgpu (texture-view/sampling batch Y-3, phase Y3; Dawn green incl. 52326/52326 on
-`texture_component_swizzle`):** **F-076** (anisotropic filtering: Metal clamp inconsistency + MoltenVK
-error-command-buffer — `sampling/anisotropy`; wgpu-native passes), **F-077** (max-bindings shader:
-naga-lineage validation rejection that Tint accepts, and yawgpu panics in the MSL writer instead of
-erroring — `sampling/sampler_texture`). `texture_component_swizzle` is skipped by yawgpu and wgpu-native
-(feature not implemented) — Dawn-only oracle for now.
+**Open — naga lineage / wgpu-native:** **F-070** (reduced 2026-06-11: Metal residual is
+`struct_inner_align` 9 + matCx3 padding 16 + `shadow:loop`; MoltenVK still fails ~54 `memory_layout`
+layout cases — SPIR-V backend lacks the fix), **F-071** (wgpu-native `zero_init` 3930 + `robust_access`
+aborts), **F-075** (wgpu-native buffer mapping broadly broken). `texture_component_swizzle` remains
+Dawn-only oracle (yawgpu/wgpu-native lack the feature).
 
 The earlier `api/validation` bulk-port findings **F-060/F-061/F-062/F-063** (all cross-HAL; Dawn passed all) are
 **all fixed and re-verified on both HALs** (Metal == Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2
@@ -1192,7 +1183,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   family as the resolved F-057 / F-060.
 - **Expected (WebGPU):** if a backend reports immediate-data support, the immediate-data WGSL must compile;
   pipeline creation then fails (or not) on the size-mismatch rule the test targets — not on the shader module.
-- **Status:** **OPEN** (yawgpu, cross-HAL). Oracle-limited (Dawn skips). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `f9a076e`; re-verified 2026-06-11 on Metal + MoltenVK, `pipeline/immediates` green).
 
 ---
 
@@ -1206,7 +1197,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   got none` / `scope did not catch the expected error type`). Dawn classifies and filters these correctly.
 - **Expected (WebGPU):** an OOM allocation surfaces a `GPUOutOfMemoryError`, caught only by an
   `'out-of-memory'`-filtered scope; mismatched filters let it propagate as uncaptured.
-- **Status:** **OPEN** (yawgpu, cross-HAL — error-reporting model). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `f9a076e` + `de7bae3`/`ef43eae`; re-verified 2026-06-11 on Metal + MoltenVK, `error_scope` green).
 
 ---
 
@@ -1218,7 +1209,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Observed:** `unexpected validation error: render pass viewport rectangle exceeds device bounds` — yawgpu
   rejects a viewport rectangle that **is** contained within the allowed bounds; Dawn accepts it. yawgpu's
   viewport-bounds validation is too strict.
-- **Status:** **OPEN** (yawgpu, cross-HAL). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `f9a076e`; re-verified 2026-06-11 on Metal + MoltenVK, `dynamic_state` green).
 
 ---
 
@@ -1233,7 +1224,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   **mismatched device**; (c) [Metal only] a non-256-aligned `bytesPerRow` for single-aspect DS formats
   (`stencil8`, `depth16unorm`, `depth32float`) — MoltenVK feature-gates those formats so they don't surface
   there.
-- **Status:** **OPEN** (yawgpu, cross-HAL — buffer/texture-copy validation gaps). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `f9a076e`; re-verified 2026-06-11 on Metal + MoltenVK, `image_copy/buffer_related` green).
 
 ---
 
@@ -1265,7 +1256,9 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   round-tripped through a `var<workgroup>` comes back as zeros (48 `read_layout` + 7 `write_layout`
   yawgpu-only cases; 54/55 are `workgroup`, plus 1 `uniform` straggler). Scalar, vector, matrix and
   array-of-matrix layouts all affected.
-- **Status:** **OPEN** (yawgpu — workgroup-memory load/store on Metal). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `a034b24`; re-verified 2026-06-11 — the 55 yawgpu-only cases pass on
+  Metal; the naga-fork fix also cleared the previously shared workgroup `write_layout` set on Metal.
+  Remaining `memory_layout` failures are tracked under F-070.)
 
 ---
 
@@ -1275,7 +1268,11 @@ Recorded for completeness; these fail **identically on yawgpu and wgpu-native** 
 naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch focus.
 
 - `memory_layout`: 48 shared cases — `write_layout` with `aspace="workgroup"` (44) and `struct_inner_align`
-  across all address spaces (4).
+  across all address spaces (4). **Update 2026-06-11:** yawgpu's naga-fork fix (`a034b24`) cleared the
+  workgroup `write_layout` set on **Metal** — the Metal residual is now `struct_inner_align` only
+  (9 cases). The **MoltenVK** path still fails ~54 `memory_layout` cases (workgroup `write_layout`
+  matrices/vectors, `struct_double_align`, `struct_inner_size_and_align`, `array_stride_size`) — the
+  SPIR-V backend did not get the equivalent fix.
 - `padding`: 16 shared cases on **Metal only** (`matCx3`/`array_of_matCx3` columns 2–4, plus struct cases) —
   implementation writes into matCx3 column padding bytes (`expected 239, got 0` at the padding byte).
   yawgpu-MoltenVK passes all but 2, so this is the naga **MSL** backend; yawgpu inherits it via its naga fork.
@@ -1311,7 +1308,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   the six `size=0` buffer subcases and the `size=12; range=[0,0]` explicit zero-length-range subcase, in
   every region-mode case (~93 unique cases). Mapping a zero-size buffer or a zero-length range is valid
   per spec (Dawn and yawgpu-Vulkan accept it); yawgpu's Metal HAL rejects/fails the map.
-- **Status:** **OPEN** (yawgpu — Metal HAL zero-size mapping). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `726e8aa`; re-verified 2026-06-11, `buffers,map` green on Metal + MoltenVK).
 
 ---
 
@@ -1323,7 +1320,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   `mappedAtCreation=true` and a ~9 PB size **aborts the process** (Rust panic, likely an unchecked
   host-allocation/overflow) instead of failing gracefully (Dawn returns an unmappable buffer and raises
   no error; `getMappedRange` returns null).
-- **Status:** **OPEN** (yawgpu, cross-HAL — ungraceful OOM handling). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `726e8aa`; re-verified 2026-06-11, `map_oom` green on Metal + MoltenVK — no abort).
 
 ---
 
@@ -1337,7 +1334,8 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   `boundary="queue-op"` and predominantly `writeOp="write-buffer"`: a `queue.writeBuffer` issued *after*
   a submitted read/write becomes visible to that earlier work (the read observes the later write), i.e.
   writeBuffer's staging upload is not ordered behind previously submitted command buffers.
-- **Status:** **OPEN** (yawgpu — Vulkan HAL writeBuffer ordering at queue-op boundaries). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `a034b24`; re-verified 2026-06-11, `multiple_buffers` 260 cases green on
+  MoltenVK and Metal).
 
 ---
 
@@ -1363,7 +1361,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   differently. On **MoltenVK**, all 3 cases (including `anisotropic_filter_mipmap_color`, which passes on
   Metal) fail with `queue submit cannot use an error command buffer` — an out-of-range `maxAnisotropy`
   appears to error sampler/pipeline creation instead of being clamped.
-- **Status:** **OPEN** (yawgpu — sampler `maxAnisotropy` clamping on both HALs). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `726e8aa`; re-verified 2026-06-11, `anisotropy` 3/3 green on Metal + MoltenVK).
 
 ---
 
@@ -1378,9 +1376,59 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   (`queue submit cannot use an error command buffer`).
 - **Found by:** `api,operation,sampling,sampler_texture` `sample_texture_combos` — a generated WGSL using
   the device's full `maxSampledTexturesPerShaderStage` × `maxSamplersPerShaderStage` binding matrix.
-- **Status:** **OPEN** — two actionables: (naga fork) module wrongly fails validation; (yawgpu-core)
-  pipeline creation must gate on shader validation result instead of reaching the backend writer.
-  Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `d376a1b` — naga storage-access fix + Metal per-kind/per-stage binding
+  slots; re-verified 2026-06-11, `sampler_texture` green on Metal + MoltenVK, no panic). Note: the same
+  commit introduced regressions tracked as F-078/F-081.
+
+---
+
+## F-078 — yawgpu regression: robust_access compute pipelines all error — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL: Metal and MoltenVK both fail the same 1068 subcases). Introduced by the
+  2026-06-11 yawgpu update (suspect `d376a1b` binding-slot rework); this group was fully green on yawgpu
+  the day before (Metal `pass=1068 fail=0`).
+- **Found by:** `shader,execution,robust_access` `linear_memory` — every non-f16 subcase.
+- **Observed:** `uncaptured error: queue submit cannot use an error command buffer` — compute pipeline /
+  bind-group-layout creation fails for the test's explicit-BGL setup (group 0: storage/uniform test
+  buffer or empty; group 1: uniform constants + storage result), invalidating the command buffer.
+- **Status:** **OPEN** (yawgpu, cross-HAL regression). Surfaced, not masked.
+
+---
+
+## F-079 — yawgpu regression: destroyed-resource errors fire outside the expected validation point — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, identical on Metal and MoltenVK). New with the 2026-06-11 update.
+- **Found by:** `api,validation,encoding,cmds,setBindGroup` `state_and_binding_index` (6: compute pass ×
+  `state="destroyed"` buffer/texture) and `api,validation,queue,destroyed,query_set` `timestamps` (1).
+- **Observed:** `uncaptured error: bind group buffer must not be destroyed` / `... texture must not be
+  destroyed` / `render pass timestamp writes query set cannot use a destroyed query set` — the error now
+  surfaces as an uncaptured error outside the point where the spec (and the test's error scope) expects
+  it, instead of failing the expected call (submit-time validation).
+- **Status:** **OPEN** (yawgpu, cross-HAL regression — validation timing/reporting). Surfaced, not masked.
+
+---
+
+## F-080 — yawgpu regression: filtering-sampler + unfilterable-float texture no longer rejected — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, 32 cases identical on Metal and MoltenVK). Regression of the F-057-area
+  validation, new with the 2026-06-11 update.
+- **Found by:** `api,validation,non_filterable_texture` `non_filterable_texture_with_filtering_sampler`
+  (`sampleType="unfilterable-float"` combinations; other sample types still pass).
+- **Observed:** `expected validation error, got none` — pairing a filtering sampler with an
+  `unfilterable-float` texture binding must fail pipeline validation; yawgpu now accepts it.
+- **Status:** **OPEN** (yawgpu, cross-HAL regression). Surfaced, not masked.
+
+---
+
+## F-081 — yawgpu regression: external-texture pipelines error "missing params buffer slot" — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL, 2 cases identical on Metal and MoltenVK — the message references the MSL
+  path but the Vulkan backend fails identically, so the shared binding-slot assignment is at fault).
+  Regression of the F-060-area support, new with the 2026-06-11 update (suspect `d376a1b`).
+- **Found by:** `api,validation,render_pipeline,misc` `external_texture` (isAsync=false/true).
+- **Observed:** `uncaptured error: MSL external texture binding is missing params buffer slot` — creating
+  a render pipeline that binds a `texture_external` errors.
+- **Status:** **OPEN** (yawgpu, cross-HAL regression). Surfaced, not masked.
 
 ---
 

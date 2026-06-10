@@ -136,7 +136,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 73 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 77 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
@@ -152,26 +152,20 @@ state:
   `texture_external`; `render_pipeline/misc`), **F-061** (over-rejects compatible pipeline-layout binding
   kinds; `resource_compatibility`), **F-062** (over-rejects compatible render-bundle attachment signatures;
   `render_bundle`), and **F-063** (inter-stage interpolation-sampling mis-validated; `inter_stage`) are now
-  **all fixed and re-verified on both HALs**. The batch-4 bulk port then surfaced four more cross-HAL findings,
-  currently **open** (Dawn passes all it can oracle): **F-064** (WGSL frontend errors immediate-data shader
-  modules; `pipeline/immediates` — Dawn skips, no oracle), **F-065** (error-scope reports OOM as a validation
-  error; `error_scope`), **F-066** (`setViewport` rejects an in-bounds viewport;
-  `encoding/cmds/render/dynamic_state`), and **F-067** (under-validates depth/stencil buffer copies + buffer
-  device-mismatch; `image_copy/buffer_related`). The shader/execution structural batch (Y-1) surfaced two
-  more, currently **open**: **F-068** (indirect-draw vertex robustness broken;
-  `shader,execution,robust_access_vertex` — cross-HAL, wgpu-native passes so not naga-lineage) and
-  **F-069** (workgroup-memory loads read zeros; `shader,execution,memory_layout` — Metal-dominant).
-  Shared-naga observations from the same batch are tracked as **F-070** (affects yawgpu via its naga fork:
-  workgroup `write_layout`, `struct_inner_align`, matCx3 padding on MSL, `shadow:loop`). The buffer-mapping
-  batch (Y-2) surfaced three more, currently **open**: **F-072** (zero-size map ranges fail;
-  `buffers,map` — Metal-only), **F-073** (panic-abort on an OOM-sized `mappedAtCreation` buffer;
-  `buffers,map_oom` — cross-HAL), and **F-074** (`queue.writeBuffer` not ordered behind prior submits at
-  queue-op boundaries; `memory_sync/buffer/multiple_buffers` — MoltenVK-only, native-Vulkan confirm
-  pending). The texture-view/sampling batch (Y-3) surfaced two more, currently **open**: **F-076**
-  (anisotropic-filter `maxAnisotropy` clamping broken on both HALs in different ways;
-  `sampling/anisotropy` — wgpu-native passes) and **F-077** (max-bindings shader rejected by naga where
-  Tint accepts it, and yawgpu panic-aborts in the MSL writer instead of erroring;
-  `sampling/sampler_texture`). Three **Mac-only
+  **all fixed and re-verified on both HALs**, as are the ten findings surfaced by the batch-4 and Y-1..Y-3
+  bulk ports — **F-064–F-067** (validation), **F-069** (workgroup-memory loads), **F-072/F-073**
+  (zero-size map ranges, OOM `mappedAtCreation` abort), **F-074** (`queue.writeBuffer` ordering),
+  **F-076** (`maxAnisotropy` clamping) and **F-077** (max-bindings shader panic) — all re-verified
+  2026-06-11 on Metal + MoltenVK. Currently **open**: **F-068** (indirect-draw vertex robustness broken;
+  `shader,execution,robust_access_vertex` — cross-HAL, wgpu-native passes so not naga-lineage), and four
+  cross-HAL **regressions introduced by the 2026-06-11 yawgpu update**: **F-078**
+  (`shader,execution,robust_access` compute pipelines all error, 1068 subcases), **F-079**
+  (destroyed-resource errors fire outside the expected validation point; `setBindGroup` +
+  `queue/destroyed/query_set`), **F-080** (filtering sampler + `unfilterable-float` no longer rejected;
+  `non_filterable_texture`, 32), and **F-081** (external-texture pipelines error "missing params buffer
+  slot"; `render_pipeline/misc`). Naga-lineage residuals are tracked as **F-070** (Metal:
+  `struct_inner_align` + matCx3 padding + `shadow:loop`; MoltenVK additionally ~54 `memory_layout` layout
+  cases pending the SPIR-V-side fix). Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`
