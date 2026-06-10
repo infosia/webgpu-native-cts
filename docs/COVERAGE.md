@@ -25,14 +25,14 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
 | `api/validation` | 129 | 56 | 9 | 0 | 0 | 64 |
-| `api/operation` | 72 | 14 | 30 | 4 | 0 | 24 |
+| `api/operation` | 72 | 18 | 31 | 6 | 0 | 17 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 11 | 0 | 0 | 228 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **81** | **39** | **20** | **435** | **108** |
+| **Total** | **683** | **85** | **40** | **22** | **435** | **101** |
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -91,6 +91,17 @@ layout, workgroup memory) where all historical yawgpu findings clustered; `shade
 `specs/phaseS1-shader-exec-structural.md`). It surfaced **F-068** (yawgpu cross-HAL: indirect-draw vertex
 robustness), **F-069** (yawgpu Metal: workgroup-memory loads read zeros), plus shared-naga **F-070** and
 wgpu-native **F-071** (`zero_init`, 3930 subcase failures).
+
+**Batch Y-2 / phase Y2 (buffer mapping + multi-buffer sync)** ported `buffers/{map, map_oom,
+createBindGroup}` and `memory_sync/buffer/multiple_buffers` (plus `buffers/threading` as upstream
+`.unimplemented()` stubs → partial); `buffers/{map_ArrayBuffer, map_detach}` are **N/A** (JS `ArrayBuffer`
+detach/transfer semantics). Two JS-vs-native adaptations are documented in the ports: an invalid `mapAsync`
+may eagerly report `unmapped` (JS pins `'pending'` synchronously; Dawn and yawgpu agree on eager), and the
+oom=true `mappedAtCreation` RangeError becomes "no mapping obtainable, any error type tolerated". All five
+files Dawn-green (920/920 on `map`+`map_oom` after the adaptations). Surfaced **F-072** (yawgpu Metal:
+zero-size map ranges fail), **F-073** (yawgpu cross-HAL: panic-abort on OOM-sized `mappedAtCreation`),
+**F-074** (yawgpu MoltenVK: `queue.writeBuffer` ordering vs prior submits at queue-op boundaries), and
+wgpu-native **F-075** (mapping broadly broken, 586 fail/crash).
 
 Notes on the pre-classified rows:
 

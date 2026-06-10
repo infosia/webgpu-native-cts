@@ -101,7 +101,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   four parallel Workflow bulk-port batches** (`query_set/*`, `texture/*`, `render_pipeline/*` state,
   `encoding/*` + `encoding/cmds/*`, `shader_module/*`, `getBindGroupLayout`, `queue/*`,
   `resource_compatibility`, `render_bundle`, `inter_stage`, `error_scope`, `image_copy/buffer_related`,
-  `layout_shader_compat`, … — see [COVERAGE](docs/COVERAGE.md) for the full list) — and **38
+  `layout_shader_compat`, … — see [COVERAGE](docs/COVERAGE.md) for the full list) — and **43
   `api/operation`** files: `command_buffer/`
   `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture, render/render_bundle,
   programmable/state_tracking, queries/occlusionQuery}`, `queue/writeBuffer`,
@@ -114,7 +114,8 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   foundations),
   `compute/basic` + `compute_pipeline/overrides` (the compute + override-constant foundations),
   `sampling/filter_mode` (the texture-sampling foundation),
-  `memory_sync/buffer/single_buffer` (the buffer-synchronization foundation),
+  `memory_sync/buffer/{single_buffer, multiple_buffers}` (the buffer-synchronization foundations),
+  `buffers/{map, map_oom, createBindGroup, threading}` (the buffer-mapping foundation),
   `render_pass/{resolve, storeop2, clear_value, storeOp, transient_attachment}` (the multisample-resolve +
   store-op + stencil-clear-value + storeOp + transient-attachment foundations),
   `storage_texture/{read_only, read_write}` (the storage-texture read + write foundations),
@@ -132,7 +133,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 67 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 71 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
@@ -158,7 +159,12 @@ state:
   `shader,execution,robust_access_vertex` — cross-HAL, wgpu-native passes so not naga-lineage) and
   **F-069** (workgroup-memory loads read zeros; `shader,execution,memory_layout` — Metal-dominant).
   Shared-naga observations from the same batch are tracked as **F-070** (affects yawgpu via its naga fork:
-  workgroup `write_layout`, `struct_inner_align`, matCx3 padding on MSL, `shadow:loop`). Three **Mac-only
+  workgroup `write_layout`, `struct_inner_align`, matCx3 padding on MSL, `shadow:loop`). The buffer-mapping
+  batch (Y-2) surfaced three more, currently **open**: **F-072** (zero-size map ranges fail;
+  `buffers,map` — Metal-only), **F-073** (panic-abort on an OOM-sized `mappedAtCreation` buffer;
+  `buffers,map_oom` — cross-HAL), and **F-074** (`queue.writeBuffer` not ordered behind prior submits at
+  queue-op boundaries; `memory_sync/buffer/multiple_buffers` — MoltenVK-only, native-Vulkan confirm
+  pending). Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`
