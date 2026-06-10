@@ -54,6 +54,12 @@ Metal-dominant). Shared-naga and wgpu-native-only observations from the same bat
 workgroup `write_layout`, `struct_inner_align`, matCx3 padding [MSL], `shadow:loop`), **F-071** (wgpu-native
 `zero_init` 3930 subcase failures).
 
+**Open — yawgpu (buffer-mapping/sync batch Y-2, phase Y2; Dawn green):** **F-072** (zero-size map ranges
+fail — `buffers,map`, Metal-only, ~93 cases), **F-073** (panic-abort on OOM-sized `mappedAtCreation`
+buffer — `buffers,map_oom`, cross-HAL), **F-074** (`queue.writeBuffer` ordering vs prior submits —
+`memory_sync/buffer/multiple_buffers`, MoltenVK-only, 21 cases, native-Vulkan confirm pending). Plus
+**F-075** (wgpu-native: buffer mapping broadly broken, 586 fail/crash).
+
 The earlier `api/validation` bulk-port findings **F-060/F-061/F-062/F-063** (all cross-HAL; Dawn passed all) are
 **all fixed and re-verified on both HALs** (Metal == Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2
 fail=0` (F-060, yawgpu `fa97027`), `resource_compatibility` `pass=123 fail=0` (F-061), `render_bundle` `pass=21
@@ -1283,6 +1289,58 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   `robust_access`: all 366 non-f16 case shards **abort** — pipeline creation fails validation
   (`ComputePipeline with '' label is invalid`) and the error surfaces as a Rust panic + `fatal runtime
   error` at `wgpuQueueSubmit` instead of a reportable error (same abort class as F-001).
+- **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
+  `expectations/wgpu-native.*` on regen). Not masked.
+
+---
+
+## F-072 — yawgpu: zero-size map ranges fail — Metal-only
+
+- **Backend:** yawgpu Metal only (MoltenVK passes all the same cases; Dawn passes everything;
+  wgpu-native fails these groups too but for its own broader mapping defects — see F-075).
+- **Found by:** `api,operation,buffers,map` `mapAsync,read` / `mapAsync,write` / `remapped_for_write` /
+  `mappedAtCreation` (batch Y-2, phase Y2 port).
+- **Observed:** `expected mapAsync success` — every subcase whose map region is **zero-sized** fails:
+  the six `size=0` buffer subcases and the `size=12; range=[0,0]` explicit zero-length-range subcase, in
+  every region-mode case (~93 unique cases). Mapping a zero-size buffer or a zero-length range is valid
+  per spec (Dawn and yawgpu-Vulkan accept it); yawgpu's Metal HAL rejects/fails the map.
+- **Status:** **OPEN** (yawgpu — Metal HAL zero-size mapping). Surfaced, not masked.
+
+---
+
+## F-073 — yawgpu: panic-abort on OOM-sized mappedAtCreation buffer — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL: Metal and MoltenVK both abort with signal 6).
+- **Found by:** `api,operation,buffers,map_oom` `mappedAtCreation` `oom=true;size=9007199254740984`.
+- **Observed:** `shard worker aborted: signal 6 (Abort trap: 6)` — `wgpuDeviceCreateBuffer` with
+  `mappedAtCreation=true` and a ~9 PB size **aborts the process** (Rust panic, likely an unchecked
+  host-allocation/overflow) instead of failing gracefully (Dawn returns an unmappable buffer and raises
+  no error; `getMappedRange` returns null).
+- **Status:** **OPEN** (yawgpu, cross-HAL — ungraceful OOM handling). Surfaced, not masked.
+
+---
+
+## F-074 — yawgpu: queue.writeBuffer ordering vs prior submits broken — MoltenVK-only (native-Vulkan confirm pending)
+
+- **Backend:** yawgpu Vulkan via MoltenVK only (Metal passes all 260 `multiple_buffers` cases; Dawn green).
+  Like F-033, a MoltenVK translation artifact cannot be fully excluded until a native-Vulkan run, but the
+  failure is an API-level ordering property, pointing at the yawgpu Vulkan HAL submission/staging path.
+- **Found by:** `api,operation,memory_sync,buffer,multiple_buffers` `rw` (16) / `ww` (5).
+- **Observed:** `GPU buffer mismatch at byte 0: expected 0, got 1` — all 21 failing cases have
+  `boundary="queue-op"` and predominantly `writeOp="write-buffer"`: a `queue.writeBuffer` issued *after*
+  a submitted read/write becomes visible to that earlier work (the read observes the later write), i.e.
+  writeBuffer's staging upload is not ordered behind previously submitted command buffers.
+- **Status:** **OPEN** (yawgpu — Vulkan HAL writeBuffer ordering at queue-op boundaries). Surfaced, not masked.
+
+---
+
+## F-075 — wgpu-native: buffer mapping broadly broken (586 fail/crash in `buffers,map`)
+
+- **Backend:** wgpu-native only.
+- **Found by:** `api,operation,buffers,map` (batch Y-2 port): `mapAsync,read` 129, `remapped_for_write`
+  228, `mapAsync,mapState` 96, `mapAsync,write` 57, `typedArrayAccess` 54, `mappedAtCreation,mapState` 12,
+  `unchanged_ranges_preserved` 10; 109 shard-worker crashes among them.
+- **Observed:** widespread mapAsync/getMappedRange failures and process aborts on Metal.
 - **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
   `expectations/wgpu-native.*` on regen). Not masked.
 
