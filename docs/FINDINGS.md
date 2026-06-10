@@ -47,6 +47,13 @@ in-bounds viewport as out-of-bounds — `encoding/cmds/render/dynamic_state`, 2)
 depth/stencil buffer copies: aspect-`all` on a combined depth+stencil format, buffer device-mismatch, and the
 256-byte `bytesPerRow` alignment for DS formats — `image_copy/buffer_related`, Metal 15 / MoltenVK 8).
 
+**Open — yawgpu (shader/execution batch Y-1, phase S1; Dawn green, wgpu-native green on both groups):**
+**F-068** (indirect-draw vertex robustness broken — `robust_access_vertex`, Metal 89 / MoltenVK 129 unique
+cases, cross-HAL), **F-069** (workgroup-memory loads read zeros — `memory_layout`, 55 yawgpu-only cases,
+Metal-dominant). Shared-naga and wgpu-native-only observations from the same batch: **F-070** (naga lineage:
+workgroup `write_layout`, `struct_inner_align`, matCx3 padding [MSL], `shadow:loop`), **F-071** (wgpu-native
+`zero_init` 3930 subcase failures).
+
 The earlier `api/validation` bulk-port findings **F-060/F-061/F-062/F-063** (all cross-HAL; Dawn passed all) are
 **all fixed and re-verified on both HALs** (Metal == Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2
 fail=0` (F-060, yawgpu `fa97027`), `resource_compatibility` `pass=123 fail=0` (F-061), `render_bundle` `pass=21
@@ -1214,6 +1221,70 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   (`stencil8`, `depth16unorm`, `depth32float`) — MoltenVK feature-gates those formats so they don't surface
   there.
 - **Status:** **OPEN** (yawgpu, cross-HAL — buffer/texture-copy validation gaps). Surfaced, not masked.
+
+---
+
+## F-068 — yawgpu: vertex-buffer OOB robustness broken for indirect draws — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL; Metal fails 89 unique cases, MoltenVK 129, 83 common — both dominated by
+  `indirect=true`: 79/89 on Metal, 123/129 on MoltenVK). **Nondeterministic across runs** (65 unique on a
+  second Metal sweep) — expected for unclamped OOB fetches that read whatever memory happens to hold; the
+  indirect-dominated distribution is stable. wgpu-native passes all 1856 (so this is not shared-naga);
+  Dawn passes (one worker-crash artifact re-ran clean in isolation).
+- **Found by:** `shader,execution,robust_access_vertex` `vertex_buffer_access` (phase S1 / batch Y-1 port).
+- **Observed:** `pixel(0,0) expected rgba={0,255,0,255}, got {255,0,0,255}` — the test shader detects
+  out-of-bounds vertex-fetch data that should have been clamped/zeroed. Failures concentrate on
+  **indirect** draws (`drawIndirect` / `drawIndexedIndirect`) across `vertexCount`/`instanceCount`/
+  `baseVertex`/`firstVertex` overflows and all `float32*` attribute formats; a small non-indirect residue
+  (10 Metal / 6 MoltenVK) also fails. yawgpu's vertex-robustness path is not applied (or applied with the
+  wrong bounds) when draw parameters come from an indirect buffer.
+- **Status:** **OPEN** (yawgpu, cross-HAL — indirect-draw vertex robustness). Surfaced, not masked.
+
+---
+
+## F-069 — yawgpu: workgroup-memory loads read zeros (memory_layout) — Metal-dominant
+
+- **Backend:** yawgpu (Metal-dominant: 55 cases fail on Metal that wgpu-native passes; only 6 of those also
+  fail on MoltenVK). wgpu-native (upstream naga MSL) passes the same 55 on Metal — so this is yawgpu's
+  Metal HAL or its naga-fork MSL emission, not shared-naga. Dawn passes all of `memory_layout`.
+- **Found by:** `shader,execution,memory_layout` `read_layout`/`write_layout` (phase S1 / batch Y-1 port).
+- **Observed:** `GPU buffer mismatch at byte 0: expected 42, got 0` — with `aspace="workgroup"`, data
+  round-tripped through a `var<workgroup>` comes back as zeros (48 `read_layout` + 7 `write_layout`
+  yawgpu-only cases; 54/55 are `workgroup`, plus 1 `uniform` straggler). Scalar, vector, matrix and
+  array-of-matrix layouts all affected.
+- **Status:** **OPEN** (yawgpu — workgroup-memory load/store on Metal). Surfaced, not masked.
+
+---
+
+## F-070 — shared-naga (yawgpu + wgpu-native): workgroup write_layout, struct_inner_align, matCx3 padding, loop shadowing
+
+Recorded for completeness; these fail **identically on yawgpu and wgpu-native** (Dawn green), so they are
+naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch focus.
+
+- `memory_layout`: 48 shared cases — `write_layout` with `aspace="workgroup"` (44) and `struct_inner_align`
+  across all address spaces (4).
+- `padding`: 16 shared cases on **Metal only** (`matCx3`/`array_of_matCx3` columns 2–4, plus struct cases) —
+  implementation writes into matCx3 column padding bytes (`expected 239, got 0` at the padding byte).
+  yawgpu-MoltenVK passes all but 2, so this is the naga **MSL** backend; yawgpu inherits it via its naga fork.
+- `shadow`: `loop` fails on yawgpu Metal + MoltenVK + wgpu-native (`expected 0, got 239` at byte 0 — output
+  never written) — naga mis-handles shadowing in `loop`; Dawn passes.
+- **Status:** **OPEN** (naga lineage; affects yawgpu via its fork). Surfaced, not masked.
+
+---
+
+## F-071 — wgpu-native: zero_init fails massively; robust_access aborts the process
+
+- **Backend:** wgpu-native only (yawgpu and Dawn pass both groups — `robust_access` Dawn 1626/1626,
+  yawgpu Metal `fail=0 crash=0`).
+- **Found by:** `shader,execution,zero_init` `compute,zero_init` and `shader,execution,robust_access`
+  `linear_memory` (phase S1 / batch Y-1 port).
+- **Observed:** (a) `zero_init`: 3930 subcase failures on Metal — wgpu-native does not zero-initialize the
+  tested workgroup/private/function variables for most type/workgroup-size combinations. (b)
+  `robust_access`: all 366 non-f16 case shards **abort** — pipeline creation fails validation
+  (`ComputePipeline with '' label is invalid`) and the error surfaces as a Rust panic + `fatal runtime
+  error` at `wgpuQueueSubmit` instead of a reportable error (same abort class as F-001).
+- **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
+  `expectations/wgpu-native.*` on regen). Not masked.
 
 ---
 

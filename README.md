@@ -120,7 +120,10 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   `storage_texture/{read_only, read_write}` (the storage-texture read + write foundations),
   `resource_init/texture_zero` (the texture zero-init foundation), and
   `vertex_state/{index_format, correctness}` (the indexed-draw index-format + vertex-format-decode
-  foundations).
+  foundations) — and **11 `shader/execution`** structural files (`stage`, `float_parse`, `override`,
+  `value_init`, `shadow`, `limits`, `padding`, `robust_access`, `robust_access_vertex`, `zero_init`,
+  `memory_layout` — the WGSL zero-init / robustness / memory-layout / workgroup-memory execution
+  foundations; `shader/validation` and the expression precision tables stay deferred).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
@@ -129,7 +132,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 63 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 67 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
@@ -150,7 +153,12 @@ state:
   modules; `pipeline/immediates` — Dawn skips, no oracle), **F-065** (error-scope reports OOM as a validation
   error; `error_scope`), **F-066** (`setViewport` rejects an in-bounds viewport;
   `encoding/cmds/render/dynamic_state`), and **F-067** (under-validates depth/stencil buffer copies + buffer
-  device-mismatch; `image_copy/buffer_related`). Three **Mac-only
+  device-mismatch; `image_copy/buffer_related`). The shader/execution structural batch (Y-1) surfaced two
+  more, currently **open**: **F-068** (indirect-draw vertex robustness broken;
+  `shader,execution,robust_access_vertex` — cross-HAL, wgpu-native passes so not naga-lineage) and
+  **F-069** (workgroup-memory loads read zeros; `shader,execution,memory_layout` — Metal-dominant).
+  Shared-naga observations from the same batch are tracked as **F-070** (affects yawgpu via its naga fork:
+  workgroup `write_layout`, `struct_inner_align`, matCx3 padding on MSL, `shadow:loop`). Three **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`

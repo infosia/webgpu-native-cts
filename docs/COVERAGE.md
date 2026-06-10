@@ -27,12 +27,12 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `api/validation` | 129 | 56 | 9 | 0 | 0 | 64 |
 | `api/operation` | 72 | 14 | 30 | 4 | 0 | 24 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
-| `shader/execution` | 239 | 0 | 0 | 0 | 239 | 0 |
+| `shader/execution` | 239 | 11 | 0 | 0 | 228 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **70** | **39** | **20** | **446** | **108** |
+| **Total** | **683** | **81** | **39** | **20** | **435** | **108** |
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -81,6 +81,16 @@ errors immediate-data shader modules; `pipeline/immediates`, 4 — Dawn skips, n
 reports OOM as a validation error / filters miss the type; `error_scope`, 7), **F-066** (`setViewport` rejects
 an in-bounds viewport; `dynamic_state`, 2), **F-067** (under-validates depth/stencil buffer copies + buffer
 device-mismatch; `image_copy/buffer_related`, Metal 15 / MoltenVK 8).
+
+**Batch Y-1 / phase S1 (shader/execution structural)** ported the 11 non-expression single-file tests under
+`shader/execution/` — `stage`, `float_parse`, `override`, `value_init`, `shadow`, `limits`, `padding`,
+`robust_access`, `robust_access_vertex`, `zero_init`, `memory_layout` (1722 cases; `zero_init` alone has 5089
+subcases). Selection rationale: these exercise the integrated backend stack (zero-init, robustness, memory
+layout, workgroup memory) where all historical yawgpu findings clustered; `shader/validation` and
+`shader/execution/expression` stay deferred (they predominantly exercise the WGSL frontend / const-eval — see
+`specs/phaseS1-shader-exec-structural.md`). It surfaced **F-068** (yawgpu cross-HAL: indirect-draw vertex
+robustness), **F-069** (yawgpu Metal: workgroup-memory loads read zeros), plus shared-naga **F-070** and
+wgpu-native **F-071** (`zero_init`, 3930 subcase failures).
 
 Notes on the pre-classified rows:
 
