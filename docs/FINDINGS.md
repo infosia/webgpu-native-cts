@@ -43,14 +43,19 @@ findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + Molt
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu:** **F-085** (per-sample interpolation / sample_mask wrong on Vulkan —
-`shader_io/fragment_builtins`, **native-Vulkan CONFIRMED 2026-06-11** on Windows/NVIDIA RTX 5060 Ti:
-the same 92 cases fail with the same signature as MoltenVK — a real yawgpu Vulkan defect, not a
-translation artifact). The native-Vulkan run (yawgpu `9382206`) cleared the other two pending
-findings: **F-083** (memory_model/barrier) is green natively (`pass=12 fail=0`, two consecutive
-runs) and **F-086** (compound eval order, discard derivatives, IO-struct-in-buffer) passes all
-three cases natively — both reclassified MoltenVK-only translation artifacts (same class as
-F-033/F-045/F-053/F-068-residual). Batch Y-4b (statement +
+**Open — yawgpu:** none. **F-085** was native-Vulkan confirmed (2026-06-11, Windows/NVIDIA RTX
+5060 Ti: the same 92 cases as MoltenVK) but then **reclassified — NOT an implementation defect**:
+wgpu-native on the same machine/driver fails the identical 92 cases (its earlier "fully green"
+Y-4b record was wgpu-native-on-Metal), and Dawn behaves the same on Vulkan (no FragCoord/
+SampleMaskIn normalization; suppresses these cases via crbug.com/407144390). The WGSL WG resolved
+to respecify `sample_mask` input to the Vulkan single-bit semantics (gpuweb/gpuweb#5457; CTS
+change gpuweb/cts#4510 pending merge); `position` under per-sample invocation is open in
+gpuweb/gpuweb#4777. The 92 cases are `xfail` in both `expectations/yawgpu.txt` and
+`expectations/wgpu-native.txt` until cts#4510 merges. The same native-Vulkan run (yawgpu
+`9382206`) cleared the other two pending findings: **F-083** (memory_model/barrier) is green
+natively (`pass=12 fail=0`, two consecutive runs) and **F-086** (compound eval order, discard
+derivatives, IO-struct-in-buffer) passes all three cases natively — both reclassified MoltenVK-only
+translation artifacts (same class as F-033/F-045/F-053/F-068-residual). Batch Y-4b (statement +
 shader_io, 11 files incl. fragment_builtins 2399-line port): Dawn green 2929/0; yawgpu Metal and
 wgpu-native fully green. The 2026-06-11 regressions F-079/F-080/F-081 were fixed the same day (yawgpu `4770131` +
 `9382206`) and re-verified: `api,validation` full sweep on Metal `pass=107608 fail=0`; F-079/F-080 also
@@ -1503,21 +1508,32 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 
 ---
 
-## F-085 — yawgpu: per-sample interpolation / sample_mask wrong on Vulkan — native-Vulkan CONFIRMED
+## F-085 — Vulkan per-sample dispatch: sample_mask / position fragment builtins — NOT an implementation defect (spec in flux; xfail)
 
-- **Backend:** yawgpu Vulkan (yawgpu Metal, wgpu-native and Dawn all pass). Initially observed on
-  MoltenVK; **confirmed identical on native Vulkan** (2026-06-11, Windows 11 / NVIDIA RTX 5060 Ti,
-  yawgpu `9382206`) — a real yawgpu Vulkan-path defect, not a MoltenVK artifact.
+- **Backend:** **every Vulkan-based implementation** — yawgpu (MoltenVK AND native Windows/Vulkan,
+  NVIDIA RTX 5060 Ti, yawgpu `9382206`), **wgpu-native on the same machine/driver (identical 92
+  fails; verified 2026-06-11 — its earlier "fully green" Y-4b record was wgpu-native-on-Metal)**,
+  and Dawn (no FragCoord/SampleMaskIn normalization on Vulkan: `RenderPipelineVk.cpp` enables
+  sample shading only for framebuffer fetch; Chromium suppresses exactly these cases on
+  Linux/Vulkan via crbug.com/407144390). Metal-family targets pass (Metal's builtins natively
+  match the current oracle).
 - **Found by:** `shader,execution,shader_io,fragment_builtins` — `inputs,sample_mask` (88) and
   `inputs,position` (4), exactly the `sampleCount=4` × `interpolation="…,sample"` (linear/perspective)
-  cases; same 92-case set and signature on both MoltenVK and native Vulkan.
-- **Observed:** per-sample values disagree with the oracle (e.g. position expected 0.5/center, actual at
-  the standard 4× sample locations — sample-rate shading and the expected evaluation point disagree on
-  the Vulkan path); sample_mask readbacks contain per-sample mask bits that don't match. Native-Vulkan
-  signature: with sample-rate shading active, the `sample_mask` input reads back only the current
-  sample's bit (actual 1/2/4/8 per sample) where the oracle expects the full coverage mask (15) —
-  i.e. Vulkan's per-sample `SampleMaskIn` semantics leak through instead of WebGPU's.
-- **Status:** **OPEN** (yawgpu — Vulkan per-sample shading/interpolation path). Surfaced, not masked.
+  cases; same 92-case set and signature on MoltenVK and native Vulkan.
+- **Observed:** with `@interpolate(…, sample)` forcing per-sample dispatch, Vulkan's native
+  semantics surface: the `sample_mask` input contains only the current sample's bit (1/2/4/8;
+  spec-conformant per the Vulkan `SampleMask` builtin definition) where the current CTS oracle
+  expects the full coverage mask (15), and `position.xy` is at the sample location where the
+  oracle expects the pixel center. The port's oracle matches upstream `fragment_builtins.spec.ts`
+  exactly — this is not a porting bug.
+- **Root cause:** WebGPU↔Vulkan semantic gap, currently being resolved **in Vulkan's favor**: the
+  WGSL WG resolved to respecify `sample_mask` input to single-bit-under-per-sample-invocation
+  (gpuweb/gpuweb#5457, WGSL minutes 2025-12-09 / 2026-01-06; CTS change gpuweb/cts#4510 pending
+  merge). `position` center-vs-sample-location remains an open spec question (gpuweb/gpuweb#4777).
+- **Status:** **RECLASSIFIED — not an implementation defect.** The 92 cases are `xfail` in
+  `expectations/yawgpu.txt` and `expectations/wgpu-native.txt` (both verified
+  `fail=0 xfail=92`, exit 0). When gpuweb/cts#4510 merges: re-port the new sample_mask oracle and
+  drop those xfail entries; keep the 4 `inputs,position` entries until gpuweb#4777 resolves.
 
 ---
 
