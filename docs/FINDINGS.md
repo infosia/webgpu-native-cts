@@ -43,11 +43,15 @@ findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + Molt
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu: none.** The 2026-06-11 regressions F-079/F-080/F-081 were fixed the same day (yawgpu
-`4770131` + `9382206`) and re-verified: `api,validation` full sweep on Metal `pass=107608 fail=0`;
-F-079/F-080 also green on MoltenVK. `external_texture` on Vulkan now fails honestly with "not supported
-on the Vulkan backend" — the deliberate `fa97027` limitation (previously a false pass), documented under
-F-081, not an open defect.
+**Open — yawgpu:** **F-083** (workgroupBarrier does not order non-atomic storage-texture accesses —
+`memory_model/barrier`, MoltenVK, 17k–25k disallowed observations per run; native-Vulkan confirm
+pending). The 2026-06-11 regressions F-079/F-080/F-081 were fixed the same day (yawgpu `4770131` +
+`9382206`) and re-verified: `api,validation` full sweep on Metal `pass=107608 fail=0`; F-079/F-080 also
+green on MoltenVK. `external_texture` on Vulkan now fails honestly with "not supported on the Vulkan
+backend" — the deliberate `fa97027` limitation (previously a false pass), documented under F-081, not an
+open defect. Batch Y-4a (flow_control + memory_model): `flow_control` is green on **all four** targets
+(140 cases); memory_model surfaced **F-082** (naga-MSL: storage-texture intra-invocation coherence — also
+fails on wgpu-native, queued with the naga batch), F-083 above, and wgpu-native **F-084**.
 
 **Open — naga lineage / wgpu-native:** **F-078** (validator treats `let`-propagated indices as
 const-expression OOB → all `robust_access` compute pipelines error; Tint correct; yawgpu's earlier
@@ -1446,6 +1450,44 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   **deliberate** Vulkan-side rejection introduced by `fa97027` (F-060), surfaced honestly by the F-065
   error wiring (the earlier "pass=2 both HALs" record was a false pass on Vulkan, cf. F-078's lesson).
   Tracked as a documented yawgpu-Vulkan feature limitation, not a defect.
+
+---
+
+## F-082 — naga-MSL lineage: storage-texture intra-invocation coherence broken on Metal
+
+- **Backend:** naga MSL lineage — yawgpu Metal and wgpu-native (Metal) fail the **same 12 cases**
+  (r32uint/r32sint/r32float × 1d/2d/2d-array/3d); Dawn passes all; yawgpu-MoltenVK (SPIR-V path) passes.
+- **Found by:** `shader,execution,memory_model,texture_intra_invocation_coherence` (batch Y-4a port).
+- **Observed:** `GPU buffer mismatch … expected N, got 0` — a storage-texture write followed by a read of
+  the same texel **within the same invocation** returns stale/zero data on the MSL path.
+- **Status:** **OPEN** (naga MSL backend; affects yawgpu via its fork). Queued with the naga batch
+  (F-070/F-078). Surfaced, not masked.
+
+---
+
+## F-083 — yawgpu: workgroupBarrier does not order non-atomic storage-texture accesses — MoltenVK (native-Vulkan confirm pending)
+
+- **Backend:** yawgpu Vulkan via MoltenVK (Metal passes; Dawn passes). Reproducible, not statistical
+  noise: 17k–25k disallowed observations out of 65 536 per run.
+- **Found by:** `shader,execution,memory_model,barrier` `workgroup_barrier_load_store`
+  `accessValueType="u32";memType="non_atomic_texture";accessPair="rw";normalBarrier=true`.
+- **Observed:** `memory model test failed: testResults[1] == 25567, expected == 0 (disallowed weak
+  behavior observed)` — a `workgroupBarrier()` between a non-atomic storage-texture write and a read does
+  not establish ordering on the Vulkan path (missing image-memory scope in the emitted barrier, or a HAL
+  barrier gap). Like F-074 was, needs a native-Vulkan run to exclude a MoltenVK artifact — though a
+  memory-ordering hole is unlikely to be a translation issue.
+- **Status:** **OPEN** (yawgpu — Vulkan barrier semantics for storage textures). Surfaced, not masked.
+
+---
+
+## F-084 — wgpu-native: disallowed weak-memory behaviors on Metal (barrier/coherence/weak)
+
+- **Backend:** wgpu-native only (yawgpu Metal passes these; Dawn passes).
+- **Found by:** `shader,execution,memory_model`: `barrier:workgroup_barrier_load_store` (2),
+  `coherence:corw1`/`corw2` (3), `weak:load_buffer` (1) — beyond the 12 F-082 cases it shares with yawgpu.
+- **Observed:** disallowed weak behaviors observed in the stress harness — barrier/coherence guarantees
+  violated on Metal.
+- **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference). Not masked.
 
 ---
 

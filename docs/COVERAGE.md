@@ -27,12 +27,12 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `api/validation` | 129 | 56 | 9 | 0 | 0 | 64 |
 | `api/operation` | 72 | 22 | 32 | 6 | 0 | 12 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
-| `shader/execution` | 239 | 11 | 0 | 0 | 228 | 0 |
+| `shader/execution` | 239 | 27 | 0 | 0 | 212 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **89** | **41** | **22** | **435** | **96** |
+| **Total** | **683** | **105** | **41** | **22** | **419** | **96** |
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -114,6 +114,19 @@ green on all three backends and both yawgpu HALs. Surfaced **F-076** (yawgpu: an
 Metal clamp inconsistency, MoltenVK error-command-buffer; wgpu-native passes) and **F-077** (shared-naga:
 max-bindings shader rejected by naga but accepted by Tint; yawgpu panics in the MSL writer instead of
 surfacing the error).
+
+**Batch Y-4a / phase Y4a (shader/execution flow_control + memory_model)** ported all 10 `flow_control/`
+files plus the shared `harness.h` (header-only) and all 6 `memory_model/` files plus
+`memory_model_setup.h`. `flow_control` (140 cases) is green on **all four targets** (Dawn, yawgpu Metal,
+yawgpu MoltenVK, wgpu-native) — no findings. memory_model needed one harness-port fix (plain-`GpuTest`
+fixtures re-request a device from the already-consumed shared adapter on Dawn — switched to the
+max-limits fixture / a private-adapter fixture for `texture_intra_invocation_coherence`); after the fix
+Dawn is green (83 pass / 75 tier-format skips) and the batch surfaced **F-082** (naga-MSL:
+storage-texture intra-invocation coherence, also on wgpu-native), **F-083** (yawgpu MoltenVK:
+workgroupBarrier does not order non-atomic storage-texture accesses) and **F-084** (wgpu-native:
+disallowed weak behaviors). ⚠️ Latent suite issue noted by the fix: ~21 other api/* files use plain
+`MakeTestGroup<GpuTest>` and can hit the same consumed-adapter failure in mixed-fixture processes on
+Dawn — to be normalized in a follow-up.
 
 Notes on the pre-classified rows:
 
