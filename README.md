@@ -157,12 +157,11 @@ state:
   (zero-size map ranges, OOM `mappedAtCreation` abort), **F-074** (`queue.writeBuffer` ordering),
   **F-076** (`maxAnisotropy` clamping) and **F-077** (max-bindings shader panic) — all re-verified
   2026-06-11 on Metal + MoltenVK, as is **F-068** (indirect-draw vertex robustness — Metal vertex pulling
-  + Vulkan robustBufferAccess; native Windows/Vulkan confirmed green). Currently **open**: three
-  cross-HAL **regressions introduced by the 2026-06-11 yawgpu update**: **F-079**
-  (destroyed-resource errors fire outside the expected validation point; `setBindGroup` +
-  `queue/destroyed/query_set`), **F-080** (filtering sampler + `unfilterable-float` no longer rejected;
-  `non_filterable_texture`, 32), and **F-081** (external-texture pipelines error "missing params buffer
-  slot"; `render_pipeline/misc`). Naga-lineage residuals are tracked as **F-078** (`robust_access`: the
+  + Vulkan robustBufferAccess; native Windows/Vulkan confirmed green). The three same-day regressions
+  from that update (**F-079/F-080/F-081**) were fixed and re-verified the same day — the full
+  `api,validation` sweep is green on Metal (`pass=107608 fail=0`). **No yawgpu defects are currently
+  open.** (`texture_external` on the Vulkan backend rejects honestly per the documented `fa97027`
+  limitation; see F-081.) Naga-lineage residuals are tracked as **F-078** (`robust_access`: the
   validator treats `let`-propagated indices as const-expression OOB — Tint is correct; yawgpu's earlier
   "green" on this group was a false pass exposed by the F-065 error wiring, so this is **not** a yawgpu
   regression) and **F-070** (Metal: `struct_inner_align` + matCx3 padding + `shadow:loop`; MoltenVK

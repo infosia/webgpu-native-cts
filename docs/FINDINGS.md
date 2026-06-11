@@ -37,18 +37,17 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/079/080/081
 — each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`f857f3f`) fixed the eleven
 findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK (F-068 additionally
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu (regressions introduced by the 2026-06-11 update; all cross-HAL, Metal == MoltenVK):**
-**F-079** (destroyed-resource errors fire as uncaptured errors outside the expected validation point —
-`setBindGroup` 6 + `queue/destroyed/query_set` 1), **F-080** (filtering sampler + `unfilterable-float`
-texture no longer rejected — `non_filterable_texture`, 32; F-057-area regression), **F-081**
-(external-texture pipelines error "missing params buffer slot" — `render_pipeline/misc`, 2; F-060-area
-regression).
+**Open — yawgpu: none.** The 2026-06-11 regressions F-079/F-080/F-081 were fixed the same day (yawgpu
+`4770131` + `9382206`) and re-verified: `api,validation` full sweep on Metal `pass=107608 fail=0`;
+F-079/F-080 also green on MoltenVK. `external_texture` on Vulkan now fails honestly with "not supported
+on the Vulkan backend" — the deliberate `fa97027` limitation (previously a false pass), documented under
+F-081, not an open defect.
 
 **Open — naga lineage / wgpu-native:** **F-078** (validator treats `let`-propagated indices as
 const-expression OOB → all `robust_access` compute pipelines error; Tint correct; yawgpu's earlier
@@ -1415,7 +1414,8 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   destroyed` / `render pass timestamp writes query set cannot use a destroyed query set` — the error now
   surfaces as an uncaptured error outside the point where the spec (and the test's error scope) expects
   it, instead of failing the expected call (submit-time validation).
-- **Status:** **OPEN** (yawgpu, cross-HAL regression — validation timing/reporting). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `9382206` — submit-time destroyed validation; re-verified 2026-06-11 on
+  Metal + MoltenVK, `setBindGroup` and `queue/destroyed/query_set` green).
 
 ---
 
@@ -1427,7 +1427,8 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   (`sampleType="unfilterable-float"` combinations; other sample types still pass).
 - **Observed:** `expected validation error, got none` — pairing a filtering sampler with an
   `unfilterable-float` texture binding must fail pipeline validation; yawgpu now accepts it.
-- **Status:** **OPEN** (yawgpu, cross-HAL regression). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `9382206` — layout-aware filterable check; re-verified 2026-06-11 on
+  Metal + MoltenVK, `non_filterable_texture` green, 160 cases).
 
 ---
 
@@ -1439,7 +1440,12 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 - **Found by:** `api,validation,render_pipeline,misc` `external_texture` (isAsync=false/true).
 - **Observed:** `uncaptured error: MSL external texture binding is missing params buffer slot` — creating
   a render pipeline that binds a `texture_external` errors.
-- **Status:** **OPEN** (yawgpu, cross-HAL regression). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `4770131` — fragment-only external textures regained their params
+  buffer slot; re-verified 2026-06-11, Metal `external_texture` pass=2). Note: on **MoltenVK/Vulkan** the
+  2 cases now fail with `external textures are not supported on the Vulkan backend` — that is the
+  **deliberate** Vulkan-side rejection introduced by `fa97027` (F-060), surfaced honestly by the F-065
+  error wiring (the earlier "pass=2 both HALs" record was a false pass on Vulkan, cf. F-078's lesson).
+  Tracked as a documented yawgpu-Vulkan feature limitation, not a defect.
 
 ---
 
