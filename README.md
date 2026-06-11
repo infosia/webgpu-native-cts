@@ -127,9 +127,11 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   foundations) — and **11 `shader/execution`** structural files (`stage`, `float_parse`, `override`,
   `value_init`, `shadow`, `limits`, `padding`, `robust_access`, `robust_access_vertex`, `zero_init`,
   `memory_layout` — the WGSL zero-init / robustness / memory-layout / workgroup-memory execution
-  foundations) plus the **`flow_control/` tree (10 files + shared harness)** and the **`memory_model/`
-  tree (6 files + stress harness)** — control-flow and barrier/atomics/coherence execution coverage
-  (`shader/validation` and the expression precision tables stay deferred).
+  foundations) plus the **`flow_control/` tree (10 files + shared harness)**, the **`memory_model/`
+  tree (6 files + stress harness)** — control-flow and barrier/atomics/coherence execution coverage —
+  and the **`statement/` (5) + `shader_io/` (6) trees** including the `fragment_builtins` /
+  `compute_builtins` giants (inter-stage interpolation, sample_mask, subgroup builtins, workgroup_size
+  — `shader/validation` and the expression precision tables stay deferred).
   These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
   `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
   `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
@@ -138,7 +140,7 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
   (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
   [COVERAGE](docs/COVERAGE.md).
 
-**Conformance outcome.** The suite has surfaced 80 cross-backend findings to date; the full per-finding
+**Conformance outcome.** The suite has surfaced 82 cross-backend findings to date; the full per-finding
 record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
 state:
 
@@ -161,9 +163,13 @@ state:
   2026-06-11 on Metal + MoltenVK, as is **F-068** (indirect-draw vertex robustness — Metal vertex pulling
   + Vulkan robustBufferAccess; native Windows/Vulkan confirmed green). The three same-day regressions
   from that update (**F-079/F-080/F-081**) were fixed and re-verified the same day — the full
-  `api,validation` sweep is green on Metal (`pass=107608 fail=0`). Currently **open**: **F-083**
-  (`workgroupBarrier` does not order non-atomic storage-texture accesses; `memory_model/barrier` —
-  MoltenVK, reproducible at 17k–25k disallowed observations per run, native-Vulkan confirm pending).
+  `api,validation` sweep is green on Metal (`pass=107608 fail=0`). Currently **open** (all
+  MoltenVK-surfaced, native-Vulkan confirm pending): **F-083** (`workgroupBarrier` does not order
+  non-atomic storage-texture accesses; `memory_model/barrier` — reproducible at 17k–25k disallowed
+  observations per run), **F-085** (per-sample interpolation / sample_mask wrong on Vulkan;
+  `shader_io/fragment_builtins`, 92 cases), and **F-086** (compound-assignment eval order, discard
+  derivatives, IO-struct-in-buffer — 3 single cases). The Y-4b batch (statement + shader_io) is
+  otherwise green on Dawn (2929/0), yawgpu Metal and wgpu-native.
   (`texture_external` on the Vulkan backend rejects honestly per the documented `fa97027`
   limitation; see F-081.) The Y-4a batch also surfaced **F-082** (naga-MSL: storage-texture
   intra-invocation coherence — shared with wgpu-native) and **F-084** (wgpu-native: disallowed

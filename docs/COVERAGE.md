@@ -27,12 +27,12 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `api/validation` | 129 | 56 | 9 | 0 | 0 | 64 |
 | `api/operation` | 72 | 22 | 32 | 6 | 0 | 12 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
-| `shader/execution` | 239 | 27 | 0 | 0 | 212 | 0 |
+| `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **105** | **41** | **22** | **419** | **96** |
+| **Total** | **683** | **116** | **41** | **22** | **408** | **96** |
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -127,6 +127,19 @@ workgroupBarrier does not order non-atomic storage-texture accesses) and **F-084
 disallowed weak behaviors). ⚠️ Latent suite issue noted by the fix: ~21 other api/* files use plain
 `MakeTestGroup<GpuTest>` and can hit the same consumed-adapter failure in mixed-fixture processes on
 Dawn — to be normalized in a follow-up.
+
+**Batch Y-4b / phase Y4b (shader/execution statement + shader_io)** ported all 5 `statement/` and all 6
+`shader_io/` files (incl. the two giants: `fragment_builtins` 2399 → 2237-line port, `compute_builtins`
+1276 → 1372). Dawn green `pass=2929 fail=0`; yawgpu Metal and wgpu-native fully green. Review fixes:
+`swizzle_assignment` needed the upstream `skipIfLanguageFeatureNotSupported('swizzle_assignment')` guard
+(the WGSL language feature is unsafe-experimental in this Dawn → upstream-faithful outcome is skip=162)
+and `requires` directives must precede declarations; `shared_structs` had a dangling
+`WGPUStringView` from a `sv(const std::string&)` temporary (now `const char*`); `fragment_builtins`
+linked against `wgpuDeviceGetAdapterInfo` which yawgpu does not export (switched to the
+temporary-instance `wgpuAdapterGetInfo` pattern). Surfaced **F-085** (yawgpu MoltenVK: per-sample
+interpolation / sample_mask, 92 cases) and **F-086** (yawgpu/naga-SPIR-V MoltenVK: compound-assignment
+eval order, discard derivatives, IO-struct-in-buffer — 3 single cases); both pending native-Vulkan
+confirmation.
 
 Notes on the pre-classified rows:
 

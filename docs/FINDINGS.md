@@ -45,7 +45,12 @@ limitation, same class as F-033/F-045/F-053).
 
 **Open — yawgpu:** **F-083** (workgroupBarrier does not order non-atomic storage-texture accesses —
 `memory_model/barrier`, MoltenVK, 17k–25k disallowed observations per run; native-Vulkan confirm
-pending). The 2026-06-11 regressions F-079/F-080/F-081 were fixed the same day (yawgpu `4770131` +
+pending), **F-085** (per-sample interpolation / sample_mask wrong on Vulkan —
+`shader_io/fragment_builtins`, MoltenVK, 92 cases; native-Vulkan confirm pending), **F-086** (three
+single-case Vulkan divergences: compound-assignment eval order [likely naga-SPIR-V], discard
+derivatives, IO-struct-in-buffer — MoltenVK; native-Vulkan confirm pending). Batch Y-4b (statement +
+shader_io, 11 files incl. fragment_builtins 2399-line port): Dawn green 2929/0; yawgpu Metal and
+wgpu-native fully green. The 2026-06-11 regressions F-079/F-080/F-081 were fixed the same day (yawgpu `4770131` +
 `9382206`) and re-verified: `api,validation` full sweep on Metal `pass=107608 fail=0`; F-079/F-080 also
 green on MoltenVK. `external_texture` on Vulkan now fails honestly with "not supported on the Vulkan
 backend" — the deliberate `fa97027` limitation (previously a false pass), documented under F-081, not an
@@ -1488,6 +1493,33 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 - **Observed:** disallowed weak behaviors observed in the stress harness — barrier/coherence guarantees
   violated on Metal.
 - **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference). Not masked.
+
+---
+
+## F-085 — yawgpu: per-sample interpolation / sample_mask wrong on Vulkan — MoltenVK (native-Vulkan confirm pending)
+
+- **Backend:** yawgpu Vulkan via MoltenVK only (yawgpu Metal, wgpu-native and Dawn all pass).
+- **Found by:** `shader,execution,shader_io,fragment_builtins` — `inputs,sample_mask` (88) and
+  `inputs,position` (4), concentrated on `sampleCount=4` with `interpolation="…,sample"`.
+- **Observed:** per-sample values disagree with the oracle (e.g. position expected 0.5/center, actual at
+  the standard 4× sample locations — sample-rate shading and the expected evaluation point disagree on
+  the Vulkan path); sample_mask readbacks contain per-sample mask bits that don't match.
+- **Status:** **OPEN** (yawgpu — Vulkan per-sample shading/interpolation path). Surfaced, not masked.
+
+---
+
+## F-086 — yawgpu/naga-SPIR-V: three single-case Vulkan divergences (compound eval order, discard derivatives, IO-struct-in-buffer) — MoltenVK (native-Vulkan confirm pending)
+
+- **Backend:** yawgpu Vulkan via MoltenVK only (yawgpu Metal, wgpu-native, Dawn pass).
+- **Found by / observed:**
+  (a) `statement,compound` `eval_order`: `arr[idx()] += foo()` — the `expect_not_reached()` branch runs
+  (`arr[0] != 42` after the compound assignment), i.e. the WGSL-specified evaluation order of a compound
+  assignment's reference/RHS is violated on the SPIR-V path — likely naga SPIR-V backend lineage;
+  (b) `statement,discard` `derivatives:useStorageBuffers=true`: 2176 derivative elements outside
+  tolerance — helper-invocation/derivative semantics after discard;
+  (c) `shader_io,shared_structs` `shared_with_buffer`: `queue submit cannot use an error command buffer`
+  — a struct shared between entry-point IO and a storage buffer errors pipeline creation.
+- **Status:** **OPEN** (Vulkan-path; classify per-item after a native-Vulkan run). Surfaced, not masked.
 
 ---
 
