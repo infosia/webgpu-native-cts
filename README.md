@@ -157,15 +157,16 @@ state:
   (zero-size map ranges, OOM `mappedAtCreation` abort), **F-074** (`queue.writeBuffer` ordering),
   **F-076** (`maxAnisotropy` clamping) and **F-077** (max-bindings shader panic) — all re-verified
   2026-06-11 on Metal + MoltenVK, as is **F-068** (indirect-draw vertex robustness — Metal vertex pulling
-  + Vulkan robustBufferAccess; native Windows/Vulkan confirmed green). Currently **open**: four
-  cross-HAL **regressions introduced by the 2026-06-11 yawgpu update**: **F-078**
-  (`shader,execution,robust_access` compute pipelines all error, 1068 subcases), **F-079**
+  + Vulkan robustBufferAccess; native Windows/Vulkan confirmed green). Currently **open**: three
+  cross-HAL **regressions introduced by the 2026-06-11 yawgpu update**: **F-079**
   (destroyed-resource errors fire outside the expected validation point; `setBindGroup` +
   `queue/destroyed/query_set`), **F-080** (filtering sampler + `unfilterable-float` no longer rejected;
   `non_filterable_texture`, 32), and **F-081** (external-texture pipelines error "missing params buffer
-  slot"; `render_pipeline/misc`). Naga-lineage residuals are tracked as **F-070** (Metal:
-  `struct_inner_align` + matCx3 padding + `shadow:loop`; MoltenVK additionally ~54 `memory_layout` layout
-  cases pending the SPIR-V-side fix). Four **Mac-only
+  slot"; `render_pipeline/misc`). Naga-lineage residuals are tracked as **F-078** (`robust_access`: the
+  validator treats `let`-propagated indices as const-expression OOB — Tint is correct; yawgpu's earlier
+  "green" on this group was a false pass exposed by the F-065 error wiring, so this is **not** a yawgpu
+  regression) and **F-070** (Metal: `struct_inner_align` + matCx3 padding + `shadow:loop`; MoltenVK
+  additionally ~54 `memory_layout` layout cases pending the SPIR-V-side fix). Four **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), the **F-053** MoltenVK residual (an explicit `vkCreateImageView`

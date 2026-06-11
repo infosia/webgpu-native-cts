@@ -43,20 +43,21 @@ findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + Molt
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu:**
-- **Regressions introduced by the 2026-06-11 update (all cross-HAL, Metal == MoltenVK):** **F-078**
-  (`shader,execution,robust_access` compute pipelines all error — 1068 subcases that were green the day
-  before), **F-079** (destroyed-resource errors fire as uncaptured errors outside the expected validation
-  point — `setBindGroup` 6 + `queue/destroyed/query_set` 1), **F-080** (filtering sampler +
-  `unfilterable-float` texture no longer rejected — `non_filterable_texture`, 32; F-057-area regression),
-  **F-081** (external-texture pipelines error "missing params buffer slot" — `render_pipeline/misc`, 2;
-  F-060-area regression).
+**Open — yawgpu (regressions introduced by the 2026-06-11 update; all cross-HAL, Metal == MoltenVK):**
+**F-079** (destroyed-resource errors fire as uncaptured errors outside the expected validation point —
+`setBindGroup` 6 + `queue/destroyed/query_set` 1), **F-080** (filtering sampler + `unfilterable-float`
+texture no longer rejected — `non_filterable_texture`, 32; F-057-area regression), **F-081**
+(external-texture pipelines error "missing params buffer slot" — `render_pipeline/misc`, 2; F-060-area
+regression).
 
-**Open — naga lineage / wgpu-native:** **F-070** (reduced 2026-06-11: Metal residual is
-`struct_inner_align` 9 + matCx3 padding 16 + `shadow:loop`; MoltenVK still fails ~54 `memory_layout`
-layout cases — SPIR-V backend lacks the fix), **F-071** (wgpu-native `zero_init` 3930 + `robust_access`
-aborts), **F-075** (wgpu-native buffer mapping broadly broken). `texture_component_swizzle` remains
-Dawn-only oracle (yawgpu/wgpu-native lack the feature).
+**Open — naga lineage / wgpu-native:** **F-078** (validator treats `let`-propagated indices as
+const-expression OOB → all `robust_access` compute pipelines error; Tint correct; yawgpu's earlier
+"green" was a false pass exposed by the F-065 uncaptured-error wiring — NOT a yawgpu regression),
+**F-070** (reduced 2026-06-11: Metal residual is `struct_inner_align` 9 + matCx3 padding 16 +
+`shadow:loop`; MoltenVK still fails ~54 `memory_layout` layout cases — SPIR-V backend lacks the fix),
+**F-071** (wgpu-native `zero_init` 3930 + `robust_access` aborts — same naga root as F-078), **F-075**
+(wgpu-native buffer mapping broadly broken). `texture_component_swizzle` remains Dawn-only oracle
+(yawgpu/wgpu-native lack the feature).
 
 The earlier `api/validation` bulk-port findings **F-060/F-061/F-062/F-063** (all cross-HAL; Dawn passed all) are
 **all fixed and re-verified on both HALs** (Metal == Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2
@@ -1386,16 +1387,22 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 
 ---
 
-## F-078 — yawgpu regression: robust_access compute pipelines all error — cross-HAL
+## F-078 — naga lineage: validator treats `let`-propagated indices as const-expression OOB (robust_access) — NOT a yawgpu regression
 
-- **Backend:** yawgpu (cross-HAL: Metal and MoltenVK both fail the same 1068 subcases). Introduced by the
-  2026-06-11 yawgpu update (suspect `d376a1b` binding-slot rework); this group was fully green on yawgpu
-  the day before (Metal `pass=1068 fail=0`).
-- **Found by:** `shader,execution,robust_access` `linear_memory` — every non-f16 subcase.
-- **Observed:** `uncaptured error: queue submit cannot use an error command buffer` — compute pipeline /
-  bind-group-layout creation fails for the test's explicit-BGL setup (group 0: storage/uniform test
-  buffer or empty; group 1: uniform constants + storage result), invalidating the command buffer.
-- **Status:** **OPEN** (yawgpu, cross-HAL regression). Surfaced, not masked.
+- **Backend:** naga lineage (yawgpu fork AND upstream — verified with naga-cli at both `f510a088` and
+  `ecad2036`: identical rejection). Dawn (Tint) accepts and passes all 1626.
+- **Found by:** `shader,execution,robust_access` `linear_memory` — every non-f16 subcase (1068 on yawgpu,
+  cross-HAL identical; wgpu-native aborts on the same group, recorded under F-071 — same root).
+- **Observed:** `uncaptured error: queue submit cannot use an error command buffer`. Root cause: naga
+  const-propagates `let index = (3u);` into `s.data[index]` (array length 3) and raises a **static OOB
+  validation error**; per WGSL a `let` is a runtime value, so this must be a runtime-clamped access —
+  Tint is correct, naga over-validates.
+- **History note (test oracle):** yawgpu's earlier `pass=1068` was a **false pass** — the invalid pipeline
+  meant the dispatch never ran and the zero-initialized result buffer happened to equal the expected
+  success value (0). The F-065 uncaptured-error wiring (2026-06-11) exposed this correctly; the
+  "regression" classification in earlier revisions of this entry was wrong.
+- **Status:** **OPEN** (naga-fork validator fix: do not treat `let`-propagated indices as constant
+  expressions for OOB validation). Queued with the F-070 naga batch. Surfaced, not masked.
 
 ---
 
