@@ -50,8 +50,10 @@ Y-4b record was wgpu-native-on-Metal), and Dawn behaves the same on Vulkan (no F
 SampleMaskIn normalization; suppresses these cases via crbug.com/407144390). The WGSL WG resolved
 to respecify `sample_mask` input to the Vulkan single-bit semantics (gpuweb/gpuweb#5457; CTS
 change gpuweb/cts#4510 pending merge); `position` under per-sample invocation is open in
-gpuweb/gpuweb#4777. The 92 cases are `xfail` in both `expectations/yawgpu.txt` and
-`expectations/wgpu-native.txt` until cts#4510 merges. The same native-Vulkan run (yawgpu
+gpuweb/gpuweb#4777. The 92 cases are `xfail` in the **Vulkan-only** expectation files
+`expectations/yawgpu-vulkan.txt` / `expectations/wgpu-native-vulkan.txt` (applied to Vulkan-backend
+runs only; the Metal-run files stay xfail-free so Metal sweeps show no xpass noise) until cts#4510
+merges. The same native-Vulkan run (yawgpu
 `9382206`) cleared the other two pending findings: **F-083** (memory_model/barrier) is green
 natively (`pass=12 fail=0`, two consecutive runs) and **F-086** (compound eval order, discard
 derivatives, IO-struct-in-buffer) passes all three cases natively — both reclassified MoltenVK-only
@@ -1530,10 +1532,14 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   WGSL WG resolved to respecify `sample_mask` input to single-bit-under-per-sample-invocation
   (gpuweb/gpuweb#5457, WGSL minutes 2025-12-09 / 2026-01-06; CTS change gpuweb/cts#4510 pending
   merge). `position` center-vs-sample-location remains an open spec question (gpuweb/gpuweb#4777).
-- **Status:** **RECLASSIFIED — not an implementation defect.** The 92 cases are `xfail` in
-  `expectations/yawgpu.txt` and `expectations/wgpu-native.txt` (both verified
-  `fail=0 xfail=92`, exit 0). When gpuweb/cts#4510 merges: re-port the new sample_mask oracle and
-  drop those xfail entries; keep the 4 `inputs,position` entries until gpuweb#4777 resolves.
+- **Status:** **RECLASSIFIED — not an implementation defect.** The 92 cases are `xfail` in the
+  **Vulkan-only** expectation files `expectations/yawgpu-vulkan.txt` and
+  `expectations/wgpu-native-vulkan.txt` (verified `fail=0 xfail=92`, exit 0 on Windows/Vulkan).
+  They are deliberately NOT in the Metal-run files (`expectations/yawgpu.txt`,
+  `expectations/wgpu-native.txt`) — Metal passes these cases, so a single shared file would emit
+  `xpass=92` noise on every Metal sweep (verified). Apply the `-vulkan` file for Vulkan-backend runs
+  only. When gpuweb/cts#4510 merges: re-port the new sample_mask oracle and drop those xfail
+  entries; keep the 4 `inputs,position` entries until gpuweb#4777 resolves.
 
 ---
 

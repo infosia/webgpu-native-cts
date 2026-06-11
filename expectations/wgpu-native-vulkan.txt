@@ -1,0 +1,22 @@
+# wgpu-native VULKAN-only expectations — apply ONLY to Vulkan-backend runs (Windows).
+# Metal runs use expectations/wgpu-native.txt; applying this file on Metal would report
+# these entries as xpass.
+# One full case query per line (# comments allowed; a line ending ':*' is a test-prefix match).
+
+# F-085: fragment builtins under Vulkan per-sample dispatch (@interpolate(...,sample) at
+# sampleCount=4) — sample_mask input is the current sample's bit (Vulkan semantics) and
+# position.xy is at the sample location, where the current CTS oracle expects the full
+# coverage mask and the pixel center. NOT an implementation defect: yawgpu, wgpu-native and
+# Dawn all behave this way on Vulkan (Dawn suppresses these cases, crbug.com/407144390);
+# the WGSL WG resolved to respecify sample_mask to the Vulkan single-bit semantics
+# (gpuweb/gpuweb#5457; CTS change gpuweb/cts#4510 pending). position is open in
+# gpuweb/gpuweb#4777. Drop the sample_mask entries when cts#4510 merges and the port's
+# oracle is updated; keep position until #4777 resolves.
+webgpu:shader,execution,shader_io,fragment_builtins:inputs,sample_mask:nearFar="[0,1]";sampleCount=4;interpolation="linear,sample"
+webgpu:shader,execution,shader_io,fragment_builtins:inputs,sample_mask:nearFar="[0,1]";sampleCount=4;interpolation="perspective,sample"
+webgpu:shader,execution,shader_io,fragment_builtins:inputs,sample_mask:nearFar="[0.25,0.75]";sampleCount=4;interpolation="linear,sample"
+webgpu:shader,execution,shader_io,fragment_builtins:inputs,sample_mask:nearFar="[0.25,0.75]";sampleCount=4;interpolation="perspective,sample"
+webgpu:shader,execution,shader_io,fragment_builtins:inputs,position:nearFar="[0,1]";sampleCount=4;interpolation="linear,sample"
+webgpu:shader,execution,shader_io,fragment_builtins:inputs,position:nearFar="[0,1]";sampleCount=4;interpolation="perspective,sample"
+webgpu:shader,execution,shader_io,fragment_builtins:inputs,position:nearFar="[0.25,0.75]";sampleCount=4;interpolation="linear,sample"
+webgpu:shader,execution,shader_io,fragment_builtins:inputs,position:nearFar="[0.25,0.75]";sampleCount=4;interpolation="perspective,sample"

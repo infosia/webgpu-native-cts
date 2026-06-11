@@ -133,7 +133,12 @@ VK_ICD_FILENAMES=$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json \
 ```
 
 `DYLD_LIBRARY_PATH=$VULKAN_SDK/lib` is required so `ash` can load the Vulkan loader; without it yawgpu
-can report `BackendUnavailable`. This is Vulkan API coverage via MoltenVK, not native Vulkan. It is
+can report `BackendUnavailable`.
+
+Expectation files are split per backend **and per API**: Metal runs use
+`expectations/<backend>.txt`; Vulkan-backend runs (native Windows or MoltenVK) use
+`expectations/<backend>-vulkan.txt`, which carries the Vulkan-only xfails (currently the F-085
+spec-in-flux set). Applying the `-vulkan` file on Metal would surface its entries as `xpass`. This is Vulkan API coverage via MoltenVK, not native Vulkan. It is
 useful for yawgpu Vulkan HAL triage, but authoritative Vulkan conformance still requires native
 Vulkan hardware/OS coverage.
 
