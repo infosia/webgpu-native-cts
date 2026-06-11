@@ -37,13 +37,13 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/069/072/073/074/076/077
-— each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`d376a1b`) fixed the ten
-findings F-064–F-067, F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK.
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077
+— each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`f857f3f`) fixed the eleven
+findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK (F-068 additionally
+confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
+limitation, same class as F-033/F-045/F-053).
 
 **Open — yawgpu:**
-- **F-068** (indirect-draw vertex robustness — **Metal fixed** by `f857f3f` (vertex pulling);
-  **MoltenVK residual: 125 cases**, indirect-dominated; native-Vulkan confirm pending).
 - **Regressions introduced by the 2026-06-11 update (all cross-HAL, Metal == MoltenVK):** **F-078**
   (`shader,execution,robust_access` compute pipelines all error — 1068 subcases that were green the day
   before), **F-079** (destroyed-resource errors fire as uncaptured errors outside the expected validation
@@ -1242,11 +1242,11 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   `baseVertex`/`firstVertex` overflows and all `float32*` attribute formats; a small non-indirect residue
   (10 Metal / 6 MoltenVK) also fails. yawgpu's vertex-robustness path is not applied (or applied with the
   wrong bounds) when draw parameters come from an indirect buffer.
-- **Status:** **PARTIALLY RESOLVED** (yawgpu `f857f3f` — Metal vertex pulling + Vulkan robustBufferAccess;
-  re-verified 2026-06-11: **Metal green** (1856 cases), **MoltenVK still fails 125 unique cases** with the
-  same indirect-dominated profile (119/125 `indirect=true`) — the Vulkan-side approach does not cover
-  indirect-draw vertex fetch there. Like F-074 was, a native-Vulkan run is needed to separate a MoltenVK
-  robustness limitation from a yawgpu Vulkan HAL gap. Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `f857f3f` — Metal vertex pulling + Vulkan robustBufferAccess;
+  re-verified 2026-06-11: **Metal green** (1856 cases) and **native Windows/Vulkan green** (user-confirmed
+  2026-06-11). A **125-case MoltenVK-only residual** remains (indirect-dominated, 119/125
+  `indirect=true`) — with native Vulkan clean this is a MoltenVK Vulkan→Metal robustness translation
+  limitation, same class as F-033/F-045/F-053, not a yawgpu defect. Surfaced, not masked.
 
 ---
 

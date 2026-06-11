@@ -156,9 +156,8 @@ state:
   bulk ports — **F-064–F-067** (validation), **F-069** (workgroup-memory loads), **F-072/F-073**
   (zero-size map ranges, OOM `mappedAtCreation` abort), **F-074** (`queue.writeBuffer` ordering),
   **F-076** (`maxAnisotropy` clamping) and **F-077** (max-bindings shader panic) — all re-verified
-  2026-06-11 on Metal + MoltenVK. Currently **open**: **F-068** (indirect-draw vertex robustness —
-  **fixed on Metal** via vertex pulling; a 125-case MoltenVK residual remains, native-Vulkan confirm
-  pending), and four
+  2026-06-11 on Metal + MoltenVK, as is **F-068** (indirect-draw vertex robustness — Metal vertex pulling
+  + Vulkan robustBufferAccess; native Windows/Vulkan confirmed green). Currently **open**: four
   cross-HAL **regressions introduced by the 2026-06-11 yawgpu update**: **F-078**
   (`shader,execution,robust_access` compute pipelines all error, 1068 subcases), **F-079**
   (destroyed-resource errors fire outside the expected validation point; `setBindGroup` +
@@ -166,11 +165,12 @@ state:
   `non_filterable_texture`, 32), and **F-081** (external-texture pipelines error "missing params buffer
   slot"; `render_pipeline/misc`). Naga-lineage residuals are tracked as **F-070** (Metal:
   `struct_inner_align` + matCx3 padding + `shadow:loop`; MoltenVK additionally ~54 `memory_layout` layout
-  cases pending the SPIR-V-side fix). Three **Mac-only
+  cases pending the SPIR-V-side fix). Four **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
-  viewport-clamped), and the **F-053** MoltenVK residual (an explicit `vkCreateImageView`
-  2D-view-on-3D-image `[mvk-error]`) — all confirmed MoltenVK Vulkan→Metal translation limitations, **absent
+  viewport-clamped), the **F-053** MoltenVK residual (an explicit `vkCreateImageView`
+  2D-view-on-3D-image `[mvk-error]`), and the **F-068** MoltenVK residual (125 indirect-draw
+  vertex-robustness cases) — all confirmed MoltenVK Vulkan→Metal translation limitations, **absent
   on native Vulkan**, not yawgpu defects; the **GLES** HAL is the only untested follow-up. See
   [FINDINGS](docs/FINDINGS.md) for the per-finding record.
 - **Dawn** — the oracle — passes everything.
