@@ -43,12 +43,14 @@ findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + Molt
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu:** **F-083** (workgroupBarrier does not order non-atomic storage-texture accesses —
-`memory_model/barrier`, MoltenVK, 17k–25k disallowed observations per run; native-Vulkan confirm
-pending), **F-085** (per-sample interpolation / sample_mask wrong on Vulkan —
-`shader_io/fragment_builtins`, MoltenVK, 92 cases; native-Vulkan confirm pending), **F-086** (three
-single-case Vulkan divergences: compound-assignment eval order [likely naga-SPIR-V], discard
-derivatives, IO-struct-in-buffer — MoltenVK; native-Vulkan confirm pending). Batch Y-4b (statement +
+**Open — yawgpu:** **F-085** (per-sample interpolation / sample_mask wrong on Vulkan —
+`shader_io/fragment_builtins`, **native-Vulkan CONFIRMED 2026-06-11** on Windows/NVIDIA RTX 5060 Ti:
+the same 92 cases fail with the same signature as MoltenVK — a real yawgpu Vulkan defect, not a
+translation artifact). The native-Vulkan run (yawgpu `9382206`) cleared the other two pending
+findings: **F-083** (memory_model/barrier) is green natively (`pass=12 fail=0`, two consecutive
+runs) and **F-086** (compound eval order, discard derivatives, IO-struct-in-buffer) passes all
+three cases natively — both reclassified MoltenVK-only translation artifacts (same class as
+F-033/F-045/F-053/F-068-residual). Batch Y-4b (statement +
 shader_io, 11 files incl. fragment_builtins 2399-line port): Dawn green 2929/0; yawgpu Metal and
 wgpu-native fully green. The 2026-06-11 regressions F-079/F-080/F-081 were fixed the same day (yawgpu `4770131` +
 `9382206`) and re-verified: `api,validation` full sweep on Metal `pass=107608 fail=0`; F-079/F-080 also
@@ -1470,18 +1472,23 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 
 ---
 
-## F-083 — yawgpu: workgroupBarrier does not order non-atomic storage-texture accesses — MoltenVK (native-Vulkan confirm pending)
+## F-083 — yawgpu: workgroupBarrier does not order non-atomic storage-texture accesses — MoltenVK-only (native Vulkan green)
 
-- **Backend:** yawgpu Vulkan via MoltenVK (Metal passes; Dawn passes). Reproducible, not statistical
-  noise: 17k–25k disallowed observations out of 65 536 per run.
+- **Backend:** yawgpu Vulkan via MoltenVK only (Metal passes; Dawn passes; **native Vulkan passes** —
+  see below). On MoltenVK reproducible, not statistical noise: 17k–25k disallowed observations out of
+  65 536 per run.
 - **Found by:** `shader,execution,memory_model,barrier` `workgroup_barrier_load_store`
   `accessValueType="u32";memType="non_atomic_texture";accessPair="rw";normalBarrier=true`.
 - **Observed:** `memory model test failed: testResults[1] == 25567, expected == 0 (disallowed weak
   behavior observed)` — a `workgroupBarrier()` between a non-atomic storage-texture write and a read does
-  not establish ordering on the Vulkan path (missing image-memory scope in the emitted barrier, or a HAL
-  barrier gap). Like F-074 was, needs a native-Vulkan run to exclude a MoltenVK artifact — though a
-  memory-ordering hole is unlikely to be a translation issue.
-- **Status:** **OPEN** (yawgpu — Vulkan barrier semantics for storage textures). Surfaced, not masked.
+  not establish ordering on the MoltenVK path.
+- **Native-Vulkan run (2026-06-11, Windows 11 / NVIDIA RTX 5060 Ti, yawgpu `9382206`):**
+  `memory_model,barrier:*` = `pass=12 skip=24 fail=0` (skips are shader-f16 / workgroupUniformLoad
+  variants), green on **two consecutive runs** including the exact failing case above. The ordering
+  hole does not exist on a native Vulkan driver.
+- **Status:** **RECLASSIFIED — MoltenVK translation artifact** (same class as F-033/F-045/F-053/
+  F-068-residual: the SPIR-V→Metal translation, not yawgpu's emitted barriers, loses the image-memory
+  ordering). Not a yawgpu defect on native Vulkan; record kept for the MoltenVK environment.
 
 ---
 
@@ -1496,30 +1503,43 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 
 ---
 
-## F-085 — yawgpu: per-sample interpolation / sample_mask wrong on Vulkan — MoltenVK (native-Vulkan confirm pending)
+## F-085 — yawgpu: per-sample interpolation / sample_mask wrong on Vulkan — native-Vulkan CONFIRMED
 
-- **Backend:** yawgpu Vulkan via MoltenVK only (yawgpu Metal, wgpu-native and Dawn all pass).
+- **Backend:** yawgpu Vulkan (yawgpu Metal, wgpu-native and Dawn all pass). Initially observed on
+  MoltenVK; **confirmed identical on native Vulkan** (2026-06-11, Windows 11 / NVIDIA RTX 5060 Ti,
+  yawgpu `9382206`) — a real yawgpu Vulkan-path defect, not a MoltenVK artifact.
 - **Found by:** `shader,execution,shader_io,fragment_builtins` — `inputs,sample_mask` (88) and
-  `inputs,position` (4), concentrated on `sampleCount=4` with `interpolation="…,sample"`.
+  `inputs,position` (4), exactly the `sampleCount=4` × `interpolation="…,sample"` (linear/perspective)
+  cases; same 92-case set and signature on both MoltenVK and native Vulkan.
 - **Observed:** per-sample values disagree with the oracle (e.g. position expected 0.5/center, actual at
   the standard 4× sample locations — sample-rate shading and the expected evaluation point disagree on
-  the Vulkan path); sample_mask readbacks contain per-sample mask bits that don't match.
+  the Vulkan path); sample_mask readbacks contain per-sample mask bits that don't match. Native-Vulkan
+  signature: with sample-rate shading active, the `sample_mask` input reads back only the current
+  sample's bit (actual 1/2/4/8 per sample) where the oracle expects the full coverage mask (15) —
+  i.e. Vulkan's per-sample `SampleMaskIn` semantics leak through instead of WebGPU's.
 - **Status:** **OPEN** (yawgpu — Vulkan per-sample shading/interpolation path). Surfaced, not masked.
 
 ---
 
-## F-086 — yawgpu/naga-SPIR-V: three single-case Vulkan divergences (compound eval order, discard derivatives, IO-struct-in-buffer) — MoltenVK (native-Vulkan confirm pending)
+## F-086 — yawgpu/naga-SPIR-V: three single-case Vulkan divergences (compound eval order, discard derivatives, IO-struct-in-buffer) — MoltenVK-only (native Vulkan green)
 
-- **Backend:** yawgpu Vulkan via MoltenVK only (yawgpu Metal, wgpu-native, Dawn pass).
-- **Found by / observed:**
+- **Backend:** yawgpu Vulkan via MoltenVK only (yawgpu Metal, wgpu-native, Dawn pass; **native Vulkan
+  passes all three** — see below).
+- **Found / observed (MoltenVK):**
   (a) `statement,compound` `eval_order`: `arr[idx()] += foo()` — the `expect_not_reached()` branch runs
   (`arr[0] != 42` after the compound assignment), i.e. the WGSL-specified evaluation order of a compound
-  assignment's reference/RHS is violated on the SPIR-V path — likely naga SPIR-V backend lineage;
+  assignment's reference/RHS is violated on the SPIR-V path;
   (b) `statement,discard` `derivatives:useStorageBuffers=true`: 2176 derivative elements outside
   tolerance — helper-invocation/derivative semantics after discard;
   (c) `shader_io,shared_structs` `shared_with_buffer`: `queue submit cannot use an error command buffer`
   — a struct shared between entry-point IO and a storage buffer errors pipeline creation.
-- **Status:** **OPEN** (Vulkan-path; classify per-item after a native-Vulkan run). Surfaced, not masked.
+- **Native-Vulkan run (2026-06-11, Windows 11 / NVIDIA RTX 5060 Ti, yawgpu `9382206`):** all three
+  cases **pass** — `compound:eval_order`, `discard:derivatives` (both `useStorageBuffers` variants),
+  and `shared_structs:shared_with_buffer`; the containing files are otherwise green too
+  (`statement,compound` + `statement,discard` + `shader_io,shared_structs` = fail=0).
+- **Status:** **RECLASSIFIED — MoltenVK translation artifacts** (per-item: the SPIR-V naga emits is
+  consumed correctly by a native driver; MoltenVK's SPIR-V→Metal translation diverges). Not yawgpu
+  defects on native Vulkan; record kept for the MoltenVK environment.
 
 ---
 
