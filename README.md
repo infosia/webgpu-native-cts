@@ -156,8 +156,9 @@ state:
   bulk ports — **F-064–F-067** (validation), **F-069** (workgroup-memory loads), **F-072/F-073**
   (zero-size map ranges, OOM `mappedAtCreation` abort), **F-074** (`queue.writeBuffer` ordering),
   **F-076** (`maxAnisotropy` clamping) and **F-077** (max-bindings shader panic) — all re-verified
-  2026-06-11 on Metal + MoltenVK. Currently **open**: **F-068** (indirect-draw vertex robustness broken;
-  `shader,execution,robust_access_vertex` — cross-HAL, wgpu-native passes so not naga-lineage), and four
+  2026-06-11 on Metal + MoltenVK. Currently **open**: **F-068** (indirect-draw vertex robustness —
+  **fixed on Metal** via vertex pulling; a 125-case MoltenVK residual remains, native-Vulkan confirm
+  pending), and four
   cross-HAL **regressions introduced by the 2026-06-11 yawgpu update**: **F-078**
   (`shader,execution,robust_access` compute pipelines all error, 1068 subcases), **F-079**
   (destroyed-resource errors fire outside the expected validation point; `setBindGroup` +

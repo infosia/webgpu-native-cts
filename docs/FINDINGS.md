@@ -42,8 +42,8 @@ never masked). The early validation/copy milestones (commit + result):
 findings F-064–F-067, F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK.
 
 **Open — yawgpu:**
-- **F-068** (indirect-draw vertex robustness broken — `shader,execution,robust_access_vertex`, cross-HAL,
-  nondeterministic case counts; no fix attempted yet).
+- **F-068** (indirect-draw vertex robustness — **Metal fixed** by `f857f3f` (vertex pulling);
+  **MoltenVK residual: 125 cases**, indirect-dominated; native-Vulkan confirm pending).
 - **Regressions introduced by the 2026-06-11 update (all cross-HAL, Metal == MoltenVK):** **F-078**
   (`shader,execution,robust_access` compute pipelines all error — 1068 subcases that were green the day
   before), **F-079** (destroyed-resource errors fire as uncaptured errors outside the expected validation
@@ -1242,7 +1242,11 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   `baseVertex`/`firstVertex` overflows and all `float32*` attribute formats; a small non-indirect residue
   (10 Metal / 6 MoltenVK) also fails. yawgpu's vertex-robustness path is not applied (or applied with the
   wrong bounds) when draw parameters come from an indirect buffer.
-- **Status:** **OPEN** (yawgpu, cross-HAL — indirect-draw vertex robustness). Surfaced, not masked.
+- **Status:** **PARTIALLY RESOLVED** (yawgpu `f857f3f` — Metal vertex pulling + Vulkan robustBufferAccess;
+  re-verified 2026-06-11: **Metal green** (1856 cases), **MoltenVK still fails 125 unique cases** with the
+  same indirect-dominated profile (119/125 `indirect=true`) — the Vulkan-side approach does not cover
+  indirect-draw vertex fetch there. Like F-074 was, a native-Vulkan run is needed to separate a MoltenVK
+  robustness limitation from a yawgpu Vulkan HAL gap. Surfaced, not masked.
 
 ---
 
