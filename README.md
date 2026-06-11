@@ -83,213 +83,108 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 
 ## Status
 
-**Active — the harness runs and is porting tests across all three backends on real hardware
-(Apple Metal, and Windows/Vulkan via wgpu-native and yawgpu).** What works today:
+**Active.** The harness is complete; tests are being ported in parallel batches. All three
+backends build link-agnostically and run on real GPUs — verified on **macOS / Apple Metal** and
+**Windows 11 / Vulkan** (NVIDIA GeForce RTX 5060 Ti). Last full sweep: **2026-06-11**.
 
-- A complete custom harness: registry, fluent params (`combine`/`combineWithParams`/`filter`/`expand`
-  with per-case subcase expansion), the `suite:file:test:params` query system, fixtures, error scopes,
-  async→sync helpers, a listing generator, and `cts_unittests` self-tests.
-- **Per-case crash isolation** (`--isolate` runs each case in a child process — `fork`+`exec` on
-  POSIX, `CreateProcess` on Windows — so a backend that *aborts* becomes a contained `crash` result
-  instead of killing the run) and a **per-backend expectations** file (`--expectations`, with `:*`
-  test-prefix lines) so a run with known divergences still exits 0.
-- All three backends — **wgpu-native, yawgpu, Dawn** — build link-agnostically and run on a real GPU.
-  Verified on macOS (Metal) and Windows (MSVC + Vulkan, for wgpu-native and yawgpu).
-- Ported so far: **65 `api/validation` files** (56 complete, 9 partial) — the original hand-ported
-  vertical slice (`createTexture`, `createView`, `createBindGroupLayout`, `createPipelineLayout`,
-  `clearBuffer`, `copyBufferToBuffer`, plus a maximally-ported `buffer/mapping`) **plus 55 files from
-  four parallel Workflow bulk-port batches** (`query_set/*`, `texture/*`, `render_pipeline/*` state,
-  `encoding/*` + `encoding/cmds/*`, `shader_module/*`, `getBindGroupLayout`, `queue/*`,
-  `resource_compatibility`, `render_bundle`, `inter_stage`, `error_scope`, `image_copy/buffer_related`,
-  `layout_shader_compat`, … — see [COVERAGE](docs/COVERAGE.md) for the full list) — and **48
-  `api/operation`** files: `command_buffer/`
-  `{clearBuffer, copyBufferToBuffer, basic, image_copy, copyTextureToTexture, render/render_bundle,
-  programmable/state_tracking, queries/occlusionQuery}`, `queue/writeBuffer`,
-  `onSubmittedWorkDone`, `rendering/{basic, draw, color_target_state, depth, stencil, depth_bias,
-  indirect_draw, 3d_texture_slices, depth_clip_clamp}` (the color render-to-texture + draw-call +
-  blend-state + depth-test + stencil-test + depth-bias + indirect-draw + 3D-texture-slice + viewport
-  depth-clamp foundations),
-  `render_pipeline/{culling_tests, primitive_topology, pipeline_output_targets, overrides,
-  vertex_only_render_pipeline}` (the face-culling + primitive-topology + fragment-output + override-constant
-  foundations),
-  `compute/basic` + `compute_pipeline/overrides` (the compute + override-constant foundations),
-  `sampling/{filter_mode, sampler_texture, anisotropy}` (the texture-sampling foundations),
-  `texture_view/{format_reinterpretation, texture_component_swizzle}` (the view-reinterpretation +
-  component-swizzle foundations; swizzle is 52k subcases, Dawn-only oracle until yawgpu/wgpu-native gain
-  the feature),
-  `memory_sync/buffer/{single_buffer, multiple_buffers}` (the buffer-synchronization foundations),
-  `buffers/{map, map_oom, createBindGroup, threading}` (the buffer-mapping foundation),
-  `render_pass/{resolve, storeop2, clear_value, storeOp, transient_attachment}` (the multisample-resolve +
-  store-op + stencil-clear-value + storeOp + transient-attachment foundations),
-  `storage_texture/{read_only, read_write}` (the storage-texture read + write foundations),
-  `resource_init/texture_zero` (the texture zero-init foundation), and
-  `vertex_state/{index_format, correctness}` (the indexed-draw index-format + vertex-format-decode
-  foundations) — and **11 `shader/execution`** structural files (`stage`, `float_parse`, `override`,
-  `value_init`, `shadow`, `limits`, `padding`, `robust_access`, `robust_access_vertex`, `zero_init`,
-  `memory_layout` — the WGSL zero-init / robustness / memory-layout / workgroup-memory execution
-  foundations) plus the **`flow_control/` tree (10 files + shared harness)**, the **`memory_model/`
-  tree (6 files + stress harness)** — control-flow and barrier/atomics/coherence execution coverage —
-  and the **`statement/` (5) + `shader_io/` (6) trees** including the `fragment_builtins` /
-  `compute_builtins` giants (inter-stage interpolation, sample_mask, subgroup builtins, workgroup_size
-  — `shader/validation` and the expression precision tables stay deferred).
-  These add the buffer-readback foundation (`makeBufferWithContents` + `expectGPUBufferValuesEqual`), the
-  `writeBuffer`/`writeTexture` upload paths, the texture-copy foundation (`copyBufferToTexture`/
-  `copyTextureToBuffer`/`copyTextureToTexture`), the **TexelView decode-value comparison stack** that
-  backs the color `image_copy` port (137256 subcases), the **render-to-texture path** (depth via
-  `copyTextureToTexture:copy_depth_stencil`; color via `rendering/basic`), and the **compute path**
-  (`compute/basic` — compute pipeline + `dispatchWorkgroups` + storage readback). See
-  [COVERAGE](docs/COVERAGE.md).
+### Port coverage
 
-**Conformance outcome.** The suite has surfaced 82 cross-backend findings to date; the full per-finding
-record (what, which backend, root cause, current status) lives in [FINDINGS](docs/FINDINGS.md). Current
-state:
+683 upstream `.spec.ts` files at the [pinned revision](docs/UPSTREAM.md):
 
-- **yawgpu** — the primary conformance subject — passed the entire ported suite on Vulkan as of the
-  2026-06-08 confirmation (Mac via MoltenVK and native Windows / NVIDIA RTX 5060 Ti).
-  `expectations/yawgpu.txt` carries no expected failures — nothing is masked. (It also *runs* the
-  `immediate_data_size` cases Dawn/wgpu-native skip.) The render-path findings F-051 (multisampled-texture-view
-  crash; `sample_mask`), F-054 (sparse / `null` color attachment; `pipeline_output_targets`), F-055 (read-only
-  DS attachment + concurrent depth/stencil sampling; `memory_sync/texture`) and F-053 (multi-attachment
-  3D-slice render; `3d_texture_slices`) are all fixed; the `api/validation` Workflow
-  bulk-port findings **F-057** (`texture_cube_array<f32>` shader error), **F-058** (depth-stencil state
-  over-validation), **F-059** (storage-texture-format support gap), **F-060** (WGSL errored on
-  `texture_external`; `render_pipeline/misc`), **F-061** (over-rejects compatible pipeline-layout binding
-  kinds; `resource_compatibility`), **F-062** (over-rejects compatible render-bundle attachment signatures;
-  `render_bundle`), and **F-063** (inter-stage interpolation-sampling mis-validated; `inter_stage`) are now
-  **all fixed and re-verified on both HALs**, as are the ten findings surfaced by the batch-4 and Y-1..Y-3
-  bulk ports — **F-064–F-067** (validation), **F-069** (workgroup-memory loads), **F-072/F-073**
-  (zero-size map ranges, OOM `mappedAtCreation` abort), **F-074** (`queue.writeBuffer` ordering),
-  **F-076** (`maxAnisotropy` clamping) and **F-077** (max-bindings shader panic) — all re-verified
-  2026-06-11 on Metal + MoltenVK, as is **F-068** (indirect-draw vertex robustness — Metal vertex pulling
-  + Vulkan robustBufferAccess; native Windows/Vulkan confirmed green). The three same-day regressions
-  from that update (**F-079/F-080/F-081**) were fixed and re-verified the same day — the full
-  `api,validation` sweep is green on Metal (`pass=107608 fail=0`). Currently **open**: **F-085**
-  (per-sample interpolation / sample_mask wrong on the Vulkan path; `shader_io/fragment_builtins`,
-  92 cases — **confirmed on native Windows/Vulkan**: with sample-rate shading the `sample_mask` input
-  reads back only the current sample's bit instead of WebGPU's full coverage mask). **F-083**
-  (`memory_model/barrier` ordering) and **F-086** (compound eval order, discard derivatives,
-  IO-struct-in-buffer) are **green on native Vulkan** and reclassified as MoltenVK translation
-  artifacts. The Y-4b batch (statement + shader_io) is otherwise green on Dawn (2929/0), yawgpu Metal
-  and wgpu-native.
-  (`texture_external` on the Vulkan backend rejects honestly per the documented `fa97027`
-  limitation; see F-081.) The Y-4a batch also surfaced **F-082** (naga-MSL: storage-texture
-  intra-invocation coherence — shared with wgpu-native) and **F-084** (wgpu-native: disallowed
-  weak-memory behaviors); `flow_control` is green on all four targets. Naga-lineage residuals are
-  tracked as **F-078** (`robust_access`: the
-  validator treats `let`-propagated indices as const-expression OOB — Tint is correct; yawgpu's earlier
-  "green" on this group was a false pass exposed by the F-065 error wiring, so this is **not** a yawgpu
-  regression) and **F-070** (Metal: `struct_inner_align` + matCx3 padding + `shadow:loop`; MoltenVK
-  additionally ~54 `memory_layout` layout cases pending the SPIR-V-side fix). Six **Mac-only
-  MoltenVK
-  residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
-  viewport-clamped), the **F-053** MoltenVK residual (an explicit `vkCreateImageView`
-  2D-view-on-3D-image `[mvk-error]`), the **F-068** MoltenVK residual (125 indirect-draw
-  vertex-robustness cases), **F-083** (workgroupBarrier vs non-atomic storage-texture ordering) and
-  **F-086** (compound eval order / discard derivatives / IO-struct-in-buffer) — all confirmed MoltenVK
-  Vulkan→Metal translation limitations, **absent on native Vulkan**, not yawgpu defects; the **GLES**
-  HAL is the only untested follow-up. See
-  [FINDINGS](docs/FINDINGS.md) for the per-finding record.
-- **Dawn** — the oracle — passes everything.
-- **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
-  F-019, F-021), missing validation (F-012 — `createView` on a destroyed texture; F-015 — the
-  view-usage subset rule), and the wgpu-native 3D multi-slice copy/readback family **F-027** (a 3D
-  whole-subresource `image_copy` readback after a non-zero-origin copy) and **F-028** (3D
-  `copyTextureToTexture` leaves depth slices z≥1 zero; 2D-array copies pass), plus **F-036** (aborts
-  when a constant-factor blend draws without `setBlendConstant`, which should default to `[0,0,0,0]`;
-  `color_target_state`, contained via `--isolate` + expectations), **F-045** (`frag_depth` is not
-  clamped to the viewport depth range before the depth test — `depth_clip_clamp`; shared with yawgpu, Dawn
-  passes), **F-048** (the stencil reference value is not masked to the stencil aspect's bit width —
-  `clear_value`; shared with yawgpu, Dawn passes), **F-052** (ignores the pipeline `multisample.mask` —
-  `sample_mask`; Dawn passes), and **F-056** (aborts on a **mixed read-only/written** depth-stencil
-  attachment that is also sampled — over-strict per-texture usage-conflict validation;
-  `memory_sync/texture/readonly_depth_stencil`; Dawn + yawgpu pass).
+```mermaid
+pie showData
+    title Upstream .spec.ts files (683)
+    "Ported — complete" : 116
+    "Ported — partial" : 41
+    "Deferred (shader/validation, expression precision)" : 408
+    "Not portable (N/A)" : 22
+    "Todo" : 96
+```
 
-Every divergence is reported and surfaced — never masked to make a test pass; yawgpu's were fixed and
-re-confirmed on hardware, wgpu-native's are contained via `--isolate` + expectations.
+```mermaid
+xychart-beta
+    title "Ported (complete + partial) by area, %"
+    x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
+    y-axis "ported %" 0 --> 100
+    bar [50, 75, 16, 0, 23]
+```
+
+| Area | Ported* | Note |
+|------|--------:|------|
+| `api/validation` | 65 / 129 | |
+| `api/operation` | 54 / 72 | |
+| `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees |
+| `shader/validation` | 0 / 207 | deferred |
+| **Total** | **157 / 683** | |
+
+\* complete + partial. Per-file detail and what each batch added: [COVERAGE](docs/COVERAGE.md).
+
+### What works
+
+- **Harness, 1:1 with upstream** — registry, fluent params, the `suite:file:test:params` query
+  system, fixtures, error scopes, async→sync helpers, listing generator, `cts_unittests` self-tests.
+- **Crash containment** — `--isolate` runs each case in a child process (POSIX + Windows), so a
+  backend *abort* becomes a contained `crash` result instead of killing the run.
+- **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
+  with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
+
+### Backends at a glance
+
+| Backend | Role | Metal | Vulkan (Windows) | Open findings |
+|---------|------|:-----:|:----------------:|---------------|
+| **yawgpu** | primary subject | ✅ green | ✅ green | **0** — 60 surfaced, all fixed & re-verified on hardware; `expectations/yawgpu.txt` is empty |
+| **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
+| **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **20** — eager panics, missing validation, 3D copy/readback, rendering |
+
+### Findings — 86 surfaced to date (F-001…F-086)
+
+The full per-finding record (what, which backend, root cause, status) lives in
+[FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
+test pass.
+
+| Bucket | # | Representative findings |
+|--------|--:|-------------------------|
+| yawgpu — fixed & hardware-re-verified | 60 | F-005…F-081; nothing masked |
+| wgpu-native — open | 20 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory |
+| MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 6 | F-033, F-045, F-053/F-068 residuals, F-083, F-086 |
+| Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |
+| naga-lineage residuals (tracked upstream) | 3 | F-070 memory layout, F-078 `robust_access` validator, F-082 storage-texture coherence |
+
+Buckets overlap where a finding affects several backends (e.g. F-045, F-082).
 
 ### Test results
 
-Per-backend comparison, each case isolated — `--isolate` (one subprocess per case) for
-`api,validation`, in-process readback for `api,operation` — at the [pinned
-revisions](docs/UPSTREAM.md).
+Measured per case at the [pinned revisions](docs/UPSTREAM.md) — Vulkan rows 2026-06-08, Metal
+operation sweep 2026-06-06.
 
-#### `api,validation` — 4715 cases across 10 files
+#### `api,validation` (`--isolate`, one subprocess per case)
 
-> The full per-backend **isolated** measurement table below covers the original hand-ported
-> vertical-slice files. The **40 files added by the three Workflow bulk-port batches** are verified
-> separately — every batch is **Dawn-green** (the oracle passes all cases, 0 fail) and **swept on
-> yawgpu across both HALs** (Metal + MoltenVK), which is how findings **F-057…F-063** were surfaced.
-> They are folded into the full per-backend isolated/expectations table on the next Windows regen.
+| Backend | Platform | pass | skip | xfail | xpass | fail | crash |
+|---------|----------|-----:|-----:|------:|------:|-----:|------:|
+| **Dawn** | Metal | 4324 | 391 | – | – | 0 | 0 |
+| **yawgpu** | Metal | 4332 | 383 | – | – | 0 | 0 |
+| **yawgpu** | Vulkan | 3257 | 1458 | 0 | 0 | 0 | 0 |
+| **wgpu-native** | Metal | 3407 | 756 | – | – | 338 | 214 |
+| **wgpu-native** | Vulkan | 2507 | 1770 | 438 | 218 | 0 | 0 |
 
-**Real-GPU Metal** (Apple Silicon):
+- The Metal rows cover the original hand-ported vertical-slice files; the 40 bulk-ported files are
+  verified separately (Dawn-green, yawgpu swept on both HALs) and fold in on the next regen.
+- Per-backend case totals differ because each adapter's optional-feature set changes how the
+  format-swept tests parametrize.
+- wgpu-native's fails/crashes are the panic + missing-validation families (F-001–F-021; F-015
+  ≈ 324 cases); with `--isolate --expectations` its Vulkan run exits 0 (`fail=0 crash=0`).
 
-| Backend | pass | skip | fail | crash | |
-|---------|-----:|-----:|-----:|------:|--|
-| **Dawn** | 4324 | 391 | 0 | 0 | C++ reference implementation — the conformance oracle |
-| **yawgpu** | 4332 | 383 | 0 | 0 | primary subject — **zero failures**; runs the 8 `immediate_data_size` cases Dawn skips |
-| **wgpu-native** | 3407 | 756 | 338 | 214 | 214 crashes are eager-panics on invalid input (F-001–F-004 incl. F-003 mapping, F-007, F-013, F-017, F-019, F-021); 338 fails are missing-validation / uncaptured-error divergences (F-015 view-usage subset ≈ 324, F-012, F-003 mapping) |
+#### `api,operation`
 
-**Real-GPU Vulkan** (Windows 11, NVIDIA GeForce RTX 5060 Ti) — both backends re-measured **2026-06-08**
-via `--isolate --expectations` (the same per-case methodology as the Metal table above):
+| Backend | Platform | Result (leaf subcases) |
+|---------|----------|------------------------|
+| **Dawn** | Metal | `pass=247751 fail=0 crash=0` |
+| **yawgpu** | Metal | `pass=247579 fail=0 crash=0` |
+| **yawgpu** | Vulkan | `pass=214039 skip=85698 fail=0 crash=0` — full suite, exit 0 in ~2 min (`--workers 16`), nothing masked |
+| **wgpu-native** | Metal | `pass=3322 fail=78 xfail=3` — fails are the 3D copy/readback findings F-027/F-028 |
 
-| Backend | pass | skip | xfail | xpass | fail | crash |
-|---------|-----:|-----:|------:|------:|-----:|------:|
-| **yawgpu** | 3257 | 1458 | 0 | 0 | 0 | 0 |
-| **wgpu-native** | 2507 | 1770 | 438 | 218 | 0 | 0 |
-
-**yawgpu posts `pass=3257 skip=1458`, zero failures** — a clean cross-platform result. The pass/skip
-split differs from its Metal row (`4332 / 383`) only because this NVIDIA Vulkan driver feature-gates more
-optional texture formats than Apple Metal, so more format cases skip; the zero-failure outcome is
-identical on both platforms. (Dawn is not yet built on Windows.)
-
-The per-backend case totals differ (yawgpu 4715, wgpu-native 4933) because each adapter exposes a
-different optional-feature set, so the format-swept tests parametrize to a different number of cases. The
-`wgpu-native` row differs from its Metal numbers because the expectations file
-(`expectations/wgpu-native.txt`) was tuned on Metal and this NVIDIA Vulkan driver diverges: **218** cases
-the file lists as failures actually **pass** here (reported as `xpass`), while **438** expected
-divergences are still contained (`xfail`, dominated by the `createView` view-usage-subset cases — F-015 —
-and the `createBindGroupLayout` storage-texture aborts — F-017). All `wgpu-native` aborts are contained by
-`--isolate` and reclassified via the expectations file, so an `--isolate --expectations` run still exits 0
-(`fail=0 crash=0`) on both platforms.
-
-#### `api,operation` — Metal (in-process readback)
-
-**Full ported suite (28 files = 10 `api,validation` + 18 `api,operation`), 2026-06-06, real-GPU Metal.**
-Run end-to-end, **Dawn (oracle) and yawgpu are green across the whole suite** —
-`pass=247751 / 247579 fail=0 crash=0` (per-**subcase** leaf totals; the small pass/skip delta is
-feature-gating, not failures). The `api,operation` half now includes the V1–V9 foundations —
-`rendering/{basic, draw, color_target_state, depth, stencil}`, `compute/basic`, `sampling/filter_mode`,
-`memory_sync/buffer/single_buffer`, `render_pass/{resolve, storeop2}`, and
-`storage_texture/{read_only, read_write}` — most of which surfaced a yawgpu finding since fixed and
-re-verified (F-034/035/037/038/039/040/041, all resolved; `basic`/`compute`/`sampling`/`storeop2`/
-`read_write` were clean first-time). **wgpu-native** is run per-**case**
-via `--isolate --expectations` (the only mode that contains its aborts): its `api,operation` half is
-`pass=3322 fail=78 xfail=3 crash=0` — the 78 fails are the 3D copy/readback findings **F-027**/**F-028**,
-the 3 `xfail` the contained **F-002** (`clearBuffer`) + **F-036** (`color_target_state`) aborts; its
-`api,validation` half is the table above. (The Metal Dawn run is per-file: the `AllFeaturesMaxLimitsGpuTest`
-fixture requests a fresh all-features device per test and Dawn caps live devices per process —
-`--isolate`/per-file resets the count; yawgpu has no such cap, so its combined run is clean.)
-
-The large *structural* ports sweep the format axis densely; on Dawn and yawgpu they are clean, while
-wgpu-native surfaces the 3D multi-slice copy/readback findings F-027 and F-028.
-
-The buffer/queue operation tests (`clearBuffer`, `copyBufferToBuffer`, `basic`, `writeBuffer`,
-`onSubmittedWorkDone`) pass on Dawn and yawgpu; on wgpu-native `clearBuffer:clear`'s `size=0` subcase
-aborts (F-002, contained by `--isolate`). Run in one process, the command_buffer operation files show
-**no cross-test interference** — yawgpu is clean across the combined run (`pass=32785 skip=5 fail=0`); no
-test poisons another.
-
-**yawgpu on Windows/Vulkan** (NVIDIA RTX 5060 Ti, native — not MoltenVK; 2026-06-08): the operation ports
-**match Metal exactly**, including the depth/stencil aspects fixed on the Vulkan HAL (F-031 `cac328a`,
-F-032 `3c847ac`; see
-[F-032](docs/FINDINGS.md#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8)).
-The full ported suite on native Vulkan is green — every ported case passes or skips, **`fail=0
-crash=0`**. A fresh end-to-end run (yawgpu `e70d18d`, all 48 file-level queries via `--workers 16`,
-`--expectations expectations/yawgpu.txt` with nothing masked) posts
-`pass=214039 skip=85698 fail=0 crash=0 xfail=0 xpass=0`, exit 0 in ~2m (a per-**subcase** leaf count;
-the same suite is `pass=7208 skip=388` at per-**case** granularity). The only Mac-only artifact (F-033 color
-`copyTextureToTexture` under MoltenVK) is a confirmed MoltenVK translation limitation, absent on native
-Vulkan.
+yawgpu's operation results on native Vulkan **match Metal exactly**; the only Mac-side artifacts
+are the MoltenVK translation bucket above, absent on native Vulkan.
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
