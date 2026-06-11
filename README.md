@@ -163,13 +163,14 @@ state:
   2026-06-11 on Metal + MoltenVK, as is **F-068** (indirect-draw vertex robustness — Metal vertex pulling
   + Vulkan robustBufferAccess; native Windows/Vulkan confirmed green). The three same-day regressions
   from that update (**F-079/F-080/F-081**) were fixed and re-verified the same day — the full
-  `api,validation` sweep is green on Metal (`pass=107608 fail=0`). Currently **open** (all
-  MoltenVK-surfaced, native-Vulkan confirm pending): **F-083** (`workgroupBarrier` does not order
-  non-atomic storage-texture accesses; `memory_model/barrier` — reproducible at 17k–25k disallowed
-  observations per run), **F-085** (per-sample interpolation / sample_mask wrong on Vulkan;
-  `shader_io/fragment_builtins`, 92 cases), and **F-086** (compound-assignment eval order, discard
-  derivatives, IO-struct-in-buffer — 3 single cases). The Y-4b batch (statement + shader_io) is
-  otherwise green on Dawn (2929/0), yawgpu Metal and wgpu-native.
+  `api,validation` sweep is green on Metal (`pass=107608 fail=0`). Currently **open**: **F-085**
+  (per-sample interpolation / sample_mask wrong on the Vulkan path; `shader_io/fragment_builtins`,
+  92 cases — **confirmed on native Windows/Vulkan**: with sample-rate shading the `sample_mask` input
+  reads back only the current sample's bit instead of WebGPU's full coverage mask). **F-083**
+  (`memory_model/barrier` ordering) and **F-086** (compound eval order, discard derivatives,
+  IO-struct-in-buffer) are **green on native Vulkan** and reclassified as MoltenVK translation
+  artifacts. The Y-4b batch (statement + shader_io) is otherwise green on Dawn (2929/0), yawgpu Metal
+  and wgpu-native.
   (`texture_external` on the Vulkan backend rejects honestly per the documented `fa97027`
   limitation; see F-081.) The Y-4a batch also surfaced **F-082** (naga-MSL: storage-texture
   intra-invocation coherence — shared with wgpu-native) and **F-084** (wgpu-native: disallowed
@@ -178,13 +179,15 @@ state:
   validator treats `let`-propagated indices as const-expression OOB — Tint is correct; yawgpu's earlier
   "green" on this group was a false pass exposed by the F-065 error wiring, so this is **not** a yawgpu
   regression) and **F-070** (Metal: `struct_inner_align` + matCx3 padding + `shadow:loop`; MoltenVK
-  additionally ~54 `memory_layout` layout cases pending the SPIR-V-side fix). Four **Mac-only
+  additionally ~54 `memory_layout` layout cases pending the SPIR-V-side fix). Six **Mac-only
   MoltenVK
   residuals** remain — **F-033** (color `copyTextureToTexture`), **F-045** (`frag_depth` not
   viewport-clamped), the **F-053** MoltenVK residual (an explicit `vkCreateImageView`
-  2D-view-on-3D-image `[mvk-error]`), and the **F-068** MoltenVK residual (125 indirect-draw
-  vertex-robustness cases) — all confirmed MoltenVK Vulkan→Metal translation limitations, **absent
-  on native Vulkan**, not yawgpu defects; the **GLES** HAL is the only untested follow-up. See
+  2D-view-on-3D-image `[mvk-error]`), the **F-068** MoltenVK residual (125 indirect-draw
+  vertex-robustness cases), **F-083** (workgroupBarrier vs non-atomic storage-texture ordering) and
+  **F-086** (compound eval order / discard derivatives / IO-struct-in-buffer) — all confirmed MoltenVK
+  Vulkan→Metal translation limitations, **absent on native Vulkan**, not yawgpu defects; the **GLES**
+  HAL is the only untested follow-up. See
   [FINDINGS](docs/FINDINGS.md) for the per-finding record.
 - **Dawn** — the oracle — passes everything.
 - **wgpu-native** — open findings: eager-panics on invalid input (F-001–F-004, F-007, F-013, F-017,
