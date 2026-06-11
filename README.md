@@ -94,11 +94,11 @@ backends build link-agnostically and run on real GPUs — verified on **macOS / 
 ```mermaid
 pie showData
     title Upstream .spec.ts files (683)
-    "Ported — complete" : 116
-    "Ported — partial" : 41
+    "Ported — complete" : 121
+    "Ported — partial" : 51
     "Deferred (shader/validation, expression precision)" : 408
-    "Not portable (N/A)" : 22
-    "Todo" : 96
+    "Not portable (N/A)" : 18
+    "Todo" : 85
 ```
 
 ```mermaid
@@ -106,16 +106,16 @@ xychart-beta
     title "Ported (complete + partial) by area, %"
     x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
     y-axis "ported %" 0 --> 100
-    bar [50, 75, 16, 0, 23]
+    bar [50, 97, 16, 0, 25]
 ```
 
 | Area | Ported* | Note |
 |------|--------:|------|
-| `api/validation` | 65 / 129 | |
-| `api/operation` | 54 / 72 | |
+| `api/validation` | 64 / 129 | |
+| `api/operation` | 70 / 72 | complete except 2 N/A (`buffers/map_ArrayBuffer`, `map_detach`) |
 | `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees |
 | `shader/validation` | 0 / 207 | deferred |
-| **Total** | **157 / 683** | |
+| **Total** | **172 / 683** | |
 
 \* complete + partial. Per-file detail and what each batch added: [COVERAGE](docs/COVERAGE.md).
 
@@ -132,11 +132,11 @@ xychart-beta
 
 | Backend | Role | Metal | Vulkan (Windows) | Open findings |
 |---------|------|:-----:|:----------------:|---------------|
-| **yawgpu** | primary subject | ✅ green | ✅ green | **0** — 60 surfaced, all fixed & re-verified on hardware; `expectations/yawgpu.txt` is empty |
+| **yawgpu** | primary subject | ✅ green | ✅ green | **1** — F-087 (requestDevice limit/adapter-lifecycle, cross-HAL); 60 earlier findings fixed & re-verified on hardware |
 | **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
-| **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **20** — eager panics, missing validation, 3D copy/readback, rendering |
+| **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **21** — eager panics, missing validation, 3D copy/readback, rendering |
 
-### Findings — 86 surfaced to date (F-001…F-086)
+### Findings — 88 surfaced to date (F-001…F-088)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
@@ -144,8 +144,9 @@ test pass.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
+| yawgpu — open | 1 | F-087 (requestDevice limit/adapter-lifecycle, cross-HAL; Dawn-oracle-confirmed) |
 | yawgpu — fixed & hardware-re-verified | 60 | F-005…F-081; nothing masked |
-| wgpu-native — open | 20 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory |
+| wgpu-native — open | 21 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 6 | F-033, F-045, F-053/F-068 residuals, F-083, F-086 |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |
 | naga-lineage residuals (tracked upstream) | 3 | F-070 memory layout, F-078 `robust_access` validator, F-082 storage-texture coherence |

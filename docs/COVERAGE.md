@@ -24,15 +24,19 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 56 | 9 | 0 | 0 | 64 |
-| `api/operation` | 72 | 22 | 32 | 6 | 0 | 12 |
+| `api/validation` | 129 | 56 | 8 | 0 | 0 | 65 |
+| `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **116** | **41** | **22** | **408** | **96** |
+| **Total** | **683** | **121** | **51** | **18** | **408** | **85** |
+
+> Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
+> `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
+> complete except the two N/A `buffers/{map_ArrayBuffer,map_detach}` (JS ArrayBuffer detach semantics).
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-
@@ -140,6 +144,26 @@ temporary-instance `wgpuAdapterGetInfo` pattern). Surfaced **F-085** (yawgpu Mol
 interpolation / sample_mask, 92 cases) and **F-086** (yawgpu/naga-SPIR-V MoltenVK: compound-assignment
 eval order, discard derivatives, IO-struct-in-buffer — 3 single cases); both pending native-Vulkan
 confirmation.
+
+**Batch Y-5 / phase Y5 (api/operation lifecycle / reflection / immediate)** ported the final 15
+`api/operation` files: `reflection`, `labels`, `shader_module/compilation_info`,
+`pipeline/{default_layout,pipeline_layout_created_with_null_bind_group_layout}`, `adapter/{info,
+requestAdapter,requestDevice}`, `device/{lost,all_limits_and_features}`, `limits/max_combined_limits`,
+`uncapturederror`, `command_buffer/{render/dynamic_state,programmable/immediate}`,
+`compute_pipeline/entry_point_name` — completing `api/operation` (only the two N/A map files remain).
+Dawn green (465 pass / 619 skip / 0 fail) after fixes: the dominant failure was a **fixture-level
+consumed-adapter cascade** — `TestGroup<GpuTest>` lifecycle files ran `GpuTest::init()→device()`, which
+consumes the single shared adapter and poisons every later `AllFeaturesMaxLimitsGpuTest` case with
+"adapter is consumed"; rebasing the device-less lifecycle tests on the plain `Fixture` (empty `init()`)
+fixed it. Other fixes: three more dangling-`WGPUStringView`-from-temporary bugs (entry points / labels);
+`requestDevice:limit,out_of_range` → `.unimplemented()` (WebIDL `[EnforceRange]` coercion has no C-API
+analog); `labels:wrappers_do_not_share_labels` + `adapter,info` normalization + `compilation_info` unicode
+linePos adapted as JS/web-platform semantics; `immediate` runtime-skips when `maxImmediateSize==0` (skips
+on all current backends — kept as-is, not chased per the no-oracle rule). Surfaced **F-087** (yawgpu
+cross-HAL requestDevice limit/adapter-lifecycle gaps, 73 cases) and **F-088** (wgpu-native lifecycle
+panics, bring-up reference). ⚠️ The consumed-adapter root cause is the same latent issue flagged in Y-4a:
+other plain-`TestGroup<GpuTest>` files (e.g. `onSubmittedWorkDone`) still poison `AllFeaturesMaxLimits`
+groups in a shared-process run — a harness/fixture normalization follow-up.
 
 Notes on the pre-classified rows:
 

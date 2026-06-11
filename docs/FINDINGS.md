@@ -43,7 +43,9 @@ findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + Molt
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu:** none. **F-085** was native-Vulkan confirmed (2026-06-11, Windows/NVIDIA RTX
+**Open — yawgpu:** **F-087** (requestDevice limit & adapter-lifecycle conformance gaps —
+`api,operation,adapter,requestDevice`, cross-HAL 73 cases, Dawn-oracle-confirmed; surfaced by batch Y-5).
+**F-085** was native-Vulkan confirmed (2026-06-11, Windows/NVIDIA RTX
 5060 Ti: the same 92 cases as MoltenVK) but then **reclassified — NOT an implementation defect**:
 wgpu-native on the same machine/driver fails the identical 92 cases (its earlier "fully green"
 Y-4b record was wgpu-native-on-Metal), and Dawn behaves the same on Vulkan (no FragCoord/
@@ -1562,6 +1564,44 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 - **Status:** **RECLASSIFIED — MoltenVK translation artifacts** (per-item: the SPIR-V naga emits is
   consumed correctly by a native driver; MoltenVK's SPIR-V→Metal translation diverges). Not yawgpu
   defects on native Vulkan; record kept for the MoltenVK environment.
+
+---
+
+## F-087 — yawgpu: requestDevice limit & adapter-lifecycle conformance gaps — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL — Metal and MoltenVK fail the **identical 73 cases**; Dawn passes all,
+  oracle-confirmed). Not naga/HAL-specific — this is yawgpu-core's adapter/requestDevice path.
+- **Found by:** `api,operation,adapter,requestDevice` (batch Y-5). The `default`/`invalid`/`stale`/
+  `limit,better_than_supported`/`limit,worse_than_default`/`limits,supported` subtests; `out_of_range` is
+  not counted (it is `.unimplemented()` — WebIDL `[EnforceRange]` coercion has no C-API analog).
+- **Observed (distinct gaps):**
+  (a) **defaults not honored** (`default`, 4): a device requested with no `requiredLimits` reports limits
+  below the WebGPU defaults — e.g. `maxTextureDimension1D` comes back `4096` where the spec default
+  (and Dawn) is `8192`.
+  (b) **adapter not consumed/stale** (`invalid` 1, `stale` 10): after one successful `requestDevice`, a
+  second `requestDevice` on the **same adapter** must fail (the adapter is single-use); yawgpu allows it.
+  (c) **better-than-supported not rejected** (`limit,better_than_supported`, 8): requesting a limit above
+  the adapter's supported value must reject with an OperationError; yawgpu accepts it.
+  (d) **adapter-advertised vs device-delivered mismatch** (`limits,supported` 24, `limit,worse_than_default`
+  26): requesting a supported limit (e.g. `maxColorAttachments=8`) yields a device that reports a smaller
+  value (`4`); and some valid worse-than-default requests are wrongly rejected as exceeding support.
+- **Status:** **OPEN** (yawgpu — requestDevice limit validation + adapter lifecycle). Surfaced, not masked.
+
+---
+
+## F-088 — wgpu-native: lifecycle/reflection groups panic-abort & under-validate (Y-5 bring-up reference)
+
+- **Backend:** wgpu-native only (Dawn passes; yawgpu passes everything except F-087's requestDevice set).
+- **Found by:** the batch Y-5 groups: 56 **process aborts** (contained as `crash` via `--isolate`) across
+  `object_has_descriptor_label` (18), `pipeline_layout_with_null_bind_group_layout` (16),
+  `getCompilationInfo_returns`/`offset_and_length`/`line_number_and_position` (16),
+  `max_storage_buffer_texture_frag_outputs` (3), `iff_uncaptured` (2), `texture_creation_from_reflection`
+  (1); plus ~126 fails (requestDevice limit-reporting gaps similar to F-087 but broader, and
+  `texture_reflection_attributes` 9, `lost_on_destroy` 1).
+- **Observed:** the same eager-panic class as F-001…F-021 (wgpu-native aborts on paths Dawn/yawgpu handle
+  gracefully) plus requestDevice/limit conformance gaps.
+- **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
+  `expectations/wgpu-native.txt` on regen). Not masked.
 
 ---
 
