@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 57 | 8 | 3 | 0 | 61 |
+| `api/validation` | 129 | 58 | 8 | 3 | 0 | 60 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **122** | **51** | **21** | **408** | **81** |
+| **Total** | **683** | **123** | **51** | **21** | **408** | **80** |
 
 > Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
 > `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
@@ -186,6 +186,13 @@ values are not 1-based — `WGPUBufferBindingType_Uniform=2` etc.; `WGPUBindGrou
 zero binding, not "whole buffer" — use `WGPU_WHOLE_SIZE`; sampler-type compat predicate). Surfaced
 **F-089** (yawgpu cross-HAL: filtering sampler not rejected for a non-filtering sampler binding, 1 case).
 See `specs/phaseY6-api-validation-completion-plan.md` for the V1–V10 roadmap.
+
+**Batch Y-6 V2 (`compute_pipeline`)** ported all 19 tests (compute pipeline creation, shader-module /
+pipeline-layout / device-mismatch validation, workgroup-storage & invocation limits, override
+identifier/type/value/workgroup-size validation incl. f16-gated, resource compatibility, storage-texture
+format). Codex first-pass port was Dawn-green on the first oracle run (11842/0); yawgpu Metal and MoltenVK
+also green (no finding). wgpu-native fails 10 (`limits,workgroup_storage_size` + `overrides,workgroup_size,
+limits` — it does not reject over-limit workgroup storage/size; bring-up reference).
 
 Notes on the pre-classified rows:
 
