@@ -49,9 +49,12 @@ fragment-state validation gaps — `render_pipeline/fragment_state`, cross-HAL 1
 (render-pass descriptor & attachment-compatibility validation gaps — `render_pass/*`, cross-HAL 1082
 cases); **F-093** (encoding-validation gaps — `encoding/{copyTextureToTexture,draw,encoder_open_state,
 pipeline_bind_group_compat}`, cross-HAL: compressed-copy over-validation [1904], vertex-OOB, encoder
-open-state error reporting, pipeline-layout compat). Naga-lineage **F-091** (MSL writer panics on
-generated vertex shaders — `render_pipeline/vertex_state` + `encoding/cmds/render/draw`, yawgpu Metal +
-wgpu-native crash; MoltenVK + Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+open-state error reporting, pipeline-layout compat); **F-094** (image-copy buffer/layout validation gaps —
+`image_copy/{buffer_texture_copies,layout_related,texture_related}`, cross-HAL 3513 cases:
+required-bytes-in-copy under-validation [2766], offset-alignment over-validation [660], offset+bytesPerRow
+[76], DS aspect / device-mismatch). Naga-lineage **F-091** (MSL writer panics on generated vertex shaders
+— `render_pipeline/vertex_state` + `encoding/cmds/render/draw`, yawgpu Metal + wgpu-native crash; MoltenVK
++ Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1723,6 +1726,26 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   behavior is arguably the more correct one, so this is a Dawn leniency, not a yawgpu defect.
 - **Status:** **OPEN** (yawgpu — encoder/command validation; vertex-OOB partly masked by F-091 on Metal).
   Surfaced, not masked.
+
+---
+
+## F-094 — yawgpu: image-copy buffer/layout validation gaps — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL — Metal and MoltenVK fail the **identical 3513 cases**; Dawn passes all,
+  oracle-confirmed). yawgpu-core copy validation. Surfaced by Y-6 V6.
+- **Found by:** `api,validation,image_copy,{buffer_texture_copies,layout_related,texture_related}`.
+- **Observed (distinct gaps):**
+  (a) **required-bytes-in-copy under-validation** `layout_related,required_bytes_in_copy` (2766): a
+  buffer one byte too small for the copy's data layout is accepted ("expected validation error, got
+  none") — yawgpu does not enforce `buffer.size >= offset + requiredBytesInCopy`. Dominant cluster.
+  (b) **offset-alignment over-validation / error** `layout_related,offset_alignment` (660): valid
+  offset/copy layouts on 1d copies raise `uncaptured error: repack_texel_rows: source …` — yawgpu errors
+  where Dawn accepts (or mis-handles the repack path).
+  (c) **offset + bytesPerRow over-validation** `buffer_texture_copies,offset_and_bytesPerRow` (76):
+  `unexpected validation error: copy …` for valid offset/bytesPerRow combos.
+  (d) depth/stencil aspect copy validation `buffer_texture_copies,depth_stencil_format,*` (7) and
+  `device_mismatch` (4).
+- **Status:** **OPEN** (yawgpu — image-copy buffer/layout validation). Surfaced, not masked.
 
 ---
 

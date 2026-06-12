@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 66 | 9 | 3 | 0 | 51 |
+| `api/validation` | 129 | 69 | 9 | 3 | 0 | 48 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **131** | **52** | **21** | **408** | **71** |
+| **Total** | **683** | **134** | **52** | **21** | **408** | **68** |
 
 > Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
 > `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
@@ -221,6 +221,16 @@ rebind). Dawn 31761/0. Surfaced **F-093** (yawgpu cross-HAL encoding-validation 
 over-validation [1904], vertex-OOB [MoltenVK 11664; Metal masked by F-091 crash], encoder open-state error
 reporting [25], pipeline-layout compat [18]). F-091 also crashes the `draw` vertex shaders on yawgpu Metal
 + wgpu-native.
+
+**Batch Y-6 V6 (`image_copy/{buffer_texture_copies,layout_related,texture_related}`, 3 files, 23 tests)**
+completes native buffer↔texture copy validation. Ported by codex (GPT-5.5); Dawn-green after a long
+required-bytes-in-copy debug pinned to the oracle via instrumented truth-table runs — the canonical rule:
+requiredBytesInCopy = (depth>1 ? bpr·rpi·(depth-1) : 0) + (heightBlocks>0 ? bpr·(heightBlocks-1)+
+bytesInLastRow : 0); width=0/height=0 still enforce the strided layout; depthOrArrayLayers==0 →
+requiredBytesInCopy 0 but the buffer must still satisfy offset≤size (total data size = offset). Dawn
+56729/0. Surfaced **F-094** (yawgpu cross-HAL image-copy buffer/layout validation gaps: required-bytes
+under-validation [2766], offset-alignment over-validation [660], offset+bytesPerRow [76], DS aspect /
+device-mismatch). wgpu-native 1248 crashes (bring-up reference).
 
 Notes on the pre-classified rows:
 
