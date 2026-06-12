@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 58 | 8 | 3 | 0 | 60 |
+| `api/validation` | 129 | 60 | 8 | 3 | 0 | 58 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **123** | **51** | **21** | **408** | **80** |
+| **Total** | **683** | **125** | **51** | **21** | **408** | **78** |
 
 > Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
 > `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
@@ -193,6 +193,14 @@ identifier/type/value/workgroup-size validation incl. f16-gated, resource compat
 format). Codex first-pass port was Dawn-green on the first oracle run (11842/0); yawgpu Metal and MoltenVK
 also green (no finding). wgpu-native fails 10 (`limits,workgroup_storage_size` + `overrides,workgroup_size,
 limits` — it does not reject over-limit workgroup storage/size; bring-up reference).
+
+**Batch Y-6 V3 (`render_pipeline/{fragment_state, vertex_state}`)** ported both files (25 tests). Codex
+port Dawn-green after one review round (the fragment shader must emit `vec4<f32>/u32/i32` matching each
+color target's base type, not always f32). Dawn 41985/0. Surfaced **F-090** (yawgpu cross-HAL
+fragment-state validation gaps — bytes-per-sample under-validation + output-target/blend/blendable
+over-validation, 146 cases) and naga-lineage **F-091** (naga MSL writer panics on generated vertex shaders
+during render-pipeline creation — yawgpu Metal + wgpu-native crash; yawgpu MoltenVK runs `vertex_state`
+clean at 28151/0, proving yawgpu's vertex *validation* is correct and only the MSL codegen panics).
 
 Notes on the pre-classified rows:
 

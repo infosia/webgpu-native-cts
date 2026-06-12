@@ -44,7 +44,10 @@ confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is
 limitation, same class as F-033/F-045/F-053).
 
 **Open — yawgpu:** **F-089** (filtering sampler not rejected for a non-filtering sampler binding —
-`createBindGroup`, cross-HAL 1 case, Dawn-oracle-confirmed; surfaced by Y-6 V1). **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+`createBindGroup`, cross-HAL 1 case, Dawn-oracle-confirmed; surfaced by Y-6 V1); **F-090** (render-pipeline
+fragment-state validation gaps — `render_pipeline/fragment_state`, cross-HAL 146 cases). Naga-lineage
+**F-091** (MSL writer panics on generated vertex shaders — `render_pipeline/vertex_state`, yawgpu Metal +
+wgpu-native crash; MoltenVK + Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1624,6 +1627,44 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   `createBindGroup` (Dawn: "Filtering sampler is incompatible with non-filtering sampler binding"); yawgpu
   accepts it. yawgpu's createBindGroup does not enforce the filtering-vs-non-filtering sampler-type rule.
 - **Status:** **OPEN** (yawgpu — createBindGroup sampler-type compatibility). Surfaced, not masked.
+
+---
+
+## F-090 — yawgpu: render-pipeline fragment-state validation gaps — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL — Metal and MoltenVK fail the **identical 146 cases**; Dawn passes all,
+  oracle-confirmed). yawgpu-core validation (not naga).
+- **Found by:** `api,validation,render_pipeline,fragment_state` (batch Y-6 V3 port).
+- **Observed (distinct gaps):**
+  (a) **under-validation** `limits,maxColorAttachmentBytesPerSample,{aligned,unaligned}` (58): a fragment
+  state whose color targets exceed `maxColorAttachmentBytesPerSample` is accepted ("expected validation
+  error, got none") — Dawn rejects it.
+  (b) **over-validation, no-target** `pipeline_output_targets` (24): `format=_undef_` (a fragment shader
+  with no color output / no color target) is rejected — "render pipeline fragment color output requires a
+  color target" — where Dawn allows it.
+  (c) **over-validation, blend** `pipeline_output_targets,blend` (60): valid blend-factor combinations
+  (e.g. `r8unorm` + `src-alpha`) are rejected; Dawn accepts.
+  (d) **over-validation, blendable** `targets_format_filterable` (4): `r16float` is rejected as "must be
+  blendable" where it is a valid color target; Dawn accepts.
+- **Status:** **OPEN** (yawgpu — fragment-state color-target/blend/bytes-per-sample validation). Surfaced,
+  not masked.
+
+---
+
+## F-091 — naga-MSL lineage: MSL writer panics on generated vertex shaders during render-pipeline creation
+
+- **Backend:** naga MSL lineage — **yawgpu Metal and wgpu-native both abort** (Rust panic at
+  `naga/src/back/msl/writer.rs:6843`, signal 6); yawgpu **MoltenVK (naga SPIR-V writer) and Dawn (Tint)
+  pass**. So the panic is in naga's MSL backend, shared by yawgpu's fork and upstream naga.
+- **Found by:** `api,validation,render_pipeline,vertex_state` (batch Y-6 V3). On yawgpu Metal: 518 crashes
+  across `vertex_attribute_offset_alignment` (428), `vertex_shader_type_matches_attribute_format` (41),
+  `vertex_attribute_contained_in_stride` (41) and others; wgpu-native aborts the same set. yawgpu
+  **MoltenVK** runs the whole file clean (`vertex_state` `pass=28151 fail=0 crash=0`) — confirming
+  yawgpu's vertex-state *validation* is correct; only the MSL codegen panics.
+- **Observed:** `panic in a function that cannot unwind` from the MSL writer while compiling the test's
+  generated vertex shader (specific vertex attribute formats/types trip the writer).
+- **Status:** **OPEN** (naga MSL backend; affects yawgpu Metal via its fork + wgpu-native). Queued with
+  the F-070 naga batch. Surfaced, not masked.
 
 ---
 
