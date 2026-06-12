@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 60 | 8 | 3 | 0 | 58 |
+| `api/validation` | 129 | 62 | 8 | 3 | 0 | 56 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **125** | **51** | **21** | **408** | **78** |
+| **Total** | **683** | **127** | **51** | **21** | **408** | **76** |
 
 > Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
 > `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
@@ -201,6 +201,14 @@ fragment-state validation gaps — bytes-per-sample under-validation + output-ta
 over-validation, 146 cases) and naga-lineage **F-091** (naga MSL writer panics on generated vertex shaders
 during render-pipeline creation — yawgpu Metal + wgpu-native crash; yawgpu MoltenVK runs `vertex_state`
 clean at 28151/0, proving yawgpu's vertex *validation* is correct and only the MSL codegen panics).
+
+**Batch Y-6 V4 (`render_pass/{render_pass_descriptor, attachment_compatibility}`)** ported both files (44
+tests). Codex port Dawn-green after three review rounds (resolve-support is per-format: 16-bit unorm
+resolvable, 16-bit snorm not; depthSlice/depthClearValue undefined-sentinel handling; timestamp write
+index must flow from the param). Dawn 12073/0. Surfaced **F-092** (yawgpu cross-HAL render-pass / attachment
+validation gaps, 1082 cases — depth/stencil loadOp-vs-readOnly under-validation [864], pipeline-vs-pass
+depth read-only/write/format compat [186], bytes-per-sample [shares F-090's root, 29], snorm-16 resolve
+[3]). wgpu-native 864 fail + 24 crash (bring-up reference).
 
 Notes on the pre-classified rows:
 

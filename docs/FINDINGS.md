@@ -45,9 +45,11 @@ limitation, same class as F-033/F-045/F-053).
 
 **Open — yawgpu:** **F-089** (filtering sampler not rejected for a non-filtering sampler binding —
 `createBindGroup`, cross-HAL 1 case, Dawn-oracle-confirmed; surfaced by Y-6 V1); **F-090** (render-pipeline
-fragment-state validation gaps — `render_pipeline/fragment_state`, cross-HAL 146 cases). Naga-lineage
-**F-091** (MSL writer panics on generated vertex shaders — `render_pipeline/vertex_state`, yawgpu Metal +
-wgpu-native crash; MoltenVK + Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+fragment-state validation gaps — `render_pipeline/fragment_state`, cross-HAL 146 cases); **F-092**
+(render-pass descriptor & attachment-compatibility validation gaps — `render_pass/*`, cross-HAL 1082
+cases). Naga-lineage **F-091** (MSL writer panics on generated vertex shaders —
+`render_pipeline/vertex_state`, yawgpu Metal + wgpu-native crash; MoltenVK + Dawn green) is queued with
+the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1665,6 +1667,30 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   generated vertex shader (specific vertex attribute formats/types trip the writer).
 - **Status:** **OPEN** (naga MSL backend; affects yawgpu Metal via its fork + wgpu-native). Queued with
   the F-070 naga batch. Surfaced, not masked.
+
+---
+
+## F-092 — yawgpu: render-pass descriptor & attachment-compatibility validation gaps — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL — Metal and MoltenVK fail the **identical 1082 cases**; Dawn passes all,
+  oracle-confirmed). yawgpu-core validation.
+- **Found by:** `api,validation,render_pass,{render_pass_descriptor,attachment_compatibility}` (Y-6 V4).
+- **Observed (distinct gaps):**
+  (a) **depth/stencil loadOp/storeOp vs read-only** `depth_stencil_attachment,loadOp_storeOp_match_
+  depthReadOnly_stencilReadOnly` (864): a depth/stencil attachment that sets a `loadOp`/`storeOp` while
+  the matching aspect is `readOnly` (which is illegal) is accepted — "expected validation error, got
+  none". The dominant cluster.
+  (b) **pipeline vs pass depth read-only/write state** `render_pass_or_bundle_and_pipeline,depth_stencil_
+  read_only_write_state` (144): yawgpu mis-validates compatibility between a render pipeline's
+  depth-write/compare state and the pass/bundle's read-only depth-stencil state.
+  (c) **pipeline vs pass depth format** `render_pass_or_bundle_and_pipeline,depth_format` (42): depth
+  attachment format mismatch between pipeline and pass/bundle mis-validated (incl. the `_undef_` case).
+  (d) **bytes-per-sample** `color_attachments,limits,maxColorAttachmentBytesPerSample,{aligned,unaligned}`
+  (29): over-limit color-attachment bytes-per-sample not rejected — **same root as F-090(a)**, surfacing
+  on the render-pass color-attachment path.
+  (e) **snorm-16 resolve** `resolveTarget,format_supports_resolve` (3): a resolve target with a
+  non-resolvable 16-bit snorm format is accepted; Dawn rejects.
+- **Status:** **OPEN** (yawgpu — render-pass / attachment validation). Surfaced, not masked.
 
 ---
 
