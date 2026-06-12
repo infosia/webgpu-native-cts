@@ -37,14 +37,18 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/079/080/081
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/078/079/080/081/082/087
 — each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`f857f3f`) fixed the eleven
 findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK (F-068 additionally
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu:** **F-087** (requestDevice limit & adapter-lifecycle conformance gaps —
-`api,operation,adapter,requestDevice`, cross-HAL 73 cases, Dawn-oracle-confirmed; surfaced by batch Y-5).
+**Open — yawgpu: none.** **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
+on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
+let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
+12 passes both HALs). The naga-lineage **F-070** residual (struct_inner_align + matCx3 padding +
+`shadow:loop`, 26 cases on Metal) is unchanged by the bump and stays open.
 **F-085** was native-Vulkan confirmed (2026-06-11, Windows/NVIDIA RTX
 5060 Ti: the same 92 cases as MoltenVK) but then **reclassified — NOT an implementation defect**:
 wgpu-native on the same machine/driver fails the identical 92 cases (its earlier "fully green"
@@ -1420,8 +1424,10 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   meant the dispatch never ran and the zero-initialized result buffer happened to equal the expected
   success value (0). The F-065 uncaptured-error wiring (2026-06-11) exposed this correctly; the
   "regression" classification in earlier revisions of this entry was wrong.
-- **Status:** **OPEN** (naga-fork validator fix: do not treat `let`-propagated indices as constant
-  expressions for OOB validation). Queued with the F-070 naga batch. Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `0be6c55`, naga rev bump; re-verified 2026-06-12 — `robust_access`
+  `linear_memory` now `pass=1068 fail=0` on Metal and MoltenVK. The pass is genuine, not the earlier
+  false pass: the F-065 uncaptured-error wiring is in place, so a silently-failing pipeline would surface
+  as a fail, not a pass — the module now compiles, the dispatch runs, and OOB accesses clamp to 0.)
 
 ---
 
@@ -1476,8 +1482,8 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 - **Found by:** `shader,execution,memory_model,texture_intra_invocation_coherence` (batch Y-4a port).
 - **Observed:** `GPU buffer mismatch … expected N, got 0` — a storage-texture write followed by a read of
   the same texel **within the same invocation** returns stale/zero data on the MSL path.
-- **Status:** **OPEN** (naga MSL backend; affects yawgpu via its fork). Queued with the naga batch
-  (F-070/F-078). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `0be6c55`, naga rev bump; re-verified 2026-06-12 —
+  `texture_intra_invocation_coherence` `pass=12 fail=0` on yawgpu Metal and MoltenVK; Dawn still green).
 
 ---
 
@@ -1585,7 +1591,8 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   (d) **adapter-advertised vs device-delivered mismatch** (`limits,supported` 24, `limit,worse_than_default`
   26): requesting a supported limit (e.g. `maxColorAttachments=8`) yields a device that reports a smaller
   value (`4`); and some valid worse-than-default requests are wrongly rejected as exceeding support.
-- **Status:** **OPEN** (yawgpu — requestDevice limit validation + adapter lifecycle). Surfaced, not masked.
+- **Status:** **RESOLVED** (yawgpu `0be6c55`; re-verified 2026-06-12 — `requestDevice` `pass=289 fail=0`
+  on Metal and MoltenVK, matching the Dawn oracle exactly. All four gaps closed.)
 
 ---
 

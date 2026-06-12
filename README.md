@@ -132,7 +132,7 @@ xychart-beta
 
 | Backend | Role | Metal | Vulkan (Windows) | Open findings |
 |---------|------|:-----:|:----------------:|---------------|
-| **yawgpu** | primary subject | ✅ green | ✅ green | **1** — F-087 (requestDevice limit/adapter-lifecycle, cross-HAL); 60 earlier findings fixed & re-verified on hardware |
+| **yawgpu** | primary subject | ✅ green | ✅ green | **0** — 63 surfaced, all fixed & re-verified on hardware; `expectations/yawgpu.txt` is empty (Vulkan-only F-085 xfails are spec-in-flux, not a defect) |
 | **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
 | **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **21** — eager panics, missing validation, 3D copy/readback, rendering |
 
@@ -144,8 +144,7 @@ test pass.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| yawgpu — open | 1 | F-087 (requestDevice limit/adapter-lifecycle, cross-HAL; Dawn-oracle-confirmed) |
-| yawgpu — fixed & hardware-re-verified | 60 | F-005…F-081; nothing masked |
+| yawgpu — fixed & hardware-re-verified | 63 | F-005…F-082, F-087; nothing masked |
 | wgpu-native — open | 21 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 6 | F-033, F-045, F-053/F-068 residuals, F-083, F-086 |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |
