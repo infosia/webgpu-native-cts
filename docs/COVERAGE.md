@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 62 | 8 | 3 | 0 | 56 |
+| `api/validation` | 129 | 66 | 9 | 3 | 0 | 51 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **127** | **51** | **21** | **408** | **76** |
+| **Total** | **683** | **131** | **52** | **21** | **408** | **71** |
 
 > Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
 > `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
@@ -209,6 +209,18 @@ index must flow from the param). Dawn 12073/0. Surfaced **F-092** (yawgpu cross-
 validation gaps, 1082 cases — depth/stencil loadOp-vs-readOnly under-validation [864], pipeline-vs-pass
 depth read-only/write/format compat [186], bytes-per-sample [shares F-090's root, 29], snorm-16 resolve
 [3]). wgpu-native 864 fail + 24 crash (bring-up reference).
+
+**Batch Y-6 V5 (`encoding/*`, 5 files, 38 tests)** ported `encoder_open_state`,
+`programmable/{pipeline_bind_group_compat,pipeline_immediate}`, `cmds/copyTextureToTexture`,
+`cmds/render/draw`. pipeline_immediate is partial (immediate-data paths skip — no exported
+`wgpu*SetImmediates`). Ported by codex (GPT-5.5 from the fix rounds on); Dawn-green after several rounds —
+codex first registered skip-stubs (rejected, redone as real ports), and the
+`draw,index_buffer_format_dirtying` expectation was pinned to the Dawn oracle via an instrumented
+truth-table run (this Dawn re-validates strip-index-format only on pipeline change, not on index-buffer
+rebind). Dawn 31761/0. Surfaced **F-093** (yawgpu cross-HAL encoding-validation gaps: compressed-copy
+over-validation [1904], vertex-OOB [MoltenVK 11664; Metal masked by F-091 crash], encoder open-state error
+reporting [25], pipeline-layout compat [18]). F-091 also crashes the `draw` vertex shaders on yawgpu Metal
++ wgpu-native.
 
 Notes on the pre-classified rows:
 

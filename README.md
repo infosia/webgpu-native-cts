@@ -94,11 +94,11 @@ backends build link-agnostically and run on real GPUs — verified on **macOS / 
 ```mermaid
 pie showData
     title Upstream .spec.ts files (683)
-    "Ported — complete" : 127
-    "Ported — partial" : 51
+    "Ported — complete" : 131
+    "Ported — partial" : 52
     "Deferred (shader/validation, expression precision)" : 408
     "Not portable (N/A)" : 21
-    "Todo" : 76
+    "Todo" : 71
 ```
 
 ```mermaid
@@ -111,11 +111,11 @@ xychart-beta
 
 | Area | Ported* | Note |
 |------|--------:|------|
-| `api/validation` | 70 / 129 | Y-6 V1–V4 (createBindGroup, compute_pipeline, render_pipeline fragment/vertex, render_pass descriptor/compat); 3 N/A; 56 todo |
+| `api/validation` | 75 / 129 | Y-6 V1–V5 (createBindGroup, compute_pipeline, render_pipeline, render_pass, encoding); 3 N/A; 51 todo |
 | `api/operation` | 70 / 72 | complete except 2 N/A (`buffers/map_ArrayBuffer`, `map_detach`) |
 | `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees |
 | `shader/validation` | 0 / 207 | deferred |
-| **Total** | **178 / 683** | |
+| **Total** | **183 / 683** | |
 
 \* complete + partial. Per-file detail and what each batch added: [COVERAGE](docs/COVERAGE.md).
 
@@ -132,11 +132,11 @@ xychart-beta
 
 | Backend | Role | Metal | Vulkan (Windows) | Open findings |
 |---------|------|:-----:|:----------------:|---------------|
-| **yawgpu** | primary subject | ✅ green | ✅ green | **3** — F-089 (createBindGroup sampler), F-090 (fragment-state), F-092 (render-pass/attachment validation), all cross-HAL; 64 earlier findings fixed |
+| **yawgpu** | primary subject | ✅ green | ✅ green | **4** — F-089/F-090/F-092/F-093 (createBindGroup sampler, fragment-state, render-pass, encoding validation), all cross-HAL; 64 earlier findings fixed |
 | **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
 | **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **21** — eager panics, missing validation, 3D copy/readback, rendering |
 
-### Findings — 92 surfaced to date (F-001…F-092)
+### Findings — 93 surfaced to date (F-001…F-093)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
@@ -144,7 +144,7 @@ test pass.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| yawgpu — open | 3 | F-089 (createBindGroup sampler), F-090 (fragment-state), F-092 (render-pass/attachment validation) — all cross-HAL, Dawn-oracle-confirmed |
+| yawgpu — open | 4 | F-089 (createBindGroup sampler), F-090 (fragment-state), F-092 (render-pass), F-093 (encoding/copy validation) — all cross-HAL, Dawn-oracle-confirmed |
 | yawgpu — fixed & hardware-re-verified | 64 | F-005…F-082, F-087; nothing masked |
 | wgpu-native — open | 21 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 6 | F-033, F-045, F-053/F-068 residuals, F-083, F-086 |

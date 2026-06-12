@@ -47,9 +47,11 @@ limitation, same class as F-033/F-045/F-053).
 `createBindGroup`, cross-HAL 1 case, Dawn-oracle-confirmed; surfaced by Y-6 V1); **F-090** (render-pipeline
 fragment-state validation gaps — `render_pipeline/fragment_state`, cross-HAL 146 cases); **F-092**
 (render-pass descriptor & attachment-compatibility validation gaps — `render_pass/*`, cross-HAL 1082
-cases). Naga-lineage **F-091** (MSL writer panics on generated vertex shaders —
-`render_pipeline/vertex_state`, yawgpu Metal + wgpu-native crash; MoltenVK + Dawn green) is queued with
-the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+cases); **F-093** (encoding-validation gaps — `encoding/{copyTextureToTexture,draw,encoder_open_state,
+pipeline_bind_group_compat}`, cross-HAL: compressed-copy over-validation [1904], vertex-OOB, encoder
+open-state error reporting, pipeline-layout compat). Naga-lineage **F-091** (MSL writer panics on
+generated vertex shaders — `render_pipeline/vertex_state` + `encoding/cmds/render/draw`, yawgpu Metal +
+wgpu-native crash; MoltenVK + Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1691,6 +1693,36 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   (e) **snorm-16 resolve** `resolveTarget,format_supports_resolve` (3): a resolve target with a
   non-resolvable 16-bit snorm format is accepted; Dawn rejects.
 - **Status:** **OPEN** (yawgpu — render-pass / attachment validation). Surfaced, not masked.
+
+---
+
+## F-093 — yawgpu: encoding-validation gaps (compressed copy / encoder-state / pipeline-layout / vertex-OOB) — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL — Metal and MoltenVK; Dawn passes all, oracle-confirmed). yawgpu-core
+  encoder/command validation. Surfaced by Y-6 V5.
+- **Found by:** `api,validation,encoding,{cmds/copyTextureToTexture, cmds/render/draw, encoder_open_state,
+  programmable/pipeline_bind_group_compat}`.
+- **Observed (distinct gaps):**
+  (a) **compressed texture-to-texture copy over-validation** `copyTextureToTexture,
+  copy_ranges_with_compressed_texture_formats` (1904, Metal==MoltenVK): valid compressed-format copies
+  (bc1/bc2/.../astc) are rejected — `copy texture destination range exceeds the texture subresource` —
+  yawgpu mis-computes the block-aligned copy bounds for compressed formats. The dominant cluster.
+  (b) **vertex-buffer OOB validation** `draw,vertex_buffer_OOB` (MoltenVK 11664; on Metal this group
+  crashes via the naga MSL writer F-091, so it is only assessable on the Vulkan path): out-of-bounds
+  vertex-buffer draws are not rejected at finish().
+  (c) **encoder open-state error reporting** `encoder_open_state,{render_pass,compute_pass}_commands`
+  (25): yawgpu raises `pass encoder cannot be used after end` where Dawn defers/accepts — an error-timing /
+  reporting divergence.
+  (d) **pipeline-layout compatibility** `pipeline_bind_group_compat,pipeline_layouts,{render,compute}_pass`
+  (18): yawgpu mis-predicts auto-vs-explicit pipeline-layout compatibility for some param combos.
+  (e) `draw,buffer_binding_overlap` (Metal 4 + crashes; MoltenVK 324) — partly F-091 crash on Metal,
+  partly a real overlap-validation gap on the Vulkan path.
+- **Note (not part of F-093):** `draw,index_buffer_format_dirtying` (2) fails on yawgpu because yawgpu is
+  **stricter** than our Dawn — it validates a re-bound mismatched index-buffer format (errors), whereas this
+  Dawn build does not (the port's expectation matches the Dawn oracle; see the in-file comment). yawgpu's
+  behavior is arguably the more correct one, so this is a Dawn leniency, not a yawgpu defect.
+- **Status:** **OPEN** (yawgpu — encoder/command validation; vertex-OOB partly masked by F-091 on Metal).
+  Surfaced, not masked.
 
 ---
 
