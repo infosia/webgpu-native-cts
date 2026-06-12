@@ -94,11 +94,11 @@ backends build link-agnostically and run on real GPUs — verified on **macOS / 
 ```mermaid
 pie showData
     title Upstream .spec.ts files (683)
-    "Ported — complete" : 121
-    "Ported — partial" : 51
+    "Ported — complete" : 122
+    "Ported — partial" : 50
     "Deferred (shader/validation, expression precision)" : 408
-    "Not portable (N/A)" : 18
-    "Todo" : 85
+    "Not portable (N/A)" : 21
+    "Todo" : 82
 ```
 
 ```mermaid
@@ -111,7 +111,7 @@ xychart-beta
 
 | Area | Ported* | Note |
 |------|--------:|------|
-| `api/validation` | 64 / 129 | |
+| `api/validation` | 64 / 129 | 3 N/A web/native gaps triaged; 62 todo |
 | `api/operation` | 70 / 72 | complete except 2 N/A (`buffers/map_ArrayBuffer`, `map_detach`) |
 | `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees |
 | `shader/validation` | 0 / 207 | deferred |
