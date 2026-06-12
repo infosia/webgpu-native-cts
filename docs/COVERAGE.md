@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 57 | 7 | 3 | 0 | 62 |
+| `api/validation` | 129 | 57 | 8 | 3 | 0 | 61 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **122** | **50** | **21** | **408** | **82** |
+| **Total** | **683** | **122** | **51** | **21** | **408** | **81** |
 
 > Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
 > `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
@@ -177,6 +177,15 @@ synchronous map helper, moving that file from partial to ported. Future `api/val
 classify web-only subcases inside otherwise-portable files as per-test N/A (not whole-file N/A), notably
 canvas configuration / `getCurrentTexture`, external-texture resource bindings, and device-lost
 `copyExternalImageToTexture` / `importExternalTexture` subcases.
+
+**Batch Y-6 V1 (api/validation completion — `createBindGroup`)** ported the central bind-group
+validation file (27 tests): 22 native-portable tests + the 5 `external_texture,texture_view,*` tests as
+`.unimplemented()` (no native `GPUExternalTexture` creation). Ported by the codex MCP coding agent,
+Dawn-oracle-verified by the orchestrator (2358 pass / 85 skip / 0 fail) after three review rounds (enum
+values are not 1-based — `WGPUBufferBindingType_Uniform=2` etc.; `WGPUBindGroupEntry.size=0` is a literal
+zero binding, not "whole buffer" — use `WGPU_WHOLE_SIZE`; sampler-type compat predicate). Surfaced
+**F-089** (yawgpu cross-HAL: filtering sampler not rejected for a non-filtering sampler binding, 1 case).
+See `specs/phaseY6-api-validation-completion-plan.md` for the V1–V10 roadmap.
 
 Notes on the pre-classified rows:
 

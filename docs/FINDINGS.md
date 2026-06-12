@@ -43,7 +43,8 @@ findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + Molt
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu: none.** **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+**Open — yawgpu:** **F-089** (filtering sampler not rejected for a non-filtering sampler binding —
+`createBindGroup`, cross-HAL 1 case, Dawn-oracle-confirmed; surfaced by Y-6 V1). **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1609,6 +1610,20 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   gracefully) plus requestDevice/limit conformance gaps.
 - **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
   `expectations/wgpu-native.txt` on regen). Not masked.
+
+---
+
+## F-089 — yawgpu: filtering sampler not rejected for a non-filtering sampler binding — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL — Metal and MoltenVK both fail the **same 1 case**; Dawn raises the error,
+  oracle-confirmed).
+- **Found by:** `api,validation,createBindGroup` `binding_must_contain_resource_defined_in_layout`
+  `resourceType="filtSamp";entry="sampler_non-filtering"` (batch Y-6 V1 port).
+- **Observed:** `expected validation error, got none` — binding a **filtering** sampler (one with a linear
+  filter mode) to a bind-group-layout entry declared `sampler: { type: "non-filtering" }` must fail at
+  `createBindGroup` (Dawn: "Filtering sampler is incompatible with non-filtering sampler binding"); yawgpu
+  accepts it. yawgpu's createBindGroup does not enforce the filtering-vs-non-filtering sampler-type rule.
+- **Status:** **OPEN** (yawgpu — createBindGroup sampler-type compatibility). Surfaced, not masked.
 
 ---
 
