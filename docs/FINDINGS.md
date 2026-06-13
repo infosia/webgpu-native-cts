@@ -60,7 +60,10 @@ non-identity swizzle views accepted without the feature, `capability_checks/feat
 only_identity_swizzle`, cross-HAL 18; surfaced by Y-6 V9); **F-099** (`rgba16unorm`/`rgba16snorm` not gated
 behind `texture-formats-tier1` — accepted across texture/color-target/storage/render-bundle/render-attachment/
 multisample/render-pipeline without the feature, `capability_checks/features/{texture_formats,texture_formats_tier1}`,
-cross-HAL 28; `r16*`/`rg16*` are correctly gated; surfaced by Y-6 V9). Naga-lineage **F-091** (MSL writer panics on generated vertex
+cross-HAL 28; `r16*`/`rg16*` are correctly gated; surfaced by Y-6 V9); naga-lineage **F-100** (out-of-range
+`@binding` rejected at `createShaderModule` rather than pipeline creation — `capability_checks/limits/
+maxBindingsPerBindGroup:createPipeline`, cross-HAL 12; validation-timing, wgpu-native crashes; surfaced by Y-6
+V10a). Naga-lineage **F-091** (MSL writer panics on generated vertex
 shaders
 — `render_pipeline/vertex_state` + `encoding/cmds/render/draw`, yawgpu Metal + wgpu-native crash; MoltenVK
 + Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
@@ -1842,6 +1845,27 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   (`r16`/`rg16`/`rgba16` unorm/snorm) used without the feature — 90 cases that should be clean validation
   errors — plus it leaves `depth32float-stencil8` ungated in the render-bundle d/s path (bring-up
   reference; to be reflected in `expectations/wgpu-native.*` on regen).
+
+---
+
+## F-100 — yawgpu (naga frontend): out-of-range `@binding` rejected at `createShaderModule`, not pipeline creation — cross-HAL
+
+- **Backend:** yawgpu Metal AND MoltenVK (identical, cross-HAL). Dawn (oracle) passes. wgpu-native crashes
+  on the same input. Surfaced by Y-6 V10a.
+- **Found by:** `api,validation,capability_checks,limits,maxBindingsPerBindGroup:createPipeline,at_over`
+  (12 cases: `limitTest ∈ {atDefault, underDefault}` × `overLimit` × 3 pipeline types × async).
+- **Observed:** the test builds a shader module whose single binding uses `@binding(testValue-1)` where
+  `testValue` exceeds the device's `maxBindingsPerBindGroup`, then expects the *pipeline* creation to fail.
+  Dawn validates the over-range binding at pipeline creation, so the test's inner `expectValidationError`
+  consumes it. yawgpu's naga frontend rejects it earlier, at `createShaderModule` ("shader resource
+  binding 1000 exceeds the maximum binding number"), so the error escapes the inner scope and trips the
+  outer no-leaked-error assertion of `_testThenDestroyDevice`. The net conformance outcome (the over-limit
+  binding is rejected) is the same — this is a validation-**timing/scope** divergence, not a missing or
+  spurious validation. wgpu-native panics (signal) on the same path.
+- **Status:** **OPEN**, naga-lineage (surfaced on yawgpu cross-HAL; the `@binding` range check lives in the
+  naga frontend, hence wgpu-native is affected too — it crashes). Surfaced/unmasked; `expectations/yawgpu.txt`
+  stays xfail-free. The broader wgpu-native limit crashes (128 in V10a — requesting devices with specific
+  limits + over-limit ops) are the known bring-up eager-panic class.
 
 ---
 

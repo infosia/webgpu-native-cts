@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 77 | 13 | 3 | 0 | 36 |
+| `api/validation` | 129 | 87 | 14 | 3 | 0 | 25 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,10 +32,10 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **142** | **56** | **21** | **408** | **56** |
+| **Total** | **683** | **152** | **57** | **21** | **408** | **45** |
 
-> Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 178 files (complete + partial) under
-> `src/webgpu/` (api/validation 70, api/operation 70, shader/execution 38). `api/operation` is now
+> Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 189 files (complete + partial) under
+> `src/webgpu/` (api/validation 81, api/operation 70, shader/execution 38). `api/operation` is now
 > complete except the two N/A `buffers/{map_ArrayBuffer,map_detach}` (JS ArrayBuffer detach semantics).
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
@@ -276,6 +276,23 @@ usage all succeed without the feature, 28; `r16*`/`rg16*` are correctly gated). 
 (signal) on the tier1 16-bit-norm formats without the feature (90 cases, should be a clean validation
 error) + the swizzle gap (18) + `depth32float-stencil8` render-bundle d/s not gated (1) — bring-up
 reference.
+
+**Batch Y-6 V10a (`capability_checks/limits` — the `limit_utils` keystone + 11 core-path files)** ports the
+shared `limit_utils.ts` helper (1348 lines) to `limits/limit_utils.h`: the CTS default-limits table for all
+35 `kPossibleLimits`, limit-name get/set accessors over `WGPULimits` + chained `WGPUCompatibilityModeLimits`,
+the sparse-`requiredLimits` device-request machinery, the `LimitTest` private-adapter fixture (per-test
+device requested with a specific limit value, error-scope-wrapped, then destroyed), `kMaximumLimitBaseParams`,
+and `testDeviceWithRequestedMaximumLimits` / `testDeviceWithSpecificLimits` (the heavier binding-combination
+generators are stubbed `// V10b`). Then 11 files validate the helper end-to-end: `maxBufferSize`,
+`maxTextureDimension1D/2D/3D` (2D's 2 canvas tests are web-only `.unimplemented()`), `maxTextureArrayLayers`,
+`maxComputeWorkgroupSizeX/Y/Z`, `maxComputeInvocationsPerWorkgroup`, `maxComputeWorkgroupsPerDimension`,
+`maxBindingsPerBindGroup` (10 complete + maxTextureDimension2D partial). Codex (GPT-5.5). **Dawn (oracle)
+199/0 green.** **yawgpu Metal AND MoltenVK both fail the same 12 cases (cross-HAL):** **F-100** —
+`maxBindingsPerBindGroup:createPipeline,at_over` with an out-of-range `@binding`, which yawgpu's naga
+frontend rejects at `createShaderModule` (leaking to the outer error scope) rather than at pipeline creation
+where Dawn validates it. wgpu-native crashes heavily (128 crashes + 52 fails on requesting devices with
+specific limits + over-limit ops — bring-up reference, known eager-panic class). Remaining ~24 limit files +
+`clip_distances` (deferred from V9) land in later V10 sub-batches.
 
 Notes on the pre-classified rows:
 
