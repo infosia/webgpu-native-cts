@@ -94,6 +94,16 @@ inline constexpr std::array<WGPUShaderStage, 8> kShaderStageCombinations = {
     WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute,
 };
 
+inline constexpr std::array<WGPUShaderStage, 7> kShaderStageCombinationsWithStage = {
+    WGPUShaderStage_Vertex,
+    WGPUShaderStage_Fragment,
+    WGPUShaderStage_Vertex | WGPUShaderStage_Fragment,
+    WGPUShaderStage_Compute,
+    WGPUShaderStage_Vertex | WGPUShaderStage_Compute,
+    WGPUShaderStage_Fragment | WGPUShaderStage_Compute,
+    WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute,
+};
+
 inline constexpr std::array<WGPUShaderStage, 3> kShaderStages = {
     WGPUShaderStage_Vertex,
     WGPUShaderStage_Fragment,

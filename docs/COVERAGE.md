@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 100 | 14 | 3 | 0 | 12 |
+| `api/validation` | 129 | 112 | 14 | 3 | 0 | 0 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,10 +32,10 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **165** | **57** | **21** | **408** | **32** |
+| **Total** | **683** | **177** | **57** | **21** | **408** | **20** |
 
-> Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 202 files (complete + partial) under
-> `src/webgpu/` (api/validation 94, api/operation 70, shader/execution 38). `api/operation` is now
+> Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 214 files (complete + partial) under
+> `src/webgpu/` (api/validation 106, api/operation 70, shader/execution 38). `api/operation` is now
 > complete except the two N/A `buffers/{map_ArrayBuffer,map_detach}` (JS ArrayBuffer detach semantics).
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
@@ -309,6 +309,23 @@ pattern (bring-up reference, same eager-panic class as V10a). Remaining for V10c
 binding-combination families (`max{Storage,Uniform}…PerShaderStage`, in-stage variants, `maxBindGroups`,
 `maxBindGroupsPlusVertexBuffers`, `maxVertexBuffers`) which need the stubbed WGSL binding-combination
 generators.
+
+**Batch Y-6 V10c (`capability_checks/limits` per-stage binding-combination families, 12 files → all complete)
+— completes all 35 limit files and the api/validation port (todo → 0).** Implements the stubbed
+`limit_utils.h` generators (`getPerStageWGSLForBindingCombination[StorageTextures]`, `testGPU{Binding,
+RenderAndBinding}CommandsMixin`, `testMaxStorageXXXInYYYStageDeviceCreationWithDependentLimit`,
+`kBindingCombinations`, `reorder`/`kReorderOrderKeys`, `kBindGroupTests`, +
+`kShaderStageCombinationsWithStage` in `capability_info.h`) and ports `maxBindGroups`,
+`maxBindGroupsPlusVertexBuffers`, `maxVertexBuffers`, `max{SampledTextures,Samplers,UniformBuffers,
+StorageBuffers,StorageTextures}PerShaderStage`, `maxStorage{Buffers,Textures}In{Fragment,Vertex}Stage`.
+Codex (GPT-5.5). **Dawn (oracle) 9280/0 green** (all 35 limit files). **yawgpu Metal AND MoltenVK both fail
+the same 312 cases (cross-HAL):** **F-101** — per-stage resource binding limits (sampled-texture / sampler /
+uniform-buffer / storage-texture PerShaderStage + storage-texture in-stage) NOT enforced at **auto-layout**
+pipeline creation, though enforced for explicit BGL/pipeline-layouts (those pass). MoltenVK additionally has
+a 30-case **MoltenVK-only** residual (`maxComputeWorkgroupStorageSize:createComputePipeline` `atLimit` — the
+SPIR-V/MoltenVK path can't compile a shader using the full workgroup-storage limit; Metal green;
+F-033/F-045-class translation artifact). wgpu-native crashes/fails heavily (bring-up reference). The 12
+pre-existing F-100 maxBindingsPerBindGroup fails persist.
 
 Notes on the pre-classified rows:
 

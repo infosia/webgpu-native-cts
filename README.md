@@ -94,11 +94,11 @@ backends build link-agnostically and run on real GPUs — verified on **macOS / 
 ```mermaid
 pie showData
     title Upstream .spec.ts files (683)
-    "Ported — complete" : 165
+    "Ported — complete" : 177
     "Ported — partial" : 57
     "Deferred (shader/validation, expression precision)" : 408
     "Not portable (N/A)" : 21
-    "Todo" : 32
+    "Todo" : 20
 ```
 
 ```mermaid
@@ -106,16 +106,16 @@ xychart-beta
     title "Ported (complete + partial) by area, %"
     x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
     y-axis "ported %" 0 --> 100
-    bar [88, 97, 16, 0, 33]
+    bar [98, 97, 16, 0, 34]
 ```
 
 | Area | Ported* | Note |
 |------|--------:|------|
-| `api/validation` | 114 / 129 | Y-6 V1–V10b (… capability_checks/features + limits: keystone, simple/min families, clip_distances); 3 whole-file N/A; 12 todo |
+| `api/validation` | 126 / 129 | Y-6 V1–V10 COMPLETE (… capability_checks/features + all 35 limits); only the 3 whole-file N/A remain |
 | `api/operation` | 70 / 72 | complete except 2 N/A (`buffers/map_ArrayBuffer`, `map_detach`) |
 | `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees |
 | `shader/validation` | 0 / 207 | deferred |
-| **Total** | **222 / 683** | |
+| **Total** | **234 / 683** | |
 
 \* complete + partial. Per-file detail and what each batch added: [COVERAGE](docs/COVERAGE.md).
 
@@ -132,11 +132,11 @@ xychart-beta
 
 | Backend | Role | Metal | Vulkan (Windows) | Open findings |
 |---------|------|:-----:|:----------------:|---------------|
-| **yawgpu** | primary subject | ✅ green | ✅ green | **9** — F-089/F-090/F-092…F-096/F-098/F-099 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope, swizzle + tier1-format feature gating), all cross-HAL; 64 earlier findings fixed |
+| **yawgpu** | primary subject | ✅ green | ✅ green | **10** — F-089/F-090/F-092…F-096/F-098/F-099/F-101 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope, swizzle + tier1-format feature gating, per-stage limit enforcement), all cross-HAL; 64 earlier findings fixed |
 | **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
 | **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **22** — eager panics, missing validation, 3D copy/readback, rendering, device-lost state |
 
-### Findings — 100 surfaced to date (F-001…F-100)
+### Findings — 101 surfaced to date (F-001…F-101)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
@@ -144,10 +144,10 @@ test pass.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| yawgpu — open | 9 | F-089/F-090/F-092…F-096 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope); F-098/F-099 (swizzle + `rgba16` tier1-format feature gating not enforced) — all cross-HAL, Dawn-oracle-confirmed |
+| yawgpu — open | 10 | F-089/F-090/F-092…F-096 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope); F-098/F-099 (swizzle + `rgba16` tier1-format feature gating); F-101 (per-stage resource limits not enforced at auto-layout pipeline creation) — all cross-HAL, Dawn-oracle-confirmed |
 | yawgpu — fixed & hardware-re-verified | 64 | F-005…F-082, F-087; nothing masked |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
-| MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 6 | F-033, F-045, F-053/F-068 residuals, F-083, F-086 |
+| MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 7 | F-033, F-045, F-053/F-068 residuals, F-083, F-086; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual (Metal green) |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |
 | naga-lineage residuals (tracked upstream) | 3 | F-070 memory layout / matCx3 padding / `shadow:loop`; F-091 MSL writer panic on generated vertex shaders (Metal + wgpu-native); F-100 out-of-range `@binding` rejected at `createShaderModule` not pipeline creation (yawgpu cross-HAL; wgpu-native crashes) |
 

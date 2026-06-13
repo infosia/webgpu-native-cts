@@ -60,7 +60,10 @@ non-identity swizzle views accepted without the feature, `capability_checks/feat
 only_identity_swizzle`, cross-HAL 18; surfaced by Y-6 V9); **F-099** (`rgba16unorm`/`rgba16snorm` not gated
 behind `texture-formats-tier1` — accepted across texture/color-target/storage/render-bundle/render-attachment/
 multisample/render-pipeline without the feature, `capability_checks/features/{texture_formats,texture_formats_tier1}`,
-cross-HAL 28; `r16*`/`rg16*` are correctly gated; surfaced by Y-6 V9); naga-lineage **F-100** (out-of-range
+cross-HAL 28; `r16*`/`rg16*` are correctly gated; surfaced by Y-6 V9); **F-101** (per-stage resource binding
+limits — sampled-texture/sampler/uniform-buffer/storage-texture PerShaderStage + storage-texture in-stage —
+not enforced at **auto-layout** pipeline creation, though enforced for explicit layouts;
+`capability_checks/limits/*PerShaderStage:createPipeline`, cross-HAL 312; surfaced by Y-6 V10c); naga-lineage **F-100** (out-of-range
 `@binding` rejected at `createShaderModule` rather than pipeline creation — `capability_checks/limits/
 maxBindingsPerBindGroup:createPipeline`, cross-HAL 12; validation-timing, wgpu-native crashes; surfaced by Y-6
 V10a). Naga-lineage **F-091** (MSL writer panics on generated vertex
@@ -1866,6 +1869,33 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   naga frontend, hence wgpu-native is affected too — it crashes). Surfaced/unmasked; `expectations/yawgpu.txt`
   stays xfail-free. The broader wgpu-native limit crashes (128 in V10a — requesting devices with specific
   limits + over-limit ops) are the known bring-up eager-panic class.
+
+---
+
+## F-101 — yawgpu: per-stage resource binding limits not enforced at auto-layout pipeline creation — cross-HAL
+
+- **Backend:** yawgpu Metal AND MoltenVK (identical 312 cases, cross-HAL). Dawn (oracle) passes. Surfaced
+  by Y-6 V10c.
+- **Found by:** `api,validation,capability_checks,limits,{maxSampledTexturesPerShaderStage,
+  maxSamplersPerShaderStage, maxUniformBuffersPerShaderStage, maxStorageTexturesPerShaderStage,
+  maxStorageTexturesInFragmentStage, maxStorageTexturesInVertexStage}:createPipeline,at_over` (the
+  `overLimit` cases — 60+60+60+108+12+12 = 312).
+- **Observed:** a pipeline created with `layout: 'auto'` whose shader uses `testValue` (> the device's
+  per-stage limit) sampled-textures / samplers / uniform-buffers / storage-textures in a single stage
+  must fail pipeline creation. Dawn rejects it; yawgpu creates it without error (`no error when one was
+  expected`). yawgpu **does** enforce these limits for an **explicit** layout (the sibling
+  `createBindGroupLayout,at_over` / `createPipelineLayout,at_over` cases pass) — the gap is specifically
+  the **auto-derived** pipeline layout, where yawgpu doesn't count the shader's per-stage resources
+  against the limit. Storage *buffers* per stage are not in the failing set (enforced / skipped).
+- **Status:** **OPEN** (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
+  xfail-free.
+- **MoltenVK-only residual (separate, not a yawgpu-core defect):**
+  `maxComputeWorkgroupStorageSize:createComputePipeline,at_over` `atLimit` fails on MoltenVK only (30
+  cases) with `internal error: HAL shader compilation failed: vulkan: compute pipeline creation failed`
+  — the SPIR-V/MoltenVK path cannot compile a compute shader that uses the full workgroup-storage limit.
+  Metal is green. Same MoltenVK-translation-artifact class as F-033/F-045/F-053/F-068-residual.
+- **wgpu-native:** crashes/fails heavily on the per-stage-limit pipeline paths (bring-up reference, same
+  eager-panic class as the other V10 limit files).
 
 ---
 
