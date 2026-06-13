@@ -52,7 +52,9 @@ pipeline_bind_group_compat}`, cross-HAL: compressed-copy over-validation [1904],
 open-state error reporting, pipeline-layout compat); **F-094** (image-copy buffer/layout validation gaps —
 `image_copy/{buffer_texture_copies,layout_related,texture_related}`, cross-HAL 3513 cases:
 required-bytes-in-copy under-validation [2766], offset-alignment over-validation [660], offset+bytesPerRow
-[76], DS aspect / device-mismatch). Naga-lineage **F-091** (MSL writer panics on generated vertex shaders
+[76], DS aspect / device-mismatch); **F-095** (buffer usage-scope conflicts not detected in a render pass —
+`resource_usages/buffer/*`, cross-HAL 296 cases; Dawn AND wgpu-native both reject, yawgpu doesn't).
+Naga-lineage **F-091** (MSL writer panics on generated vertex shaders
 — `render_pipeline/vertex_state` + `encoding/cmds/render/draw`, yawgpu Metal + wgpu-native crash; MoltenVK
 + Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
@@ -1746,6 +1748,21 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   (d) depth/stencil aspect copy validation `buffer_texture_copies,depth_stencil_format,*` (7) and
   `device_mismatch` (4).
 - **Status:** **OPEN** (yawgpu — image-copy buffer/layout validation). Surfaced, not masked.
+
+---
+
+## F-095 — yawgpu: buffer usage-scope conflicts not detected in a render pass — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL — Metal and MoltenVK fail the **identical 296 cases**; Dawn **and
+  wgpu-native** both pass, so this is a genuine yawgpu-core gap, not naga-lineage). Surfaced by Y-6 V7a.
+- **Found by:** `api,validation,resource_usages,buffer,{in_pass_encoder,in_pass_misc}` — render-pass
+  variants (`buffer_usage_in_one_render_pass_with_{no_draw,one_draw,two_draws}`, 280) +
+  `compute_pass_with_one_dispatch` (6) + `in_pass_misc,reset_buffer_usage_before_draw` (10).
+- **Observed:** `expected validation error, got none` — using the **same buffer** as both a read-only
+  usage (e.g. `uniform`) and a **writable storage** usage within one render-pass usage scope is a hazard
+  that must be rejected; yawgpu accepts it. yawgpu's buffer usage-scope tracker does not flag
+  read/write-storage conflicts (predominantly in render passes; the compute path mostly validates).
+- **Status:** **OPEN** (yawgpu — buffer usage-scope / hazard tracking in passes). Surfaced, not masked.
 
 ---
 
