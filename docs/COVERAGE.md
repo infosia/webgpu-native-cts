@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 74 | 10 | 3 | 0 | 42 |
+| `api/validation` | 129 | 77 | 13 | 3 | 0 | 36 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,10 +32,10 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **139** | **53** | **21** | **408** | **62** |
+| **Total** | **683** | **142** | **56** | **21** | **408** | **56** |
 
-> Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
-> `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
+> Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 178 files (complete + partial) under
+> `src/webgpu/` (api/validation 70, api/operation 70, shader/execution 38). `api/operation` is now
 > complete except the two N/A `buffers/{map_ArrayBuffer,map_detach}` (JS ArrayBuffer detach semantics).
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
@@ -253,6 +253,29 @@ encoding, and queue commands on a destroyed (private) device; the 3 external/DOM
 `getBlockInfoForColorTextureFormat`; switched to `getBlockInfoForTextureFormat`). Dawn 2568/0;
 **yawgpu Metal AND MoltenVK fully green (2568/0)** — no yawgpu finding. wgpu-native fails all 2568
 (**F-097**, destroyed-device state model diverges; bring-up reference).
+
+**Batch Y-6 V9 (`capability_checks/features`, 6 files, 31 tests)** ports the optional-feature validation
+files: `query_types` (2, ported), `texture_formats` (13 → partial, the 2 canvas tests are web-only
+`.unimplemented()`), `texture_formats_tier1` (8, ported), `texture_formats_tier2` (3, ported),
+`texture_component_swizzle` (4 → partial, `invalid_swizzle` is JS-string-specific `.unimplemented()`),
+`subgroup_size_control` (1 → partial, `.unimplemented()` — no native `subgroup-size-control` feature enum
+in the pinned header). `clip_distances` is **deferred to V10** (depends on the `limit_utils` helper V10
+builds). Codex (GPT-5.5); a shared `feature_test_helpers.h` provides the per-test feature-selected
+private device (`selectDeviceOrSkipTestCase` / `selectDeviceForTextureFormatOrSkipTestCase`); the
+missing format lists (`kOptionalTextureFormats`, `kBC/ASTCCompressedTextureFormats`,
+`kTextureFormatTier1ThrowsWhenNotEnabled`, `kTextureFormatTier1AllowsResolve`) were derived from upstream
+`format_info.ts` into `texture_format.h`. Two orchestrator-side fixes: the fixture eagerly created a
+feature-less device in `GpuTest::init()` (overrode `init()` to defer + made `select` re-request when the
+feature set differs), and the identity swizzle was chained explicitly (Dawn rejects an explicit
+identity-valued swizzle without the feature; mapped identity → no chained descriptor). **Dawn 2056/0**
+after the fixes. **yawgpu Metal AND MoltenVK both fail the same 46 cases (cross-HAL):** **F-098**
+(texture-component-swizzle not enforced — non-identity swizzle views accepted without the feature,
+`only_identity_swizzle`, 18) and **F-099** (`rgba16unorm`/`rgba16snorm` not gated behind
+`texture-formats-tier1` — texture/color-target/storage-BGL/render-bundle/render-attachment/multisample
+usage all succeed without the feature, 28; `r16*`/`rg16*` are correctly gated). wgpu-native: **crashes**
+(signal) on the tier1 16-bit-norm formats without the feature (90 cases, should be a clean validation
+error) + the swizzle gap (18) + `depth32float-stencil8` render-bundle d/s not gated (1) — bring-up
+reference.
 
 Notes on the pre-classified rows:
 

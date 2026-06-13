@@ -55,7 +55,12 @@ required-bytes-in-copy under-validation [2766], offset-alignment over-validation
 [76], DS aspect / device-mismatch); **F-095** (buffer usage-scope conflicts not detected in a render pass —
 `resource_usages/buffer/*`, cross-HAL 296 cases; Dawn AND wgpu-native both reject, yawgpu doesn't);
 **F-096** (texture subresource usage-scope conflicts not detected — `resource_usages/texture/*`, cross-HAL
-851 cases; the texture analog of F-095). Naga-lineage **F-091** (MSL writer panics on generated vertex
+851 cases; the texture analog of F-095); **F-098** (`texture-component-swizzle` feature gating not enforced —
+non-identity swizzle views accepted without the feature, `capability_checks/features/texture_component_swizzle:
+only_identity_swizzle`, cross-HAL 18; surfaced by Y-6 V9); **F-099** (`rgba16unorm`/`rgba16snorm` not gated
+behind `texture-formats-tier1` — accepted across texture/color-target/storage/render-bundle/render-attachment/
+multisample/render-pipeline without the feature, `capability_checks/features/{texture_formats,texture_formats_tier1}`,
+cross-HAL 28; `r16*`/`rg16*` are correctly gated; surfaced by Y-6 V9). Naga-lineage **F-091** (MSL writer panics on generated vertex
 shaders
 — `render_pipeline/vertex_state` + `encoding/cmds/render/draw`, yawgpu Metal + wgpu-native crash; MoltenVK
 + Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
@@ -94,8 +99,9 @@ const-expression OOB → all `robust_access` compute pipelines error; Tint corre
 **F-070** (reduced 2026-06-11: Metal residual is `struct_inner_align` 9 + matCx3 padding 16 +
 `shadow:loop`; MoltenVK still fails ~54 `memory_layout` layout cases — SPIR-V backend lacks the fix),
 **F-071** (wgpu-native `zero_init` 3930 + `robust_access` aborts — same naga root as F-078), **F-075**
-(wgpu-native buffer mapping broadly broken). `texture_component_swizzle` remains Dawn-only oracle
-(yawgpu/wgpu-native lack the feature).
+(wgpu-native buffer mapping broadly broken). The `api,operation` `texture_component_swizzle` test remains
+Dawn-only oracle (yawgpu/wgpu-native lack the feature); the Y-6 V9 validation file additionally surfaces
+**F-098** (yawgpu/wgpu-native do not reject a swizzle view when the feature is absent).
 
 The earlier `api/validation` bulk-port findings **F-060/F-061/F-062/F-063** (all cross-HAL; Dawn passed all) are
 **all fixed and re-verified on both HALs** (Metal == Vulkan/MoltenVK, 2026-06-09): `external_texture` `pass=2
@@ -1798,6 +1804,44 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   every case (the destroyed-device state model differs).
 - **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
   `expectations/wgpu-native.*` on regen). Not masked.
+
+---
+
+## F-098 — yawgpu: `texture-component-swizzle` feature gating not enforced — cross-HAL
+
+- **Backend:** yawgpu Metal AND MoltenVK (identical, cross-HAL); wgpu-native shares the gap. Dawn (oracle)
+  passes. Surfaced by Y-6 V9.
+- **Found by:** `api,validation,capability_checks,features,texture_component_swizzle:only_identity_swizzle`
+  (18 of 19 swizzle subcases).
+- **Observed:** on a device **without** the `texture-component-swizzle` feature, creating a texture view
+  with a non-identity swizzle must raise a validation error ("swizzle used without the feature enabled",
+  per Dawn). yawgpu lacks the feature and **silently ignores the chained
+  `WGPUTextureComponentSwizzleDescriptor`** instead of rejecting it → the view is created, no error
+  (`expected validation error, got none`). The identity case correctly produces no error. wgpu-native
+  behaves the same (it too lacks the feature and does not reject the descriptor).
+- **Status:** **OPEN** (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
+  xfail-free. (Supersedes the earlier note that `texture_component_swizzle` was "Dawn-only oracle" — the
+  validation file surfaces the missing-feature rejection rule on yawgpu/wgpu-native.)
+
+## F-099 — yawgpu: `rgba16unorm`/`rgba16snorm` not gated behind `texture-formats-tier1` — cross-HAL
+
+- **Backend:** yawgpu Metal AND MoltenVK (identical, cross-HAL). Dawn (oracle) passes. Surfaced by Y-6 V9.
+- **Found by:** `api,validation,capability_checks,features,texture_formats` (`texture_descriptor`,
+  `texture_descriptor_view_formats`, `storage_texture_binding_layout`, `color_target_state`,
+  `render_bundle_encoder_descriptor_color_format`) + `texture_formats_tier1` (`texture_usage,{render_attachment,
+  multisample}`, `render_pipeline,color_target`) — 28 cases, all `format ∈ {rgba16unorm, rgba16snorm}`,
+  `enable_feature=false`.
+- **Observed:** the spec gates `rgba16unorm`/`rgba16snorm` behind `texture-formats-tier1`; without the
+  feature, creating/using them (texture, view-format, storage-BGL, color target, render bundle,
+  render-attachment + multisample usage, render-pipeline color target) must error. yawgpu treats these two
+  formats as **always-available core formats** and accepts every use (`expected validation error, got
+  none`). The other tier1 16-bit-norm formats (`r16unorm/snorm`, `rg16unorm/snorm`) **are** correctly
+  gated by yawgpu — only the `rgba16` norm pair leaks.
+- **Status:** **OPEN** (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
+  xfail-free. wgpu-native is worse here: it **crashes** (signal) on every tier1 16-bit-norm format
+  (`r16`/`rg16`/`rgba16` unorm/snorm) used without the feature — 90 cases that should be clean validation
+  errors — plus it leaves `depth32float-stencil8` ungated in the render-bundle d/s path (bring-up
+  reference; to be reflected in `expectations/wgpu-native.*` on regen).
 
 ---
 

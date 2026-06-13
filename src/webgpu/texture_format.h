@@ -266,6 +266,63 @@ inline constexpr std::array<WGPUTextureFormat, kCompressedTextureFormatInfos.siz
     WGPUTextureFormat_ASTC12x10UnormSrgb, WGPUTextureFormat_ASTC12x12Unorm, WGPUTextureFormat_ASTC12x12UnormSrgb,
 };
 
+inline constexpr std::array<WGPUTextureFormat, 59> kOptionalTextureFormats = {
+    WGPUTextureFormat_R16Unorm, WGPUTextureFormat_R16Snorm, WGPUTextureFormat_RG16Unorm,
+    WGPUTextureFormat_RG16Snorm, WGPUTextureFormat_RGBA16Unorm, WGPUTextureFormat_RGBA16Snorm,
+    WGPUTextureFormat_Depth32FloatStencil8,
+    WGPUTextureFormat_BC1RGBAUnorm, WGPUTextureFormat_BC1RGBAUnormSrgb, WGPUTextureFormat_BC2RGBAUnorm,
+    WGPUTextureFormat_BC2RGBAUnormSrgb, WGPUTextureFormat_BC3RGBAUnorm, WGPUTextureFormat_BC3RGBAUnormSrgb,
+    WGPUTextureFormat_BC4RUnorm, WGPUTextureFormat_BC4RSnorm, WGPUTextureFormat_BC5RGUnorm,
+    WGPUTextureFormat_BC5RGSnorm, WGPUTextureFormat_BC6HRGBUfloat, WGPUTextureFormat_BC6HRGBFloat,
+    WGPUTextureFormat_BC7RGBAUnorm, WGPUTextureFormat_BC7RGBAUnormSrgb,
+    WGPUTextureFormat_ETC2RGB8Unorm, WGPUTextureFormat_ETC2RGB8UnormSrgb,
+    WGPUTextureFormat_ETC2RGB8A1Unorm, WGPUTextureFormat_ETC2RGB8A1UnormSrgb,
+    WGPUTextureFormat_ETC2RGBA8Unorm, WGPUTextureFormat_ETC2RGBA8UnormSrgb,
+    WGPUTextureFormat_EACR11Unorm, WGPUTextureFormat_EACR11Snorm,
+    WGPUTextureFormat_EACRG11Unorm, WGPUTextureFormat_EACRG11Snorm,
+    WGPUTextureFormat_ASTC4x4Unorm, WGPUTextureFormat_ASTC4x4UnormSrgb,
+    WGPUTextureFormat_ASTC5x4Unorm, WGPUTextureFormat_ASTC5x4UnormSrgb,
+    WGPUTextureFormat_ASTC5x5Unorm, WGPUTextureFormat_ASTC5x5UnormSrgb,
+    WGPUTextureFormat_ASTC6x5Unorm, WGPUTextureFormat_ASTC6x5UnormSrgb,
+    WGPUTextureFormat_ASTC6x6Unorm, WGPUTextureFormat_ASTC6x6UnormSrgb,
+    WGPUTextureFormat_ASTC8x5Unorm, WGPUTextureFormat_ASTC8x5UnormSrgb,
+    WGPUTextureFormat_ASTC8x6Unorm, WGPUTextureFormat_ASTC8x6UnormSrgb,
+    WGPUTextureFormat_ASTC8x8Unorm, WGPUTextureFormat_ASTC8x8UnormSrgb,
+    WGPUTextureFormat_ASTC10x5Unorm, WGPUTextureFormat_ASTC10x5UnormSrgb,
+    WGPUTextureFormat_ASTC10x6Unorm, WGPUTextureFormat_ASTC10x6UnormSrgb,
+    WGPUTextureFormat_ASTC10x8Unorm, WGPUTextureFormat_ASTC10x8UnormSrgb,
+    WGPUTextureFormat_ASTC10x10Unorm, WGPUTextureFormat_ASTC10x10UnormSrgb,
+    WGPUTextureFormat_ASTC12x10Unorm, WGPUTextureFormat_ASTC12x10UnormSrgb,
+    WGPUTextureFormat_ASTC12x12Unorm, WGPUTextureFormat_ASTC12x12UnormSrgb,
+};
+
+inline constexpr std::array<WGPUTextureFormat, 14> kBCCompressedTextureFormats = {
+    WGPUTextureFormat_BC1RGBAUnorm, WGPUTextureFormat_BC1RGBAUnormSrgb,
+    WGPUTextureFormat_BC2RGBAUnorm, WGPUTextureFormat_BC2RGBAUnormSrgb,
+    WGPUTextureFormat_BC3RGBAUnorm, WGPUTextureFormat_BC3RGBAUnormSrgb,
+    WGPUTextureFormat_BC4RUnorm, WGPUTextureFormat_BC4RSnorm,
+    WGPUTextureFormat_BC5RGUnorm, WGPUTextureFormat_BC5RGSnorm,
+    WGPUTextureFormat_BC6HRGBUfloat, WGPUTextureFormat_BC6HRGBFloat,
+    WGPUTextureFormat_BC7RGBAUnorm, WGPUTextureFormat_BC7RGBAUnormSrgb,
+};
+
+inline constexpr std::array<WGPUTextureFormat, 28> kASTCCompressedTextureFormats = {
+    WGPUTextureFormat_ASTC4x4Unorm, WGPUTextureFormat_ASTC4x4UnormSrgb,
+    WGPUTextureFormat_ASTC5x4Unorm, WGPUTextureFormat_ASTC5x4UnormSrgb,
+    WGPUTextureFormat_ASTC5x5Unorm, WGPUTextureFormat_ASTC5x5UnormSrgb,
+    WGPUTextureFormat_ASTC6x5Unorm, WGPUTextureFormat_ASTC6x5UnormSrgb,
+    WGPUTextureFormat_ASTC6x6Unorm, WGPUTextureFormat_ASTC6x6UnormSrgb,
+    WGPUTextureFormat_ASTC8x5Unorm, WGPUTextureFormat_ASTC8x5UnormSrgb,
+    WGPUTextureFormat_ASTC8x6Unorm, WGPUTextureFormat_ASTC8x6UnormSrgb,
+    WGPUTextureFormat_ASTC8x8Unorm, WGPUTextureFormat_ASTC8x8UnormSrgb,
+    WGPUTextureFormat_ASTC10x5Unorm, WGPUTextureFormat_ASTC10x5UnormSrgb,
+    WGPUTextureFormat_ASTC10x6Unorm, WGPUTextureFormat_ASTC10x6UnormSrgb,
+    WGPUTextureFormat_ASTC10x8Unorm, WGPUTextureFormat_ASTC10x8UnormSrgb,
+    WGPUTextureFormat_ASTC10x10Unorm, WGPUTextureFormat_ASTC10x10UnormSrgb,
+    WGPUTextureFormat_ASTC12x10Unorm, WGPUTextureFormat_ASTC12x10UnormSrgb,
+    WGPUTextureFormat_ASTC12x12Unorm, WGPUTextureFormat_ASTC12x12UnormSrgb,
+};
+
 inline constexpr std::array<WGPUTextureFormat, kUncompressedTextureFormats.size() + kCompressedTextureFormats.size()> kAllTextureFormats = {
     WGPUTextureFormat_R8Unorm, WGPUTextureFormat_R8Snorm, WGPUTextureFormat_R8Uint, WGPUTextureFormat_R8Sint,
     WGPUTextureFormat_RG8Unorm, WGPUTextureFormat_RG8Snorm, WGPUTextureFormat_RG8Uint, WGPUTextureFormat_RG8Sint,
@@ -307,6 +364,22 @@ inline constexpr std::array<WGPUTextureFormat, 10> kTextureFormatTier1AllowsRend
     WGPUTextureFormat_RG16Snorm,
     WGPUTextureFormat_RGBA16Unorm,
     WGPUTextureFormat_RGBA16Snorm,
+    WGPUTextureFormat_R8Snorm,
+    WGPUTextureFormat_RG8Snorm,
+    WGPUTextureFormat_RGBA8Snorm,
+    WGPUTextureFormat_RG11B10Ufloat,
+};
+
+inline constexpr std::array<WGPUTextureFormat, 6> kTextureFormatTier1ThrowsWhenNotEnabled = {
+    WGPUTextureFormat_R16Unorm,
+    WGPUTextureFormat_R16Snorm,
+    WGPUTextureFormat_RG16Unorm,
+    WGPUTextureFormat_RG16Snorm,
+    WGPUTextureFormat_RGBA16Unorm,
+    WGPUTextureFormat_RGBA16Snorm,
+};
+
+inline constexpr std::array<WGPUTextureFormat, 4> kTextureFormatTier1AllowsResolve = {
     WGPUTextureFormat_R8Snorm,
     WGPUTextureFormat_RG8Snorm,
     WGPUTextureFormat_RGBA8Snorm,
