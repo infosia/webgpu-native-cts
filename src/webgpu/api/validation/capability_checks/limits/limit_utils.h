@@ -18,6 +18,7 @@
 #include "common/webgpu/sync.h"
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/texture_format.h"
 
 namespace cts::capability_limits {
 
@@ -578,6 +579,10 @@ class LimitTest : public GpuTest {
         }
     }
 
+    ScopeResult popErrorScopeOnLimitDevice() {
+        return popErrorScopeSync(instance_, device());
+    }
+
     void testForValidationErrorWithPossibleOutOfMemoryError(
         const std::function<void()>& body,
         bool shouldError,
@@ -732,8 +737,24 @@ class LimitTest : public GpuTest {
         }, extraLimits);
     }
 
-    void skipIfNotEnoughStorageBuffersInStage(WGPUShaderStage, uint64_t) {
-        // V10b: heavier binding-combination batches port the full compatibility-stage skip logic.
+    void skipIfNotEnoughStorageBuffersInStage(WGPUShaderStage visibility, uint64_t numRequired) {
+        WGPUCompatibilityModeLimits compat = WGPU_COMPATIBILITY_MODE_LIMITS_INIT;
+        const WGPULimits limits = queryLimits(device(), &compat);
+        if (numRequired > limits.maxStorageBuffersPerShaderStage) {
+            skip("maxStorageBuffersPerShaderStage is less than required storage buffers");
+        }
+        if ((visibility & WGPUShaderStage_Fragment) != 0 &&
+            compat.maxStorageBuffersInFragmentStage != WGPU_LIMIT_U32_UNDEFINED &&
+            limits.maxStorageBuffersPerShaderStage > compat.maxStorageBuffersInFragmentStage &&
+            !(compat.maxStorageBuffersInFragmentStage >= numRequired)) {
+            skip("maxStorageBuffersInFragmentStage is less than required storage buffers");
+        }
+        if ((visibility & WGPUShaderStage_Vertex) != 0 &&
+            compat.maxStorageBuffersInVertexStage != WGPU_LIMIT_U32_UNDEFINED &&
+            limits.maxStorageBuffersPerShaderStage > compat.maxStorageBuffersInVertexStage &&
+            !(compat.maxStorageBuffersInVertexStage >= numRequired)) {
+            skip("maxStorageBuffersInVertexStage is less than required storage buffers");
+        }
     }
 
     std::string getPerStageWGSLForBindingCombination() {

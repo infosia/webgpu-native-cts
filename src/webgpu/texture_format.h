@@ -428,6 +428,77 @@ inline constexpr std::array<WGPUTextureFormat, 39> kColorRenderableTextureFormat
     WGPUTextureFormat_RG11B10Ufloat,
 };
 
+inline constexpr std::array<uint32_t, 2> kTextureSampleCounts = {1, 4};
+
+struct ColorRenderFormatInfo {
+    WGPUTextureFormat format;
+    uint32_t byteCost;
+    uint32_t alignment;
+};
+
+inline constexpr std::array<ColorRenderFormatInfo, 42> kColorRenderFormatInfos = {{
+    {WGPUTextureFormat_R8Unorm, 1, 1},
+    {WGPUTextureFormat_R8Uint, 1, 1},
+    {WGPUTextureFormat_R8Sint, 1, 1},
+    {WGPUTextureFormat_RG8Unorm, 2, 1},
+    {WGPUTextureFormat_RG8Uint, 2, 1},
+    {WGPUTextureFormat_RG8Sint, 2, 1},
+    {WGPUTextureFormat_RGBA8Unorm, 8, 1},
+    {WGPUTextureFormat_RGBA8UnormSrgb, 8, 1},
+    {WGPUTextureFormat_RGBA8Uint, 4, 1},
+    {WGPUTextureFormat_RGBA8Sint, 4, 1},
+    {WGPUTextureFormat_BGRA8Unorm, 8, 1},
+    {WGPUTextureFormat_BGRA8UnormSrgb, 8, 1},
+    {WGPUTextureFormat_R16Unorm, 2, 2},
+    {WGPUTextureFormat_R16Snorm, 2, 2},
+    {WGPUTextureFormat_R16Uint, 2, 2},
+    {WGPUTextureFormat_R16Sint, 2, 2},
+    {WGPUTextureFormat_R16Float, 2, 2},
+    {WGPUTextureFormat_RG16Unorm, 4, 2},
+    {WGPUTextureFormat_RG16Snorm, 4, 2},
+    {WGPUTextureFormat_RG16Uint, 4, 2},
+    {WGPUTextureFormat_RG16Sint, 4, 2},
+    {WGPUTextureFormat_RG16Float, 4, 2},
+    {WGPUTextureFormat_RGBA16Unorm, 8, 4},
+    {WGPUTextureFormat_RGBA16Snorm, 8, 2},
+    {WGPUTextureFormat_RGBA16Uint, 8, 2},
+    {WGPUTextureFormat_RGBA16Sint, 8, 2},
+    {WGPUTextureFormat_RGBA16Float, 8, 2},
+    {WGPUTextureFormat_R32Uint, 4, 4},
+    {WGPUTextureFormat_R32Sint, 4, 4},
+    {WGPUTextureFormat_R32Float, 4, 4},
+    {WGPUTextureFormat_RG32Uint, 8, 4},
+    {WGPUTextureFormat_RG32Sint, 8, 4},
+    {WGPUTextureFormat_RG32Float, 8, 4},
+    {WGPUTextureFormat_RGBA32Uint, 16, 4},
+    {WGPUTextureFormat_RGBA32Sint, 16, 4},
+    {WGPUTextureFormat_RGBA32Float, 16, 4},
+    {WGPUTextureFormat_RGB10A2Uint, 8, 4},
+    {WGPUTextureFormat_RGB10A2Unorm, 8, 4},
+    {WGPUTextureFormat_RG11B10Ufloat, 8, 4},
+    {WGPUTextureFormat_R8Snorm, 1, 1},
+    {WGPUTextureFormat_RG8Snorm, 2, 1},
+    {WGPUTextureFormat_RGBA8Snorm, 4, 1},
+}};
+
+inline uint32_t getColorRenderByteCost(WGPUTextureFormat format) {
+    for (const ColorRenderFormatInfo& info : kColorRenderFormatInfos) {
+        if (info.format == format) {
+            return info.byteCost;
+        }
+    }
+    std::abort();
+}
+
+inline uint32_t getColorRenderAlignment(WGPUTextureFormat format) {
+    for (const ColorRenderFormatInfo& info : kColorRenderFormatInfos) {
+        if (info.format == format) {
+            return info.alignment;
+        }
+    }
+    std::abort();
+}
+
 inline constexpr std::array<WGPUTextureFormat, 22> kStorageTextureFormats = {
     WGPUTextureFormat_RGBA8Unorm,
     WGPUTextureFormat_RGBA8Snorm,

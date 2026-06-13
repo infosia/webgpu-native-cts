@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 87 | 14 | 3 | 0 | 25 |
+| `api/validation` | 129 | 100 | 14 | 3 | 0 | 12 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,10 +32,10 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **152** | **57** | **21** | **408** | **45** |
+| **Total** | **683** | **165** | **57** | **21** | **408** | **32** |
 
-> Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 189 files (complete + partial) under
-> `src/webgpu/` (api/validation 81, api/operation 70, shader/execution 38). `api/operation` is now
+> Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 202 files (complete + partial) under
+> `src/webgpu/` (api/validation 94, api/operation 70, shader/execution 38). `api/operation` is now
 > complete except the two N/A `buffers/{map_ArrayBuffer,map_detach}` (JS ArrayBuffer detach semantics).
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
@@ -293,6 +293,22 @@ frontend rejects at `createShaderModule` (leaking to the outer error scope) rath
 where Dawn validates it. wgpu-native crashes heavily (128 crashes + 52 fails on requesting devices with
 specific limits + over-limit ops — bring-up reference, known eager-panic class). Remaining ~24 limit files +
 `clip_distances` (deferred from V9) land in later V10 sub-batches.
+
+**Batch Y-6 V10b (`capability_checks/limits` simple/min families + `clip_distances`, 13 files → all complete)**
+ports the limit files that need only the V10a helpers plus the minimum-limit path (`kMinimumLimitBaseParams` /
+`kMinimumLimits` inversion): `maxColorAttachments`, `maxColorAttachmentBytesPerSample`,
+`maxComputeWorkgroupStorageSize`, `maxDynamic{Uniform,Storage}BuffersPerPipelineLayout`,
+`maxInterStageShaderVariables`, `max{Storage,Uniform}BufferBindingSize`, `maxVertexAttributes`,
+`maxVertexBufferArrayStride`, `min{Storage,Uniform}BufferOffsetAlignment` (the power-of-two MIN-limit path),
+and `clip_distances` (closes the V9 deferral; gated on `WGPUFeatureName_ClipDistances`, runtime-skips when
+unsupported). Codex (GPT-5.5) added `skipIfNotEnoughStorageBuffersInStage` to `limit_utils.h` and
+`getColorRenderAlignment`/`kTextureSampleCounts` to `texture_format.h`. **Dawn (oracle) 3878/0 green** (all
+limits + clip_distances). **yawgpu Metal: the only fails are the pre-existing 12 F-100 cases — every V10b
+family is green, NO new yawgpu finding.** wgpu-native still crashes/fails on the specific-limit device-request
+pattern (bring-up reference, same eager-panic class as V10a). Remaining for V10c: the per-stage
+binding-combination families (`max{Storage,Uniform}…PerShaderStage`, in-stage variants, `maxBindGroups`,
+`maxBindGroupsPlusVertexBuffers`, `maxVertexBuffers`) which need the stubbed WGSL binding-combination
+generators.
 
 Notes on the pre-classified rows:
 
