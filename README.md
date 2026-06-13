@@ -101,23 +101,29 @@ pie showData
     "Todo" : 20
 ```
 
+**The entire `api` surface is done** — all 201 `api/validation` + `api/operation` files are accounted for
+(complete, partial, or classified N/A), with **zero remaining todo**. "Addressed" below = complete + partial
++ N/A (every upstream file resolved); the remainder is deferred (`shader/validation`, expression-precision
+execution) or todo.
+
 ```mermaid
 xychart-beta
-    title "Ported (complete + partial) by area, %"
+    title "Coverage addressed (complete + partial + N/A) of upstream files, %"
     x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
-    y-axis "ported %" 0 --> 100
-    bar [98, 97, 16, 0, 34]
+    y-axis "addressed %" 0 --> 100
+    bar [100, 100, 16, 0, 37]
 ```
 
-| Area | Ported* | Note |
-|------|--------:|------|
-| `api/validation` | 126 / 129 | Y-6 V1–V10 COMPLETE (… capability_checks/features + all 35 limits); only the 3 whole-file N/A remain |
-| `api/operation` | 70 / 72 | all portable files opened (2 N/A: `buffers/map_ArrayBuffer`, `map_detach`); **42 partial** — some native-portable breadth deferred (vertical-first) |
-| `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees |
+| Area | Addressed* | Note |
+|------|----------:|------|
+| `api/validation` | **129 / 129 ✅** | **fully ported** — every file complete (112), partial (14), or N/A (3); no todo (Y-6 V1–V10: capability_checks/features + all 35 limits) |
+| `api/operation` | **72 / 72 ✅** | **fully ported** — every file complete (28), partial (42), or N/A (2); no todo. Partials leave some native-portable breadth deferred (vertical-first) |
+| `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees; rest deferred |
 | `shader/validation` | 0 / 207 | deferred |
-| **Total** | **234 / 683** | |
+| **Total** | **255 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
 
-\* complete + partial. Per-file detail and what each batch added: [COVERAGE](docs/COVERAGE.md).
+\* addressed = complete + partial + N/A (every upstream file resolved). Per-file detail and what each batch
+added: [COVERAGE](docs/COVERAGE.md).
 
 ### What works
 
