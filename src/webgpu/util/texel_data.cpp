@@ -129,6 +129,34 @@ double rgb9e5BitsToNumber(uint32_t bits) {
     return static_cast<double>(mantissa) * std::pow(2.0, static_cast<int32_t>(exponent) - 15 - 9);
 }
 
+uint32_t packRGB9E5UFloat(double r, double g, double b) {
+    constexpr uint32_t mantissaBits = 9;
+    constexpr uint32_t maxExponent = 31;
+    constexpr int32_t exponentBias = 15;
+    const double sharedExponentMax =
+        (static_cast<double>((1u << mantissaBits) - 1u) / static_cast<double>(1u << mantissaBits))
+        * std::pow(2.0, static_cast<int32_t>(maxExponent) - exponentBias);
+    const double red = std::clamp(r, 0.0, sharedExponentMax);
+    const double green = std::clamp(g, 0.0, sharedExponentMax);
+    const double blue = std::clamp(b, 0.0, sharedExponentMax);
+    const double maxComponent = std::max({red, green, blue});
+    const double log2Max = maxComponent == 0.0 ? -std::numeric_limits<double>::infinity() : std::log2(maxComponent);
+    const int32_t exponentSharedP =
+        std::max(-exponentBias - 1, static_cast<int32_t>(std::floor(log2Max))) + 1 + exponentBias;
+    const double maxSFloat =
+        maxComponent / std::pow(2.0, exponentSharedP - exponentBias - static_cast<int32_t>(mantissaBits)) + 0.5;
+    const uint32_t maxS = static_cast<uint32_t>(std::floor(maxSFloat));
+    const int32_t exponentShared = maxS == (1u << mantissaBits) ? exponentSharedP + 1 : exponentSharedP;
+    const double scalar = 1.0 / std::pow(2.0, exponentShared - exponentBias - static_cast<int32_t>(mantissaBits));
+    const uint32_t redS = static_cast<uint32_t>(std::floor(red * scalar + 0.5));
+    const uint32_t greenS = static_cast<uint32_t>(std::floor(green * scalar + 0.5));
+    const uint32_t blueS = static_cast<uint32_t>(std::floor(blue * scalar + 0.5));
+    return (static_cast<uint32_t>(exponentShared) << 27u)
+        | ((blueS & 0x1ffu) << 18u)
+        | ((greenS & 0x1ffu) << 9u)
+        | (redS & 0x1ffu);
+}
+
 bool componentsAreByteAligned(const TexelRepresentation& repr) {
     for (TexelComponent component : repr.componentOrder) {
         if (repr.bitLengths[componentIndex(component)] % 8 != 0) {
@@ -329,12 +357,16 @@ TexelComponents TexelRepresentation::bitsToNumber(const TexelBits& bits) const {
 }
 
 TexelBits TexelRepresentation::numberToBits(const TexelComponents& numbers) const {
+    TexelBits bits;
     if (format == WGPUTextureFormat_RGB9E5Ufloat) {
-        // Color-to-bytes encode for rgb9e5's shared exponent is not implemented.
-        throw std::runtime_error("rgb9e5 numberToBits is unimplemented");
+        const uint32_t encoded = packRGB9E5UFloat(numbers.values[0], numbers.values[1], numbers.values[2]);
+        const uint32_t exponent = (encoded >> 27u) & 0x1fu;
+        bits.values[0] = (exponent << 9u) | (encoded & 0x1ffu);
+        bits.values[1] = (exponent << 9u) | ((encoded >> 9u) & 0x1ffu);
+        bits.values[2] = (exponent << 9u) | ((encoded >> 18u) & 0x1ffu);
+        return bits;
     }
 
-    TexelBits bits;
     for (TexelComponent component : componentOrder) {
         const uint32_t index = componentIndex(component);
         const uint32_t bitLength = bitLengths[index];
