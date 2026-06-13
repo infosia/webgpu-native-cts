@@ -646,8 +646,8 @@ void runDefaultLayoutBindingTest(AllFeaturesMaxLimitsGpuTest& t, bool computeTes
     runCompatibility(t, computeTest ? "compute pass" : "render pass", compute, render, groups, {}, computeTest ? t.param<std::string>("computeCommand") : t.param<std::string>("renderCommand"), true, success);
 }
 
-CTS_TEST(testGroup, "pipeline_layouts,compute_pass")
-    .desc("Test auto and explicit compute pipeline layouts with empty and non-empty bind groups.")
+CTS_TEST(testGroup, "default_bind_group_layouts_never_match,compute_pass")
+    .desc("Test default, auto, and explicit compute pipeline layouts with empty and non-empty bind groups.")
     .params([](ParamsBuilder u) {
         return u.combine("empty", {false, true})
                 .combineWithParams({
@@ -662,8 +662,8 @@ CTS_TEST(testGroup, "pipeline_layouts,compute_pass")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) { runDefaultLayoutBindingTest(t, true); });
 
-CTS_TEST(testGroup, "pipeline_layouts,render_pass")
-    .desc("Test auto and explicit render pipeline layouts with empty and non-empty bind groups.")
+CTS_TEST(testGroup, "default_bind_group_layouts_never_match,render_pass")
+    .desc("Test default, auto, and explicit render pipeline layouts with empty and non-empty bind groups.")
     .params([](ParamsBuilder u) {
         return u.combine("empty", {false, true})
                 .combineWithParams({

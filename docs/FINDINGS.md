@@ -63,7 +63,10 @@ multisample/render-pipeline without the feature, `capability_checks/features/{te
 cross-HAL 28; `r16*`/`rg16*` are correctly gated; surfaced by Y-6 V9); **F-101** (per-stage resource binding
 limits — sampled-texture/sampler/uniform-buffer/storage-texture PerShaderStage + storage-texture in-stage —
 not enforced at **auto-layout** pipeline creation, though enforced for explicit layouts;
-`capability_checks/limits/*PerShaderStage:createPipeline`, cross-HAL 312; surfaced by Y-6 V10c); naga-lineage **F-100** (out-of-range
+`capability_checks/limits/*PerShaderStage:createPipeline`, cross-HAL 312; surfaced by Y-6 V10c); **F-102** (default/auto bind-group-layout compatibility validation
+diverges both directions — under-rejects cross-auto-layout binds, over-rejects valid swaps;
+`encoding/programmable/pipeline_bind_group_compat:default_bind_group_layouts_never_match`, cross-HAL 18;
+Dawn AND wgpu-native both correct; surfaced by the audit query-identity restoration); naga-lineage **F-100** (out-of-range
 `@binding` rejected at `createShaderModule` rather than pipeline creation — `capability_checks/limits/
 maxBindingsPerBindGroup:createPipeline`, cross-HAL 12; validation-timing, wgpu-native crashes; surfaced by Y-6
 V10a). Naga-lineage **F-091** (MSL writer panics on generated vertex
@@ -1896,6 +1899,27 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   Metal is green. Same MoltenVK-translation-artifact class as F-033/F-045/F-053/F-068-residual.
 - **wgpu-native:** crashes/fails heavily on the per-stage-limit pipeline paths (bring-up reference, same
   eager-panic class as the other V10 limit files).
+
+---
+
+## F-102 — yawgpu: default/auto bind-group-layout compatibility validation diverges (both directions) — cross-HAL
+
+- **Backend:** yawgpu Metal AND MoltenVK (identical 18 cases, cross-HAL). **Dawn (oracle) AND wgpu-native
+  both pass all** — a clean yawgpu-only differential. Surfaced by the Y-6 audit follow-up (query-identity
+  restoration of `pipeline_bind_group_compat`).
+- **Found by:** `api,validation,encoding,programmable,pipeline_bind_group_compat:
+  default_bind_group_layouts_never_match,{compute_pass,render_pass}` — 6 + 12 = 18 cases. (These coverage
+  paths existed in upstream but had been dropped by the original port, which registered a weaker invented
+  `pipeline_layouts,*` slice; restoring the faithful upstream test recovered them.)
+- **Observed:** a pipeline's **default (auto-generated)** bind-group layout must never be considered
+  compatible with a bind group created from a *different* auto pipeline's layout. yawgpu diverges in
+  **both** directions vs Dawn/wgpu-native: (a) `_success=false` `auto0`/`auto1` cases — yawgpu does **not**
+  reject a draw/dispatch that binds a group from a different auto layout (`expected validation error, got
+  none`, 6 cases); (b) `_success=true; swap=true` cases — yawgpu **wrongly rejects** a valid binding
+  (`uncaptured error: pipeline bind group layout is incompatible`, 12 cases). The auto-layout
+  identity/compatibility comparison is mis-keyed.
+- **Status:** **OPEN** (yawgpu defect, cross-HAL; Dawn + wgpu-native correct). Surfaced/unmasked;
+  `expectations/yawgpu.txt` stays xfail-free.
 
 ---
 

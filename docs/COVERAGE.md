@@ -35,8 +35,14 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | **Total** | **683** | **177** | **57** | **21** | **408** | **20** |
 
 > Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 214 files (complete + partial) under
-> `src/webgpu/` (api/validation 106, api/operation 70, shader/execution 38). `api/operation` is now
-> complete except the two N/A `buffers/{map_ArrayBuffer,map_detach}` (JS ArrayBuffer detach semantics).
+> `src/webgpu/` (api/validation 106, api/operation 70, shader/execution 38). `api/operation` has **every
+> portable file opened** (70/72; only `buffers/{map_ArrayBuffer,map_detach}` are N/A — JS ArrayBuffer
+> detach), but it is **not fully complete**: per the area table 43 of those 70 files are **partial** —
+> they register their upstream test names but leave some bodies `.unimplemented()`. Most of those gaps are
+> web/JS-specific, but some are native-portable breadth deliberately deferred under the vertical-first
+> strategy (e.g. `sampling/filter_mode` linear/mipmap, `rendering/color_target_state` blend matrix,
+> `command_buffer/copyTextureToTexture` compressed/multisample). Treat `api/operation` as **substantially
+> ported, several files partial**, not done.
 
 **Workflow bulk ports.** `api/validation` is being ported in parallel batches (a Workflow fans out one
 Sonnet agent per file = a full faithful port, then a single compile-verify stage; Claude reviews + Dawn-

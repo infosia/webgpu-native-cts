@@ -112,7 +112,7 @@ xychart-beta
 | Area | Ported* | Note |
 |------|--------:|------|
 | `api/validation` | 126 / 129 | Y-6 V1–V10 COMPLETE (… capability_checks/features + all 35 limits); only the 3 whole-file N/A remain |
-| `api/operation` | 70 / 72 | complete except 2 N/A (`buffers/map_ArrayBuffer`, `map_detach`) |
+| `api/operation` | 70 / 72 | all portable files opened (2 N/A: `buffers/map_ArrayBuffer`, `map_detach`); **43 partial** — some native-portable breadth deferred (vertical-first) |
 | `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees |
 | `shader/validation` | 0 / 207 | deferred |
 | **Total** | **234 / 683** | |
@@ -132,11 +132,11 @@ xychart-beta
 
 | Backend | Role | Metal | Vulkan (Windows) | Open findings |
 |---------|------|:-----:|:----------------:|---------------|
-| **yawgpu** | primary subject | ✅ green | ✅ green | **10** — F-089/F-090/F-092…F-096/F-098/F-099/F-101 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope, swizzle + tier1-format feature gating, per-stage limit enforcement), all cross-HAL; 64 earlier findings fixed |
+| **yawgpu** | primary subject | ✅ green | ✅ green | **11** — F-089/F-090/F-092…F-096/F-098/F-099/F-101/F-102 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope, swizzle + tier1-format gating, per-stage limits, auto-BGL compatibility), all cross-HAL; 64 earlier findings fixed |
 | **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
 | **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **22** — eager panics, missing validation, 3D copy/readback, rendering, device-lost state |
 
-### Findings — 101 surfaced to date (F-001…F-101)
+### Findings — 102 surfaced to date (F-001…F-102)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
@@ -144,7 +144,7 @@ test pass.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| yawgpu — open | 10 | F-089/F-090/F-092…F-096 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope); F-098/F-099 (swizzle + `rgba16` tier1-format feature gating); F-101 (per-stage resource limits not enforced at auto-layout pipeline creation) — all cross-HAL, Dawn-oracle-confirmed |
+| yawgpu — open | 11 | F-089/F-090/F-092…F-096 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope); F-098/F-099 (swizzle + `rgba16` tier1-format gating); F-101 (per-stage limits at auto-layout pipeline creation); F-102 (auto-BGL compatibility, both directions; Dawn + wgpu-native correct) — all cross-HAL, Dawn-oracle-confirmed |
 | yawgpu — fixed & hardware-re-verified | 64 | F-005…F-082, F-087; nothing masked |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 7 | F-033, F-045, F-053/F-068 residuals, F-083, F-086; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual (Metal green) |
