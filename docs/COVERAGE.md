@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 71 | 9 | 3 | 0 | 46 |
+| `api/validation` | 129 | 74 | 9 | 3 | 0 | 43 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **136** | **52** | **21** | **408** | **66** |
+| **Total** | **683** | **139** | **52** | **21** | **408** | **63** |
 
 > Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
 > `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
@@ -237,6 +237,14 @@ usage-scope / hazard validation in compute+render passes. Codex (GPT-5.5) port D
 oracle run (1422/0); wgpu-native also green. Surfaced **F-095** (yawgpu cross-HAL: buffer usage-scope
 conflicts — same buffer used as uniform + writable storage in a render pass — not detected, 296 cases;
 Dawn AND wgpu-native both reject).
+
+**Batch Y-6 V7b (`resource_usages/texture/{in_pass_encoder,in_render_common,in_render_misc}`, 3 files, 21
+tests)** completes resource_usages (texture subresource usage-scope / hazard validation across passes,
+bundles, attachments, bind groups). Codex (GPT-5.5) Dawn-green after one review round (dispatch must bind
+all required bind groups; stencil8 bindings need stencil-aspect + uint sample type; writable storage-
+texture access enums). Dawn 6556/0. Surfaced **F-096** (yawgpu cross-HAL: texture subresource usage-scope
+conflicts not detected, 851 cases — the texture analog of F-095; Dawn passes, wgpu-native passes all but
+34 of its own). wgpu-native 34 fails (bring-up reference).
 
 Notes on the pre-classified rows:
 

@@ -53,8 +53,10 @@ open-state error reporting, pipeline-layout compat); **F-094** (image-copy buffe
 `image_copy/{buffer_texture_copies,layout_related,texture_related}`, cross-HAL 3513 cases:
 required-bytes-in-copy under-validation [2766], offset-alignment over-validation [660], offset+bytesPerRow
 [76], DS aspect / device-mismatch); **F-095** (buffer usage-scope conflicts not detected in a render pass —
-`resource_usages/buffer/*`, cross-HAL 296 cases; Dawn AND wgpu-native both reject, yawgpu doesn't).
-Naga-lineage **F-091** (MSL writer panics on generated vertex shaders
+`resource_usages/buffer/*`, cross-HAL 296 cases; Dawn AND wgpu-native both reject, yawgpu doesn't);
+**F-096** (texture subresource usage-scope conflicts not detected — `resource_usages/texture/*`, cross-HAL
+851 cases; the texture analog of F-095). Naga-lineage **F-091** (MSL writer panics on generated vertex
+shaders
 — `render_pipeline/vertex_state` + `encoding/cmds/render/draw`, yawgpu Metal + wgpu-native crash; MoltenVK
 + Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
@@ -1763,6 +1765,25 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   that must be rejected; yawgpu accepts it. yawgpu's buffer usage-scope tracker does not flag
   read/write-storage conflicts (predominantly in render passes; the compute path mostly validates).
 - **Status:** **OPEN** (yawgpu — buffer usage-scope / hazard tracking in passes). Surfaced, not masked.
+
+---
+
+## F-096 — yawgpu: texture subresource usage-scope conflicts not detected — cross-HAL
+
+- **Backend:** yawgpu (cross-HAL — Metal and MoltenVK fail the **identical 851 cases**; Dawn passes all,
+  wgpu-native passes all but 34 of its own — so a genuine yawgpu-core gap). The texture analog of F-095.
+  Surfaced by Y-6 V7b.
+- **Found by:** `api,validation,resource_usages,texture,{in_pass_encoder,in_render_common,in_render_misc}`.
+  Largest clusters: `in_render_common,multiple_bind_groups` (288), `in_pass_encoder,unused_bindings_in_
+  pipeline` (224), `shader_stages_and_visibility,storage_write` (48), `subresources_and_binding_types_
+  combination_for_aspect` (40), plus color-attachment/bind-group, depth-stencil, bundle, and
+  same-index-rebind variants.
+- **Observed:** `expected validation error, got none` — using the **same texture subresource** as a
+  writable storage binding (or writing render attachment) together with another use of the same
+  subresource in one usage scope must be rejected; yawgpu accepts it. yawgpu does not track texture
+  subresource (mip/layer/aspect) usage-scope hazards in passes/bundles/bind-groups.
+- **Status:** **OPEN** (yawgpu — texture usage-scope / hazard tracking). Surfaced, not masked. Related to
+  F-095 (buffer usage-scope).
 
 ---
 
