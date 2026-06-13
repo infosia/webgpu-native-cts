@@ -95,10 +95,10 @@ backends build link-agnostically and run on real GPUs — verified on **macOS / 
 pie showData
     title Upstream .spec.ts files (683)
     "Ported — complete" : 139
-    "Ported — partial" : 52
+    "Ported — partial" : 53
     "Deferred (shader/validation, expression precision)" : 408
     "Not portable (N/A)" : 21
-    "Todo" : 63
+    "Todo" : 62
 ```
 
 ```mermaid
@@ -111,11 +111,11 @@ xychart-beta
 
 | Area | Ported* | Note |
 |------|--------:|------|
-| `api/validation` | 83 / 129 | Y-6 V1–V7 (createBindGroup, pipelines, render_pass, encoding, image_copy, resource_usages); 3 N/A; 43 todo |
+| `api/validation` | 84 / 129 | Y-6 V1–V8 (… resource_usages, device_lost/destroy); 3 whole-file N/A; 42 todo |
 | `api/operation` | 70 / 72 | complete except 2 N/A (`buffers/map_ArrayBuffer`, `map_detach`) |
 | `shader/execution` | 38 / 239 | structural files + the `flow_control`, `memory_model`, `statement`, `shader_io` trees |
 | `shader/validation` | 0 / 207 | deferred |
-| **Total** | **191 / 683** | |
+| **Total** | **192 / 683** | |
 
 \* complete + partial. Per-file detail and what each batch added: [COVERAGE](docs/COVERAGE.md).
 
@@ -134,9 +134,9 @@ xychart-beta
 |---------|------|:-----:|:----------------:|---------------|
 | **yawgpu** | primary subject | ✅ green | ✅ green | **7** — F-089/F-090/F-092…F-096 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope validation), all cross-HAL; 64 earlier findings fixed |
 | **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
-| **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **21** — eager panics, missing validation, 3D copy/readback, rendering |
+| **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **22** — eager panics, missing validation, 3D copy/readback, rendering, device-lost state |
 
-### Findings — 96 surfaced to date (F-001…F-096)
+### Findings — 97 surfaced to date (F-001…F-097)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
@@ -146,7 +146,7 @@ test pass.
 |--------|--:|-------------------------|
 | yawgpu — open | 7 | F-089/F-090/F-092…F-096 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope) — all cross-HAL, Dawn-oracle-confirmed |
 | yawgpu — fixed & hardware-re-verified | 64 | F-005…F-082, F-087; nothing masked |
-| wgpu-native — open | 21 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics |
+| wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 6 | F-033, F-045, F-053/F-068 residuals, F-083, F-086 |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |
 | naga-lineage residuals (tracked upstream) | 2 | F-070 memory layout / matCx3 padding / `shadow:loop`; F-091 MSL writer panic on generated vertex shaders (Metal + wgpu-native) |

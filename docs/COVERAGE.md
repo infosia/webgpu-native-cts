@@ -24,7 +24,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
-| `api/validation` | 129 | 74 | 9 | 3 | 0 | 43 |
+| `api/validation` | 129 | 74 | 10 | 3 | 0 | 42 |
 | `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
@@ -32,7 +32,7 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **139** | **52** | **21** | **408** | **63** |
+| **Total** | **683** | **139** | **53** | **21** | **408** | **62** |
 
 > Reconciled 2026-06-12 to the on-disk `.spec.cpp` count: 172 files (complete + partial) under
 > `src/webgpu/` (api/validation 64, api/operation 70, shader/execution 38). `api/operation` is now
@@ -245,6 +245,14 @@ all required bind groups; stencil8 bindings need stencil-aspect + uint sample ty
 texture access enums). Dawn 6556/0. Surfaced **F-096** (yawgpu cross-HAL: texture subresource usage-scope
 conflicts not detected, 851 cases — the texture analog of F-095; Dawn passes, wgpu-native passes all but
 34 of its own). wgpu-native 34 fails (bring-up reference).
+
+**Batch Y-6 V8 (`state/device_lost/destroy`, 1 file, 32 tests → partial)** ports object creation, command
+encoding, and queue commands on a destroyed (private) device; the 3 external/DOM tests
+(`importExternalTexture`, `queue,copyExternalImageToTexture,{canvas,imageBitmap}`) are N/A
+`.unimplemented()`. Codex (GPT-5.5) Dawn-green after one fix (compressed formats aborted via
+`getBlockInfoForColorTextureFormat`; switched to `getBlockInfoForTextureFormat`). Dawn 2568/0;
+**yawgpu Metal AND MoltenVK fully green (2568/0)** — no yawgpu finding. wgpu-native fails all 2568
+(**F-097**, destroyed-device state model diverges; bring-up reference).
 
 Notes on the pre-classified rows:
 

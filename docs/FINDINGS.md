@@ -1787,4 +1787,18 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 
 ---
 
+## F-097 — wgpu-native: destroyed-device operations diverge from spec (every case) — bring-up reference
+
+- **Backend:** wgpu-native only (Dawn, yawgpu Metal, yawgpu MoltenVK all pass 2568/14; wgpu-native fails
+  **all 2568**). Surfaced by Y-6 V8.
+- **Found by:** `api,validation,state,device_lost,destroy` (every native test: create*/command/queue on a
+  destroyed device).
+- **Observed:** the spec (and Dawn/yawgpu) treats most operations on a destroyed device as succeeding
+  without a validation error (invalid objects / no-ops); wgpu-native produces a different result for
+  every case (the destroyed-device state model differs).
+- **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
+  `expectations/wgpu-native.*` on regen). Not masked.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
