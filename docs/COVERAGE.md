@@ -25,19 +25,19 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | Area | Upstream files | Ported | Partial | N/A | Deferred | Todo |
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
 | `api/validation` | 129 | 112 | 14 | 3 | 0 | 0 |
-| `api/operation` | 72 | 27 | 43 | 2 | 0 | 0 |
+| `api/operation` | 72 | 28 | 42 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
 | `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **177** | **57** | **21** | **408** | **20** |
+| **Total** | **683** | **178** | **56** | **21** | **408** | **20** |
 
 > Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 214 files (complete + partial) under
 > `src/webgpu/` (api/validation 106, api/operation 70, shader/execution 38). `api/operation` has **every
 > portable file opened** (70/72; only `buffers/{map_ArrayBuffer,map_detach}` are N/A — JS ArrayBuffer
-> detach), but it is **not fully complete**: per the area table 43 of those 70 files are **partial** —
+> detach), but it is **not fully complete**: per the area table 42 of those 70 files are **partial** —
 > they register their upstream test names but leave some bodies `.unimplemented()`. Most of those gaps are
 > web/JS-specific, but some are native-portable breadth deliberately deferred under the vertical-first
 > strategy (e.g. `sampling/filter_mode` linear/mipmap, `rendering/color_target_state` blend matrix,
