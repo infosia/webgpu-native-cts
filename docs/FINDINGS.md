@@ -2023,4 +2023,50 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 
 ---
 
+## F-105 — yawgpu: robust-access write to a `bool` workgroup array not clamped — native Vulkan
+
+- **Backend:** yawgpu **native Windows/Vulkan** (NVIDIA RTX 5060 Ti, 2026-06-14). **Cross-HAL not yet
+  confirmed** — only native Vulkan was run; whether yawgpu Metal / MoltenVK show the same is unverified.
+  Dawn (oracle) passes. Surfaced by the 2026-06-14 full-suite isolation sweep.
+- **Found by:** `shader,execution,robust_access:linear_memory` — exactly **3 cases**, all
+  `addressSpace="workgroup";access="write";containerType="array";baseType="bool";isAtomic=false`
+  (shadowingMode ∈ {none, module-scope, function-scope}). Every other addressSpace / baseType / container
+  passes (`pass=1065 skip=558 fail=3`, isolation-clean, no degradation noise).
+- **Observed:** `GPU buffer mismatch at byte 0: expected 0, got 1` — an out-of-bounds **write** to a
+  `bool` workgroup array is not clamped to a safe location, so a slot that must read back `false` (0)
+  reads `true` (1). Specific to `bool`; integer/float element types are robustly clamped and pass.
+- **Likely root cause:** the `bool` in-memory representation + robustness-clamp index math in shader
+  lowering (naga-lineage class, like the other `robust_access` / memory-layout residuals), not a
+  yawgpu-core API issue. Distinct from [F-078](#f-078) (`robust_access` let-OOB over-validation, resolved).
+- **Status:** **OPEN — native-Vulkan-observed; cross-HAL classification pending** (a yawgpu Metal /
+  MoltenVK run will tell whether this is a shared-naga residual or Vulkan/SPIR-V-specific). Surfaced,
+  not masked.
+
+---
+
+## F-106 — yawgpu Vulkan HAL: missing write→read barrier for indirect-args / index / copy-source reads — native Vulkan
+
+- **Backend:** yawgpu **native Windows/Vulkan** (NVIDIA RTX 5060 Ti, 2026-06-14). yawgpu **Metal likely
+  green** (the separate RESOLVED MoltenVK-only `multiple_buffers` `rw`/`ww` finding had Metal passing all
+  260) but **not re-confirmed** this run; Dawn (oracle) passes. Surfaced by the 2026-06-14 full-suite
+  isolation sweep.
+- **Found by:** `api,operation,memory_sync,buffer,multiple_buffers:wr` — **18 cases** (`pass=87 fail=18`,
+  isolation-clean). The same file's `rw` (105) and `single_buffer` (30) variants **pass**. 16 of the 18
+  read the written buffer as an **indirect-args / index buffer** (`readOp ∈ {input-indirect-dispatch ×8,
+  input-indirect ×4, input-indirect-index ×4}`); the other 2 read it as a **copy source** (`b2b-copy` /
+  `b2t-copy` read after a `t2b-copy` write). 15/18 cross a `command-buffer` boundary.
+- **Observed:** `GPU buffer mismatch at byte 0: expected 1, got 0` — the prior write is **not visible** to
+  the later read; the read returns stale/zero data. The write→read (`wr`) hazard is honoured for ordinary
+  storage reads (those pass) but **not** when the destination use is an indirect-command / index / transfer
+  read.
+- **Likely root cause:** yawgpu's Vulkan-HAL barrier tracking does not insert the pipeline barrier /
+  destination access for **`VK_ACCESS_INDIRECT_COMMAND_READ_BIT` / `VK_ACCESS_INDEX_READ_BIT`** (and
+  `TRANSFER_READ` for the copy-source cases) after a storage / copy write to the same buffer. `rw` and
+  non-indirect reads passing isolates the gap to those destination access types. A Vulkan-HAL
+  synchronization gap (Metal's HAL inserts these automatically), distinct from the RESOLVED MoltenVK-only
+  `multiple_buffers` `rw`/`ww` finding.
+- **Status:** **OPEN — native-Vulkan yawgpu Vulkan-HAL synchronization gap.** Surfaced, not masked.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
