@@ -135,18 +135,20 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Findings — 104 surfaced to date (F-001…F-104)
+### Findings — 106 surfaced to date (F-001…F-106)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
 test pass. Full cross-backend sweep **2026-06-14**: Dawn `534184/0`, **yawgpu Metal `460730` fail=2**
 (the 2 are a documented Dawn-leniency, not a defect), yawgpu MoltenVK Vulkan-path residuals (below),
-wgpu-native bring-up.
+wgpu-native bring-up. A **native-Vulkan** (NVIDIA) run of the same suite surfaced two genuine
+Vulkan-HAL/naga defects that Apple's coherent memory had masked — **F-105** and **F-106** — both
+**fixed and native-Vulkan-re-verified 2026-06-15**.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| **yawgpu — open implementation defects** | 0 | **yawgpu passes the entire ported suite on native Metal AND native Vulkan** — every finding F-005…F-103 fixed & re-verified; the only non-pass is the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` (not a defect) |
-| yawgpu — fixed & hardware-re-verified | 79 | F-005…F-082, F-087, and the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed) |
+| **yawgpu — open implementation defects** | 0 | **yawgpu passes the entire ported suite on native Metal AND native Vulkan** — every finding F-005…F-106 fixed & re-verified; the only non-pass is the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` (not a defect) |
+| yawgpu — fixed & hardware-re-verified | 81 | F-005…F-082, F-087, the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed), and the **2026-06-15** native-Vulkan pair **F-105** (robust-access `bool` workgroup array, naga SPIR-V) / **F-106** (Vulkan-HAL write→read barrier for indirect/index/copy-source reads) — both native-Vulkan-confirmed |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
 | MoltenVK-only translation artifacts — green on native Metal + native Vulkan, not yawgpu defects | 9 | **F-104** (`copyTextureToTexture` data, 14512 — native-Vulkan-confirmed green), F-070 MoltenVK SPIRV-Cross residue (`memory_layout`/`zero_init`/`robust_access_vertex`), F-033, F-045, F-053/F-068 residuals, F-083, F-086, maxComputeWorkgroupStorageSize SPIR-V compile residual |
@@ -158,10 +160,32 @@ on native Vulkan.
 
 ### Test results
 
-Measured per case at the [pinned revisions](docs/UPSTREAM.md) — Vulkan rows 2026-06-08, Metal
-operation sweep 2026-06-06.
+#### Full cross-backend sweep — **2026-06-14** (whole suite, 234 files, per-file)
 
-#### `api,validation` (`--isolate`, one subprocess per case)
+The current headline numbers — every ported file run against each backend:
+
+| Backend | Platform | pass | skip | fail | crash | xfail | Verdict |
+|---------|----------|-----:|-----:|-----:|------:|------:|---------|
+| **Dawn** (oracle) | Metal | 534184 | 63364 | **0** | 0 | — | fully green |
+| **yawgpu** | Metal | 460730 | 136816 | **2** | 0 | — | green — the 2 are the documented Dawn-leniency `draw,index_buffer_format_dirtying` (yawgpu *stricter*, not a defect) |
+| **yawgpu** | Vulkan (MoltenVK) | 445041 | 136816 | 15599 | 0 | 92 | Vulkan-path residuals, **all Metal-green** — MoltenVK/SPIRV-Cross translation artifacts (F-104 `copyTextureToTexture` 14512 + F-070/`zero_init`/`robust_access_vertex` shader residue); F-085 92 `xfail` |
+| **wgpu-native** | Vulkan (`--isolate`, per-case) | 25668 | 10200 | 5680 | 6808 | — | bring-up reference (known panic-heavy state) |
+
+- yawgpu's **Metal HAL passes the entire ported suite** bar the 2 Dawn-leniency cases; every finding
+  F-005…F-106 is fixed and re-verified. The MoltenVK `fail=15599` are **not yawgpu defects** — each is
+  green on native Metal *and* native Vulkan (F-104 was native-Vulkan-confirmed green); MoltenVK
+  mistranslates them. See the [findings buckets](#findings--106-surfaced-to-date-f-001f-106) above.
+- The separate native-Vulkan (NVIDIA) sweep of the same suite surfaced the only two *real* Vulkan-HAL
+  defects, F-105/F-106 — now fixed (subsection below). Those were Apple-masked, so they are absent from
+  the Metal/MoltenVK rows here.
+
+#### Per-area slices — older pinned revisions (`api,validation` 2026-06-08, `api,operation` 2026-06-06)
+
+Narrower per-area snapshots at the [pinned revisions](docs/UPSTREAM.md); kept for the per-result-class
+(`xfail`/`xpass`) and `--isolate` detail the whole-suite table collapses. They predate the current
+listing — the headline table above is authoritative for totals.
+
+`api,validation` (`--isolate`, one subprocess per case):
 
 | Backend | Platform | pass | skip | xfail | xpass | fail | crash |
 |---------|----------|-----:|-----:|------:|------:|-----:|------:|
@@ -171,14 +195,12 @@ operation sweep 2026-06-06.
 | **wgpu-native** | Metal | 3407 | 756 | – | – | 338 | 214 |
 | **wgpu-native** | Vulkan | 2507 | 1770 | 438 | 218 | 0 | 0 |
 
-- The Metal rows cover the original hand-ported vertical-slice files; the 40 bulk-ported files are
-  verified separately (Dawn-green, yawgpu swept on both HALs) and fold in on the next regen.
 - Per-backend case totals differ because each adapter's optional-feature set changes how the
   format-swept tests parametrize.
 - wgpu-native's fails/crashes are the panic + missing-validation families (F-001–F-021; F-015
   ≈ 324 cases); with `--isolate --expectations` its Vulkan run exits 0 (`fail=0 crash=0`).
 
-#### `api,operation`
+`api,operation` (leaf subcases):
 
 | Backend | Platform | Result (leaf subcases) |
 |---------|----------|------------------------|
@@ -187,8 +209,21 @@ operation sweep 2026-06-06.
 | **yawgpu** | Vulkan | `pass=214039 skip=85698 fail=0 crash=0` — full suite, exit 0 in ~2 min (`--workers 16`), nothing masked |
 | **wgpu-native** | Metal | `pass=3322 fail=78 xfail=3` — fails are the 3D copy/readback findings F-027/F-028 |
 
-yawgpu's operation results on native Vulkan **match Metal exactly**; the only Mac-side artifacts
-are the MoltenVK translation bucket above, absent on native Vulkan.
+#### yawgpu — native Vulkan (NVIDIA, 2026-06-14 sweep)
+
+Running the same suite on **native Vulkan** (not MoltenVK) is what separates real Vulkan-HAL/naga
+defects from Mac translation artifacts. The 2026-06-14 isolation sweep surfaced two genuine defects
+that Apple's coherent memory had masked — both now **fixed and re-verified on native Vulkan
+(2026-06-15)**:
+
+| Finding | Test | Cases | Root cause | Status |
+|---------|------|------:|-----------|--------|
+| **F-105** | `shader,execution,robust_access:linear_memory` | 3 | naga SPIR-V backend emitted the wrong stride for a `bool` workgroup array, so an OOB write wasn't clamped | **RESOLVED** — `robust_access 1068/0` Metal + MoltenVK (no regression) |
+| **F-106** | `api,operation,memory_sync,buffer,multiple_buffers:wr` | 18 | Vulkan HAL omitted the write→read barrier when the read is indirect-args / index / copy-source (missing `INDIRECT_COMMAND_READ` / `INDEX_READ` / `TRANSFER_READ`) | **RESOLVED** — `multiple_buffers 263/0` Metal + MoltenVK (no regression) |
+
+With these landed, **yawgpu passes the ported suite on native Vulkan as well as native Metal**; the
+Mac-only residuals in the MoltenVK rows above are confirmed SPIRV-Cross translation artifacts (the
+F-104/F-070 bucket), not yawgpu defects.
 
 #### wgpu-native — full suite, current scale (2026-06-14, native Vulkan)
 
