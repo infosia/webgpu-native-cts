@@ -1920,4 +1920,27 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 
 ---
 
+## F-103 — yawgpu Vulkan-HAL: 3D image-copy loses/corrupts non-zero depth slices (+ stencil8 stencil-only) — Vulkan-specific, native-confirmed
+
+- **Backend:** yawgpu **Vulkan HAL** — fails on **both MoltenVK** (`pass=130862 fail=7546`) **and native
+  Vulkan** (Windows/NVIDIA RTX, user-confirmed 2026-06-14: the same cases fail). yawgpu **Metal is fully
+  green** (`pass=138408 fail=0`), as is Dawn. A genuine **Vulkan-HAL-specific** defect, not a MoltenVK
+  translation artifact (native Vulkan reproduces it). Surfaced 2026-06-14 re-checking `image_copy`.
+- **Found by:** `api,operation,command_buffer,image_copy:{rowsPerImage_and_bytesPerRow,offsets_and_sizes,
+  origins_and_extents}` (the data-correctness copies). 7450 of the 7546 fails are `dimension="3d"`; the
+  remaining 96 are `rowsPerImage_and_bytesPerRow_depth_stencil:format="stencil8";aspect="stencil-only"`.
+- **Observed:** for a **3D** texture buffer↔texture copy, MoltenVK reads back wrong data at **non-zero
+  z-slices** — the mismatches are at `z≥1` (7320 at z=1, 130 at z=2), `z=0` is correct — across **43
+  formats** (systematic, not format-specific: a copy-geometry / slice-stride defect, not a per-format
+  packing bug). `stencil8` stencil-only copies also mismatch (96). Metal handles all of these correctly.
+- **Status:** **OPEN — yawgpu Vulkan-HAL defect (native-Vulkan-confirmed).** The user confirmed the same
+  cases fail on native Windows/Vulkan, so it is **not** a MoltenVK artifact — yawgpu's Vulkan HAL mishandles
+  the **z-slice stride / 3D copy region** in buffer↔3D-texture copies (data correct at z=0, wrong at z≥1),
+  plus stencil8 stencil-only. Metal-HAL-specific green; Vulkan-HAL real bug. Symptom-cousin of the
+  wgpu-native 3D-copy family [F-027](#f-027)/[F-028](#f-028) but in yawgpu's Vulkan HAL. Surfaced, not
+  masked; the Metal-run `expectations/yawgpu.txt` stays clean (this is a Vulkan-backend defect — fix in
+  yawgpu's Vulkan HAL rather than xfail).
+
+---
+
 _Add new findings as `F-00N` with the same fields._

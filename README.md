@@ -134,7 +134,7 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Findings — 102 surfaced to date (F-001…F-102)
+### Findings — 103 surfaced to date (F-001…F-103)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
@@ -142,7 +142,7 @@ test pass.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| yawgpu — open | 2 | F-095/F-096 (buffer + texture subresource usage-scope conflicts not detected in a render pass) — cross-HAL, Dawn + wgpu-native both reject |
+| yawgpu — open | 3 | F-095/F-096 (buffer + texture subresource usage-scope conflicts not detected) — cross-HAL, Dawn + wgpu-native both reject; **F-103** (3D image-copy loses non-zero depth slices + stencil8 stencil-only — yawgpu **Vulkan-HAL** defect, native-Vulkan-confirmed; Metal green `138408/0`, Vulkan/MoltenVK `fail=7546`) |
 | yawgpu — fixed & hardware-re-verified | 74 | F-005…F-082, F-087, and the **2026-06-14** batch F-089/F-090/F-091/F-092/F-093/F-094/F-098/F-099/F-101/F-102 (re-verified green on Metal + MoltenVK); nothing masked |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 7 | F-033, F-045, F-053/F-068 residuals, F-083, F-086; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual (Metal green) |
