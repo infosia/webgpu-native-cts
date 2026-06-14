@@ -134,14 +134,6 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Backends at a glance
-
-| Backend | Role | Metal | Vulkan (Windows) | Open findings |
-|---------|------|:-----:|:----------------:|---------------|
-| **yawgpu** | primary subject | ✅ green | ✅ green | **2** — F-095/F-096 (buffer + texture usage-scope conflicts not detected), cross-HAL; **74 findings fixed** (incl. the 2026-06-14 batch F-089/F-090/F-091/F-092/F-093/F-094/F-098/F-099/F-101/F-102) |
-| **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
-| **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **22** — eager panics, missing validation, 3D copy/readback, rendering, device-lost state |
-
 ### Findings — 102 surfaced to date (F-001…F-102)
 
 The full per-finding record (what, which backend, root cause, status) lives in
