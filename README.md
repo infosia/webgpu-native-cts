@@ -145,16 +145,16 @@ wgpu-native bring-up.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| **yawgpu — Metal HAL** | 0 | **the entire ported suite passes on Metal** (every finding F-005…F-103 fixed & re-verified); the only non-pass is the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` |
+| **yawgpu — open implementation defects** | 0 | **yawgpu passes the entire ported suite on native Metal AND native Vulkan** — every finding F-005…F-103 fixed & re-verified; the only non-pass is the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` (not a defect) |
 | yawgpu — fixed & hardware-re-verified | 79 | F-005…F-082, F-087, and the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed) |
-| yawgpu — Vulkan HAL / MoltenVK residuals (Metal-green; need native-Vulkan to classify) | 1 + artifacts | **F-104** (`copyTextureToTexture` data wrong on Vulkan path, 14512 — likely a Vulkan-HAL defect like F-103); plus MoltenVK SPIRV-Cross translation artifacts (`memory_layout`/`zero_init`/`robust_access_vertex`, F-070-class) and the `maxComputeWorkgroupStorageSize` SPIR-V compile residual |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
-| MoltenVK-only translation artifacts — green on Metal, not yawgpu defects | 8 | F-033, F-045, F-053/F-068 residuals, F-083, F-086, F-070 MoltenVK SPIRV-Cross residue; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual |
+| MoltenVK-only translation artifacts — green on native Metal + native Vulkan, not yawgpu defects | 9 | **F-104** (`copyTextureToTexture` data, 14512 — native-Vulkan-confirmed green), F-070 MoltenVK SPIRV-Cross residue (`memory_layout`/`zero_init`/`robust_access_vertex`), F-033, F-045, F-053/F-068 residuals, F-083, F-086, maxComputeWorkgroupStorageSize SPIR-V compile residual |
 
 Buckets overlap where a finding affects several backends (e.g. F-045, F-082). **naga-lineage residuals
-F-070/F-091/F-100 are all fixed on yawgpu** (Metal-green, 2026-06-14); their remaining MoltenVK-only
-`memory_layout`/`zero_init` residue is reclassified as SPIRV-Cross translation artifacts.
+F-070/F-091/F-100 are all fixed on yawgpu** (Metal-green, 2026-06-14); the remaining MoltenVK-only failures
+(F-104, `memory_layout`/`zero_init`) are SPIRV-Cross translation artifacts — yawgpu's Vulkan HAL is correct
+on native Vulkan.
 
 ### Test results
 
