@@ -1391,9 +1391,10 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
     `function`/`private`/`workgroup`) and ~801 workgroup `zero_init` cases are MoltenVK SPIRV-Cross
     (`[mvk-error] no matching function ... spvArrayCopyFromConstantToThreadGroup`) / non-host-visible
     threadgroup-layout translation artifacts (same class as F-082/F-083/F-045). naga emits correct
-    strides/offsets and Metal passes; baseline-confirmed not introduced by the fixes. Pending native-Vulkan
-    re-confirmation (Windows/NVIDIA); no further yawgpu/naga action. Ledger: yawgpu
-    `specs/tracking/cts-coverage.md`.
+    strides/offsets and Metal passes. **native-Vulkan-confirmed 2026-06-14 (Windows/NVIDIA): F-070 is fully
+    resolved on native Vulkan too** — the residual `memory_layout`/`zero_init` failures are MoltenVK-only,
+    confirming them as MoltenVK SPIRV-Cross artifacts, not yawgpu/naga defects. No further yawgpu/naga
+    action. Ledger: yawgpu `specs/tracking/cts-coverage.md`.
 
 ---
 
