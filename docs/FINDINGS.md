@@ -19,6 +19,32 @@ Backends and revisions are pinned in [UPSTREAM.md](UPSTREAM.md).
 
 ---
 
+## Full cross-backend sweep — 2026-06-14
+
+The entire ported suite (234 files) run per-file on each backend:
+
+| Backend | pass | skip | fail | crash | xfail | verdict |
+|---------|-----:|-----:|-----:|------:|------:|---------|
+| **Dawn** (oracle) | 534184 | 63364 | **0** | 0 | — | fully green |
+| **yawgpu — Metal** | 460730 | 136816 | **2** | 0 | — | green — the 2 are the documented Dawn-leniency `draw,index_buffer_format_dirtying` (yawgpu *stricter*, not a defect) |
+| **yawgpu — MoltenVK** (Vulkan HAL) | 445041 | 136816 | 15599 | 0 | 92 | Vulkan-path residuals (all Metal-green) — see below; F-085 92 xfailed |
+| **wgpu-native** (`--isolate`, per-case) | 25668 | 10200 | 5680 | 6808 | — | bring-up reference (known panic-heavy state) |
+
+**yawgpu's Metal HAL passes the entire ported suite** (bar the 2 Dawn-leniency cases) — every finding F-005…
+F-103 is fixed and re-verified on Metal. The **Vulkan HAL (via MoltenVK)** still has residuals, all of which
+are **green on Metal** (Vulkan-path-specific). Breakdown of the 15599:
+- **`api,operation,command_buffer,copyTextureToTexture` — 14512** → **F-104** (T2T copy data wrong on the
+  Vulkan path, even for 2D color; sibling of the just-fixed F-103 image_copy path).
+- SPIR-V/naga-backend shader-execution residuals (Metal-green): `zero_init` 801, `robust_access_vertex` 200,
+  `memory_layout` 42 (the **F-070** Vulkan-side residual), `padding` 2, `memory_model/barrier` 1,
+  `shader_io/shared_structs` 1, `statement/{compound,discard}` 1+1, `limits` 1.
+- known small artifacts: `maxComputeWorkgroupStorageSize` 30 (SPIR-V compile-at-limit, prior F-101 note),
+  `rendering/{3d_texture_slices 1, depth_clip_clamp 2}`, `render_pipeline/misc` 2.
+
+Like F-103/F-085, these Vulkan-path items need a **native-Vulkan** run (Windows/RTX) to split real
+yawgpu-Vulkan-HAL defects from MoltenVK translation artifacts. The Metal-run `expectations/yawgpu.txt` stays
+clean; F-085 lives in `expectations/yawgpu-vulkan.txt`.
+
 ## Re-test summary
 
 Every defect this suite surfaced against **yawgpu** (the primary conformance subject) was fixed in yawgpu
@@ -37,7 +63,7 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/078/079/080/081/082/087/089/090/091/092/093/094/095/096/098/099/100/101/102/103
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/070/072/073/074/076/077/078/079/080/081/082/087/089/090/091/092/093/094/095/096/098/099/100/101/102/103
 — each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`f857f3f`) fixed the eleven
 findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK (F-068 additionally
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
@@ -67,12 +93,18 @@ documented Dawn-leniency (yawgpu is *stricter*; not a defect — see the F-093 n
 **Open — yawgpu:** **none of the yawgpu-core findings remain.** The 2026-06-14 batch additionally resolved
 **F-095** (`resource_usages/buffer/*` `c0e5ba7` — `1422/0`), **F-096** (`resource_usages/texture/*`
 `5ed5ada` — `6556/0`), and **F-103** (yawgpu Vulkan-HAL 3D image-copy slice-stride `e7db246` —
-`command_buffer/image_copy 138408/0`, native-Vulkan + MoltenVK confirmed). **F-100** (out-of-range `@binding` validation-timing) was **also fixed** by `16ee140` (now validated at
-pipeline creation; `maxBindingsPerBindGroup 43/0` both HALs). The **sole remaining yawgpu-runnable failure**
-is **naga-lineage F-070** (memory_layout `struct_inner_align` — Metal 9 / MoltenVK 54; shared with the naga
-fork, not yawgpu-core, and unchanged by recent updates), plus the spec-in-flux **F-085** (Vulkan
-`sample_mask`, xfailed in the Vulkan-only expectation files). Every other ported test passes on yawgpu
-Metal **and** MoltenVK. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+`command_buffer/image_copy 138408/0`, native-Vulkan + MoltenVK confirmed). **F-100** (out-of-range `@binding` validation-timing) was **also fixed** by `16ee140`, and **F-070**
+(memory_layout `struct_inner_align` / matCx3 padding) by `a558b71`+`e4a31d1` — **on Metal**
+(`memory_layout 434/0`, was 9 fail). yawgpu's **Metal HAL now passes the entire ported suite** (bar the 2
+Dawn-leniency `draw,index_buffer_format_dirtying` cases).
+
+The remaining open items are all **Vulkan-HAL / SPIR-V-path** (Metal-green), surfaced by the 2026-06-14
+full MoltenVK sweep (see the cross-backend table at the top): **F-104** (`copyTextureToTexture` data wrong,
+14512), the SPIR-V/naga-backend shader-execution residuals (`zero_init`, `robust_access_vertex`,
+`memory_layout` 42 — the **F-070** Vulkan-side, `padding`, etc.), the `maxComputeWorkgroupStorageSize`
+SPIR-V compile residual, and the spec-in-flux **F-085** (`sample_mask`, xfailed in
+`expectations/yawgpu-vulkan.txt`). These need a native-Vulkan run to split real Vulkan-HAL defects from
+MoltenVK artifacts. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1336,7 +1368,28 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   yawgpu-MoltenVK passes all but 2, so this is the naga **MSL** backend; yawgpu inherits it via its naga fork.
 - `shadow`: `loop` fails on yawgpu Metal + MoltenVK + wgpu-native (`expected 0, got 239` at byte 0 — output
   never written) — naga mis-handles shadowing in `loop`; Dawn passes.
-- **Status:** **OPEN** (naga lineage; affects yawgpu via its fork). Surfaced, not masked.
+- **Status (yawgpu): RESOLVED 2026-06-14** — all three naga-fixable sub-parts fixed in yawgpu's naga fork and
+  re-verified Metal-green; the remaining MoltenVK-only residue is reclassified as a MoltenVK translation
+  artifact. (wgpu-native, on upstream naga, still shares the original defects.)
+  - `shadow:loop` — fork `ebec34ae4` (WGSL `continuing` block is a scope nested in the loop body, per
+    WGSL §6.4). `shader,execution,shadow` `7/0` on Metal AND MoltenVK.
+  - `padding` (matCx3 + struct) — fork `197a3ddd` (MSL backend now decomposes host-shareable composite
+    stores so padding bytes are never written; matCx3 columns / vec3 leaves stored as 12-byte
+    `packed_*3`). `shader,execution,padding` `2/16 → 18/0` on Metal. (MoltenVK SPIR-V path unchanged; its
+    residual 2 are artifacts.)
+  - `struct_inner_align` — fork `ee37a074` (added `alignment: Alignment` to `TypeInner::Struct`; the
+    `@align`-derived struct alignment was being discarded and re-derived from member types only, so a
+    nested struct landed at the wrong offset). `shader,execution,memory_layout` Metal `425/9 → 434/0`
+    (cleared in every address space); MoltenVK `46 → 35` (host-visible cleared). No regression either
+    backend (zero_init baseline-confirmed unchanged, image_copy 138408/0).
+  - **MoltenVK-only residue = artifact:** the remaining MoltenVK `memory_layout` (workgroup
+    `write_layout` matrices/vec; `struct_inner_*`/`struct_double_align`/`array_stride_size` in
+    `function`/`private`/`workgroup`) and ~801 workgroup `zero_init` cases are MoltenVK SPIRV-Cross
+    (`[mvk-error] no matching function ... spvArrayCopyFromConstantToThreadGroup`) / non-host-visible
+    threadgroup-layout translation artifacts (same class as F-082/F-083/F-045). naga emits correct
+    strides/offsets and Metal passes; baseline-confirmed not introduced by the fixes. Pending native-Vulkan
+    re-confirmation (Windows/NVIDIA); no further yawgpu/naga action. Ledger: yawgpu
+    `specs/tracking/cts-coverage.md`.
 
 ---
 
@@ -1943,6 +1996,24 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   `api,operation,command_buffer,image_copy pass=138408 fail=0` (was `fail=7546`), matching the Metal HAL.
   Was a yawgpu Vulkan-HAL z-slice-stride defect in buffer↔3D-texture copies (wrong data at z≥1) + stencil8
   stencil-only; Metal was always green. Surfaced, not masked.
+
+---
+
+## F-104 — yawgpu Vulkan HAL (MoltenVK-observed): `copyTextureToTexture` produces wrong data — Metal green
+
+- **Backend:** yawgpu **MoltenVK** (`api,operation,command_buffer,copyTextureToTexture` `pass=16614
+  fail=14512`); yawgpu **Metal is fully green**, as is Dawn. Surfaced by the 2026-06-14 full sweep.
+- **Found by:** `api,operation,command_buffer,copyTextureToTexture:*` — the texture↔texture copy
+  data-correctness tests; pixel mismatches across color formats, including basic **2D** copies
+  (e.g. `srcFormat=r8unorm;dstFormat=r8unorm;dimension="2d"` — `pixel mismatch at 0,0,0`), not only 3D.
+- **Observed:** a `copyTextureToTexture` on the Vulkan path reads back wrong pixel data; Metal copies the
+  same cases correctly. Sibling of [F-103](#f-103) (the buffer↔texture `image_copy` Vulkan-HAL slice-stride
+  bug, fixed `e7db246`); the T2T path was not covered by that fix. The breadth (2D color, ~14.5k cases)
+  points to a copy-region / layout defect in yawgpu's Vulkan-HAL T2T path rather than a per-format issue.
+- **Status:** **OPEN — MoltenVK-observed; classification pending native Vulkan.** Most likely a real
+  yawgpu Vulkan-HAL defect (as F-103 turned out to be, native-Vulkan-confirmed) rather than a MoltenVK
+  translation artifact, but a Windows/native-Vulkan run confirms which. Metal-run `expectations/yawgpu.txt`
+  unaffected. Surfaced, not masked.
 
 ---
 

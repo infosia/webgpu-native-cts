@@ -85,7 +85,8 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 
 **Active.** The harness is complete; tests are being ported in parallel batches. All three
 backends build link-agnostically and run on real GPUs — verified on **macOS / Apple Metal** and
-**Windows 11 / Vulkan** (NVIDIA GeForce RTX 5060 Ti). Last full sweep: **2026-06-11**.
+**Windows 11 / Vulkan** (NVIDIA GeForce RTX 5060 Ti). Last full sweep: **2026-06-14** — Dawn `534184/0`,
+yawgpu Metal green (`460730`, 2 Dawn-leniency), yawgpu MoltenVK Vulkan-path residuals, wgpu-native bring-up.
 
 ### Port coverage
 
@@ -134,22 +135,26 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Findings — 103 surfaced to date (F-001…F-103)
+### Findings — 104 surfaced to date (F-001…F-104)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
-test pass.
+test pass. Full cross-backend sweep **2026-06-14**: Dawn `534184/0`, **yawgpu Metal `460730` fail=2**
+(the 2 are a documented Dawn-leniency, not a defect), yawgpu MoltenVK Vulkan-path residuals (below),
+wgpu-native bring-up.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| yawgpu — open (core) | 0 | **all yawgpu-core findings resolved.** Only naga-lineage residuals remain (next row) |
-| yawgpu — fixed & hardware-re-verified | 78 | F-005…F-082, F-087, and the **2026-06-14** batch F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal + MoltenVK; F-103 also native-Vulkan-confirmed); nothing masked |
+| **yawgpu — Metal HAL** | 0 | **the entire ported suite passes on Metal** (every finding F-005…F-103 fixed & re-verified); the only non-pass is the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` |
+| yawgpu — fixed & hardware-re-verified | 79 | F-005…F-082, F-087, and the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed) |
+| yawgpu — Vulkan HAL / MoltenVK residuals (Metal-green; need native-Vulkan to classify) | 1 + artifacts | **F-104** (`copyTextureToTexture` data wrong on Vulkan path, 14512 — likely a Vulkan-HAL defect like F-103); plus MoltenVK SPIRV-Cross translation artifacts (`memory_layout`/`zero_init`/`robust_access_vertex`, F-070-class) and the `maxComputeWorkgroupStorageSize` SPIR-V compile residual |
+| Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
-| MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 7 | F-033, F-045, F-053/F-068 residuals, F-083, F-086; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual (Metal green) |
-| Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |
-| naga-lineage residuals (tracked upstream) | 1 | F-070 memory layout `struct_inner_align` / matCx3 padding / `shadow:loop` (yawgpu Metal 9 / MoltenVK 54). F-091 (MSL vertex-shader panic) and F-100 (`@binding` validation-timing) both **fixed on yawgpu** 2026-06-14 |
+| MoltenVK-only translation artifacts — green on Metal, not yawgpu defects | 8 | F-033, F-045, F-053/F-068 residuals, F-083, F-086, F-070 MoltenVK SPIRV-Cross residue; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual |
 
-Buckets overlap where a finding affects several backends (e.g. F-045, F-082).
+Buckets overlap where a finding affects several backends (e.g. F-045, F-082). **naga-lineage residuals
+F-070/F-091/F-100 are all fixed on yawgpu** (Metal-green, 2026-06-14); their remaining MoltenVK-only
+`memory_layout`/`zero_init` residue is reclassified as SPIRV-Cross translation artifacts.
 
 ### Test results
 
