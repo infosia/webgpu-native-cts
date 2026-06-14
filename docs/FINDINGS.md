@@ -37,42 +37,39 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/078/079/080/081/082/087
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/078/079/080/081/082/087/089/090/091/092/093/094/098/099/101/102
 — each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`f857f3f`) fixed the eleven
 findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK (F-068 additionally
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
 limitation, same class as F-033/F-045/F-053).
 
-**Open — yawgpu:** **F-089** (filtering sampler not rejected for a non-filtering sampler binding —
-`createBindGroup`, cross-HAL 1 case, Dawn-oracle-confirmed; surfaced by Y-6 V1); **F-090** (render-pipeline
-fragment-state validation gaps — `render_pipeline/fragment_state`, cross-HAL 146 cases); **F-092**
-(render-pass descriptor & attachment-compatibility validation gaps — `render_pass/*`, cross-HAL 1082
-cases); **F-093** (encoding-validation gaps — `encoding/{copyTextureToTexture,draw,encoder_open_state,
-pipeline_bind_group_compat}`, cross-HAL: compressed-copy over-validation [1904], vertex-OOB, encoder
-open-state error reporting, pipeline-layout compat); **F-094** (image-copy buffer/layout validation gaps —
-`image_copy/{buffer_texture_copies,layout_related,texture_related}`, cross-HAL 3513 cases:
-required-bytes-in-copy under-validation [2766], offset-alignment over-validation [660], offset+bytesPerRow
-[76], DS aspect / device-mismatch); **F-095** (buffer usage-scope conflicts not detected in a render pass —
-`resource_usages/buffer/*`, cross-HAL 296 cases; Dawn AND wgpu-native both reject, yawgpu doesn't);
-**F-096** (texture subresource usage-scope conflicts not detected — `resource_usages/texture/*`, cross-HAL
-851 cases; the texture analog of F-095); **F-098** (`texture-component-swizzle` feature gating not enforced —
-non-identity swizzle views accepted without the feature, `capability_checks/features/texture_component_swizzle:
-only_identity_swizzle`, cross-HAL 18; surfaced by Y-6 V9); **F-099** (`rgba16unorm`/`rgba16snorm` not gated
-behind `texture-formats-tier1` — accepted across texture/color-target/storage/render-bundle/render-attachment/
-multisample/render-pipeline without the feature, `capability_checks/features/{texture_formats,texture_formats_tier1}`,
-cross-HAL 28; `r16*`/`rg16*` are correctly gated; surfaced by Y-6 V9); **F-101** (per-stage resource binding
-limits — sampled-texture/sampler/uniform-buffer/storage-texture PerShaderStage + storage-texture in-stage —
-not enforced at **auto-layout** pipeline creation, though enforced for explicit layouts;
-`capability_checks/limits/*PerShaderStage:createPipeline`, cross-HAL 312; surfaced by Y-6 V10c); **F-102** (default/auto bind-group-layout compatibility validation
-diverges both directions — under-rejects cross-auto-layout binds, over-rejects valid swaps;
-`encoding/programmable/pipeline_bind_group_compat:default_bind_group_layouts_never_match`, cross-HAL 18;
-Dawn AND wgpu-native both correct; surfaced by the audit query-identity restoration); naga-lineage **F-100** (out-of-range
-`@binding` rejected at `createShaderModule` rather than pipeline creation — `capability_checks/limits/
-maxBindingsPerBindGroup:createPipeline`, cross-HAL 12; validation-timing, wgpu-native crashes; surfaced by Y-6
-V10a). Naga-lineage **F-091** (MSL writer panics on generated vertex
-shaders
-— `render_pipeline/vertex_state` + `encoding/cmds/render/draw`, yawgpu Metal + wgpu-native crash; MoltenVK
-+ Dawn green) is queued with the naga batch. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+**2026-06-14 yawgpu fix batch (re-verified green on Metal + MoltenVK).** A yawgpu update (`…58d8aab`:
+`cts(F-093a-d)`, `cts(F-094)`, `cts(F-101)`, `cts(F-098,F-099)`, + a naga rev) **resolved ten** of the
+open findings, re-confirmed cross-HAL on this run: **F-089** (`createBindGroup` filtering-sampler — now
+`pass=2358 fail=0`), **F-090** (`render_pipeline/fragment_state` — `10754/0`), **F-091** (naga MSL writer
+panic on generated vertex shaders — `render_pipeline/vertex_state` `28151/0 crash=0`; the Metal crash is
+gone), **F-092** (`render_pass/*` — `12095/0`), **F-093** (encoding validation: compressed-copy bounds,
+unused vertex-buffer gap slots, defer pass-after-end, auto-layout exclusive-pipeline compat — all green;
+`copyTextureToTexture 9254/0`, `encoder_open_state 119/0`, `draw 15708/2`† ), **F-094** (`image_copy/*` —
+`65794/0`), **F-098** (`texture-component-swizzle` gating), **F-099** (`rgba16unorm/snorm` tier1 gating)
+(`capability_checks/features 1178/0`), **F-101** (per-stage resource limits at auto-layout pipeline
+creation), **F-102** (default/auto bind-group-layout compatibility, both directions —
+`pipeline_bind_group_compat 2520/0`). †the 2 residual `draw,index_buffer_format_dirtying` cases are the
+documented Dawn-leniency (yawgpu is *stricter*; not a defect — see the F-093 note below).
+
+> **Harness note (not a finding):** under `--workers`, the encoding sweep now shows ~193
+> `clearBuffer`/`copyBufferToBuffer` cases failing with `failed to request device: adapter is consumed` —
+> each file passes green **in isolation**. yawgpu now consumes the adapter on `requestDevice` (spec-correct);
+> the harness's device-mismatch / per-test private-device paths leave the shared adapter consumed for sibling
+> tests in the same process. This is the known consumed-adapter harness-normalization follow-up, not a port
+> or yawgpu defect.
+
+**Open — yawgpu (cross-HAL, Dawn + wgpu-native both reject):** **F-095** (buffer usage-scope conflicts not
+detected in a render pass — `resource_usages/buffer/*`, cross-HAL 296 cases); **F-096** (texture subresource
+usage-scope conflicts not detected — `resource_usages/texture/*`, cross-HAL 851 cases; the texture analog of
+F-095). naga-lineage **F-100** (out-of-range `@binding` rejected at `createShaderModule` rather than pipeline
+creation — `capability_checks/limits/maxBindingsPerBindGroup:createPipeline`, cross-HAL 12; validation-timing,
+wgpu-native crashes; unchanged by the 2026-06-14 batch). **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1652,7 +1649,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   filter mode) to a bind-group-layout entry declared `sampler: { type: "non-filtering" }` must fail at
   `createBindGroup` (Dawn: "Filtering sampler is incompatible with non-filtering sampler binding"); yawgpu
   accepts it. yawgpu's createBindGroup does not enforce the filtering-vs-non-filtering sampler-type rule.
-- **Status:** **OPEN** (yawgpu — createBindGroup sampler-type compatibility). Surfaced, not masked.
+- **Status:** **RESOLVED 2026-06-14** (yawgpu, re-verified green Metal + MoltenVK: `createBindGroup pass=2358 fail=0`). Was OPEN (createBindGroup sampler-type compatibility).
 
 ---
 
@@ -1672,7 +1669,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   (e.g. `r8unorm` + `src-alpha`) are rejected; Dawn accepts.
   (d) **over-validation, blendable** `targets_format_filterable` (4): `r16float` is rejected as "must be
   blendable" where it is a valid color target; Dawn accepts.
-- **Status:** **OPEN** (yawgpu — fragment-state color-target/blend/bytes-per-sample validation). Surfaced,
+- **Status:** **RESOLVED 2026-06-14** (yawgpu, re-verified green Metal + MoltenVK: `fragment_state pass=10754 fail=0`). Was OPEN (fragment-state color-target/blend/bytes-per-sample validation). Surfaced,
   not masked.
 
 ---
@@ -1689,7 +1686,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   yawgpu's vertex-state *validation* is correct; only the MSL codegen panics.
 - **Observed:** `panic in a function that cannot unwind` from the MSL writer while compiling the test's
   generated vertex shader (specific vertex attribute formats/types trip the writer).
-- **Status:** **OPEN** (naga MSL backend; affects yawgpu Metal via its fork + wgpu-native). Queued with
+- **Status:** **RESOLVED on yawgpu 2026-06-14** (naga-fork rev bump — `render_pipeline/vertex_state pass=28151 fail=0 crash=0` on Metal, the MSL writer panic is gone; MoltenVK was already green). wgpu-native (upstream naga) may still crash. Was OPEN (naga MSL backend; affects yawgpu Metal via its fork + wgpu-native). Queued with
   the F-070 naga batch. Surfaced, not masked.
 
 ---
@@ -1714,7 +1711,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   on the render-pass color-attachment path.
   (e) **snorm-16 resolve** `resolveTarget,format_supports_resolve` (3): a resolve target with a
   non-resolvable 16-bit snorm format is accepted; Dawn rejects.
-- **Status:** **OPEN** (yawgpu — render-pass / attachment validation). Surfaced, not masked.
+- **Status:** **RESOLVED 2026-06-14** (yawgpu, re-verified green Metal + MoltenVK: `render_pass/* pass=12095 fail=0`). Was OPEN (render-pass / attachment validation).
 
 ---
 
@@ -1743,7 +1740,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   **stricter** than our Dawn — it validates a re-bound mismatched index-buffer format (errors), whereas this
   Dawn build does not (the port's expectation matches the Dawn oracle; see the in-file comment). yawgpu's
   behavior is arguably the more correct one, so this is a Dawn leniency, not a yawgpu defect.
-- **Status:** **OPEN** (yawgpu — encoder/command validation; vertex-OOB partly masked by F-091 on Metal).
+- **Status:** **RESOLVED 2026-06-14** (yawgpu `cts(F-093a-d)`, re-verified green Metal + MoltenVK: `copyTextureToTexture 9254/0`, `encoder_open_state 119/0`, `draw 15708/2`† where the 2 are the Dawn-leniency note above, `pipeline_bind_group_compat 2520/0`). Was OPEN (encoder/command validation; vertex-OOB partly masked by F-091 on Metal).
   Surfaced, not masked.
 
 ---
@@ -1764,7 +1761,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   `unexpected validation error: copy …` for valid offset/bytesPerRow combos.
   (d) depth/stencil aspect copy validation `buffer_texture_copies,depth_stencil_format,*` (7) and
   `device_mismatch` (4).
-- **Status:** **OPEN** (yawgpu — image-copy buffer/layout validation). Surfaced, not masked.
+- **Status:** **RESOLVED 2026-06-14** (yawgpu `cts(F-094)`, re-verified green Metal + MoltenVK: `image_copy/* pass=65794 fail=0`). Was OPEN (image-copy buffer/layout validation).
 
 ---
 
@@ -1828,7 +1825,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   `WGPUTextureComponentSwizzleDescriptor`** instead of rejecting it → the view is created, no error
   (`expected validation error, got none`). The identity case correctly produces no error. wgpu-native
   behaves the same (it too lacks the feature and does not reject the descriptor).
-- **Status:** **OPEN** (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
+- **Status:** **RESOLVED 2026-06-14** (yawgpu, re-verified green Metal + MoltenVK). Was OPEN (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
   xfail-free. (Supersedes the earlier note that `texture_component_swizzle` was "Dawn-only oracle" — the
   validation file surfaces the missing-feature rejection rule on yawgpu/wgpu-native.)
 
@@ -1846,7 +1843,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   formats as **always-available core formats** and accepts every use (`expected validation error, got
   none`). The other tier1 16-bit-norm formats (`r16unorm/snorm`, `rg16unorm/snorm`) **are** correctly
   gated by yawgpu — only the `rgba16` norm pair leaks.
-- **Status:** **OPEN** (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
+- **Status:** **RESOLVED 2026-06-14** (yawgpu, re-verified green Metal + MoltenVK). Was OPEN (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
   xfail-free. wgpu-native is worse here: it **crashes** (signal) on every tier1 16-bit-norm format
   (`r16`/`rg16`/`rgba16` unorm/snorm) used without the feature — 90 cases that should be clean validation
   errors — plus it leaves `depth32float-stencil8` ungated in the render-bundle d/s path (bring-up
@@ -1890,7 +1887,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   `createBindGroupLayout,at_over` / `createPipelineLayout,at_over` cases pass) — the gap is specifically
   the **auto-derived** pipeline layout, where yawgpu doesn't count the shader's per-stage resources
   against the limit. Storage *buffers* per stage are not in the failing set (enforced / skipped).
-- **Status:** **OPEN** (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
+- **Status:** **RESOLVED 2026-06-14** (yawgpu, re-verified green Metal + MoltenVK). Was OPEN (yawgpu defect, cross-HAL). Surfaced/unmasked; `expectations/yawgpu.txt` stays
   xfail-free.
 - **MoltenVK-only residual (separate, not a yawgpu-core defect):**
   `maxComputeWorkgroupStorageSize:createComputePipeline,at_over` `atLimit` fails on MoltenVK only (30
@@ -1918,7 +1915,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   none`, 6 cases); (b) `_success=true; swap=true` cases — yawgpu **wrongly rejects** a valid binding
   (`uncaptured error: pipeline bind group layout is incompatible`, 12 cases). The auto-layout
   identity/compatibility comparison is mis-keyed.
-- **Status:** **OPEN** (yawgpu defect, cross-HAL; Dawn + wgpu-native correct). Surfaced/unmasked;
+- **Status:** **RESOLVED 2026-06-14** (yawgpu `cts(F-093d)` auto-layout BGL exclusive-pipeline compat, re-verified green Metal + MoltenVK: `pipeline_bind_group_compat pass=2520 fail=0`). Was OPEN (yawgpu defect, cross-HAL; Dawn + wgpu-native correct). Surfaced/unmasked;
   `expectations/yawgpu.txt` stays xfail-free.
 
 ---

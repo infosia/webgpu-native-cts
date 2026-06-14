@@ -138,7 +138,7 @@ added: [COVERAGE](docs/COVERAGE.md).
 
 | Backend | Role | Metal | Vulkan (Windows) | Open findings |
 |---------|------|:-----:|:----------------:|---------------|
-| **yawgpu** | primary subject | ✅ green | ✅ green | **11** — F-089/F-090/F-092…F-096/F-098/F-099/F-101/F-102 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope, swizzle + tier1-format gating, per-stage limits, auto-BGL compatibility), all cross-HAL; 64 earlier findings fixed |
+| **yawgpu** | primary subject | ✅ green | ✅ green | **2** — F-095/F-096 (buffer + texture usage-scope conflicts not detected), cross-HAL; **74 findings fixed** (incl. the 2026-06-14 batch F-089/F-090/F-091/F-092/F-093/F-094/F-098/F-099/F-101/F-102) |
 | **Dawn** | conformance oracle | ✅ green | not built yet | 0 |
 | **wgpu-native** | third data point | ⚠️ | ⚠️ (contained) | **22** — eager panics, missing validation, 3D copy/readback, rendering, device-lost state |
 
@@ -150,12 +150,12 @@ test pass.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| yawgpu — open | 11 | F-089/F-090/F-092…F-096 (createBindGroup, fragment-state, render-pass, encoding, image-copy, buffer + texture usage-scope); F-098/F-099 (swizzle + `rgba16` tier1-format gating); F-101 (per-stage limits at auto-layout pipeline creation); F-102 (auto-BGL compatibility, both directions; Dawn + wgpu-native correct) — all cross-HAL, Dawn-oracle-confirmed |
-| yawgpu — fixed & hardware-re-verified | 64 | F-005…F-082, F-087; nothing masked |
+| yawgpu — open | 2 | F-095/F-096 (buffer + texture subresource usage-scope conflicts not detected in a render pass) — cross-HAL, Dawn + wgpu-native both reject |
+| yawgpu — fixed & hardware-re-verified | 74 | F-005…F-082, F-087, and the **2026-06-14** batch F-089/F-090/F-091/F-092/F-093/F-094/F-098/F-099/F-101/F-102 (re-verified green on Metal + MoltenVK); nothing masked |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 7 | F-033, F-045, F-053/F-068 residuals, F-083, F-086; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual (Metal green) |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |
-| naga-lineage residuals (tracked upstream) | 3 | F-070 memory layout / matCx3 padding / `shadow:loop`; F-091 MSL writer panic on generated vertex shaders (Metal + wgpu-native); F-100 out-of-range `@binding` rejected at `createShaderModule` not pipeline creation (yawgpu cross-HAL; wgpu-native crashes) |
+| naga-lineage residuals (tracked upstream) | 2 | F-070 memory layout / matCx3 padding / `shadow:loop` (Metal 9 / MoltenVK 53); F-100 out-of-range `@binding` rejected at `createShaderModule` not pipeline creation (yawgpu cross-HAL; wgpu-native crashes). F-091 (MSL writer panic on generated vertex shaders) **fixed on yawgpu Metal** 2026-06-14 |
 
 Buckets overlap where a finding affects several backends (e.g. F-045, F-082).
 
