@@ -219,6 +219,27 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 
 Exit code: non-zero if any non-expected case fails. Skips/warns do not fail the run by default.
 
+### Large-suite runs & finding triage (helper scripts)
+
+At the current suite size a single `--workers N` run is unreliable for reading findings on one
+workstation: high concurrency (>~10 simultaneous Vulkan devices) can freeze the whole OS, while low
+concurrency means each shard process runs so many cases that GPU state degrades and later cases fail
+en masse with `HAL queue submission failed: vulkan` (fake fails). `--workers` ties shard count to
+concurrency, so it cannot avoid both. [`scripts/`](../scripts/README.md) holds helpers that decouple
+them:
+
+- **`scripts/run_sharded.sh [M] [N] [EXPECTATIONS]`** — full suite split into `M` shards run `N` at a
+  time (default 48 / 8); no freeze, summed totals, degradation-filtered candidate list. A **screen**,
+  not a verdict.
+- **`scripts/isolate.sh QUERY...`** — run each query **alone** to tell a real finding (`fail>0`,
+  no `HAL queue submission failed` / `adapter is consumed` noise) from degradation collateral
+  (passes in isolation). The authoritative triage step.
+- **`scripts/recheck.sh`** — isolate the saved set of known yawgpu/Vulkan findings as a regression
+  guard after a backend change.
+
+Note `--shard I/N` is **0-indexed** (`0/N … (N-1)/N`). See [`scripts/README.md`](../scripts/README.md)
+for the full rationale and workflow.
+
 ---
 
 ## 5. Regenerating the listing
