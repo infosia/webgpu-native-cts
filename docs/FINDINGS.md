@@ -37,7 +37,7 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/078/079/080/081/082/087/089/090/091/092/093/094/095/096/098/099/101/102/103
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/078/079/080/081/082/087/089/090/091/092/093/094/095/096/098/099/100/101/102/103
 — each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`f857f3f`) fixed the eleven
 findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK (F-068 additionally
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
@@ -67,11 +67,12 @@ documented Dawn-leniency (yawgpu is *stricter*; not a defect — see the F-093 n
 **Open — yawgpu:** **none of the yawgpu-core findings remain.** The 2026-06-14 batch additionally resolved
 **F-095** (`resource_usages/buffer/*` `c0e5ba7` — `1422/0`), **F-096** (`resource_usages/texture/*`
 `5ed5ada` — `6556/0`), and **F-103** (yawgpu Vulkan-HAL 3D image-copy slice-stride `e7db246` —
-`command_buffer/image_copy 138408/0`, native-Vulkan + MoltenVK confirmed). The only residuals are
-**naga-lineage** (shared with the naga fork, not yawgpu-core): **F-100** (out-of-range `@binding` rejected at
-`createShaderModule` rather than pipeline creation — `capability_checks/limits/maxBindingsPerBindGroup:
-createPipeline`, cross-HAL 12; validation-timing, wgpu-native crashes) and **F-070** (memory_layout
-`struct_inner_align` — Metal 9 / MoltenVK 53), plus the spec-in-flux **F-085** (Vulkan `sample_mask`). **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+`command_buffer/image_copy 138408/0`, native-Vulkan + MoltenVK confirmed). **F-100** (out-of-range `@binding` validation-timing) was **also fixed** by `16ee140` (now validated at
+pipeline creation; `maxBindingsPerBindGroup 43/0` both HALs). The **sole remaining yawgpu-runnable failure**
+is **naga-lineage F-070** (memory_layout `struct_inner_align` — Metal 9 / MoltenVK 54; shared with the naga
+fork, not yawgpu-core, and unchanged by recent updates), plus the spec-in-flux **F-085** (Vulkan
+`sample_mask`, xfailed in the Vulkan-only expectation files). Every other ported test passes on yawgpu
+Metal **and** MoltenVK. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1867,10 +1868,12 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   outer no-leaked-error assertion of `_testThenDestroyDevice`. The net conformance outcome (the over-limit
   binding is rejected) is the same — this is a validation-**timing/scope** divergence, not a missing or
   spurious validation. wgpu-native panics (signal) on the same path.
-- **Status:** **OPEN**, naga-lineage (surfaced on yawgpu cross-HAL; the `@binding` range check lives in the
-  naga frontend, hence wgpu-native is affected too — it crashes). Surfaced/unmasked; `expectations/yawgpu.txt`
-  stays xfail-free. The broader wgpu-native limit crashes (128 in V10a — requesting devices with specific
-  limits + over-limit ops) are the known bring-up eager-panic class.
+- **Status:** **RESOLVED on yawgpu 2026-06-14** (yawgpu `cts(F-100)` `16ee140` — "validate @binding range
+  at pipeline creation against the limit"; re-verified green Metal + MoltenVK:
+  `maxBindingsPerBindGroup pass=43 fail=0`). yawgpu now validates the over-range `@binding` at pipeline
+  creation (matching Dawn) instead of at `createShaderModule`. wgpu-native (upstream naga) may still crash.
+  Was OPEN naga-lineage. The broader wgpu-native limit crashes (128 in V10a — requesting devices with
+  specific limits + over-limit ops) are the known bring-up eager-panic class.
 
 ---
 

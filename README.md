@@ -143,11 +143,11 @@ test pass.
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
 | yawgpu — open (core) | 0 | **all yawgpu-core findings resolved.** Only naga-lineage residuals remain (next row) |
-| yawgpu — fixed & hardware-re-verified | 77 | F-005…F-082, F-087, and the **2026-06-14** batch F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-101/F-102/F-103 (re-verified green on Metal + MoltenVK; F-103 also native-Vulkan-confirmed); nothing masked |
+| yawgpu — fixed & hardware-re-verified | 78 | F-005…F-082, F-087, and the **2026-06-14** batch F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal + MoltenVK; F-103 also native-Vulkan-confirmed); nothing masked |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 7 | F-033, F-045, F-053/F-068 residuals, F-083, F-086; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual (Metal green) |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |
-| naga-lineage residuals (tracked upstream) | 2 | F-070 memory layout / matCx3 padding / `shadow:loop` (Metal 9 / MoltenVK 53); F-100 out-of-range `@binding` rejected at `createShaderModule` not pipeline creation (yawgpu cross-HAL; wgpu-native crashes). F-091 (MSL writer panic on generated vertex shaders) **fixed on yawgpu Metal** 2026-06-14 |
+| naga-lineage residuals (tracked upstream) | 1 | F-070 memory layout `struct_inner_align` / matCx3 padding / `shadow:loop` (yawgpu Metal 9 / MoltenVK 54). F-091 (MSL vertex-shader panic) and F-100 (`@binding` validation-timing) both **fixed on yawgpu** 2026-06-14 |
 
 Buckets overlap where a finding affects several backends (e.g. F-045, F-082).
 
