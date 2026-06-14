@@ -2038,9 +2038,14 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
 - **Likely root cause:** the `bool` in-memory representation + robustness-clamp index math in shader
   lowering (naga-lineage class, like the other `robust_access` / memory-layout residuals), not a
   yawgpu-core API issue. Distinct from [F-078](#f-078) (`robust_access` let-OOB over-validation, resolved).
-- **Status:** **OPEN — native-Vulkan-observed; cross-HAL classification pending** (a yawgpu Metal /
-  MoltenVK run will tell whether this is a shared-naga residual or Vulkan/SPIR-V-specific). Surfaced,
-  not masked.
+- **Status:** **RESOLVED 2026-06-15** (yawgpu `cts(F-105)` `87cc2c6`, naga fork `7dd824389`
+  "naga(spv): correct bool array stride so robust workgroup-array writes clamp"). The SPIR-V backend
+  emitted the wrong array stride for a `bool`-element array, so the robustness clamp index math for a
+  workgroup `bool` array write addressed the wrong slot; the fix corrects the stride. Native-Vulkan-only
+  manifestation: NVIDIA exposed it, Apple GPUs masked it. **Cross-HAL classification = Vulkan/SPIR-V-path
+  (bool stride), not a Metal/MSL defect.** Verified native Vulkan (Windows/NVIDIA, user); Apple
+  regression-confirmed here `shader,execution,robust_access` `1068/0` on **both** Metal and MoltenVK (both
+  were already green pre-fix; still green post-fix — no regression). Surfaced, not masked.
 
 ---
 
@@ -2065,7 +2070,16 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   non-indirect reads passing isolates the gap to those destination access types. A Vulkan-HAL
   synchronization gap (Metal's HAL inserts these automatically), distinct from the RESOLVED MoltenVK-only
   `multiple_buffers` `rw`/`ww` finding.
-- **Status:** **OPEN — native-Vulkan yawgpu Vulkan-HAL synchronization gap.** Surfaced, not masked.
+- **Status:** **RESOLVED 2026-06-15** (yawgpu `cts(F-106)` `858de27` — "Vulkan HAL: make buffer writes
+  visible to indirect/index/copy-source reads"). The Vulkan-HAL barrier tracking now adds the missing
+  destination access/stage (`VK_ACCESS_INDIRECT_COMMAND_READ_BIT` / `VK_ACCESS_INDEX_READ_BIT` /
+  `TRANSFER_READ`) after a storage/copy write to the same buffer, so the prior write is visible to a
+  later indirect-args / index / copy-source read. A genuine yawgpu Vulkan-HAL synchronization gap that
+  was **latent on Apple GPUs** (Metal native + MoltenVK have coherent/implicitly-ordered memory that
+  masked the missing barrier) and exposed on NVIDIA native Vulkan — i.e. a real Vulkan-spec UB, not an
+  Apple-only quirk. Verified native Vulkan (Windows/NVIDIA, user); Apple regression-confirmed here
+  `api,operation,memory_sync,buffer,multiple_buffers` `263/0` on **both** Metal and MoltenVK (already
+  green pre-fix; still green — no regression). Surfaced, not masked.
 
 ---
 
