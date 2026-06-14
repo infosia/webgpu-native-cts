@@ -185,6 +185,20 @@ operation sweep 2026-06-06.
 yawgpu's operation results on native Vulkan **match Metal exactly**; the only Mac-side artifacts
 are the MoltenVK translation bucket above, absent on native Vulkan.
 
+#### wgpu-native — full suite, current scale (2026-06-14, native Vulkan)
+
+The slice tables above are per-area snapshots at the 2026-06-08 revision. A **whole-suite** Vulkan
+run at the current listing (234 files, `--workers 8`) measures
+`pass=289054 skip=215886 fail=9551 crash=7967 xfail=92` (raw). These are **not new defects** — they
+are the wgpu-native panic + missing-validation families already recorded per area in
+[COVERAGE](docs/COVERAGE.md) as *bring-up reference* (F-097 device-lost 2568; F-027/F-028 3D
+copy/readback ≈3000; the F-092-area depth-readonly gaps 864; limits/alignment `unimplemented!()`
+panics, contained as `crash` by `--workers` crash-resume). wgpu-native's
+`expectations/wgpu-native-vulkan.txt` (8 lines) has **not yet been regenerated for the grown suite**,
+so a full run is not triaged to `fail=0 crash=0` the way the smaller slices above are — regenerating
+it via `--isolate --emit-crash-list` is pending. yawgpu remains the **primary** conformance subject;
+wgpu-native is the bring-up reference.
+
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
 
