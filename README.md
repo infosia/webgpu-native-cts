@@ -142,8 +142,8 @@ test pass.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| yawgpu — open | 3 | F-095/F-096 (buffer + texture subresource usage-scope conflicts not detected) — cross-HAL, Dawn + wgpu-native both reject; **F-103** (3D image-copy loses non-zero depth slices + stencil8 stencil-only — yawgpu **Vulkan-HAL** defect, native-Vulkan-confirmed; Metal green `138408/0`, Vulkan/MoltenVK `fail=7546`) |
-| yawgpu — fixed & hardware-re-verified | 74 | F-005…F-082, F-087, and the **2026-06-14** batch F-089/F-090/F-091/F-092/F-093/F-094/F-098/F-099/F-101/F-102 (re-verified green on Metal + MoltenVK); nothing masked |
+| yawgpu — open (core) | 0 | **all yawgpu-core findings resolved.** Only naga-lineage residuals remain (next row) |
+| yawgpu — fixed & hardware-re-verified | 77 | F-005…F-082, F-087, and the **2026-06-14** batch F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-101/F-102/F-103 (re-verified green on Metal + MoltenVK; F-103 also native-Vulkan-confirmed); nothing masked |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
 | MoltenVK-only translation artifacts — green on native Vulkan, not yawgpu defects | 7 | F-033, F-045, F-053/F-068 residuals, F-083, F-086; maxComputeWorkgroupStorageSize at-limit SPIR-V compile residual (Metal green) |
 | Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files for yawgpu **and** wgpu-native |

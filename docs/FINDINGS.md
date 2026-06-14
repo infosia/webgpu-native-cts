@@ -37,7 +37,7 @@ never masked). The early validation/copy milestones (commit + result):
 | `copyTextureToTexture` depth/stencil (T26) | F-031 — depth render-path support (7 gaps) `f3afc31` | `copy_depth_stencil pass=216 fail=0` (Dawn-equal, from `pass=36 fail=180`) |
 | `image_copy` depth/stencil (T27) | F-032 — depth/stencil aspect buffer copies `c8f15d5`,`af9ac5c` | `image_copy` d/s `pass=1152 fail=0` (Dawn-equal, from `pass=288 fail=864`); full `image_copy pass=138408 fail=0` |
 
-**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/078/079/080/081/082/087/089/090/091/092/093/094/098/099/101/102
+**Resolved yawgpu findings:** F-005/006/008/009/010/011/014/016/018/020/022/023/024/025/026/029/030/031/032/034/035/037/038/039/040/041/042/043/044/045/046/047/048/049/050/051/053/054/055/057/058/059/060/061/062/063/064/065/066/067/068/069/072/073/074/076/077/078/079/080/081/082/087/089/090/091/092/093/094/095/096/098/099/101/102/103
 — each keeps a compact record below. The 2026-06-11 yawgpu update (`f9a076e`…`f857f3f`) fixed the eleven
 findings F-064–F-069, F-072–F-074, F-076, F-077, re-verified on Metal + MoltenVK (F-068 additionally
 confirmed green on native Windows/Vulkan; its 125-case MoltenVK-only residual is a translation
@@ -64,12 +64,14 @@ documented Dawn-leniency (yawgpu is *stricter*; not a defect — see the F-093 n
 > tests in the same process. This is the known consumed-adapter harness-normalization follow-up, not a port
 > or yawgpu defect.
 
-**Open — yawgpu (cross-HAL, Dawn + wgpu-native both reject):** **F-095** (buffer usage-scope conflicts not
-detected in a render pass — `resource_usages/buffer/*`, cross-HAL 296 cases); **F-096** (texture subresource
-usage-scope conflicts not detected — `resource_usages/texture/*`, cross-HAL 851 cases; the texture analog of
-F-095). naga-lineage **F-100** (out-of-range `@binding` rejected at `createShaderModule` rather than pipeline
-creation — `capability_checks/limits/maxBindingsPerBindGroup:createPipeline`, cross-HAL 12; validation-timing,
-wgpu-native crashes; unchanged by the 2026-06-14 batch). **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
+**Open — yawgpu:** **none of the yawgpu-core findings remain.** The 2026-06-14 batch additionally resolved
+**F-095** (`resource_usages/buffer/*` `c0e5ba7` — `1422/0`), **F-096** (`resource_usages/texture/*`
+`5ed5ada` — `6556/0`), and **F-103** (yawgpu Vulkan-HAL 3D image-copy slice-stride `e7db246` —
+`command_buffer/image_copy 138408/0`, native-Vulkan + MoltenVK confirmed). The only residuals are
+**naga-lineage** (shared with the naga fork, not yawgpu-core): **F-100** (out-of-range `@binding` rejected at
+`createShaderModule` rather than pipeline creation — `capability_checks/limits/maxBindingsPerBindGroup:
+createPipeline`, cross-HAL 12; validation-timing, wgpu-native crashes) and **F-070** (memory_layout
+`struct_inner_align` — Metal 9 / MoltenVK 53), plus the spec-in-flux **F-085** (Vulkan `sample_mask`). **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
 the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
 on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
 let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
@@ -1776,7 +1778,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   usage (e.g. `uniform`) and a **writable storage** usage within one render-pass usage scope is a hazard
   that must be rejected; yawgpu accepts it. yawgpu's buffer usage-scope tracker does not flag
   read/write-storage conflicts (predominantly in render passes; the compute path mostly validates).
-- **Status:** **OPEN** (yawgpu — buffer usage-scope / hazard tracking in passes). Surfaced, not masked.
+- **Status:** **RESOLVED 2026-06-14** (yawgpu `cts(F-095)` `c0e5ba7`, re-verified green Metal + MoltenVK: `resource_usages/buffer/* pass=1422 fail=0`). Was OPEN (buffer usage-scope / hazard tracking in passes).
 
 ---
 
@@ -1794,7 +1796,7 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   writable storage binding (or writing render attachment) together with another use of the same
   subresource in one usage scope must be rejected; yawgpu accepts it. yawgpu does not track texture
   subresource (mip/layer/aspect) usage-scope hazards in passes/bundles/bind-groups.
-- **Status:** **OPEN** (yawgpu — texture usage-scope / hazard tracking). Surfaced, not masked. Related to
+- **Status:** **RESOLVED 2026-06-14** (yawgpu `cts(F-096)` `5ed5ada`, re-verified green Metal + MoltenVK: `resource_usages/texture/* pass=6556 fail=0`). Was OPEN (texture usage-scope / hazard tracking). Related to
   F-095 (buffer usage-scope).
 
 ---
@@ -1933,13 +1935,11 @@ naga-lineage defects, not yawgpu-core defects. Deprioritized per the Y-batch foc
   z-slices** — the mismatches are at `z≥1` (7320 at z=1, 130 at z=2), `z=0` is correct — across **43
   formats** (systematic, not format-specific: a copy-geometry / slice-stride defect, not a per-format
   packing bug). `stencil8` stencil-only copies also mismatch (96). Metal handles all of these correctly.
-- **Status:** **OPEN — yawgpu Vulkan-HAL defect (native-Vulkan-confirmed).** The user confirmed the same
-  cases fail on native Windows/Vulkan, so it is **not** a MoltenVK artifact — yawgpu's Vulkan HAL mishandles
-  the **z-slice stride / 3D copy region** in buffer↔3D-texture copies (data correct at z=0, wrong at z≥1),
-  plus stencil8 stencil-only. Metal-HAL-specific green; Vulkan-HAL real bug. Symptom-cousin of the
-  wgpu-native 3D-copy family [F-027](#f-027)/[F-028](#f-028) but in yawgpu's Vulkan HAL. Surfaced, not
-  masked; the Metal-run `expectations/yawgpu.txt` stays clean (this is a Vulkan-backend defect — fix in
-  yawgpu's Vulkan HAL rather than xfail).
+- **Status:** **RESOLVED 2026-06-14** (yawgpu `cts(F-103)` `e7db246` — "fix Vulkan HAL 3D/multi-slice copy
+  slice stride"). The user confirmed the fix on native Windows/Vulkan; re-verified here on MoltenVK:
+  `api,operation,command_buffer,image_copy pass=138408 fail=0` (was `fail=7546`), matching the Metal HAL.
+  Was a yawgpu Vulkan-HAL z-slice-stride defect in buffer↔3D-texture copies (wrong data at z≥1) + stencil8
+  stencil-only; Metal was always green. Surfaced, not masked.
 
 ---
 
