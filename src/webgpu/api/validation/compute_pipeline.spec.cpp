@@ -37,6 +37,22 @@ WGPUStringView sv(std::string_view s) {
     return WGPUStringView{s.data(), s.size()};
 }
 
+// Parse up to three comma-separated unsigned components (e.g. "1,8,32" or "64").
+// Mirrors the upstream sscanf("%u,%u,%u") behaviour: components absent from the
+// string keep their incoming value. Portable replacement for sscanf (MSVC C4996).
+void parseWorkgroupSize(const std::string& s, uint32_t& x, uint32_t& y, uint32_t& z) {
+    uint32_t* out[3] = {&x, &y, &z};
+    size_t idx = 0;
+    size_t pos = 0;
+    while (idx < 3 && pos <= s.size()) {
+        const size_t comma = s.find(',', pos);
+        const size_t len = (comma == std::string::npos) ? std::string::npos : comma - pos;
+        *out[idx++] = static_cast<uint32_t>(std::stoul(s.substr(pos, len)));
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+}
+
 WGPUConstantEntry makeConstantEntry(std::string_view key, double value) {
     WGPUConstantEntry entry = WGPU_CONSTANT_ENTRY_INIT;
     entry.key = sv(key);
@@ -494,7 +510,7 @@ CTS_TEST(g, "limits,invocations_per_workgroup")
         uint32_t x = 1;
         uint32_t y = 1;
         uint32_t z = 1;
-        (void)std::sscanf(size.c_str(), "%u,%u,%u", &x, &y, &z);
+        parseWorkgroupSize(size, x, y, z);
         const std::string code = "@compute @workgroup_size(" + size + ") fn main () {}\n";
         createPipelineWithCode(t, x * y * z <= t.getLimits().maxComputeInvocationsPerWorkgroup, code);
     });
@@ -520,7 +536,7 @@ CTS_TEST(g, "limits,invocations_per_workgroup,each_component")
         uint32_t x = 1;
         uint32_t y = 1;
         uint32_t z = 1;
-        (void)std::sscanf(size.c_str(), "%u,%u,%u", &x, &y, &z);
+        parseWorkgroupSize(size, x, y, z);
         const WGPULimits limits = t.getLimits();
         const std::string code = "@compute @workgroup_size(" + size + ") fn main () {}\n";
         createPipelineWithCode(t, x <= limits.maxComputeWorkgroupSizeX

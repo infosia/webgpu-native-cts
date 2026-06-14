@@ -102,7 +102,7 @@ CTS_TEST(testGroup, "createPipelineLayout,at_over")
                 for (uint32_t stageBit = 0; stageBit < 3; ++stageBit) {
                     const uint64_t count = std::min(remaining, perStage[stageBit]);
                     remaining -= count;
-                    layouts.push_back(createBGL(t, count, static_cast<WGPUShaderStage>(1u << stageBit), type));
+                    layouts.push_back(createBGL(t, count, static_cast<WGPUShaderStage>(uint64_t{1} << stageBit), type));
                 }
                 WGPUPipelineLayoutDescriptor desc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
                 desc.bindGroupLayoutCount = layouts.size();
