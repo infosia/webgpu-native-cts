@@ -293,26 +293,22 @@ bool skipIfResourceNotSupportedInStages(
         if ((type == WGPUBufferBindingType_Storage || type == WGPUBufferBindingType_ReadOnlyStorage)
             && !(compat.maxStorageBuffersInFragmentStage >= 2)) {
             t.skip("maxStorageBuffersInFragmentStage < 2");
-            return true;
         }
     }
     if ((visibility & WGPUShaderStage_Fragment) != 0 && entryKeyIsStorageTexture(entryKey)
         && !(compat.maxStorageTexturesInFragmentStage >= 1)) {
         t.skip("maxStorageTexturesInFragmentStage < 1");
-        return true;
     }
     if ((visibility & WGPUShaderStage_Vertex) != 0 && entryKeyIsBufferLocal(entryKey)) {
         const WGPUBufferBindingType type = entryKeyBufferTypeLocal(entryKey);
         if ((type == WGPUBufferBindingType_Storage || type == WGPUBufferBindingType_ReadOnlyStorage)
             && !(compat.maxStorageBuffersInVertexStage >= 2)) {
             t.skip("maxStorageBuffersInVertexStage < 2");
-            return true;
         }
     }
     if ((visibility & WGPUShaderStage_Vertex) != 0 && entryKeyIsStorageTexture(entryKey)
         && !(compat.maxStorageTexturesInVertexStage >= 1)) {
         t.skip("maxStorageTexturesInVertexStage < 1");
-        return true;
     }
     return false;
 }

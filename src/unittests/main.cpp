@@ -449,17 +449,16 @@ int main() {
             require(rgb9e5.values[1] == 0.25, "rgb9e5 G shared-exponent decode");
             require(rgb9e5.values[2] == 0.125, "rgb9e5 B shared-exponent decode");
 
-            bool rgb9e5EncodeThrew = false;
-            try {
-                cts::TexelComponents color;
-                color.values[0] = 0.5;
-                color.values[1] = 0.25;
-                color.values[2] = 0.125;
-                (void)cts::texelRepresentation(WGPUTextureFormat_RGB9E5Ufloat).numberToBits(color);
-            } catch (const std::runtime_error&) {
-                rgb9e5EncodeThrew = true;
-            }
-            require(rgb9e5EncodeThrew, "rgb9e5 numberToBits guard");
+            cts::TexelComponents color;
+            color.values[0] = 0.5;
+            color.values[1] = 0.25;
+            color.values[2] = 0.125;
+            const cts::TexelComponents rgb9e5RoundTrip =
+                cts::texelRepresentation(WGPUTextureFormat_RGB9E5Ufloat)
+                    .bitsToNumber(cts::texelRepresentation(WGPUTextureFormat_RGB9E5Ufloat).numberToBits(color));
+            require(rgb9e5RoundTrip.values[0] == 0.5, "rgb9e5 numberToBits round-trip R");
+            require(rgb9e5RoundTrip.values[1] == 0.25, "rgb9e5 numberToBits round-trip G");
+            require(rgb9e5RoundTrip.values[2] == 0.125, "rgb9e5 numberToBits round-trip B");
         }
 
         {
