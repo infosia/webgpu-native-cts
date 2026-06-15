@@ -1553,4 +1553,35 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-112 — yawgpu Vulkan: workgroup-class atomics violate read-read coherence (`corr`) — native Vulkan
+
+- **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Win). Suspected correctness defect — **OPEN, under
+  investigation**.
+- **Found by:** `shader,execution,memory_model,coherence:corr:memType="atomic_workgroup";testType="intra_workgroup"`
+  (the non-RMW variant) — **1 subcase**. Surfaced by the first full-suite `--isolate --workers 8` run
+  (2026-06-15); reproduces deterministically in isolation (in-process ×3 and `--isolate` all `fail=1`).
+- **Observed:** the `corr` test (thread A `atomicStore(x,1)`; thread B `r0=atomicLoad(x); r1=atomicLoad(x)`)
+  records the WebGPU-disallowed weak outcome `r0==1 && r1==0` (the second read sees an older value than the
+  first — a single-location coherence violation) on **workgroup-address-space** atomics. The disallowed
+  behavior is observed a small but non-zero number of times each run (e.g. `behaviors:[0,9976,0,8]`,
+  `[0,9973,0,11]`); the count jitters but the violation is present every run, so this is a reproducible
+  failure, not stress-harness noise (a conformant backend records **0** weak outcomes — the storage-class
+  rows do).
+- **Narrowing (points at naga SPIR-V workgroup-atomic memory semantics):** within the same `corr` test,
+  `memType="atomic_storage"` (storage-buffer atomics, inter/intra) **pass**, and the `atomic_workgroup`
+  **RMW variant** (`atomicExchange`/`atomicAdd`) **passes**; only the plain `atomicLoad`/`atomicStore`
+  workgroup path fails. That isolates it to the memory semantics naga emits for workgroup-class atomic
+  load/store on SPIR-V (RMW ops happen to carry stronger ordering), not the harness/port (the port
+  reproduces upstream `_testCode` 1:1 and the storage rows exercise the same machinery cleanly).
+- **Status / next step:** **OPEN.** Cross-backend confirmation pending — the wgpu-native cross-check was
+  inconclusive (`build-wgpu/cts.exe` is stale: the query matched 0 cases). Rebuild wgpu-native and run
+  `coherence:corr:*` on the same Vulkan GPU: if wgpu-native/Dawn also record the weak outcome it is more
+  likely a CTS-oracle/hardware-stress matter (cf. F-084 on Metal, F-085 sample semantics) than a yawgpu
+  defect; if only yawgpu fails it is a naga SPIR-V workgroup-atomic codegen bug to fix on the HAL. **Not**
+  added to `expectations/yawgpu-vulkan.txt` (kept visible as an open finding per triage decision).
+- **Repro:** `cts --isolate 'webgpu:shader,execution,memory_model,coherence:corr:*'` → `fail=1` (the
+  `atomic_workgroup;intra_workgroup` non-RMW case).
+
+---
+
 _Add new findings as `F-00N` with the same fields._
