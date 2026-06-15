@@ -26,13 +26,22 @@ The entire ported suite (234 files) run per-file on each backend:
 | Backend | pass | skip | fail | crash | xfail | verdict |
 |---------|-----:|-----:|-----:|------:|------:|---------|
 | **Dawn** (oracle) | 534184 | 63364 | **0** | 0 | — | fully green |
-| **yawgpu — Metal** | 460730 | 136816 | **2** | 0 | — | green — the 2 are the documented Dawn-leniency `draw,index_buffer_format_dirtying` (yawgpu *stricter*, not a defect) |
-| **yawgpu — MoltenVK** (Vulkan HAL) | 445041 | 136816 | 15599 | 0 | 92 | Vulkan-path residuals (all Metal-green) — see below; F-085 92 xfailed |
+| **yawgpu — Metal** | 460730 | 136816 | **0** | 0 | 2 | green — the 2 `xfail` are the documented Dawn-leniency `draw,index_buffer_format_dirtying` (yawgpu *stricter*, not a defect), now carried in `expectations/yawgpu.txt` |
+| **yawgpu — Vulkan (native, NVIDIA)** | — | — | **0** | 0 | 94 | green — every ported file `fail=0` in per-file isolation; F-005…F-112 all fixed & native-Vulkan-re-verified (2026-06-15/16); F-085 (92) + F-111 (2) = 94 `xfail` |
+| **yawgpu — MoltenVK** (Vulkan HAL) | 445041 | 136816 | 15599 | 0 | 92 | Vulkan-path residuals (all Metal-green AND native-Vulkan-green) — see below; F-085 92 xfailed |
 | **wgpu-native** (`--isolate`, per-case) | 25668 | 10200 | 5680 | 6808 | — | bring-up reference (known panic-heavy state) |
 
-**yawgpu's Metal HAL passes the entire ported suite** (bar the 2 Dawn-leniency cases) — every finding F-005…
-F-103 is fixed and re-verified on Metal. The **Vulkan HAL (via MoltenVK)** still has residuals, all of which
-are **green on Metal** (Vulkan-path-specific). Breakdown of the 15599:
+> **Update (2026-06-16):** the native-Vulkan (NVIDIA) sweeps that followed this MoltenVK run surfaced eight
+> genuine Apple-masked findings — **F-105, F-106, the F-107…F-110 batch, and F-112** (all fixed &
+> native-Vulkan-re-verified), plus **F-111** (external-texture feature gap, documented `xfail`). **F-112**
+> is the cross-check payoff: suspected to be a naga workgroup-atomic SPIR-V defect, but wgpu-native passed
+> the same case with byte-identical SPIR-V, so the real cause was yawgpu's storage-buffer bounds-check
+> policy (`Restrict`), fixed by gating on `VK_EXT_robustness2` — *not* naga. **No yawgpu finding remains
+> open on Metal or native Vulkan.** The 2 Dawn-leniency Metal cases are now `xfail` (not raw `fail`).
+
+**yawgpu's Metal HAL passes the entire ported suite** (bar the 2 Dawn-leniency cases, now `xfail`) — every
+finding F-005…F-103 is fixed and re-verified on Metal. The **Vulkan HAL (via MoltenVK)** still has
+residuals, all of which are **green on Metal** (Vulkan-path-specific). Breakdown of the 15599:
 - **`api,operation,command_buffer,copyTextureToTexture` — 14512** → **F-104**, a **MoltenVK translation
   artifact** (native-Vulkan-confirmed green 2026-06-14 — does NOT fail on Windows/Vulkan; yawgpu's Vulkan
   HAL is correct, MoltenVK mistranslates the T2T copy). Unlike F-103, this one is not a yawgpu defect.
@@ -52,8 +61,11 @@ belong in `expectations/yawgpu-vulkan.txt` for Vulkan-backend runs.
 ## Re-test summary
 
 Every defect this suite surfaced against **yawgpu** (the primary conformance subject) was fixed in yawgpu
-and re-confirmed on real hardware — `expectations/yawgpu.txt` carries no expected-failure lines (surfaced,
-never masked). The early validation/copy milestones (commit + result):
+and re-confirmed on real hardware. The Metal `expectations/yawgpu.txt` carries a single `xfail`: the
+`draw,index_buffer_format_dirtying` Dawn-leniency (yawgpu is *stricter* — not a defect); Vulkan-only
+expected failures (F-085 spec-in-flux, F-111 external-texture gap) live in `expectations/yawgpu-vulkan.txt`.
+No yawgpu *defect* is masked — every entry is a documented non-defect. The early validation/copy milestones
+(commit + result):
 
 | milestone | yawgpu fix(es) | result after fix |
 |-----------|----------------|------------------|
@@ -102,18 +114,22 @@ documented Dawn-leniency (yawgpu is *stricter*; not a defect — see the F-093 n
 (`memory_layout 434/0`, was 9 fail). yawgpu's **Metal HAL now passes the entire ported suite** (bar the 2
 Dawn-leniency `draw,index_buffer_format_dirtying` cases).
 
-The remaining open items are all **Vulkan-HAL / SPIR-V-path** (Metal-green), surfaced by the 2026-06-14
-full MoltenVK sweep (see the cross-backend table at the top): **F-104** (`copyTextureToTexture` data wrong,
-14512), the SPIR-V/naga-backend shader-execution residuals (`zero_init`, `robust_access_vertex`,
-`memory_layout` 42 — the **F-070** Vulkan-side, `padding`, etc.), the `maxComputeWorkgroupStorageSize`
-SPIR-V compile residual, and the spec-in-flux **F-085** (`sample_mask`, xfailed in
-`expectations/yawgpu-vulkan.txt`). These need a native-Vulkan run to split real Vulkan-HAL defects from
-MoltenVK artifacts. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5) was fixed
-the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289 fail=0`
-on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078** (`robust_access`
-let-OOB over-validation — now 1068 genuine passes) and **F-082** (`texture_intra_invocation_coherence` —
-12 passes both HALs). The naga-lineage **F-070** residual (struct_inner_align + matCx3 padding +
-`shadow:loop`, 26 cases on Metal) is unchanged by the bump and stays open.
+The MoltenVK sweep's residuals have since been **split by a native-Vulkan (NVIDIA) run** (the question this
+paragraph used to leave open): the **MoltenVK-only** items — **F-104** (`copyTextureToTexture` data wrong,
+14512), the SPIR-V/SPIRV-Cross shader-execution residuals (`zero_init`, `robust_access_vertex`,
+`memory_layout` 42, `padding`, etc.), and the `maxComputeWorkgroupStorageSize` SPIR-V compile residual — are
+all **native-Vulkan-green**, i.e. confirmed MoltenVK/SPIRV-Cross translation artifacts, not yawgpu defects.
+The **genuine Vulkan-HAL defects** the native-Vulkan runs surfaced (Apple-masked) — **F-105, F-106,
+F-107…F-110, F-112** — are all **fixed and native-Vulkan-re-verified** (2026-06-15/16); **F-111** is the
+external-texture feature gap (`xfail`). The spec-in-flux **F-085** (`sample_mask`/`position`) stays `xfail`
+in `expectations/yawgpu-vulkan.txt`. **F-087** (requestDevice limit & adapter-lifecycle, surfaced by Y-5)
+was fixed the same area-sweep day (yawgpu `0be6c55`) and re-verified 2026-06-12 (`requestDevice` `pass=289
+fail=0` on both HALs, matching Dawn). The same `0be6c55` (naga rev bump) also resolved **F-078**
+(`robust_access` let-OOB over-validation — now 1068 genuine passes) and **F-082**
+(`texture_intra_invocation_coherence` — 12 passes both HALs). The naga-lineage **F-070** residual
+(struct_inner_align + matCx3 padding + `shadow:loop`) was resolved for yawgpu on 2026-06-14 (naga fork:
+`ebec34ae4` shadow:loop, `197a3ddd` matCx3/struct padding, `ee37a074` struct_inner_align) — Metal-green and
+native-Vulkan-confirmed; the remaining MoltenVK `memory_layout` residue is the SPIRV-Cross artifact above.
 **F-085** was native-Vulkan confirmed (2026-06-11, Windows/NVIDIA RTX
 5060 Ti: the same 92 cases as MoltenVK) but then **reclassified — NOT an implementation defect**:
 wgpu-native on the same machine/driver fails the identical 92 cases (its earlier "fully green"
@@ -141,8 +157,9 @@ fails on wgpu-native, queued with the naga batch), F-083 above, and wgpu-native 
 **Open — naga lineage / wgpu-native:** **F-078** (validator treats `let`-propagated indices as
 const-expression OOB → all `robust_access` compute pipelines error; Tint correct; yawgpu's earlier
 "green" was a false pass exposed by the F-065 uncaptured-error wiring — NOT a yawgpu regression),
-**F-070** (reduced 2026-06-11: Metal residual is `struct_inner_align` 9 + matCx3 padding 16 +
-`shadow:loop`; MoltenVK still fails ~54 `memory_layout` layout cases — SPIR-V backend lacks the fix),
+**F-070** (`memory_layout`/`padding`/`shadow:loop` — **fixed on yawgpu** both HALs via the naga-fork revs,
+but **wgpu-native (upstream naga) still fails it**: 2026-06-16 cross-check on Metal measured `memory_layout`
+fail=55+crash=1, `padding` fail=16, `shadow` crash=1),
 **F-071** (wgpu-native `zero_init` 3930 + `robust_access` aborts — same naga root as F-078), **F-075**
 (wgpu-native buffer mapping broadly broken). The `api,operation` `texture_component_swizzle` test remains
 Dawn-only oracle (yawgpu/wgpu-native lack the feature); the Y-6 V9 validation file additionally surfaces
