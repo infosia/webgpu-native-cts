@@ -222,32 +222,47 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 
 Exit code: non-zero if any non-expected case fails. Skips/warns do not fail the run by default.
 
-### Large-suite runs & finding triage (helper scripts)
+### Large-suite runs & finding triage
 
-At the current suite size a single plain `--workers N` (in-process shards) run is unreliable for
-reading findings on one workstation: high concurrency (>~10 simultaneous Vulkan devices) can freeze
-the whole OS, while low concurrency means each shard process runs so many cases **sharing one
-process-global device** (`src/common/harness.cpp`) that GPU state degrades and later cases fail en
-masse with `HAL queue submission failed: vulkan` (fake fails). Plain `--workers` ties shard count to
-concurrency, so it cannot avoid both.
+At the current suite size (~234 file-level queries / ~600k subcases) a single plain `--workers N`
+(in-process shards) run is unreliable for reading findings on one workstation: high concurrency (>~10
+simultaneous Vulkan devices) can freeze the whole OS, while low concurrency means each shard process
+runs so many cases **sharing one process-global device** (`src/common/harness.cpp`) that GPU state
+degrades and later cases fail en masse with `HAL queue submission failed: vulkan` (fake fails). Plain
+`--workers` ties shard count to concurrency, so it cannot avoid both.
 
-**Preferred now: `--isolate --workers N`** (the per-case isolation pool) gives each case its own
-process — so degradation cannot accrue — *and* runs `N` at once with a capped default, producing the
-**same classification as serial `--isolate` for any `N`**. Combined with `--output`/`--baseline` it
-makes findings authoritative and aggregation deterministic without the manual shard-then-isolate
-dance. The decoupling helpers below remain for the plain-`--workers` path and for CI matrix sharding:
+**Use `--isolate --workers N` (the per-case isolation pool).** Each case runs in its own child
+process — so in-process degradation cannot accrue — and up to `N` run at once with a capped default
+(`min(cores, 8)`; GPU/VRAM pressure, not CPU, is the limiter), which stays under the OS-freeze
+ceiling. Results are **identical to serial `--isolate` for any `N`**. This decouples isolation from
+concurrency, replacing the old manual shard-then-isolate-then-recheck workflow:
 
-- **`scripts/run_sharded.sh [M] [N] [EXPECTATIONS]`** — full suite split into `M` shards run `N` at a
-  time (default 48 / 8); no freeze, summed totals, degradation-filtered candidate list. A **screen**,
-  not a verdict.
-- **`scripts/isolate.sh QUERY...`** — run each query **alone** to tell a real finding (`fail>0`,
-  no `HAL queue submission failed` / `adapter is consumed` noise) from degradation collateral
-  (passes in isolation). The authoritative triage step.
-- **`scripts/recheck.sh`** — isolate the saved set of known yawgpu/Vulkan findings as a regression
-  guard after a backend change.
+```bash
+# authoritative full-suite run on one workstation (derive the query list from the catalog):
+mapfile -t Q < <(grep -o '"path":"[^"]*"' src/webgpu/listing.json | sed 's/"path":"//;s/"//;s/^/webgpu:/;s/$/:*/')
+build-yawgpu/Release/cts.exe --isolate --workers 8 \
+    --expectations expectations/yawgpu-vulkan.txt --output run.jsonl "${Q[@]}"
+```
 
-Note `--shard I/N` is **0-indexed** (`0/N … (N-1)/N`). See [`scripts/README.md`](../scripts/README.md)
-for the full rationale and workflow.
+Validated on yawgpu/Vulkan (Windows, RTX 5060 Ti, 234 queries): **no OS freeze, `crash=0`, ~41 min**,
+and per-case isolation removes the cross-case degradation entirely (the only residual fails are a tiny
+flaky/probabilistic tail — e.g. `memory_model`, intermittent `HAL queue submission failed` — not the
+mass collateral that plagued plain `--workers`).
+
+**Triage flow (all native, no helper scripts):**
+- **Screen + record:** the `--isolate --workers 8 --output run.jsonl` run above is itself the
+  authoritative pass — its `summary:` line and the JSONL are the verdict, not just a candidate list.
+- **Confirm one suspect at finer grain:** a *single* case with a very large subcase count can still
+  degrade in-process (its subcases share one process); re-run that test alone, or split it narrower,
+  with `cts --isolate 'webgpu:<file>:<test>:*'` (optionally `--workers N`). `fail=0` ⇒ the suite-run
+  "fail" was within-case flakiness; a stable `fail>0` with no `HAL queue submission failed` noise ⇒
+  real finding.
+- **Regression guard:** keep a known-clean `run.jsonl` as a baseline and diff a later run with
+  `--baseline run.jsonl` — it reports `Regressed`/`Fixed`/`New`/`Removed` and exits non-zero only on a
+  regression. This replaces the old hand-maintained recheck list.
+
+Note `--shard I/N` is **0-indexed** (`0/N … (N-1)/N`; `N/N` errors) — still the primitive for fanning
+a run across CI machines (each machine runs and judges its own shard).
 
 ---
 
