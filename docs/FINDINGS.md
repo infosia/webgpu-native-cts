@@ -1573,12 +1573,16 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   workgroup path fails. That isolates it to the memory semantics naga emits for workgroup-class atomic
   load/store on SPIR-V (RMW ops happen to carry stronger ordering), not the harness/port (the port
   reproduces upstream `_testCode` 1:1 and the storage rows exercise the same machinery cleanly).
-- **Status / next step:** **OPEN.** Cross-backend confirmation pending — the wgpu-native cross-check was
-  inconclusive (`build-wgpu/cts.exe` is stale: the query matched 0 cases). Rebuild wgpu-native and run
-  `coherence:corr:*` on the same Vulkan GPU: if wgpu-native/Dawn also record the weak outcome it is more
-  likely a CTS-oracle/hardware-stress matter (cf. F-084 on Metal, F-085 sample semantics) than a yawgpu
-  defect; if only yawgpu fails it is a naga SPIR-V workgroup-atomic codegen bug to fix on the HAL. **Not**
-  added to `expectations/yawgpu-vulkan.txt` (kept visible as an open finding per triage decision).
+- **Cross-backend control (2026-06-16): confirmed yawgpu-specific.** On the **same** NVIDIA RTX 5060 Ti,
+  **same** Vulkan API, and **same** CTS oracle, **wgpu-native passes `coherence:corr` 6/6 (3/3 runs)** —
+  including the `atomic_workgroup;intra_workgroup` non-RMW subcase that yawgpu fails. So this is **not** a
+  CTS-oracle or hardware/stress artifact (unlike F-084/F-085); it is specific to yawgpu's Vulkan path.
+- **Status / next step:** **OPEN — confirmed yawgpu defect.** Root cause is the SPIR-V memory semantics
+  naga emits for **workgroup-address-space `atomicLoad`/`atomicStore`** (RMW ops and storage-class atomics
+  are unaffected); the workgroup-atomic load/store lack the ordering/coherence needed for the
+  single-location read-read guarantee. Fix belongs on the yawgpu/naga SPIR-V side (separate repo). **Not**
+  added to `expectations/yawgpu-vulkan.txt` (kept visible as an open finding per triage decision); add an
+  xfail only if it is deferred long-term. Re-check after a naga rev bump.
 - **Repro:** `cts --isolate 'webgpu:shader,execution,memory_model,coherence:corr:*'` → `fail=1` (the
   `atomic_workgroup;intra_workgroup` non-RMW case).
 
