@@ -73,6 +73,14 @@ std::optional<TestStatus> statusFromName(std::string_view status) {
     return std::nullopt;
 }
 
+bool isFailureStatus(TestStatus status) {
+    return status == TestStatus::Fail || status == TestStatus::Crash;
+}
+
+bool isFlakyResult(const SubcaseResult& result) {
+    return result.attempts > 1 && !isFailureStatus(result.status);
+}
+
 std::string sanitizeResultMessage(std::string message) {
     for (char& ch : message) {
         if (ch == '\t' || ch == '\r' || ch == '\n') {
@@ -230,6 +238,21 @@ bool isBadEffectiveStatus(const std::string& status) {
 
 } // namespace
 
+RetryOutcome chooseRetryOutcome(const std::vector<TestStatus>& attempts) {
+    if (attempts.empty()) {
+        return RetryOutcome{};
+    }
+
+    size_t reportIndex = attempts.size() - 1;
+    for (size_t i = 0; i < attempts.size(); ++i) {
+        if (!isFailureStatus(attempts[i])) {
+            reportIndex = i;
+            break;
+        }
+    }
+    return RetryOutcome{reportIndex, attempts.size() > 1 && !isFailureStatus(attempts[reportIndex])};
+}
+
 ExpectationSet loadExpectations(const std::string& path) {
     ExpectationSet expectations;
     if (path.empty()) {
@@ -294,7 +317,12 @@ std::string resultJsonLine(const SubcaseResult& r, bool expected) {
         << "\",\"status\":\"" << statusName(r.status)
         << "\",\"message\":\"" << jsonEscape(r.message)
         << "\",\"expected\":" << (expected ? "true" : "false")
-        << ",\"effective\":\"" << effectiveStatusName(r, expected) << "\"}";
+        << ",\"effective\":\"" << effectiveStatusName(r, expected) << "\""
+        << ",\"attempts\":" << r.attempts;
+    if (isFlakyResult(r)) {
+        out << ",\"flaky\":true";
+    }
+    out << "}";
     return out.str();
 }
 
@@ -934,16 +962,22 @@ int isolatedPollTimeoutMs(const std::vector<IsolatedChildState>& children, long 
 void recordIsolatedResult(
     std::vector<std::optional<SubcaseResult>>& resultsByCase,
     size_t position,
-    SubcaseResult result) {
+    SubcaseResult result,
+    std::vector<size_t>* completedPositions = nullptr) {
     resultsByCase[position] = std::move(result);
+    if (completedPositions != nullptr) {
+        completedPositions->push_back(position);
+    }
 }
 
 bool finishExitedPipeDrainedIsolatedChildren(
     std::vector<IsolatedChildState>& children,
-    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+    std::vector<std::optional<SubcaseResult>>& resultsByCase,
+    std::vector<size_t>* completedPositions) {
 #if defined(_WIN32)
     (void)children;
     (void)resultsByCase;
+    (void)completedPositions;
     return false;
 #else
     bool changed = false;
@@ -953,7 +987,7 @@ bool finishExitedPipeDrainedIsolatedChildren(
             continue;
         }
         const size_t position = children[i].position;
-        recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(children[i])));
+        recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(children[i])), completedPositions);
         children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
         changed = true;
     }
@@ -964,7 +998,8 @@ bool finishExitedPipeDrainedIsolatedChildren(
 bool reapTimedOutIsolatedChildren(
     const RunOptions& options,
     std::vector<IsolatedChildState>& children,
-    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+    std::vector<std::optional<SubcaseResult>>& resultsByCase,
+    std::vector<size_t>* completedPositions) {
     bool changed = false;
     const auto now = Clock::now();
     for (size_t i = 0; i < children.size();) {
@@ -973,7 +1008,11 @@ bool reapTimedOutIsolatedChildren(
             continue;
         }
         const size_t position = children[i].position;
-        recordIsolatedResult(resultsByCase, position, timeoutIsolatedChild(std::move(children[i]), options.caseTimeoutMs));
+        recordIsolatedResult(
+            resultsByCase,
+            position,
+            timeoutIsolatedChild(std::move(children[i]), options.caseTimeoutMs),
+            completedPositions);
         children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
         changed = true;
     }
@@ -983,14 +1022,15 @@ bool reapTimedOutIsolatedChildren(
 void pumpIsolatedChildren(
     const RunOptions& options,
     std::vector<IsolatedChildState>& children,
-    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+    std::vector<std::optional<SubcaseResult>>& resultsByCase,
+    std::vector<size_t>* completedPositions = nullptr) {
     if (children.empty()) {
         return;
     }
-    if (finishExitedPipeDrainedIsolatedChildren(children, resultsByCase)) {
+    if (finishExitedPipeDrainedIsolatedChildren(children, resultsByCase, completedPositions)) {
         return;
     }
-    if (reapTimedOutIsolatedChildren(options, children, resultsByCase)) {
+    if (reapTimedOutIsolatedChildren(options, children, resultsByCase, completedPositions)) {
         return;
     }
 
@@ -1011,7 +1051,8 @@ void pumpIsolatedChildren(
                     recordIsolatedResult(
                         resultsByCase,
                         position,
-                        abortIsolatedChild(std::move(child), windowsErrorMessage("PeekNamedPipe", error)));
+                        abortIsolatedChild(std::move(child), windowsErrorMessage("PeekNamedPipe", error)),
+                        completedPositions);
                     children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
                     hadActivity = true;
                     continue;
@@ -1030,7 +1071,8 @@ void pumpIsolatedChildren(
                         recordIsolatedResult(
                             resultsByCase,
                             position,
-                            abortIsolatedChild(std::move(child), windowsErrorMessage("ReadFile", error)));
+                            abortIsolatedChild(std::move(child), windowsErrorMessage("ReadFile", error)),
+                            completedPositions);
                         children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
                         hadActivity = true;
                         continue;
@@ -1047,7 +1089,7 @@ void pumpIsolatedChildren(
         const DWORD wait = WaitForSingleObject(child.proc.hProcess, 0);
         if (child.pipeDrained && wait == WAIT_OBJECT_0) {
             const size_t position = child.position;
-            recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(child)));
+            recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(child)), completedPositions);
             children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
             hadActivity = true;
             continue;
@@ -1058,7 +1100,8 @@ void pumpIsolatedChildren(
             recordIsolatedResult(
                 resultsByCase,
                 position,
-                abortIsolatedChild(std::move(child), windowsErrorMessage("WaitForSingleObject", error)));
+                abortIsolatedChild(std::move(child), windowsErrorMessage("WaitForSingleObject", error)),
+                completedPositions);
             children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
             hadActivity = true;
             continue;
@@ -1125,7 +1168,8 @@ void pumpIsolatedChildren(
             recordIsolatedResult(
                 resultsByCase,
                 position,
-                abortIsolatedChild(std::move(children[i]), "read failed: " + std::string(std::strerror(errno))));
+                abortIsolatedChild(std::move(children[i]), "read failed: " + std::string(std::strerror(errno))),
+                completedPositions);
             children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
             fds.erase(fds.begin() + static_cast<std::ptrdiff_t>(i));
             closed = false;
@@ -1144,7 +1188,7 @@ void pumpIsolatedChildren(
             continue;
         }
         const size_t position = children[i].position;
-        recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(children[i])));
+        recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(children[i])), completedPositions);
         children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
         fds.erase(fds.begin() + static_cast<std::ptrdiff_t>(i));
     }
@@ -1169,6 +1213,39 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
     return *result[0];
 }
 
+SubcaseResult finalizeRetryResult(const std::vector<SubcaseResult>& attempts) {
+    std::vector<TestStatus> statuses;
+    statuses.reserve(attempts.size());
+    for (const SubcaseResult& attempt : attempts) {
+        statuses.push_back(attempt.status);
+    }
+
+    const RetryOutcome outcome = chooseRetryOutcome(statuses);
+    SubcaseResult result = attempts[outcome.reportIndex];
+    result.attempts = static_cast<int>(attempts.size());
+    if (outcome.flaky) {
+        std::cerr << "flaky: " << result.query << " failed then passed on retry " << outcome.reportIndex << "\n";
+    }
+    return result;
+}
+
+bool shouldRetryIsolatedAttempt(const RunOptions& options, const std::vector<SubcaseResult>& attempts) {
+    if (options.retries <= 0 || attempts.empty() || !isFailureStatus(attempts.back().status)) {
+        return false;
+    }
+    return attempts.size() <= static_cast<size_t>(options.retries);
+}
+
+SubcaseResult runIsolatedChildWithRetries(const RunOptions& options, const std::string& query) {
+    std::vector<SubcaseResult> attempts;
+    while (true) {
+        attempts.push_back(runIsolatedChild(options, query));
+        if (!shouldRetryIsolatedAttempt(options, attempts)) {
+            return finalizeRetryResult(attempts);
+        }
+    }
+}
+
 std::vector<SubcaseResult> collectIsolatedRuns(
     const RunOptions& options,
     const std::vector<Query>& queries,
@@ -1179,7 +1256,7 @@ std::vector<SubcaseResult> collectIsolatedRuns(
         if (!caseSelectedByShard(i, options)) {
             continue;
         }
-        results.push_back(runIsolatedChild(options, cases[i].query));
+        results.push_back(runIsolatedChildWithRetries(options, cases[i].query));
     }
     return results;
 }
@@ -1191,16 +1268,42 @@ void startQueuedIsolatedChildren(
     size_t& next,
     size_t maxChildren,
     std::vector<IsolatedChildState>& children,
-    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+    std::vector<std::optional<SubcaseResult>>& resultsByCase,
+    std::vector<size_t>* completedPositions) {
     while (children.size() < maxChildren && next < queue.size()) {
         const size_t position = queue[next++];
         IsolatedChildStart started = startIsolatedChild(options, cases[position].query, position);
         if (started.result) {
-            recordIsolatedResult(resultsByCase, position, std::move(*started.result));
+            recordIsolatedResult(resultsByCase, position, std::move(*started.result), completedPositions);
             continue;
         }
         children.push_back(std::move(*started.child));
     }
+}
+
+void processCompletedIsolatedAttempts(
+    const RunOptions& options,
+    std::vector<size_t>& queue,
+    std::vector<size_t>& completedPositions,
+    std::vector<std::optional<SubcaseResult>>& completedByCase,
+    std::vector<std::vector<SubcaseResult>>& attemptsByCase,
+    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+    for (size_t position : completedPositions) {
+        if (!completedByCase[position]) {
+            continue;
+        }
+
+        std::vector<SubcaseResult>& attempts = attemptsByCase[position];
+        attempts.push_back(std::move(*completedByCase[position]));
+        completedByCase[position].reset();
+
+        if (shouldRetryIsolatedAttempt(options, attempts)) {
+            queue.push_back(position);
+            continue;
+        }
+        resultsByCase[position] = finalizeRetryResult(attempts);
+    }
+    completedPositions.clear();
 }
 
 std::vector<SubcaseResult> collectIsolatedParallelRuns(
@@ -1217,15 +1320,33 @@ std::vector<SubcaseResult> collectIsolatedParallelRuns(
     }
 
     std::vector<std::optional<SubcaseResult>> resultsByCase(cases.size());
+    std::vector<std::optional<SubcaseResult>> completedByCase(cases.size());
+    std::vector<std::vector<SubcaseResult>> attemptsByCase(cases.size());
+    std::vector<size_t> completedPositions;
     std::vector<IsolatedChildState> children;
     size_t next = 0;
     const size_t maxChildren = static_cast<size_t>((std::max)(1, resolveWorkers(options)));
 
     while (next < queue.size() || !children.empty()) {
-        startQueuedIsolatedChildren(options, cases, queue, next, maxChildren, children, resultsByCase);
+        startQueuedIsolatedChildren(
+            options,
+            cases,
+            queue,
+            next,
+            maxChildren,
+            children,
+            completedByCase,
+            &completedPositions);
         if (!children.empty()) {
-            pumpIsolatedChildren(options, children, resultsByCase);
+            pumpIsolatedChildren(options, children, completedByCase, &completedPositions);
         }
+        processCompletedIsolatedAttempts(
+            options,
+            queue,
+            completedPositions,
+            completedByCase,
+            attemptsByCase,
+            resultsByCase);
     }
 
     std::vector<SubcaseResult> merged;
@@ -1234,7 +1355,11 @@ std::vector<SubcaseResult> collectIsolatedParallelRuns(
             continue;
         }
         if (!resultsByCase[i]) {
-            merged.push_back(SubcaseResult{cases[i].query, TestStatus::Crash, "isolated worker produced no result"});
+            if (!attemptsByCase[i].empty()) {
+                merged.push_back(finalizeRetryResult(attemptsByCase[i]));
+            } else {
+                merged.push_back(SubcaseResult{cases[i].query, TestStatus::Crash, "isolated worker produced no result"});
+            }
             continue;
         }
         merged.push_back(std::move(*resultsByCase[i]));
@@ -1775,6 +1900,7 @@ struct RunSummary {
     size_t crash = 0;
     size_t xfail = 0;
     size_t xpass = 0;
+    size_t flaky = 0;
 };
 
 void writeJsonOutput(
@@ -1801,6 +1927,7 @@ void writeJsonOutput(
         << ",\"crash\":" << summary.crash
         << ",\"xfail\":" << summary.xfail
         << ",\"xpass\":" << summary.xpass
+        << ",\"flaky\":" << summary.flaky
         << "}\n";
 }
 
@@ -1920,10 +2047,12 @@ int printRunResults(
         summary.warn += result.status == TestStatus::Warn ? 1 : 0;
         summary.fail += unexpectedFailure && result.status == TestStatus::Fail ? 1 : 0;
         summary.crash += unexpectedFailure && result.status == TestStatus::Crash ? 1 : 0;
+        summary.flaky += isFlakyResult(result) ? 1 : 0;
     }
     std::cout << "summary: pass=" << summary.pass << " skip=" << summary.skip << " warn=" << summary.warn
               << " fail=" << summary.fail << " crash=" << summary.crash
-              << " xfail=" << summary.xfail << " xpass=" << summary.xpass << "\n";
+              << " xfail=" << summary.xfail << " xpass=" << summary.xpass
+              << " flaky=" << summary.flaky << "\n";
 
     writeJsonOutput(options.outputPath, results, expectations, summary);
     if (!options.baselinePath.empty()) {
@@ -2024,6 +2153,10 @@ std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& result
 }
 
 int runQueries(const RunOptions& options) {
+    if (options.retries > 0 && !options.isolate) {
+        std::cerr << "--retries requires --isolate; ignoring --retries\n";
+    }
+
     if (!options.runCaseQuery.empty()) {
         setStdoutBinaryForResultProtocol();
         try {
@@ -2037,6 +2170,9 @@ int runQueries(const RunOptions& options) {
     const int workerCount = resolveWorkers(options);
     RunOptions runOptions = options;
     runOptions.workers = workerCount;
+    if (!runOptions.isolate) {
+        runOptions.retries = 0;
+    }
 
     if (options.workersSpecified && !options.crashListPath.empty()) {
         std::cerr << "--workers is incompatible with --crash-list\n";

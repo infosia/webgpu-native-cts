@@ -697,6 +697,31 @@ int main() {
         }
 
         {
+            size_t retryOutcomeAssertions = 0;
+            auto requireOutcome = [&](const std::vector<cts::TestStatus>& attempts,
+                                      size_t expectedIndex,
+                                      bool expectedFlaky,
+                                      const std::string& label) {
+                const cts::RetryOutcome outcome = cts::chooseRetryOutcome(attempts);
+                require(outcome.reportIndex == expectedIndex, label + " report index");
+                ++retryOutcomeAssertions;
+                require(outcome.flaky == expectedFlaky, label + " flaky");
+                ++retryOutcomeAssertions;
+            };
+
+            requireOutcome({cts::TestStatus::Fail}, 0, false, "single fail retry outcome");
+            requireOutcome({cts::TestStatus::Fail, cts::TestStatus::Pass}, 1, true, "fail then pass retry outcome");
+            requireOutcome(
+                {cts::TestStatus::Crash, cts::TestStatus::Crash, cts::TestStatus::Pass},
+                2,
+                true,
+                "crash crash pass retry outcome");
+            requireOutcome({cts::TestStatus::Pass}, 0, false, "single pass retry outcome");
+            requireOutcome({cts::TestStatus::Fail, cts::TestStatus::Fail}, 1, false, "fail fail retry outcome");
+            require(retryOutcomeAssertions == 10, "chooseRetryOutcome assertion count");
+        }
+
+        {
             const cts::SubcaseResult result{
                 "webgpu:a,b,c:test:*",
                 cts::TestStatus::Fail,
@@ -712,12 +737,20 @@ int main() {
             require(message && *message == result.message, "JSONL escaped message round-trip");
             require(effective && *effective == "xfail", "JSONL expected fail effective status");
             require(line.find("\"expected\":true") != std::string::npos, "JSONL expected bool true");
+            require(line.find("\"attempts\":1") != std::string::npos, "JSONL default attempts");
+            require(line.find("\"flaky\"") == std::string::npos, "JSONL non-flaky omits flaky");
 
             const std::string passLine = cts::resultJsonLine(
                 cts::SubcaseResult{"webgpu:a,b,c:pass:*", cts::TestStatus::Pass, ""},
                 true);
             const std::optional<std::string> passEffective = jsonStringFieldForTest(passLine, "effective");
             require(passEffective && *passEffective == "xpass", "JSONL expected pass effective status");
+
+            const std::string flakyLine = cts::resultJsonLine(
+                cts::SubcaseResult{"webgpu:a,b,c:flaky:*", cts::TestStatus::Pass, "", 2},
+                false);
+            require(flakyLine.find("\"attempts\":2") != std::string::npos, "JSONL flaky attempts");
+            require(flakyLine.find("\"flaky\":true") != std::string::npos, "JSONL flaky bool true");
 
             const std::string baselinePath = "cts_unittests_baseline.jsonl";
             {
