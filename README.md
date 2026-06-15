@@ -185,65 +185,12 @@ The current headline numbers — every ported file run against each backend:
   result** — each is green on native Metal *and* native Vulkan (F-104 native-Vulkan-confirmed green);
   MoltenVK/SPIRV-Cross mistranslates them. See the [findings buckets](#findings--111-surfaced-to-date-f-001f-111) above.
 - The native-Vulkan (NVIDIA) sweeps surfaced the genuine Apple-masked Vulkan-HAL/naga defects
-  F-105/F-106 and the F-107…F-110 batch (all fixed, subsection below). Being Apple-masked, they never
-  appeared in the Metal/MoltenVK rows.
-
-#### Per-area slices — older pinned revisions (`api,validation` 2026-06-08, `api,operation` 2026-06-06)
-
-Narrower per-area snapshots at the [pinned revisions](docs/UPSTREAM.md); kept for the per-result-class
-(`xfail`/`xpass`) and `--isolate` detail the whole-suite table collapses. They predate the current
-listing — the headline table above is authoritative for totals.
-
-`api,validation` (`--isolate`, one subprocess per case):
-
-| Backend | Platform | pass | skip | xfail | xpass | fail | crash |
-|---------|----------|-----:|-----:|------:|------:|-----:|------:|
-| **Dawn** | Metal | 4324 | 391 | – | – | 0 | 0 |
-| **yawgpu** | Metal | 4332 | 383 | – | – | 0 | 0 |
-| **yawgpu** | Vulkan | 3257 | 1458 | 0 | 0 | 0 | 0 |
-| **wgpu-native** | Metal | 3407 | 756 | – | – | 338 | 214 |
-| **wgpu-native** | Vulkan | 2507 | 1770 | 438 | 218 | 0 | 0 |
-
-- Per-backend case totals differ because each adapter's optional-feature set changes how the
-  format-swept tests parametrize.
-- wgpu-native's fails/crashes are the panic + missing-validation families (F-001–F-021; F-015
-  ≈ 324 cases); with `--isolate --expectations` its Vulkan run exits 0 (`fail=0 crash=0`).
-
-`api,operation` (leaf subcases):
-
-| Backend | Platform | Result (leaf subcases) |
-|---------|----------|------------------------|
-| **Dawn** | Metal | `pass=247751 fail=0 crash=0` |
-| **yawgpu** | Metal | `pass=247579 fail=0 crash=0` |
-| **yawgpu** | Vulkan | `pass=214039 skip=85698 fail=0 crash=0` — full suite, exit 0 in ~2 min (`--workers 16`), nothing masked |
-| **wgpu-native** | Metal | `pass=3322 fail=78 xfail=3` — fails are the 3D copy/readback findings F-027/F-028 |
-
-#### yawgpu — native Vulkan (NVIDIA, 2026-06-15 sweep)
-
-Running the same suite on **native Vulkan** (not MoltenVK) is what separates real Vulkan-HAL/naga
-defects from Mac translation artifacts — this is the basis for the now-separate native-Vulkan row in the
-headline table above. The 2026-06-14/06-15 isolation sweeps surfaced seven genuine
-Apple-masked divergences — F-105/F-106 and the F-107…F-110 batch, all now **fixed and re-verified on
-native Vulkan (2026-06-15)** — plus F-111, a documented external-texture feature gap (`xfail`):
-
-| Finding | Test | Cases | Root cause | Status |
-|---------|------|------:|-----------|--------|
-| **F-105** | `shader,execution,robust_access:linear_memory` | 3 | naga SPIR-V backend emitted the wrong stride for a `bool` workgroup array, so an OOB write wasn't clamped | **RESOLVED** — `robust_access 1068/0` Metal + MoltenVK (no regression) |
-| **F-106** | `api,operation,memory_sync,buffer,multiple_buffers:wr` | 18 | Vulkan HAL omitted the write→read barrier when the read is indirect-args / index / copy-source (missing `INDIRECT_COMMAND_READ` / `INDEX_READ` / `TRANSFER_READ`) | **RESOLVED** — `multiple_buffers 263/0` Metal + MoltenVK (no regression) |
-| **F-107** | `api,operation,render_pass,storeOp` / `storeop2` | 18 | `storeOp:"discard"` mapped to `DONT_CARE`, which NVIDIA keeps; WebGPU requires discarded contents to read back zero | **RESOLVED** — eager zero-clear of discarded subresources after the pass; `storeOp 26/0` + `storeop2 2/0` native Vulkan; Metal/Noop store path unchanged |
-| **F-108** | `api,operation,texture_view,format_reinterpretation` | 4 | color/resolve attachment used the underlying texture format instead of the WebGPU view (reinterpreted) format, applying wrong srgb gamma | **RESOLVED** — thread `view_format`/`resolve_view_format` core→HAL; `format_reinterpretation 6/0` native Vulkan; no-op when view==texture format |
-| **F-109** | `api,operation,rendering,depth_clip_clamp` | 2 | output depth not clamped to the viewport range (`depthClampEnable=unclippedDepth`, which also coupled clipping) | **RESOLVED** — `depthClampEnable=TRUE` + `VK_EXT_depth_clip_enable` for independent clip control; `depth_clip_clamp 3 skip=1 0` native Vulkan; Metal/Noop unchanged |
-| **F-110** | `api,operation,render_pipeline,primitive_topology` | 2 | `primitiveRestartEnable` hardcoded false, so strip topologies never cut on the restart sentinel | **RESOLVED** — enable restart for strip topologies; `primitive_topology 20/0` native Vulkan; Metal/Noop unchanged |
-| **F-111** | `api,validation,render_pipeline,misc:external_texture` | 2 | `GPUExternalTexture` unsupported on Vulkan (naga SPIR-V cannot lower `ImageClass::External`); validation expects success | **DOCUMENTED GAP** — `xfail` in `expectations/yawgpu-vulkan.txt`; `external_texture xfail=2 fail=0`. Metal has full support |
-
-With the F-105…F-110 fixes landed, **yawgpu passes the ported suite on native Vulkan as well as native
-Metal** (external-texture being the one documented feature gap); the
-Mac-only residuals in the MoltenVK rows above are confirmed SPIRV-Cross translation artifacts (the
-F-104/F-070 bucket), not yawgpu defects.
+  F-105/F-106 and the F-107…F-110 batch (all fixed; per-finding detail in [FINDINGS](docs/FINDINGS.md)).
+  Being Apple-masked, they never appeared in the Metal/MoltenVK rows.
 
 #### wgpu-native — full suite, current scale (2026-06-14, native Vulkan)
 
-The slice tables above are per-area snapshots at the 2026-06-08 revision. A **whole-suite** Vulkan
+A **whole-suite** Vulkan
 run at the current listing (234 files, `--workers 8`) measures
 `pass=289054 skip=215886 fail=9551 crash=7967 xfail=92` (raw). These are **not new defects** — they
 are the wgpu-native panic + missing-validation families already recorded per area in
@@ -251,7 +198,7 @@ are the wgpu-native panic + missing-validation families already recorded per are
 copy/readback ≈3000; the F-092-area depth-readonly gaps 864; limits/alignment `unimplemented!()`
 panics, contained as `crash` by `--workers` crash-resume). wgpu-native's
 `expectations/wgpu-native-vulkan.txt` (8 lines) has **not yet been regenerated for the grown suite**,
-so a full run is not triaged to `fail=0 crash=0` the way the smaller slices above are — regenerating
+so a full run is not triaged to `fail=0 crash=0` — regenerating
 it via `--isolate --emit-crash-list` is pending. yawgpu remains the **primary** conformance subject;
 wgpu-native is the bring-up reference.
 
