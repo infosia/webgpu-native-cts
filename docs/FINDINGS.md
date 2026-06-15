@@ -1525,7 +1525,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   which leaves contents *undefined* (the driver may keep them). WebGPU requires discarded contents to
   behave as cleared on next read; the HAL must perform the spec-required lazy/explicit clear, not rely on
   `DONT_CARE`.
-- **Status:** **RESOLVED** (yawgpu `05f44c0`, 2026-06-15). After `vkCmdEndRenderPass` the Vulkan HAL
+- **Status:** **RESOLVED** (yawgpu `3a10aa7`, 2026-06-15). After `vkCmdEndRenderPass` the Vulkan HAL
   now explicitly clears every discarded (`store == false`) color/depth/stencil attachment subresource to
   zero (transitioning to `TRANSFER_DST` and back), which is observably equivalent to WebGPU's
   lazy-clear-on-next-read. Re-verified native Vulkan (NVIDIA): `storeOp` `pass=26 fail=0`, `storeop2`
@@ -1543,7 +1543,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   non-srgb reinterpretation of an srgb texture, the stored byte has the wrong gamma (srgb encode applied
   where the reinterpreted view should bypass it, or vice versa). Only the resolve-attachment path is hit;
   plain render-target reinterpretation passes.
-- **Status:** **RESOLVED** (yawgpu `7400c45`, 2026-06-15). The WebGPU view (reinterpreted) format is now
+- **Status:** **RESOLVED** (yawgpu `7b3a05c`, 2026-06-15). The WebGPU view (reinterpreted) format is now
   threaded core→HAL (`view_format`/`resolve_view_format` on `RenderPassColorExecution` and
   `HalRenderColorTarget`) and used for the Vulkan color/resolve attachment descriptions, image views, and
   clear values instead of the underlying texture format. Re-verified native Vulkan (NVIDIA):
@@ -1564,7 +1564,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   before the depth test/write; in Vulkan that clamp only happens with `depthClampEnable=VK_TRUE`, but core
   Vulkan couples that with disabling primitive clipping (which the default `unclippedDepth=false` needs ON).
   The HAL mapped `depthClampEnable=unclippedDepth`, so the default path only clamped to `[0,1]`.
-- **Status:** **RESOLVED** (yawgpu `26f77cd`, 2026-06-15). When `VK_EXT_depth_clip_enable` + the
+- **Status:** **RESOLVED** (yawgpu `1a0f9b4`, 2026-06-15). When `VK_EXT_depth_clip_enable` + the
   `depthClamp` feature are available the device enables both and the pipeline sets `depthClampEnable=TRUE`
   always, controlling clipping independently via
   `VkPipelineRasterizationDepthClipStateCreateInfoEXT.depthClipEnable=!unclippedDepth`. Re-verified native
@@ -1580,7 +1580,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   — 2 cases (`indirect=false` and `indirect=true`). Isolated `pass=18 fail=2`, reproduces alone.
 - **Observed:** `rgba8unorm mismatch at (32,18) channel 1: expected 0, got 255` — with a strip-index
   primitive-restart sentinel the strip is not cut, so extra geometry is rasterized.
-- **Status:** **RESOLVED** (yawgpu `81966bf`, 2026-06-15). The Vulkan input-assembly state hardcoded
+- **Status:** **RESOLVED** (yawgpu `41751d0`, 2026-06-15). The Vulkan input-assembly state hardcoded
   `primitiveRestartEnable=false`; it now enables primitive restart iff the topology is a strip
   (`line-strip`/`triangle-strip`), matching the WebGPU spec (the restart index is implicit from the bound
   index type in Vulkan). Re-verified native Vulkan (NVIDIA): `primitive_topology` `pass=20 fail=0`.
