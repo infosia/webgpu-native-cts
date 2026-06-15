@@ -1511,80 +1511,25 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-107 — yawgpu Vulkan HAL: `storeOp: "discard"` not honored (content stored instead of discarded) — native Vulkan
 
-- **Backend:** yawgpu native Vulkan (NVIDIA) only. Apple (Metal + MoltenVK) **masks** it — tilers drop
-  `MTLStoreActionDontCare` tile content, so the discarded attachment reads back cleared; the immediate-mode
-  Vulkan/NVIDIA path keeps the memory. Same Apple-masking class as F-105/F-106.
-- **Found by:** `api,operation,render_pass,storeOp:*` (17 cases) + `api,operation,render_pass,storeop2:*`
-  (1 case) — **every failing case is `storeOperation="discard"`** (color_attachment_only,
-  color_attachment_with_depth_stencil_attachment, multiple_color_attachments,
-  depth_stencil_attachment_only for depth32float + stencil8). Isolated `storeOp` = `pass=9 fail=17`,
-  `storeop2` = `pass=1 fail=1`; reproduces alone, `HAL-submission-fails=0` (not degradation collateral).
-- **Observed:** after a render pass with `storeOp:"discard"` the attachment still contains the drawn
-  value (`expected 0 got 255` / `expected 0 got 1`) instead of the WebGPU lazy-clear result.
-- **Root-cause hypothesis:** the Vulkan HAL maps `"discard"` to `VK_ATTACHMENT_STORE_OP_DONT_CARE`,
-  which leaves contents *undefined* (the driver may keep them). WebGPU requires discarded contents to
-  behave as cleared on next read; the HAL must perform the spec-required lazy/explicit clear, not rely on
-  `DONT_CARE`.
-- **Status:** **RESOLVED** (yawgpu `3a10aa7`, 2026-06-15). After `vkCmdEndRenderPass` the Vulkan HAL
-  now explicitly clears every discarded (`store == false`) color/depth/stencil attachment subresource to
-  zero (transitioning to `TRANSFER_DST` and back), which is observably equivalent to WebGPU's
-  lazy-clear-on-next-read. Re-verified native Vulkan (NVIDIA): `storeOp` `pass=26 fail=0`, `storeop2`
-  `pass=2 fail=0`. Metal/Noop store path unchanged.
+- **RESOLVED 2026-06-15** (yawgpu `3a10aa7`): `api,operation,render_pass,storeOp:*` + `storeop2:*` — the Vulkan HAL mapped `"discard"` to `VK_ATTACHMENT_STORE_OP_DONT_CARE`, which kept the drawn value on the immediate-mode NVIDIA path (`expected 0 got 255`; 18 cases, all `storeOperation="discard"`). Fix explicitly clears every discarded attachment subresource to zero after `vkCmdEndRenderPass`. Native-Vulkan-only (Apple tilers drop tile content, masking it); re-verified native Vulkan `storeOp 26/0`, `storeop2 2/0`. Metal/Noop unchanged.
 
 ---
 
 ## F-108 — yawgpu Vulkan HAL: srgb→non-srgb `viewFormat` reinterpretation applies wrong gamma on render+resolve — native Vulkan
 
-- **Backend:** yawgpu native Vulkan (NVIDIA) only; Apple masks it (Metal + MoltenVK green).
-- **Found by:** `api,operation,texture_view,format_reinterpretation:render_and_resolve_attachment:*` —
-  4 cases: `format="rgba8unorm-srgb"`/`bgra8unorm-srgb` × `sampleCount=1`/`4`, rendered through a
-  non-srgb (`rgba8unorm`/`bgra8unorm`) `viewFormat`. Isolated `pass=2 fail=4`, reproduces alone.
-- **Observed:** `mismatch at (5,0)`: `expected 179 +/- 2, got 218` — when rendering+resolving through a
-  non-srgb reinterpretation of an srgb texture, the stored byte has the wrong gamma (srgb encode applied
-  where the reinterpreted view should bypass it, or vice versa). Only the resolve-attachment path is hit;
-  plain render-target reinterpretation passes.
-- **Status:** **RESOLVED** (yawgpu `7b3a05c`, 2026-06-15). The WebGPU view (reinterpreted) format is now
-  threaded core→HAL (`view_format`/`resolve_view_format` on `RenderPassColorExecution` and
-  `HalRenderColorTarget`) and used for the Vulkan color/resolve attachment descriptions, image views, and
-  clear values instead of the underlying texture format. Re-verified native Vulkan (NVIDIA):
-  `format_reinterpretation` `pass=6 fail=0`. No-op when view==texture format; Metal/GLES/Noop unaffected.
+- **RESOLVED 2026-06-15** (yawgpu `7b3a05c`): `api,operation,texture_view,format_reinterpretation:render_and_resolve_attachment:*` — rendering+resolving through a non-srgb `viewFormat` of an srgb texture stored the wrong gamma (`expected 179 +/- 2, got 218`; 4 cases). Fix threads the reinterpreted view format core→HAL and uses it for the Vulkan color/resolve attachment descriptions, image views, and clear values. Native-Vulkan-only (Apple masks it); re-verified native Vulkan `format_reinterpretation 6/0`. Metal/GLES/Noop unaffected.
 
 ---
 
 ## F-109 — yawgpu Vulkan HAL: depth clip/clamp wrong — native Vulkan
 
-- **Backend:** yawgpu native Vulkan (NVIDIA) only; Apple masks it.
-- **Found by:** `api,operation,rendering,depth_clip_clamp:*` — 2 cases:
-  `depth_test_input_clamped:unclippedDepth=false` (`expected 0 (depth test blocked draw), got 255` — the
-  blocked draw was not blocked) and `depth_clamp_and_clip:writeDepth=true` (`checkBuffer[16]=255`, depth
-  in attachment != expected). Isolated `pass=1 skip=1 fail=2`, reproduces alone.
-- **Observed:** depth clamping/clipping (`unclippedDepth`/`depth-clip-control`) produces the wrong
-  depth-test outcome on the Vulkan HAL.
-- **Root cause:** WebGPU always clamps a fragment's output depth to the viewport `[minDepth,maxDepth]`
-  before the depth test/write; in Vulkan that clamp only happens with `depthClampEnable=VK_TRUE`, but core
-  Vulkan couples that with disabling primitive clipping (which the default `unclippedDepth=false` needs ON).
-  The HAL mapped `depthClampEnable=unclippedDepth`, so the default path only clamped to `[0,1]`.
-- **Status:** **RESOLVED** (yawgpu `1a0f9b4`, 2026-06-15). When `VK_EXT_depth_clip_enable` + the
-  `depthClamp` feature are available the device enables both and the pipeline sets `depthClampEnable=TRUE`
-  always, controlling clipping independently via
-  `VkPipelineRasterizationDepthClipStateCreateInfoEXT.depthClipEnable=!unclippedDepth`. Re-verified native
-  Vulkan (NVIDIA): `depth_clip_clamp` `pass=3 skip=1 fail=0` (the `unclippedDepth=true` case still skips —
-  `depth-clip-control` is intentionally not advertised, allowed by the target). Metal/Noop unaffected.
+- **RESOLVED 2026-06-15** (yawgpu `1a0f9b4`): `api,operation,rendering,depth_clip_clamp:*` — WebGPU always clamps fragment depth to the viewport before the test, but the HAL mapped `depthClampEnable=unclippedDepth`, so the default `unclippedDepth=false` path only clamped to `[0,1]` (`expected 0, got 255`; 2 cases). Fix enables `VK_EXT_depth_clip_enable`+`depthClamp`, sets `depthClampEnable=TRUE` always, and controls clipping independently via `depthClipEnable=!unclippedDepth`. Native-Vulkan-only (Apple masks it); re-verified native Vulkan `depth_clip_clamp 3/1skip/0` (`unclippedDepth=true` intentionally skips). Metal/Noop unaffected.
 
 ---
 
 ## F-110 — yawgpu Vulkan HAL: `triangle-strip` primitive restart not applied — native Vulkan
 
-- **Backend:** yawgpu native Vulkan (NVIDIA) only; Apple masks it.
-- **Found by:** `api,operation,render_pipeline,primitive_topology:basic:topology="triangle-strip";primitiveRestart=true`
-  — 2 cases (`indirect=false` and `indirect=true`). Isolated `pass=18 fail=2`, reproduces alone.
-- **Observed:** `rgba8unorm mismatch at (32,18) channel 1: expected 0, got 255` — with a strip-index
-  primitive-restart sentinel the strip is not cut, so extra geometry is rasterized.
-- **Status:** **RESOLVED** (yawgpu `41751d0`, 2026-06-15). The Vulkan input-assembly state hardcoded
-  `primitiveRestartEnable=false`; it now enables primitive restart iff the topology is a strip
-  (`line-strip`/`triangle-strip`), matching the WebGPU spec (the restart index is implicit from the bound
-  index type in Vulkan). Re-verified native Vulkan (NVIDIA): `primitive_topology` `pass=20 fail=0`.
-  Metal/Noop unaffected (Metal strips restart implicitly).
+- **RESOLVED 2026-06-15** (yawgpu `41751d0`): `api,operation,render_pipeline,primitive_topology:basic:topology="triangle-strip";primitiveRestart=true` — the Vulkan input-assembly state hardcoded `primitiveRestartEnable=false`, so the strip was not cut at the sentinel (`expected 0, got 255`; 2 cases, indirect=false/true). Fix enables primitive restart iff the topology is a strip. Native-Vulkan-only (Apple masks it; Metal strips restart implicitly); re-verified native Vulkan `primitive_topology 20/0`. Metal/Noop unaffected.
 
 ---
 
