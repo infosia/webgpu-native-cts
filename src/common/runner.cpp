@@ -1,12 +1,17 @@
 #include "cts/test.h"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <set>
 #include <string_view>
 #include <sstream>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "common/query.h"
 #include "cts/format_sample.h"
@@ -99,6 +104,130 @@ std::string trim(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
+char hexDigit(unsigned value) {
+    return static_cast<char>(value < 10 ? '0' + value : 'A' + (value - 10));
+}
+
+int hexValue(char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return ch - 'A' + 10;
+    }
+    return -1;
+}
+
+std::string jsonEscape(std::string_view text) {
+    std::string out;
+    out.reserve(text.size() + 8);
+    for (unsigned char ch : text) {
+        if (ch == '"') {
+            out += "\\\"";
+        } else if (ch == '\\') {
+            out += "\\\\";
+        } else if (ch < 0x20) {
+            out += "\\u00";
+            out.push_back(hexDigit(ch >> 4));
+            out.push_back(hexDigit(ch & 0x0F));
+        } else {
+            out.push_back(static_cast<char>(ch));
+        }
+    }
+    return out;
+}
+
+std::optional<std::string> jsonStringField(std::string_view line, std::string_view field) {
+    const std::string needle = "\"" + std::string(field) + "\":";
+    const size_t fieldPos = line.find(needle);
+    if (fieldPos == std::string_view::npos) {
+        return std::nullopt;
+    }
+    size_t pos = fieldPos + needle.size();
+    while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) {
+        ++pos;
+    }
+    if (pos >= line.size() || line[pos] != '"') {
+        return std::nullopt;
+    }
+    ++pos;
+
+    std::string value;
+    while (pos < line.size()) {
+        const char ch = line[pos++];
+        if (ch == '"') {
+            return value;
+        }
+        if (ch != '\\') {
+            value.push_back(ch);
+            continue;
+        }
+        if (pos >= line.size()) {
+            return std::nullopt;
+        }
+        const char escaped = line[pos++];
+        switch (escaped) {
+        case '"':
+        case '\\':
+        case '/':
+            value.push_back(escaped);
+            break;
+        case 'b':
+            value.push_back('\b');
+            break;
+        case 'f':
+            value.push_back('\f');
+            break;
+        case 'n':
+            value.push_back('\n');
+            break;
+        case 'r':
+            value.push_back('\r');
+            break;
+        case 't':
+            value.push_back('\t');
+            break;
+        case 'u': {
+            if (pos + 4 > line.size()) {
+                return std::nullopt;
+            }
+            int codepoint = 0;
+            for (int i = 0; i < 4; ++i) {
+                const int digit = hexValue(line[pos++]);
+                if (digit < 0) {
+                    return std::nullopt;
+                }
+                codepoint = codepoint * 16 + digit;
+            }
+            if (codepoint <= 0x7F) {
+                value.push_back(static_cast<char>(codepoint));
+            }
+            break;
+        }
+        default:
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
+std::string effectiveStatusName(const SubcaseResult& result, bool expected) {
+    if (expected && (result.status == TestStatus::Fail || result.status == TestStatus::Crash)) {
+        return "xfail";
+    }
+    if (expected && result.status == TestStatus::Pass) {
+        return "xpass";
+    }
+    return statusName(result.status);
+}
+
+bool isBadEffectiveStatus(const std::string& status) {
+    return status == "fail" || status == "crash";
+}
+
 } // namespace
 
 ExpectationSet loadExpectations(const std::string& path) {
@@ -129,6 +258,44 @@ ExpectationSet loadExpectations(const std::string& path) {
         }
     }
     return expectations;
+}
+
+std::unordered_map<std::string, std::string> loadBaseline(const std::string& path) {
+    std::unordered_map<std::string, std::string> baseline;
+    if (path.empty()) {
+        return baseline;
+    }
+
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("failed to open baseline file: " + path);
+    }
+
+    std::string line;
+    while (std::getline(in, line)) {
+        std::optional<std::string> query = jsonStringField(line, "query");
+        if (!query) {
+            continue;
+        }
+        std::optional<std::string> effective = jsonStringField(line, "effective");
+        if (!effective) {
+            effective = jsonStringField(line, "status");
+        }
+        if (effective) {
+            baseline[*query] = *effective;
+        }
+    }
+    return baseline;
+}
+
+std::string resultJsonLine(const SubcaseResult& r, bool expected) {
+    std::ostringstream out;
+    out << "{\"query\":\"" << jsonEscape(r.query)
+        << "\",\"status\":\"" << statusName(r.status)
+        << "\",\"message\":\"" << jsonEscape(r.message)
+        << "\",\"expected\":" << (expected ? "true" : "false")
+        << ",\"effective\":\"" << effectiveStatusName(r, expected) << "\"}";
+    return out.str();
 }
 
 namespace {
@@ -428,7 +595,61 @@ std::string signalMessage(int signal) {
     return "signal " + std::to_string(signal);
 }
 
-SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& query) {
+using Clock = std::chrono::steady_clock;
+
+struct ChildExit {
+    bool clean = false;
+    std::string message;
+};
+
+struct IsolatedChildState {
+    size_t position = 0;
+    std::string query;
+    Clock::time_point started;
+    std::string output;
+    std::optional<ChildExit> exit;
+#if defined(_WIN32)
+    PROCESS_INFORMATION proc{};
+    HANDLE readPipe = INVALID_HANDLE_VALUE;
+    bool pipeDrained = false;
+#else
+    pid_t pid = -1;
+    int fd = -1;
+#endif
+};
+
+struct IsolatedChildStart {
+    std::optional<IsolatedChildState> child;
+    std::optional<SubcaseResult> result;
+};
+
+std::vector<std::string> isolatedChildArgs(const RunOptions& options, const std::string& query) {
+    std::vector<std::string> args;
+    args.push_back(options.executablePath);
+    for (const std::string& arg : options.forwardedArgs) {
+        args.push_back(arg);
+    }
+    args.push_back("--run-case");
+    args.push_back(query);
+    return args;
+}
+
+void closeIsolatedReadPipe(IsolatedChildState& child) {
+#if defined(_WIN32)
+    if (child.readPipe != INVALID_HANDLE_VALUE) {
+        CloseHandle(child.readPipe);
+        child.readPipe = INVALID_HANDLE_VALUE;
+    }
+    child.pipeDrained = true;
+#else
+    if (child.fd >= 0) {
+        close(child.fd);
+        child.fd = -1;
+    }
+#endif
+}
+
+IsolatedChildStart startIsolatedChild(const RunOptions& options, const std::string& query, size_t position) {
 #if defined(_WIN32)
     SECURITY_ATTRIBUTES inheritable{};
     inheritable.nLength = sizeof(inheritable);
@@ -437,13 +658,13 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
     HANDLE stdoutRead = INVALID_HANDLE_VALUE;
     HANDLE stdoutWrite = INVALID_HANDLE_VALUE;
     if (!CreatePipe(&stdoutRead, &stdoutWrite, &inheritable, 0)) {
-        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreatePipe", GetLastError())};
+        return IsolatedChildStart{std::nullopt, SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreatePipe", GetLastError())}};
     }
     if (!SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0)) {
         const DWORD error = GetLastError();
         CloseHandle(stdoutRead);
         CloseHandle(stdoutWrite);
-        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("SetHandleInformation", error)};
+        return IsolatedChildStart{std::nullopt, SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("SetHandleInformation", error)}};
     }
 
     HANDLE nulHandle = CreateFileA(
@@ -458,19 +679,11 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
         const DWORD error = GetLastError();
         CloseHandle(stdoutRead);
         CloseHandle(stdoutWrite);
-        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreateFileA(NUL)", error)};
+        return IsolatedChildStart{std::nullopt, SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreateFileA(NUL)", error)}};
     }
-
-    std::vector<std::string> args;
-    args.push_back(options.executablePath);
-    for (const std::string& arg : options.forwardedArgs) {
-        args.push_back(arg);
-    }
-    args.push_back("--run-case");
-    args.push_back(query);
 
     std::string commandLine;
-    for (const std::string& arg : args) {
+    for (const std::string& arg : isolatedChildArgs(options, query)) {
         if (!commandLine.empty()) {
             commandLine.push_back(' ');
         }
@@ -501,66 +714,30 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
         CloseHandle(stdoutRead);
         CloseHandle(stdoutWrite);
         CloseHandle(nulHandle);
-        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreateProcessA", error)};
+        return IsolatedChildStart{std::nullopt, SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("CreateProcessA", error)}};
     }
 
     CloseHandle(stdoutWrite);
     CloseHandle(nulHandle);
 
-    std::string output;
-    std::array<char, 4096> buffer{};
-    while (true) {
-        DWORD bytesRead = 0;
-        if (ReadFile(stdoutRead, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr)) {
-            if (bytesRead == 0) {
-                break;
-            }
-            output.append(buffer.data(), bytesRead);
-            continue;
-        }
-        const DWORD error = GetLastError();
-        if (error == ERROR_BROKEN_PIPE) {
-            break;
-        }
-        CloseHandle(stdoutRead);
-        WaitForSingleObject(process.hProcess, INFINITE);
-        CloseHandle(process.hThread);
-        CloseHandle(process.hProcess);
-        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("ReadFile", error)};
-    }
-    CloseHandle(stdoutRead);
-
-    WaitForSingleObject(process.hProcess, INFINITE);
-    DWORD exitCode = 0;
-    if (!GetExitCodeProcess(process.hProcess, &exitCode)) {
-        const DWORD error = GetLastError();
-        CloseHandle(process.hThread);
-        CloseHandle(process.hProcess);
-        return SubcaseResult{query, TestStatus::Crash, windowsErrorMessage("GetExitCodeProcess", error)};
-    }
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-
-    if (exitCode != 0) {
-        return SubcaseResult{query, TestStatus::Crash, windowsExitMessage(exitCode)};
-    }
-
-    std::optional<SubcaseResult> parsed = parseIsolatedResultLine(query, output);
-    if (!parsed) {
-        return SubcaseResult{query, TestStatus::Crash, "no RESULT line"};
-    }
-    return *parsed;
+    IsolatedChildState child;
+    child.position = position;
+    child.query = query;
+    child.started = Clock::now();
+    child.proc = process;
+    child.readPipe = stdoutRead;
+    return IsolatedChildStart{std::move(child), std::nullopt};
 #else
     std::array<int, 2> stdoutPipe{};
     if (pipe(stdoutPipe.data()) != 0) {
-        return SubcaseResult{query, TestStatus::Crash, "pipe failed: " + std::string(std::strerror(errno))};
+        return IsolatedChildStart{std::nullopt, SubcaseResult{query, TestStatus::Crash, "pipe failed: " + std::string(std::strerror(errno))}};
     }
 
     pid_t pid = fork();
     if (pid < 0) {
         close(stdoutPipe[0]);
         close(stdoutPipe[1]);
-        return SubcaseResult{query, TestStatus::Crash, "fork failed: " + std::string(std::strerror(errno))};
+        return IsolatedChildStart{std::nullopt, SubcaseResult{query, TestStatus::Crash, "fork failed: " + std::string(std::strerror(errno))}};
     }
 
     if (pid == 0) {
@@ -575,13 +752,7 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
             close(devNull);
         }
 
-        std::vector<std::string> args;
-        args.push_back(options.executablePath);
-        for (const std::string& arg : options.forwardedArgs) {
-            args.push_back(arg);
-        }
-        args.push_back("--run-case");
-        args.push_back(query);
+        std::vector<std::string> args = isolatedChildArgs(options, query);
 
         std::vector<char*> argv;
         argv.reserve(args.size() + 1);
@@ -594,50 +765,408 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
     }
 
     close(stdoutPipe[1]);
-    std::string output;
-    std::array<char, 4096> buffer{};
-    while (true) {
-        const ssize_t n = read(stdoutPipe[0], buffer.data(), buffer.size());
-        if (n > 0) {
-            output.append(buffer.data(), static_cast<size_t>(n));
-            continue;
-        }
-        if (n == 0) {
-            break;
-        }
-        if (errno == EINTR) {
-            continue;
-        }
-        close(stdoutPipe[0]);
-        return SubcaseResult{query, TestStatus::Crash, "read failed: " + std::string(std::strerror(errno))};
+    const int flags = fcntl(stdoutPipe[0], F_GETFL, 0);
+    if (flags >= 0) {
+        (void)fcntl(stdoutPipe[0], F_SETFL, flags | O_NONBLOCK);
     }
-    close(stdoutPipe[0]);
+    IsolatedChildState child;
+    child.position = position;
+    child.query = query;
+    child.started = Clock::now();
+    child.pid = pid;
+    child.fd = stdoutPipe[0];
+    return IsolatedChildStart{std::move(child), std::nullopt};
+#endif
+}
 
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno == EINTR) {
-            continue;
-        }
-        return SubcaseResult{query, TestStatus::Crash, "waitpid failed: " + std::string(std::strerror(errno))};
-    }
-
+#if !defined(_WIN32)
+ChildExit isolatedExitFromStatus(int status) {
     if (WIFSIGNALED(status)) {
-        return SubcaseResult{query, TestStatus::Crash, signalMessage(WTERMSIG(status))};
+        return ChildExit{false, signalMessage(WTERMSIG(status))};
     }
-    if (!WIFEXITED(status)) {
-        return SubcaseResult{query, TestStatus::Crash, "child did not exit normally"};
+    if (WIFEXITED(status)) {
+        const int exitCode = WEXITSTATUS(status);
+        return ChildExit{exitCode == 0, exitCode == 0 ? "" : "child exited " + std::to_string(exitCode)};
     }
-    const int exitCode = WEXITSTATUS(status);
-    if (exitCode != 0) {
-        return SubcaseResult{query, TestStatus::Crash, "child exited " + std::to_string(exitCode)};
+    return ChildExit{false, "child did not exit normally"};
+}
+#endif
+
+std::optional<ChildExit> tryReapIsolatedChild(IsolatedChildState& child) {
+#if defined(_WIN32)
+    (void)child;
+    return std::nullopt;
+#else
+    if (child.exit) {
+        return child.exit;
+    }
+    if (child.pid <= 0) {
+        return std::nullopt;
+    }
+    int status = 0;
+    const pid_t reaped = waitpid(child.pid, &status, WNOHANG);
+    if (reaped == 0) {
+        return std::nullopt;
+    }
+    if (reaped < 0) {
+        if (errno == EINTR) {
+            return std::nullopt;
+        }
+        child.pid = -1;
+        child.exit = ChildExit{false, "waitpid failed: " + std::string(std::strerror(errno))};
+        return child.exit;
+    }
+    child.pid = -1;
+    child.exit = isolatedExitFromStatus(status);
+    return child.exit;
+#endif
+}
+
+ChildExit waitIsolatedChildExit(IsolatedChildState& child) {
+    if (child.exit) {
+        return *child.exit;
+    }
+#if defined(_WIN32)
+    WaitForSingleObject(child.proc.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    if (!GetExitCodeProcess(child.proc.hProcess, &exitCode)) {
+        const DWORD error = GetLastError();
+        CloseHandle(child.proc.hThread);
+        CloseHandle(child.proc.hProcess);
+        return ChildExit{false, windowsErrorMessage("GetExitCodeProcess", error)};
+    }
+    CloseHandle(child.proc.hThread);
+    CloseHandle(child.proc.hProcess);
+    return ChildExit{exitCode == 0, exitCode == 0 ? "" : windowsExitMessage(exitCode)};
+#else
+    int status = 0;
+    while (waitpid(child.pid, &status, 0) < 0) {
+        if (errno == EINTR) {
+            continue;
+        }
+        return ChildExit{false, "waitpid failed: " + std::string(std::strerror(errno))};
+    }
+    child.pid = -1;
+    return isolatedExitFromStatus(status);
+#endif
+}
+
+SubcaseResult finishIsolatedChild(IsolatedChildState child) {
+    closeIsolatedReadPipe(child);
+    const ChildExit exit = waitIsolatedChildExit(child);
+    if (!exit.clean) {
+        return SubcaseResult{child.query, TestStatus::Crash, exit.message};
     }
 
-    std::optional<SubcaseResult> parsed = parseIsolatedResultLine(query, output);
+    std::optional<SubcaseResult> parsed = parseIsolatedResultLine(child.query, child.output);
     if (!parsed) {
-        return SubcaseResult{query, TestStatus::Crash, "no RESULT line"};
+        return SubcaseResult{child.query, TestStatus::Crash, "no RESULT line"};
     }
     return *parsed;
+}
+
+void reapKilledIsolatedChild(IsolatedChildState& child) {
+    if (child.exit) {
+        return;
+    }
+#if defined(_WIN32)
+    (void)TerminateProcess(child.proc.hProcess, 1);
+    WaitForSingleObject(child.proc.hProcess, INFINITE);
+    CloseHandle(child.proc.hThread);
+    CloseHandle(child.proc.hProcess);
+#else
+    if (child.pid > 0) {
+        (void)kill(child.pid, SIGKILL);
+        int status = 0;
+        while (waitpid(child.pid, &status, 0) < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+        child.pid = -1;
+    }
 #endif
+}
+
+SubcaseResult abortIsolatedChild(IsolatedChildState child, const std::string& message) {
+    closeIsolatedReadPipe(child);
+    reapKilledIsolatedChild(child);
+    return SubcaseResult{child.query, TestStatus::Crash, message};
+}
+
+SubcaseResult timeoutIsolatedChild(IsolatedChildState child, long timeoutMs) {
+    closeIsolatedReadPipe(child);
+    reapKilledIsolatedChild(child);
+    return SubcaseResult{
+        child.query,
+        TestStatus::Crash,
+        "case timed out after " + std::to_string(timeoutMs) + " ms",
+    };
+}
+
+bool isolatedChildTimedOut(const IsolatedChildState& child, long timeoutMs, Clock::time_point now) {
+    if (timeoutMs <= 0) {
+        return false;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - child.started).count();
+    return elapsed >= timeoutMs;
+}
+
+int isolatedPollTimeoutMs(const std::vector<IsolatedChildState>& children, long timeoutMs) {
+    if (timeoutMs <= 0) {
+        return -1;
+    }
+    const auto now = Clock::now();
+    long remainingMin = (std::numeric_limits<long>::max)();
+    for (const IsolatedChildState& child : children) {
+        const long elapsed = static_cast<long>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - child.started).count());
+        const long remaining = timeoutMs - elapsed;
+        remainingMin = (std::min)(remainingMin, remaining);
+    }
+    if (remainingMin <= 0) {
+        return 0;
+    }
+    return static_cast<int>((std::min)(remainingMin, static_cast<long>((std::numeric_limits<int>::max)())));
+}
+
+void recordIsolatedResult(
+    std::vector<std::optional<SubcaseResult>>& resultsByCase,
+    size_t position,
+    SubcaseResult result) {
+    resultsByCase[position] = std::move(result);
+}
+
+bool finishExitedPipeDrainedIsolatedChildren(
+    std::vector<IsolatedChildState>& children,
+    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+#if defined(_WIN32)
+    (void)children;
+    (void)resultsByCase;
+    return false;
+#else
+    bool changed = false;
+    for (size_t i = 0; i < children.size();) {
+        if (children[i].fd >= 0 || !tryReapIsolatedChild(children[i])) {
+            ++i;
+            continue;
+        }
+        const size_t position = children[i].position;
+        recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(children[i])));
+        children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
+        changed = true;
+    }
+    return changed;
+#endif
+}
+
+bool reapTimedOutIsolatedChildren(
+    const RunOptions& options,
+    std::vector<IsolatedChildState>& children,
+    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+    bool changed = false;
+    const auto now = Clock::now();
+    for (size_t i = 0; i < children.size();) {
+        if (!isolatedChildTimedOut(children[i], options.caseTimeoutMs, now)) {
+            ++i;
+            continue;
+        }
+        const size_t position = children[i].position;
+        recordIsolatedResult(resultsByCase, position, timeoutIsolatedChild(std::move(children[i]), options.caseTimeoutMs));
+        children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
+        changed = true;
+    }
+    return changed;
+}
+
+void pumpIsolatedChildren(
+    const RunOptions& options,
+    std::vector<IsolatedChildState>& children,
+    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+    if (children.empty()) {
+        return;
+    }
+    if (finishExitedPipeDrainedIsolatedChildren(children, resultsByCase)) {
+        return;
+    }
+    if (reapTimedOutIsolatedChildren(options, children, resultsByCase)) {
+        return;
+    }
+
+#if defined(_WIN32)
+    std::vector<char> buffer(4096);
+    bool hadActivity = false;
+    for (size_t i = 0; i < children.size();) {
+        IsolatedChildState& child = children[i];
+        if (!child.pipeDrained) {
+            DWORD bytesAvailable = 0;
+            if (!PeekNamedPipe(child.readPipe, nullptr, 0, nullptr, &bytesAvailable, nullptr)) {
+                const DWORD error = GetLastError();
+                if (error == ERROR_BROKEN_PIPE) {
+                    closeIsolatedReadPipe(child);
+                    hadActivity = true;
+                } else {
+                    const size_t position = child.position;
+                    recordIsolatedResult(
+                        resultsByCase,
+                        position,
+                        abortIsolatedChild(std::move(child), windowsErrorMessage("PeekNamedPipe", error)));
+                    children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
+                    hadActivity = true;
+                    continue;
+                }
+            } else if (bytesAvailable > 0) {
+                if (buffer.size() < bytesAvailable) {
+                    buffer.resize(bytesAvailable);
+                }
+                DWORD bytesRead = 0;
+                if (!ReadFile(child.readPipe, buffer.data(), bytesAvailable, &bytesRead, nullptr)) {
+                    const DWORD error = GetLastError();
+                    if (error == ERROR_BROKEN_PIPE) {
+                        closeIsolatedReadPipe(child);
+                    } else {
+                        const size_t position = child.position;
+                        recordIsolatedResult(
+                            resultsByCase,
+                            position,
+                            abortIsolatedChild(std::move(child), windowsErrorMessage("ReadFile", error)));
+                        children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
+                        hadActivity = true;
+                        continue;
+                    }
+                } else if (bytesRead == 0) {
+                    closeIsolatedReadPipe(child);
+                } else {
+                    child.output.append(buffer.data(), bytesRead);
+                }
+                hadActivity = true;
+            }
+        }
+
+        const DWORD wait = WaitForSingleObject(child.proc.hProcess, 0);
+        if (child.pipeDrained && wait == WAIT_OBJECT_0) {
+            const size_t position = child.position;
+            recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(child)));
+            children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
+            hadActivity = true;
+            continue;
+        }
+        if (wait == WAIT_FAILED) {
+            const DWORD error = GetLastError();
+            const size_t position = child.position;
+            recordIsolatedResult(
+                resultsByCase,
+                position,
+                abortIsolatedChild(std::move(child), windowsErrorMessage("WaitForSingleObject", error)));
+            children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
+            hadActivity = true;
+            continue;
+        }
+        ++i;
+    }
+    if (!hadActivity) {
+        const int timeoutMs = isolatedPollTimeoutMs(children, options.caseTimeoutMs);
+        const DWORD sleepMs = timeoutMs < 0 ? 2 : static_cast<DWORD>((std::min)(timeoutMs, 2));
+        Sleep(sleepMs);
+    }
+#else
+    std::vector<pollfd> fds;
+    fds.reserve(children.size());
+    for (const IsolatedChildState& child : children) {
+        fds.push_back(pollfd{child.fd, POLLIN | POLLHUP, 0});
+    }
+
+    int timeoutMs = isolatedPollTimeoutMs(children, options.caseTimeoutMs);
+    const bool hasPipeDrainedChild = std::any_of(children.begin(), children.end(), [](const IsolatedChildState& child) {
+        return child.fd < 0;
+    });
+    if (hasPipeDrainedChild) {
+        timeoutMs = timeoutMs < 0 ? 2 : (std::min)(timeoutMs, 2);
+    }
+    const int ready = poll(fds.data(), fds.size(), timeoutMs);
+    if (ready < 0) {
+        if (errno == EINTR) {
+            return;
+        }
+        throw std::runtime_error("poll failed: " + std::string(std::strerror(errno)));
+    }
+    if (ready == 0) {
+        return;
+    }
+
+    std::array<char, 4096> buffer{};
+    for (size_t i = 0; i < children.size();) {
+        const short revents = fds[i].revents;
+        if ((revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) == 0) {
+            ++i;
+            continue;
+        }
+
+        bool closed = false;
+        while (true) {
+            const ssize_t n = read(children[i].fd, buffer.data(), buffer.size());
+            if (n > 0) {
+                children[i].output.append(buffer.data(), static_cast<size_t>(n));
+                continue;
+            }
+            if (n == 0) {
+                closeIsolatedReadPipe(children[i]);
+                closed = true;
+                break;
+            }
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            }
+            const size_t position = children[i].position;
+            recordIsolatedResult(
+                resultsByCase,
+                position,
+                abortIsolatedChild(std::move(children[i]), "read failed: " + std::string(std::strerror(errno))));
+            children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
+            fds.erase(fds.begin() + static_cast<std::ptrdiff_t>(i));
+            closed = false;
+            break;
+        }
+        if (i >= children.size()) {
+            break;
+        }
+        if (!closed) {
+            ++i;
+            continue;
+        }
+
+        if (!tryReapIsolatedChild(children[i])) {
+            ++i;
+            continue;
+        }
+        const size_t position = children[i].position;
+        recordIsolatedResult(resultsByCase, position, finishIsolatedChild(std::move(children[i])));
+        children.erase(children.begin() + static_cast<std::ptrdiff_t>(i));
+        fds.erase(fds.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+#endif
+}
+
+SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& query) {
+    IsolatedChildStart started = startIsolatedChild(options, query, 0);
+    if (started.result) {
+        return *started.result;
+    }
+
+    std::vector<IsolatedChildState> children;
+    children.push_back(std::move(*started.child));
+    std::vector<std::optional<SubcaseResult>> result(1);
+    while (!result[0]) {
+        pumpIsolatedChildren(options, children, result);
+        if (children.empty() && !result[0]) {
+            return SubcaseResult{query, TestStatus::Crash, "isolated child ended without result"};
+        }
+    }
+    return *result[0];
 }
 
 std::vector<SubcaseResult> collectIsolatedRuns(
@@ -653,6 +1182,64 @@ std::vector<SubcaseResult> collectIsolatedRuns(
         results.push_back(runIsolatedChild(options, cases[i].query));
     }
     return results;
+}
+
+void startQueuedIsolatedChildren(
+    const RunOptions& options,
+    const std::vector<CaseRun>& cases,
+    const std::vector<size_t>& queue,
+    size_t& next,
+    size_t maxChildren,
+    std::vector<IsolatedChildState>& children,
+    std::vector<std::optional<SubcaseResult>>& resultsByCase) {
+    while (children.size() < maxChildren && next < queue.size()) {
+        const size_t position = queue[next++];
+        IsolatedChildStart started = startIsolatedChild(options, cases[position].query, position);
+        if (started.result) {
+            recordIsolatedResult(resultsByCase, position, std::move(*started.result));
+            continue;
+        }
+        children.push_back(std::move(*started.child));
+    }
+}
+
+std::vector<SubcaseResult> collectIsolatedParallelRuns(
+    const RunOptions& options,
+    const std::vector<Query>& queries,
+    FormatSampleStats* stats) {
+    const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
+    std::vector<size_t> queue;
+    queue.reserve(cases.size());
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (caseSelectedByShard(i, options)) {
+            queue.push_back(i);
+        }
+    }
+
+    std::vector<std::optional<SubcaseResult>> resultsByCase(cases.size());
+    std::vector<IsolatedChildState> children;
+    size_t next = 0;
+    const size_t maxChildren = static_cast<size_t>((std::max)(1, resolveWorkers(options)));
+
+    while (next < queue.size() || !children.empty()) {
+        startQueuedIsolatedChildren(options, cases, queue, next, maxChildren, children, resultsByCase);
+        if (!children.empty()) {
+            pumpIsolatedChildren(options, children, resultsByCase);
+        }
+    }
+
+    std::vector<SubcaseResult> merged;
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (!caseSelectedByShard(i, options)) {
+            continue;
+        }
+        if (!resultsByCase[i]) {
+            merged.push_back(SubcaseResult{cases[i].query, TestStatus::Crash, "isolated worker produced no result"});
+            continue;
+        }
+        merged.push_back(std::move(*resultsByCase[i]));
+    }
+    return merged;
 }
 
 std::vector<SubcaseResult> collectSelectiveRuns(
@@ -1180,7 +1767,7 @@ std::vector<SubcaseResult> collectParallelRuns(
     return merged;
 }
 
-int printRunResults(const std::vector<SubcaseResult>& results, const ExpectationSet& expectations) {
+struct RunSummary {
     size_t pass = 0;
     size_t skip = 0;
     size_t warn = 0;
@@ -1188,6 +1775,128 @@ int printRunResults(const std::vector<SubcaseResult>& results, const Expectation
     size_t crash = 0;
     size_t xfail = 0;
     size_t xpass = 0;
+};
+
+void writeJsonOutput(
+    const std::string& path,
+    const std::vector<SubcaseResult>& results,
+    const ExpectationSet& expectations,
+    const RunSummary& summary) {
+    if (path.empty()) {
+        return;
+    }
+
+    std::ofstream out(path);
+    if (!out) {
+        throw std::runtime_error("failed to open JSONL output file: " + path);
+    }
+    for (const SubcaseResult& result : results) {
+        out << resultJsonLine(result, expectationMatches(expectations, result.query)) << "\n";
+    }
+    out << "{\"summary\":true"
+        << ",\"pass\":" << summary.pass
+        << ",\"skip\":" << summary.skip
+        << ",\"warn\":" << summary.warn
+        << ",\"fail\":" << summary.fail
+        << ",\"crash\":" << summary.crash
+        << ",\"xfail\":" << summary.xfail
+        << ",\"xpass\":" << summary.xpass
+        << "}\n";
+}
+
+void mergeCurrentEffective(
+    std::unordered_map<std::string, std::string>& current,
+    std::vector<std::string>& order,
+    const std::string& query,
+    const std::string& effective) {
+    auto found = current.find(query);
+    if (found == current.end()) {
+        current.emplace(query, effective);
+        order.push_back(query);
+        return;
+    }
+    if (!isBadEffectiveStatus(found->second) && isBadEffectiveStatus(effective)) {
+        found->second = effective;
+    }
+}
+
+struct BaselineReport {
+    std::vector<std::string> regressed;
+    std::vector<std::string> fixed;
+    std::vector<std::string> added;
+    std::vector<std::string> removed;
+};
+
+BaselineReport buildBaselineReport(
+    const std::vector<SubcaseResult>& results,
+    const ExpectationSet& expectations,
+    const std::unordered_map<std::string, std::string>& baseline) {
+    std::unordered_map<std::string, std::string> current;
+    std::vector<std::string> currentOrder;
+    for (const SubcaseResult& result : results) {
+        const bool expected = expectationMatches(expectations, result.query);
+        mergeCurrentEffective(current, currentOrder, result.query, effectiveStatusName(result, expected));
+    }
+
+    BaselineReport report;
+    for (const std::string& query : currentOrder) {
+        const BaselineDelta delta = classifyDelta(current.at(query), baseline, query);
+        if (delta == BaselineDelta::Regressed) {
+            report.regressed.push_back(query);
+        } else if (delta == BaselineDelta::Fixed) {
+            report.fixed.push_back(query);
+        } else if (delta == BaselineDelta::New) {
+            report.added.push_back(query);
+        }
+    }
+    for (const auto& [query, effective] : baseline) {
+        (void)effective;
+        if (!current.contains(query) && classifyDelta("", baseline, query) == BaselineDelta::Removed) {
+            report.removed.push_back(query);
+        }
+    }
+    std::sort(report.removed.begin(), report.removed.end());
+    return report;
+}
+
+void printBaselineList(const char* label, const std::vector<std::string>& queries) {
+    if (queries.empty()) {
+        return;
+    }
+    constexpr size_t kMaxPrinted = 20;
+    std::cout << "baseline " << label << ":\n";
+    const size_t printed = (std::min)(queries.size(), kMaxPrinted);
+    for (size_t i = 0; i < printed; ++i) {
+        std::cout << "  " << queries[i] << "\n";
+    }
+    if (printed < queries.size()) {
+        std::cout << "  ... " << (queries.size() - printed) << " more\n";
+    }
+}
+
+BaselineReport printBaselineReport(
+    const std::vector<SubcaseResult>& results,
+    const ExpectationSet& expectations,
+    const std::string& baselinePath) {
+    const std::unordered_map<std::string, std::string> baseline = loadBaseline(baselinePath);
+    BaselineReport report = buildBaselineReport(results, expectations, baseline);
+    std::cout << "baseline: Regressed=" << report.regressed.size()
+              << " Fixed=" << report.fixed.size()
+              << " New=" << report.added.size()
+              << " Removed=" << report.removed.size()
+              << "\n";
+    printBaselineList("Regressed", report.regressed);
+    printBaselineList("Fixed", report.fixed);
+    printBaselineList("New", report.added);
+    printBaselineList("Removed", report.removed);
+    return report;
+}
+
+int printRunResults(
+    const std::vector<SubcaseResult>& results,
+    const ExpectationSet& expectations,
+    const RunOptions& options) {
+    RunSummary summary;
     for (const SubcaseResult& result : results) {
         const bool expected = expectationMatches(expectations, result.query);
         std::string status = statusName(result.status);
@@ -1195,10 +1904,10 @@ int printRunResults(const std::vector<SubcaseResult>& results, const Expectation
         if (expected && (result.status == TestStatus::Fail || result.status == TestStatus::Crash)) {
             status = "xfail";
             unexpectedFailure = false;
-            ++xfail;
+            ++summary.xfail;
         } else if (expected && result.status == TestStatus::Pass) {
             status = "xpass";
-            ++xpass;
+            ++summary.xpass;
         }
 
         std::cout << status << " " << result.query;
@@ -1206,16 +1915,22 @@ int printRunResults(const std::vector<SubcaseResult>& results, const Expectation
             std::cout << " " << result.message;
         }
         std::cout << "\n";
-        pass += result.status == TestStatus::Pass ? 1 : 0;
-        skip += result.status == TestStatus::Skip ? 1 : 0;
-        warn += result.status == TestStatus::Warn ? 1 : 0;
-        fail += unexpectedFailure && result.status == TestStatus::Fail ? 1 : 0;
-        crash += unexpectedFailure && result.status == TestStatus::Crash ? 1 : 0;
+        summary.pass += result.status == TestStatus::Pass ? 1 : 0;
+        summary.skip += result.status == TestStatus::Skip ? 1 : 0;
+        summary.warn += result.status == TestStatus::Warn ? 1 : 0;
+        summary.fail += unexpectedFailure && result.status == TestStatus::Fail ? 1 : 0;
+        summary.crash += unexpectedFailure && result.status == TestStatus::Crash ? 1 : 0;
     }
-    std::cout << "summary: pass=" << pass << " skip=" << skip << " warn=" << warn
-              << " fail=" << fail << " crash=" << crash
-              << " xfail=" << xfail << " xpass=" << xpass << "\n";
-    return fail == 0 && crash == 0 ? 0 : 1;
+    std::cout << "summary: pass=" << summary.pass << " skip=" << summary.skip << " warn=" << summary.warn
+              << " fail=" << summary.fail << " crash=" << summary.crash
+              << " xfail=" << summary.xfail << " xpass=" << summary.xpass << "\n";
+
+    writeJsonOutput(options.outputPath, results, expectations, summary);
+    if (!options.baselinePath.empty()) {
+        const BaselineReport report = printBaselineReport(results, expectations, options.baselinePath);
+        return report.regressed.empty() ? 0 : 1;
+    }
+    return summary.fail == 0 && summary.crash == 0 ? 0 : 1;
 }
 
 } // namespace
@@ -1230,6 +1945,41 @@ bool expectationMatches(const ExpectationSet& expectations, const std::string& q
         }
     }
     return false;
+}
+
+BaselineDelta classifyDelta(
+    const std::string& effectiveNow,
+    const std::unordered_map<std::string, std::string>& baseline,
+    const std::string& query) {
+    const auto found = baseline.find(query);
+    if (found == baseline.end()) {
+        return effectiveNow.empty() ? BaselineDelta::Unchanged : BaselineDelta::New;
+    }
+    if (effectiveNow.empty()) {
+        return BaselineDelta::Removed;
+    }
+
+    const bool nowBad = isBadEffectiveStatus(effectiveNow);
+    const bool baselineBad = isBadEffectiveStatus(found->second);
+    if (nowBad && !baselineBad) {
+        return BaselineDelta::Regressed;
+    }
+    if (!nowBad && baselineBad) {
+        return BaselineDelta::Fixed;
+    }
+    return BaselineDelta::Unchanged;
+}
+
+int resolveWorkers(const RunOptions& options) {
+    if (options.workers == 1) {
+        return 1;
+    }
+    if (options.workers <= 0) {
+        const unsigned hardware = std::thread::hardware_concurrency();
+        const int detected = hardware == 0 ? 1 : static_cast<int>(hardware);
+        return (std::max)(1, (std::min)(detected, kDefaultMaxWorkers));
+    }
+    return options.workers;
 }
 
 bool caseBelongsToShard(size_t index, int shardIndex, int shardCount) {
@@ -1284,16 +2034,23 @@ int runQueries(const RunOptions& options) {
         }
     }
 
-    std::vector<Query> queries;
-    for (const std::string& text : options.queries) {
-        queries.push_back(parseQuery(text));
+    const int workerCount = resolveWorkers(options);
+    RunOptions runOptions = options;
+    runOptions.workers = workerCount;
+
+    if (options.workersSpecified && !options.crashListPath.empty()) {
+        std::cerr << "--workers is incompatible with --crash-list\n";
+        return 1;
     }
 
-    if (options.workers >= 2) {
-        if (options.isolate || !options.crashListPath.empty()) {
-            std::cerr << "--workers is incompatible with --isolate and --crash-list\n";
-            return 1;
+    std::vector<Query> queries;
+    try {
+        for (const std::string& text : options.queries) {
+            queries.push_back(parseQuery(text));
         }
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n";
+        return 1;
     }
 
     if (options.list || options.listCases) {
@@ -1334,38 +2091,31 @@ int runQueries(const RunOptions& options) {
     if (options.sampleFormats && !options.shardResults) {
         std::cerr << "format-sample: representative-formats mode ON - non-representative format cases are SKIPPED; this is NOT full conformance coverage.\n";
     }
-    if (options.workers >= 2) {
-        try {
-            results = collectParallelRuns(options, queries, &sampleStats);
-        } catch (const std::exception& e) {
-            std::cerr << e.what() << "\n";
-            return 1;
-        }
-    } else if (options.shardResults) {
-        setStdoutBinaryForResultProtocol();
-        (void)collectShardResultRuns(options, queries, &sampleStats);
-        return 0;
-    } else if (!options.crashListPath.empty()) {
-        ExpectationSet crashList;
-        try {
-            crashList = loadExpectations(options.crashListPath);
-        } catch (const std::exception& e) {
-            std::cerr << e.what() << "\n";
-            return 1;
-        }
-        results = collectSelectiveRuns(options, queries, crashList, &sampleStats);
-    } else if (options.isolate) {
-        results = collectIsolatedRuns(options, queries, &sampleStats);
-        if (!options.emitCrashListPath.empty()) {
-            try {
-                writeCrashList(options.emitCrashListPath, results);
-            } catch (const std::exception& e) {
-                std::cerr << e.what() << "\n";
-                return 1;
+    try {
+        if (options.shardResults) {
+            setStdoutBinaryForResultProtocol();
+            (void)collectShardResultRuns(runOptions, queries, &sampleStats);
+            return 0;
+        } else if (!options.crashListPath.empty()) {
+            ExpectationSet crashList = loadExpectations(options.crashListPath);
+            results = collectSelectiveRuns(runOptions, queries, crashList, &sampleStats);
+        } else if (options.isolate) {
+            if (workerCount >= 2) {
+                results = collectIsolatedParallelRuns(runOptions, queries, &sampleStats);
+            } else {
+                results = collectIsolatedRuns(runOptions, queries, &sampleStats);
             }
+            if (!options.emitCrashListPath.empty()) {
+                writeCrashList(options.emitCrashListPath, results);
+            }
+        } else if (workerCount >= 2) {
+            results = collectParallelRuns(runOptions, queries, &sampleStats);
+        } else {
+            results = collectRuns(queries, runOptions, &sampleStats);
         }
-    } else {
-        results = collectRuns(queries, options, &sampleStats);
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n";
+        return 1;
     }
     if (options.sampleFormats && !options.shardResults && sampleStats.runsDropped > 0) {
         std::cerr << "format-sample: thinned " << sampleStats.testsSampled
@@ -1373,7 +2123,12 @@ int runQueries(const RunOptions& options) {
                   << " of " << (sampleStats.runsKept + sampleStats.runsDropped)
                   << " format-swept subcases.\n";
     }
-    return printRunResults(results, expectations);
+    try {
+        return printRunResults(results, expectations, options);
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n";
+        return 1;
+    }
 }
 
 int writeListingJson(const std::string& path) {

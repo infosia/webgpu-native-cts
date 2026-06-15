@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -201,10 +202,35 @@ struct ExpectationSet {
     std::vector<std::string> prefixes;
 };
 
+// Max concurrent GPU-driving children when --workers is auto/0. GPU/VRAM pressure, not CPU, is the
+// limiter; high counts can wedge the OS, so the auto default is capped low on purpose.
+inline constexpr int kDefaultMaxWorkers = 8;
+
+enum class BaselineDelta {
+    Unchanged,
+    Regressed,
+    Fixed,
+    New,
+    Removed,
+};
+
+struct RunOptions;
+
 /// True if `query` is covered by an exact entry or any prefix in `expectations`.
 bool expectationMatches(const ExpectationSet& expectations, const std::string& query);
 /// Loads an expectations file (one query/prefix per line) from `path`.
 ExpectationSet loadExpectations(const std::string& path);
+/// One JSONL line for a case result, with the expectation overlay already applied.
+std::string resultJsonLine(const SubcaseResult& r, bool expected);
+/// Parse a baseline JSONL file into query -> effective status.
+std::unordered_map<std::string, std::string> loadBaseline(const std::string& path);
+/// Classify one query's current effective status against a loaded baseline.
+BaselineDelta classifyDelta(
+    const std::string& effectiveNow,
+    const std::unordered_map<std::string, std::string>& baseline,
+    const std::string& query);
+/// Resolves --workers auto/0 to the capped default, preserving explicit serial workers=1.
+int resolveWorkers(const RunOptions& options);
 
 /// Creates a fresh fixture instance for a case.
 using FixtureFactory = std::function<std::unique_ptr<Fixture>()>;
@@ -333,7 +359,9 @@ struct RunOptions {
     bool listCases = false;        ///< List individual case queries and exit.
     bool isolate = false;          ///< Run each case in its own child process.
     bool sampleFormats = false;    ///< Sample a subset of format params instead of running all.
-    int workers = 0;               ///< Parallel worker processes (0 = serial).
+    int workers = 1;               ///< Parallel worker processes (0 = auto, 1 = serial).
+    bool workersSpecified = false; ///< True when --workers was present on the CLI.
+    long caseTimeoutMs = 0;        ///< Per isolated child watchdog in milliseconds (0 = off).
     int shardIndex = -1;           ///< This shard's index when sharding (0-based; -1 = no sharding).
     int shardCount = 0;            ///< Total shard count when sharding.
     size_t shardFrom = 0;          ///< Starting case offset within the shard.
@@ -342,6 +370,8 @@ struct RunOptions {
     std::string expectationsPath;  ///< Path to the expected-failures file.
     std::string crashListPath;     ///< Path to a known-crash list to skip.
     std::string emitCrashListPath; ///< Path to write a newly discovered crash list.
+    std::string outputPath;        ///< Path to write JSONL result output.
+    std::string baselinePath;      ///< Path to a prior JSONL result output to diff against.
     std::string executablePath;    ///< Path to this executable, used to spawn isolated children.
     std::vector<std::string> forwardedArgs; ///< Extra args passed through to child processes.
     std::vector<std::string> queries;       ///< Test queries selecting what to run.

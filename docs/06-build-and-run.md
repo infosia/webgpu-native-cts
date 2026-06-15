@@ -200,16 +200,19 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 |--------|--------|
 | `--list` / `--list-cases` | print matching paths/cases; do not run |
 | `--sample-formats` | opt-in fast-iteration mode for large texture-format sweeps; keeps only representative formats, prints a stderr notice/recap, and is not full conformance coverage |
-| `--workers N` | parallel runner: spawn `N` shard workers on one machine, merge their machine-readable results back into the same ordered text summary as a sequential run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess`. `N=1` is sequential. Incompatible with `--isolate` and `--crash-list` |
+| `--workers N` \| `auto` | parallel runner: spawn `N` shard workers on one machine, merge their machine-readable results back into the same ordered text summary as a sequential run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess`. `N=1` is sequential; `auto` (or `0`) resolves to `min(hardware_concurrency, 8)` — capped low because GPU/VRAM pressure (not CPU) is the limiter and high counts can wedge the OS. **Composes with `--isolate`** (parallel per-case isolation pool — see that row); still incompatible with `--crash-list` |
 | `--shard I/N` | run or list only the deterministic round-robin shard where case index `idx % N == I`; works with `--list-cases` for partition checks and can be used directly in CI on any platform |
 | `--verbose` / `--quiet` | log level |
 | `--power-preference {low,high}` | adapter selection |
 | `--force-fallback-adapter` | request the fallback adapter |
 | `--expectations <file>` | known-failure list (case-query lines, `#` comments); matching fails/crashes → `xfail`, matching passes → `xpass`; run fails only on an unexpected fail/crash. A line ending in `:*` is a **prefix** match — it covers every case of a test in one line (used when a whole test crashes a backend, e.g. wgpu-native on `texture_usage`); a pass under such a prefix shows as `xpass`, flagging that the wildcard can be tightened |
-| `--isolate` | run **every** case in a child process (`--run-case`); a backend abort becomes a contained `crash` result instead of killing the run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess` (a Rust abort shows as a non-zero child exit, e.g. `0xC0000409`). Sequential on both. Robust but slow (one process spawn per case) — for fast runs use `--crash-list` instead |
+| `--isolate` | run **every** case in a child process (`--run-case`); a backend abort becomes a contained `crash` result instead of killing the run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess` (a Rust abort shows as a non-zero child exit, e.g. `0xC0000409`). Sequential by default; **add `--workers N` to run the per-case isolation as a bounded concurrent pool** (≤`N` children at once, results merged back into sequential order — same per-case classification as serial `--isolate` for any `N`, just faster). This makes per-case isolation practical at full-suite scale without the manual shard-then-isolate dance. For a fast *selective* run on a known-clean backend, `--crash-list` is still cheaper |
 | `--crash-list <file>` | **selective isolation** (fast): fork only the cases the file lists (same line format as `--expectations`: exact or `:*` prefix), run all others **in-process**. Produces the **same per-case classification** as full `--isolate` (in-process cases are aggregated per case), so summaries are interchangeable. A case that aborts but is **not** on the list takes down the in-process run — refresh the list with `--isolate --emit-crash-list`. Composable with `--expectations`. On a clean backend (no list match) nothing forks |
 | `--emit-crash-list <file>` | with `--isolate`, write every case that actually **crashed** (raw, before `--expectations` reclassification), sorted+unique, one query per line — directly reusable as a `--crash-list`. Workflow: run `--isolate --emit-crash-list expectations/<backend>.crash.txt` once per backend revision, then iterate with `--crash-list expectations/<backend>.crash.txt` |
 | `--run-case <case-query>` | (internal, used by `--isolate`/`--crash-list`) run exactly one case in-process and print `RESULT\t<status>\t<message>` |
+| `--case-timeout-ms M` | per-case wall-clock watchdog (only meaningful with `--isolate`): a child exceeding `M` ms is killed and recorded as a `crash` ("case timed out after M ms"), so a single wedged case cannot hang the whole run. POSIX kills with `SIGKILL`+`waitpid`; Windows uses `TerminateProcess`. `0` (default) disables it. Distinct from `--future-timeout-ms` (which bounds a single async-wait inside a case) |
+| `--output <file>` | also write machine-readable **JSONL** results: one `{"query","status","message","expected","effective"}` object per case (messages JSON-escaped), then a trailing `{"summary":true,…}` line with the counts. Works in every run mode; the human text + summary on stdout are unchanged. Makes cross-shard aggregation deterministic (no stdout re-parsing) |
+| `--baseline <file>` | after the run, diff the current results' *effective* statuses against a prior `--output` JSONL and print `Regressed`/`Fixed`/`New`/`Removed` query sets. With `--baseline` set, the **exit code reflects regressions only** (0 iff nothing got worse vs the baseline), independent of the absolute fail count — the CI-useful "did this change make anything worse" gate |
 | `--yawgpu-backend {metal,vulkan}` | (deferred — planned) select yawgpu's GPU backend at runtime once multiple are compiled in |
 | `--adapter-name <substr>` | pick an adapter by name substring |
 | `--enable-feature <name>` | request an optional feature for device creation |
@@ -221,12 +224,18 @@ Exit code: non-zero if any non-expected case fails. Skips/warns do not fail the 
 
 ### Large-suite runs & finding triage (helper scripts)
 
-At the current suite size a single `--workers N` run is unreliable for reading findings on one
-workstation: high concurrency (>~10 simultaneous Vulkan devices) can freeze the whole OS, while low
-concurrency means each shard process runs so many cases that GPU state degrades and later cases fail
-en masse with `HAL queue submission failed: vulkan` (fake fails). `--workers` ties shard count to
-concurrency, so it cannot avoid both. [`scripts/`](../scripts/README.md) holds helpers that decouple
-them:
+At the current suite size a single plain `--workers N` (in-process shards) run is unreliable for
+reading findings on one workstation: high concurrency (>~10 simultaneous Vulkan devices) can freeze
+the whole OS, while low concurrency means each shard process runs so many cases **sharing one
+process-global device** (`src/common/harness.cpp`) that GPU state degrades and later cases fail en
+masse with `HAL queue submission failed: vulkan` (fake fails). Plain `--workers` ties shard count to
+concurrency, so it cannot avoid both.
+
+**Preferred now: `--isolate --workers N`** (the per-case isolation pool) gives each case its own
+process — so degradation cannot accrue — *and* runs `N` at once with a capped default, producing the
+**same classification as serial `--isolate` for any `N`**. Combined with `--output`/`--baseline` it
+makes findings authoritative and aggregation deterministic without the manual shard-then-isolate
+dance. The decoupling helpers below remain for the plain-`--workers` path and for CI matrix sharding:
 
 - **`scripts/run_sharded.sh [M] [N] [EXPECTATIONS]`** — full suite split into `M` shards run `N` at a
   time (default 48 / 8); no freeze, summed totals, degradation-filtered candidate list. A **screen**,

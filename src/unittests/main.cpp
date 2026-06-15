@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -56,6 +57,75 @@ void requireBytes(
     const std::vector<uint8_t>& expected,
     const std::string& message) {
     require(actual == expected, message);
+}
+
+int hexValueForTest(char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return ch - 'A' + 10;
+    }
+    return -1;
+}
+
+std::optional<std::string> jsonStringFieldForTest(const std::string& line, const std::string& field) {
+    const std::string needle = "\"" + field + "\":";
+    const size_t fieldPos = line.find(needle);
+    if (fieldPos == std::string::npos) {
+        return std::nullopt;
+    }
+    size_t pos = fieldPos + needle.size();
+    if (pos >= line.size() || line[pos] != '"') {
+        return std::nullopt;
+    }
+    ++pos;
+
+    std::string value;
+    while (pos < line.size()) {
+        const char ch = line[pos++];
+        if (ch == '"') {
+            return value;
+        }
+        if (ch != '\\') {
+            value.push_back(ch);
+            continue;
+        }
+        if (pos >= line.size()) {
+            return std::nullopt;
+        }
+        const char escaped = line[pos++];
+        if (escaped == '"' || escaped == '\\' || escaped == '/') {
+            value.push_back(escaped);
+        } else if (escaped == 't') {
+            value.push_back('\t');
+        } else if (escaped == 'n') {
+            value.push_back('\n');
+        } else if (escaped == 'r') {
+            value.push_back('\r');
+        } else if (escaped == 'u') {
+            if (pos + 4 > line.size()) {
+                return std::nullopt;
+            }
+            int codepoint = 0;
+            for (int i = 0; i < 4; ++i) {
+                const int digit = hexValueForTest(line[pos++]);
+                if (digit < 0) {
+                    return std::nullopt;
+                }
+                codepoint = codepoint * 16 + digit;
+            }
+            if (codepoint <= 0x7F) {
+                value.push_back(static_cast<char>(codepoint));
+            }
+        } else {
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
 }
 
 std::vector<uint8_t> sampleBytesForFormat(WGPUTextureFormat format) {
@@ -625,6 +695,79 @@ int main() {
 
             const std::optional<cts::SubcaseResult> ignored = cts::parseResultLine("noise");
             require(!ignored.has_value(), "non-RESULT line ignored");
+        }
+
+        {
+            const cts::SubcaseResult result{
+                "webgpu:a,b,c:test:*",
+                cts::TestStatus::Fail,
+                "quote \" slash \\ tab \t",
+            };
+            const std::string line = cts::resultJsonLine(result, true);
+            const std::optional<std::string> query = jsonStringFieldForTest(line, "query");
+            const std::optional<std::string> status = jsonStringFieldForTest(line, "status");
+            const std::optional<std::string> message = jsonStringFieldForTest(line, "message");
+            const std::optional<std::string> effective = jsonStringFieldForTest(line, "effective");
+            require(query && *query == result.query, "JSONL query round-trip");
+            require(status && *status == "fail", "JSONL raw status round-trip");
+            require(message && *message == result.message, "JSONL escaped message round-trip");
+            require(effective && *effective == "xfail", "JSONL expected fail effective status");
+            require(line.find("\"expected\":true") != std::string::npos, "JSONL expected bool true");
+
+            const std::string passLine = cts::resultJsonLine(
+                cts::SubcaseResult{"webgpu:a,b,c:pass:*", cts::TestStatus::Pass, ""},
+                true);
+            const std::optional<std::string> passEffective = jsonStringFieldForTest(passLine, "effective");
+            require(passEffective && *passEffective == "xpass", "JSONL expected pass effective status");
+
+            const std::string baselinePath = "cts_unittests_baseline.jsonl";
+            {
+                std::ofstream out(baselinePath);
+                out << line << "\n";
+                out << "{\"summary\":true,\"pass\":0,\"skip\":0,\"warn\":0,\"fail\":0,\"crash\":0,\"xfail\":1,\"xpass\":0}\n";
+            }
+            const std::unordered_map<std::string, std::string> baseline = cts::loadBaseline(baselinePath);
+            std::remove(baselinePath.c_str());
+            require(baseline.size() == 1, "baseline ignores summary line");
+            require(baseline.at(result.query) == "xfail", "baseline loads effective status");
+        }
+
+        {
+            const std::unordered_map<std::string, std::string> baseline = {
+                {"was_pass", "pass"},
+                {"was_fail", "fail"},
+                {"was_crash", "crash"},
+                {"was_xfail", "xfail"},
+            };
+            require(cts::classifyDelta("fail", baseline, "was_pass") == cts::BaselineDelta::Regressed,
+                    "baseline pass to fail regressed");
+            require(cts::classifyDelta("crash", baseline, "was_xfail") == cts::BaselineDelta::Regressed,
+                    "baseline xfail to crash regressed");
+            require(cts::classifyDelta("pass", baseline, "was_fail") == cts::BaselineDelta::Fixed,
+                    "baseline fail to pass fixed");
+            require(cts::classifyDelta("xfail", baseline, "was_crash") == cts::BaselineDelta::Fixed,
+                    "baseline crash to xfail fixed");
+            require(cts::classifyDelta("pass", baseline, "new_case") == cts::BaselineDelta::New,
+                    "baseline missing query new");
+            require(cts::classifyDelta("", baseline, "was_pass") == cts::BaselineDelta::Removed,
+                    "baseline absent current removed");
+            require(cts::classifyDelta("crash", baseline, "was_fail") == cts::BaselineDelta::Unchanged,
+                    "baseline bad to bad unchanged");
+            require(cts::classifyDelta("skip", baseline, "was_pass") == cts::BaselineDelta::Unchanged,
+                    "baseline non-bad to non-bad unchanged");
+        }
+
+        {
+            cts::RunOptions workerOptions;
+            workerOptions.workers = 1;
+            require(cts::resolveWorkers(workerOptions) == 1, "resolveWorkers preserves explicit serial");
+            workerOptions.workers = 0;
+            const int autoWorkers = cts::resolveWorkers(workerOptions);
+            require(autoWorkers >= 1, "resolveWorkers auto is at least one");
+            require(autoWorkers <= cts::kDefaultMaxWorkers, "resolveWorkers auto respects cap");
+            workerOptions.workers = cts::kDefaultMaxWorkers + 5;
+            require(cts::resolveWorkers(workerOptions) == cts::kDefaultMaxWorkers + 5,
+                    "resolveWorkers preserves explicit worker count");
         }
 
         require(cts::kTextureUsages.size() == 6, "texture usages count");

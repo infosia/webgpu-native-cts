@@ -64,10 +64,12 @@ const char* adapterTypeName(WGPUAdapterType type) {
 }
 
 void printUsage() {
-    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--workers N] [--shard I/N] [--isolate] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
+    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--workers N|auto] [--shard I/N] [--isolate] [--case-timeout-ms M] [--output <file>] [--baseline <file>] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
               << "\n"
               << "Without arguments, creates a WebGPU instance, requests an adapter,\n"
-              << "prints adapter information, and exits.\n";
+              << "prints adapter information, and exits.\n"
+              << "\n"
+              << "--workers accepts a positive integer, 0, or auto; 0/auto uses a capped default.\n";
 }
 
 void printVersion() {
@@ -115,6 +117,13 @@ int runAdapterEnumeration() {
 }
 
 bool parseInt(const std::string& text, int* value) {
+    const char* begin = text.data();
+    const char* end = text.data() + text.size();
+    auto [ptr, ec] = std::from_chars(begin, end, *value);
+    return ec == std::errc() && ptr == end;
+}
+
+bool parseLong(const std::string& text, long* value) {
     const char* begin = text.data();
     const char* end = text.data() + text.size();
     auto [ptr, ec] = std::from_chars(begin, end, *value);
@@ -181,10 +190,35 @@ int main(int argc, char** argv) {
                     return EXIT_FAILURE;
                 }
                 const std::string value = argv[++i];
-                if (!parseInt(value, &options.workers) || options.workers < 1) {
+                options.workersSpecified = true;
+                if (value == "auto") {
+                    options.workers = 0;
+                } else if (!parseInt(value, &options.workers) || options.workers < 0) {
                     std::cerr << "invalid --workers value: " << value << "\n";
                     return EXIT_FAILURE;
                 }
+            } else if (arg == "--case-timeout-ms") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --case-timeout-ms\n";
+                    return EXIT_FAILURE;
+                }
+                const std::string value = argv[++i];
+                if (!parseLong(value, &options.caseTimeoutMs) || options.caseTimeoutMs < 0) {
+                    std::cerr << "invalid --case-timeout-ms value: " << value << "\n";
+                    return EXIT_FAILURE;
+                }
+            } else if (arg == "--output") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --output\n";
+                    return EXIT_FAILURE;
+                }
+                options.outputPath = argv[++i];
+            } else if (arg == "--baseline") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --baseline\n";
+                    return EXIT_FAILURE;
+                }
+                options.baselinePath = argv[++i];
             } else if (arg == "--shard") {
                 if (i + 1 >= argc) {
                     std::cerr << "missing value for --shard\n";
