@@ -135,21 +135,22 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Findings — 106 surfaced to date (F-001…F-106)
+### Findings — 111 surfaced to date (F-001…F-111)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
 test pass. Full cross-backend sweep **2026-06-14**: Dawn `534184/0`, **yawgpu Metal `460730` fail=2**
 (the 2 are a documented Dawn-leniency, not a defect), yawgpu MoltenVK Vulkan-path residuals (below),
-wgpu-native bring-up. A **native-Vulkan** (NVIDIA) run of the same suite surfaced two genuine
-Vulkan-HAL/naga defects that Apple's coherent memory had masked — **F-105** and **F-106** — both
-**fixed and native-Vulkan-re-verified 2026-06-15**.
+wgpu-native bring-up. **Native-Vulkan** (NVIDIA) runs of the same suite surfaced seven genuine
+Vulkan-HAL/naga divergences that Apple's coherent memory / tiler behaviour had masked — **F-105**,
+**F-106**, and the **F-107…F-110** batch — all **fixed and native-Vulkan-re-verified 2026-06-15**, plus
+**F-111** (external-texture feature gap, documented `xfail`, not a defect).
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| **yawgpu — open implementation defects** | 0 | **yawgpu passes the entire ported suite on native Metal AND native Vulkan** — every finding F-005…F-106 fixed & re-verified; the only non-pass is the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` (not a defect) |
-| yawgpu — fixed & hardware-re-verified | 81 | F-005…F-082, F-087, the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed), and the **2026-06-15** native-Vulkan pair **F-105** (robust-access `bool` workgroup array, naga SPIR-V) / **F-106** (Vulkan-HAL write→read barrier for indirect/index/copy-source reads) — both native-Vulkan-confirmed |
-| Spec in flux — **not an implementation defect** | 1 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); 92 cases `xfail` in the Vulkan-only expectation files |
+| **yawgpu — open implementation defects** | 0 | **yawgpu passes the entire ported suite on native Metal AND native Vulkan** — every finding F-005…F-110 fixed & re-verified; non-passes are the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` (not a defect) and F-111 external-texture (documented feature gap, `xfail`) |
+| yawgpu — fixed & hardware-re-verified | 85 | F-005…F-082, F-087, the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed), the **2026-06-15** native-Vulkan pair **F-105** / **F-106**, and the **2026-06-15** native-Vulkan batch **F-107** (storeOp `discard` zero-clear) / **F-108** (resolve/render through the WebGPU view format) / **F-109** (output-depth viewport clamp via `VK_EXT_depth_clip_enable`) / **F-110** (strip-topology primitive restart) — all native-Vulkan-confirmed |
+| Spec in flux / feature gap — **not an implementation defect** | 2 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); F-111 `GPUExternalTexture` unsupported on the Vulkan backend (naga SPIR-V cannot lower `ImageClass::External`; Metal has full support) — both `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 22 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state |
 | MoltenVK-only translation artifacts — green on native Metal + native Vulkan, not yawgpu defects | 9 | **F-104** (`copyTextureToTexture` data, 14512 — native-Vulkan-confirmed green), F-070 MoltenVK SPIRV-Cross residue (`memory_layout`/`zero_init`/`robust_access_vertex`), F-033, F-045, F-053/F-068 residuals, F-083, F-086, maxComputeWorkgroupStorageSize SPIR-V compile residual |
 
@@ -212,16 +213,22 @@ listing — the headline table above is authoritative for totals.
 #### yawgpu — native Vulkan (NVIDIA, 2026-06-14 sweep)
 
 Running the same suite on **native Vulkan** (not MoltenVK) is what separates real Vulkan-HAL/naga
-defects from Mac translation artifacts. The 2026-06-14 isolation sweep surfaced two genuine defects
-that Apple's coherent memory had masked — both now **fixed and re-verified on native Vulkan
-(2026-06-15)**:
+defects from Mac translation artifacts. The 2026-06-14/06-15 isolation sweeps surfaced seven genuine
+Apple-masked divergences — F-105/F-106 and the F-107…F-110 batch, all now **fixed and re-verified on
+native Vulkan (2026-06-15)** — plus F-111, a documented external-texture feature gap (`xfail`):
 
 | Finding | Test | Cases | Root cause | Status |
 |---------|------|------:|-----------|--------|
 | **F-105** | `shader,execution,robust_access:linear_memory` | 3 | naga SPIR-V backend emitted the wrong stride for a `bool` workgroup array, so an OOB write wasn't clamped | **RESOLVED** — `robust_access 1068/0` Metal + MoltenVK (no regression) |
 | **F-106** | `api,operation,memory_sync,buffer,multiple_buffers:wr` | 18 | Vulkan HAL omitted the write→read barrier when the read is indirect-args / index / copy-source (missing `INDIRECT_COMMAND_READ` / `INDEX_READ` / `TRANSFER_READ`) | **RESOLVED** — `multiple_buffers 263/0` Metal + MoltenVK (no regression) |
+| **F-107** | `api,operation,render_pass,storeOp` / `storeop2` | 18 | `storeOp:"discard"` mapped to `DONT_CARE`, which NVIDIA keeps; WebGPU requires discarded contents to read back zero | **RESOLVED** — eager zero-clear of discarded subresources after the pass; `storeOp 26/0` + `storeop2 2/0` native Vulkan; Metal/Noop store path unchanged |
+| **F-108** | `api,operation,texture_view,format_reinterpretation` | 4 | color/resolve attachment used the underlying texture format instead of the WebGPU view (reinterpreted) format, applying wrong srgb gamma | **RESOLVED** — thread `view_format`/`resolve_view_format` core→HAL; `format_reinterpretation 6/0` native Vulkan; no-op when view==texture format |
+| **F-109** | `api,operation,rendering,depth_clip_clamp` | 2 | output depth not clamped to the viewport range (`depthClampEnable=unclippedDepth`, which also coupled clipping) | **RESOLVED** — `depthClampEnable=TRUE` + `VK_EXT_depth_clip_enable` for independent clip control; `depth_clip_clamp 3 skip=1 0` native Vulkan; Metal/Noop unchanged |
+| **F-110** | `api,operation,render_pipeline,primitive_topology` | 2 | `primitiveRestartEnable` hardcoded false, so strip topologies never cut on the restart sentinel | **RESOLVED** — enable restart for strip topologies; `primitive_topology 20/0` native Vulkan; Metal/Noop unchanged |
+| **F-111** | `api,validation,render_pipeline,misc:external_texture` | 2 | `GPUExternalTexture` unsupported on Vulkan (naga SPIR-V cannot lower `ImageClass::External`); validation expects success | **DOCUMENTED GAP** — `xfail` in `expectations/yawgpu-vulkan.txt`; `external_texture xfail=2 fail=0`. Metal has full support |
 
-With these landed, **yawgpu passes the ported suite on native Vulkan as well as native Metal**; the
+With the F-105…F-110 fixes landed, **yawgpu passes the ported suite on native Vulkan as well as native
+Metal** (external-texture being the one documented feature gap); the
 Mac-only residuals in the MoltenVK rows above are confirmed SPIRV-Cross translation artifacts (the
 F-104/F-070 bucket), not yawgpu defects.
 
