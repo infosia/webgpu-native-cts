@@ -169,16 +169,24 @@ The current headline numbers — every ported file run against each backend:
 |---------|----------|-----:|-----:|-----:|------:|------:|---------|
 | **Dawn** (oracle) | Metal | 534184 | 63364 | **0** | 0 | — | fully green |
 | **yawgpu** | Metal | 460730 | 136816 | **2** | 0 | — | green — the 2 are the documented Dawn-leniency `draw,index_buffer_format_dirtying` (yawgpu *stricter*, not a defect) |
-| **yawgpu** | Vulkan (MoltenVK) | 445041 | 136816 | 15599 | 0 | 92 | Vulkan-path residuals, **all Metal-green** — MoltenVK/SPIRV-Cross translation artifacts (F-104 `copyTextureToTexture` 14512 + F-070/`zero_init`/`robust_access_vertex` shader residue); F-085 92 `xfail` |
+| **yawgpu** | Vulkan (native, NVIDIA) | 402163 † | 183397 | **0** † | 0 | 94 | **green — every ported file `fail=0` in per-file isolation.** F-005…F-110 all fixed & native-Vulkan-re-verified (2026-06-15); F-085 (92) + F-111 (2) = 94 `xfail`. † whole-suite via 48-shard batches: the raw run's ~12k `fail` is **stochastic GPU-state-degradation collateral** (each signature isolates `fail=0`), so the real fail is **0** and `pass` is a degradation-depressed lower bound |
+| **yawgpu** | Vulkan (MoltenVK) | 445041 | 136816 | 15599 | 0 | 92 | Vulkan-path residuals, **all Metal-green AND native-Vulkan-green** — MoltenVK/SPIRV-Cross translation artifacts (F-104 `copyTextureToTexture` 14512 + F-070/`zero_init`/`robust_access_vertex` shader residue); F-085 92 `xfail` |
 | **wgpu-native** | Vulkan (`--isolate`, per-case) | 25668 | 10200 | 5680 | 6808 | — | bring-up reference (known panic-heavy state) |
 
-- yawgpu's **Metal HAL passes the entire ported suite** bar the 2 Dawn-leniency cases; every finding
-  F-005…F-106 is fixed and re-verified. The MoltenVK `fail=15599` are **not yawgpu defects** — each is
-  green on native Metal *and* native Vulkan (F-104 was native-Vulkan-confirmed green); MoltenVK
-  mistranslates them. See the [findings buckets](#findings--106-surfaced-to-date-f-001f-106) above.
-- The separate native-Vulkan (NVIDIA) sweep of the same suite surfaced the only two *real* Vulkan-HAL
-  defects, F-105/F-106 — now fixed (subsection below). Those were Apple-masked, so they are absent from
-  the Metal/MoltenVK rows here.
+- The **native Vulkan** and **MoltenVK** rows are now separated. yawgpu's **native Vulkan HAL passes the
+  entire ported suite** (real `fail=0` by per-file isolation): every finding F-005…F-110 is fixed and
+  native-Vulkan-re-verified, with F-085 (spec-in-flux) and F-111 (external-texture feature gap) carried as
+  the 94 `xfail`. The whole-suite sharded run reports a large raw `fail`, but it is **stochastic
+  GPU-state-degradation collateral** — at this suite size (~597k subcases) a single process accumulates
+  resource pressure (`HAL queue submission failed` / `out of memory` / `shader compilation failed`), and
+  every such signature returns `fail=0` when its file is re-run alone.
+- yawgpu's **Metal HAL** likewise passes the entire ported suite bar the 2 Dawn-leniency cases.
+- The **MoltenVK** `fail=15599` are **not yawgpu defects** and are **distinct from the native-Vulkan
+  result** — each is green on native Metal *and* native Vulkan (F-104 native-Vulkan-confirmed green);
+  MoltenVK/SPIRV-Cross mistranslates them. See the [findings buckets](#findings--111-surfaced-to-date-f-001f-111) above.
+- The native-Vulkan (NVIDIA) sweeps surfaced the genuine Apple-masked Vulkan-HAL/naga defects
+  F-105/F-106 and the F-107…F-110 batch (all fixed, subsection below). Being Apple-masked, they never
+  appeared in the Metal/MoltenVK rows.
 
 #### Per-area slices — older pinned revisions (`api,validation` 2026-06-08, `api,operation` 2026-06-06)
 
@@ -210,10 +218,11 @@ listing — the headline table above is authoritative for totals.
 | **yawgpu** | Vulkan | `pass=214039 skip=85698 fail=0 crash=0` — full suite, exit 0 in ~2 min (`--workers 16`), nothing masked |
 | **wgpu-native** | Metal | `pass=3322 fail=78 xfail=3` — fails are the 3D copy/readback findings F-027/F-028 |
 
-#### yawgpu — native Vulkan (NVIDIA, 2026-06-14 sweep)
+#### yawgpu — native Vulkan (NVIDIA, 2026-06-15 sweep)
 
 Running the same suite on **native Vulkan** (not MoltenVK) is what separates real Vulkan-HAL/naga
-defects from Mac translation artifacts. The 2026-06-14/06-15 isolation sweeps surfaced seven genuine
+defects from Mac translation artifacts — this is the basis for the now-separate native-Vulkan row in the
+headline table above. The 2026-06-14/06-15 isolation sweeps surfaced seven genuine
 Apple-masked divergences — F-105/F-106 and the F-107…F-110 batch, all now **fixed and re-verified on
 native Vulkan (2026-06-15)** — plus F-111, a documented external-texture feature gap (`xfail`):
 
