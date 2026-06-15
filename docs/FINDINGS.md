@@ -1555,36 +1555,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-112 — yawgpu Vulkan: workgroup-class atomics violate read-read coherence (`corr`) — native Vulkan
 
-- **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Win). Suspected correctness defect — **OPEN, under
-  investigation**.
-- **Found by:** `shader,execution,memory_model,coherence:corr:memType="atomic_workgroup";testType="intra_workgroup"`
-  (the non-RMW variant) — **1 subcase**. Surfaced by the first full-suite `--isolate --workers 8` run
-  (2026-06-15); reproduces deterministically in isolation (in-process ×3 and `--isolate` all `fail=1`).
-- **Observed:** the `corr` test (thread A `atomicStore(x,1)`; thread B `r0=atomicLoad(x); r1=atomicLoad(x)`)
-  records the WebGPU-disallowed weak outcome `r0==1 && r1==0` (the second read sees an older value than the
-  first — a single-location coherence violation) on **workgroup-address-space** atomics. The disallowed
-  behavior is observed a small but non-zero number of times each run (e.g. `behaviors:[0,9976,0,8]`,
-  `[0,9973,0,11]`); the count jitters but the violation is present every run, so this is a reproducible
-  failure, not stress-harness noise (a conformant backend records **0** weak outcomes — the storage-class
-  rows do).
-- **Narrowing (points at naga SPIR-V workgroup-atomic memory semantics):** within the same `corr` test,
-  `memType="atomic_storage"` (storage-buffer atomics, inter/intra) **pass**, and the `atomic_workgroup`
-  **RMW variant** (`atomicExchange`/`atomicAdd`) **passes**; only the plain `atomicLoad`/`atomicStore`
-  workgroup path fails. That isolates it to the memory semantics naga emits for workgroup-class atomic
-  load/store on SPIR-V (RMW ops happen to carry stronger ordering), not the harness/port (the port
-  reproduces upstream `_testCode` 1:1 and the storage rows exercise the same machinery cleanly).
-- **Cross-backend control (2026-06-16): confirmed yawgpu-specific.** On the **same** NVIDIA RTX 5060 Ti,
-  **same** Vulkan API, and **same** CTS oracle, **wgpu-native passes `coherence:corr` 6/6 (3/3 runs)** —
-  including the `atomic_workgroup;intra_workgroup` non-RMW subcase that yawgpu fails. So this is **not** a
-  CTS-oracle or hardware/stress artifact (unlike F-084/F-085); it is specific to yawgpu's Vulkan path.
-- **Status / next step:** **OPEN — confirmed yawgpu defect.** Root cause is the SPIR-V memory semantics
-  naga emits for **workgroup-address-space `atomicLoad`/`atomicStore`** (RMW ops and storage-class atomics
-  are unaffected); the workgroup-atomic load/store lack the ordering/coherence needed for the
-  single-location read-read guarantee. Fix belongs on the yawgpu/naga SPIR-V side (separate repo). **Not**
-  added to `expectations/yawgpu-vulkan.txt` (kept visible as an open finding per triage decision); add an
-  xfail only if it is deferred long-term. Re-check after a naga rev bump.
-- **Repro:** `cts --isolate 'webgpu:shader,execution,memory_model,coherence:corr:*'` → `fail=1` (the
-  `atomic_workgroup;intra_workgroup` non-RMW case).
+- **RESOLVED** (yawgpu `b602ff2`, 2026-06-16): `shader,execution,memory_model,coherence:corr` (`atomic_workgroup;intra_workgroup` non-RMW, 1 subcase) — workgroup-atomic read-read coherence violated (WebGPU-disallowed `r0==1 && r1==0`) on native Vulkan (NVIDIA RTX 5060 Ti); wgpu-native passed the same case on the same GPU. Not a naga defect: yawgpu and wgpu-native emit byte-identical workgroup-atomic SPIR-V (GLSL450, `scope=Workgroup`, `semantics=0`, no `Coherent`), verified by reassembling wgpu-native's `VK_APIDUMP_SHOW_SHADER` capture. Cause was yawgpu's SPIR-V `buffer` bounds-check policy = `Restrict`, whose software clamp (`OpArrayLength`+`OpISub`+`UMin`) on storage-buffer accesses breaks the NVIDIA driver's coherence; SPIR-V/Vulkan version and zero-init mode ruled out. Fixed by gating `buffer` on `VK_EXT_robustness2`/`robustBufferAccess2` (→ `Unchecked` when present; `index`/`image_load` stay `Restrict`; Metal/MSL unchanged); design in yawgpu `specs/blocks/60-real-backends.md` § "CTS finding F-112". Re-verified native Vulkan: `coherence:*` 27/27, `weak`/`atomicity`/`barrier`/`adjacent`/`texture_intra_invocation_coherence` no failures, validation-layer clean. Never added to `expectations/yawgpu-vulkan.txt`.
 
 ---
 
