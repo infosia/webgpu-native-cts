@@ -1,25 +1,9 @@
 #include "common/query.h"
 
 #include <stdexcept>
-#include <vector>
 
 namespace cts {
 namespace {
-
-std::vector<std::string> split(const std::string& text, char delim) {
-    std::vector<std::string> parts;
-    size_t start = 0;
-    while (true) {
-        size_t pos = text.find(delim, start);
-        if (pos == std::string::npos) {
-            parts.push_back(text.substr(start));
-            break;
-        }
-        parts.push_back(text.substr(start, pos - start));
-        start = pos + 1;
-    }
-    return parts;
-}
 
 bool wildcardMatch(const std::string& pattern, const std::string& value) {
     if (pattern == "*" || pattern.empty()) {
@@ -34,15 +18,25 @@ bool wildcardMatch(const std::string& pattern, const std::string& value) {
 } // namespace
 
 Query parseQuery(const std::string& text) {
-    std::vector<std::string> parts = split(text, ':');
-    if (parts.size() < 3 || parts.size() > 4 || parts[0] != "webgpu") {
+    const size_t suiteEnd = text.find(':');
+    const size_t fileEnd =
+        suiteEnd == std::string::npos ? std::string::npos : text.find(':', suiteEnd + 1);
+    if (suiteEnd == std::string::npos || fileEnd == std::string::npos ||
+        text.substr(0, suiteEnd) != "webgpu") {
         throw std::runtime_error("invalid query: " + text);
     }
+    const size_t testEnd = text.find(':', fileEnd + 1);
+
     Query query;
-    query.suite = parts[0];
-    query.file = parts[1];
-    query.test = parts[2];
-    query.params = parts.size() == 4 ? parts[3] : "*";
+    query.suite = text.substr(0, suiteEnd);
+    query.file = text.substr(suiteEnd + 1, fileEnd - suiteEnd - 1);
+    if (testEnd == std::string::npos) {
+        query.test = text.substr(fileEnd + 1);
+        query.params = "*";
+    } else {
+        query.test = text.substr(fileEnd + 1, testEnd - fileEnd - 1);
+        query.params = text.substr(testEnd + 1);
+    }
     return query;
 }
 

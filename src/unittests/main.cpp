@@ -1176,6 +1176,31 @@ int main() {
         require(cts::caseQuery("api,validation,buffer,create", "limit", params) ==
                     "webgpu:api,validation,buffer,create:limit:sizeAddition=0",
                 "case query stringify");
+        require(cts::parseQuery("webgpu:f:t:k=\"0:0\"").params == "k=\"0:0\"",
+                "query params preserve colon inside quoted value");
+        cts::ParamRecord colonParams{{"offsetVariant", cts::Value("0:0")}};
+        require(cts::parseQuery(cts::caseQuery("api,validation,render_pipeline,vertex_state",
+                                               "vertex_attribute_offset_alignment",
+                                               colonParams))
+                    .params == cts::stringifyParams(colonParams),
+                "case query round-trip preserves quoted colon param");
+        require(cts::parseQuery("webgpu:file:test:*").params == "*", "explicit wildcard query params");
+        require(cts::parseQuery("webgpu:file:test").params == "*", "implicit wildcard query params");
+        require(cts::parseQuery("webgpu:file:test:").params.empty(), "empty query params");
+        bool invalidSuiteThrows = false;
+        try {
+            (void)cts::parseQuery("nope:file:test");
+        } catch (const std::runtime_error&) {
+            invalidSuiteThrows = true;
+        }
+        require(invalidSuiteThrows, "invalid suite query throws");
+        bool twoSegmentThrows = false;
+        try {
+            (void)cts::parseQuery("webgpu:file");
+        } catch (const std::runtime_error&) {
+            twoSegmentThrows = true;
+        }
+        require(twoSegmentThrows, "two-segment query throws");
 
         auto failures = cts::runSyntheticFailureForSelfTest();
         require(failures.size() == 1, "synthetic failure result count");
