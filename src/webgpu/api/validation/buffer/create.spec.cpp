@@ -107,10 +107,10 @@ CTS_TEST(g, "createBuffer_invalid_and_oom")
             ParamRecord{{"_valid", true}, {"usage", static_cast<int64_t>(WGPUBufferUsage_Storage)}, {"size", 16}},
             ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapWrite | WGPUBufferUsage_Uniform)}, {"size", 16}},
             ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapWrite | WGPUBufferUsage_Uniform)}, {"size", kMaxSafeMultipleOf8}},
-            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapWrite | WGPUBufferUsage_Uniform)}, {"size", 0x2000000000ULL}},
+            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapWrite | WGPUBufferUsage_Uniform)}, {"size", static_cast<uint64_t>(0x2000000000ULL)}},
             ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapRead | WGPUBufferUsage_Uniform)}, {"size", 16}},
             ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapRead | WGPUBufferUsage_Uniform)}, {"size", kMaxSafeMultipleOf8}},
-            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapRead | WGPUBufferUsage_Uniform)}, {"size", 0x2000000000ULL}},
+            ParamRecord{{"usage", static_cast<int64_t>(WGPUBufferUsage_MapRead | WGPUBufferUsage_Uniform)}, {"size", static_cast<uint64_t>(0x2000000000ULL)}},
         });
     })
     .fn([](GpuTest& t) {
