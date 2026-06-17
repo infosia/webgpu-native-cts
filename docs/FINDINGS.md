@@ -1576,4 +1576,25 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-113 — wgpu-native: workgroup `atomic` array not zero-initialized (`atomicExchange` advanced) — bring-up reference
+
+- **Backend:** wgpu-native (Metal, Apple). Cross-backend divergence; **not a yawgpu defect**.
+- **Found by:** `shader,execution,expression,call,builtin,atomics,atomicExchange:exchange_workgroup_advanced:*`
+  — 62 of 64 subcases fail. Isolated (`--workers 1`) reproduces: `pass=2 fail=62`.
+- **Observed:** the advanced test allocates an extra validation element in the `var<workgroup>`
+  atomic array that the shader never writes, and asserts it stays `0` (WebGPU guarantees workgroup
+  memory is zero-initialized). wgpu-native reads garbage there — `sorted values mismatch: actual
+  0,<nonzero>, expected 0,0`, with a different nonzero per subcase (uninitialized memory). The only
+  2 "passes" are luck (garbage happened to be 0), so the set is unstable run-to-run.
+- **Cross-check:** **Dawn 1445/1445 and yawgpu (Metal) 1445/1445 pass** the full atomics query; yawgpu
+  passes this exact case 64/64 in isolation. Both honor the workgroup-memory zero-init guarantee, so
+  the test is correct and the defect is wgpu-native-specific (its compute pipeline does not zero-init
+  workgroup `atomic` storage). Per [[naga-fix-crosscheck-wgpu-native]] this is wgpu-native, not naga.
+- **Status:** OPEN (wgpu-native bring-up reference, 2026-06-17). Not added to `expectations/wgpu-native.txt`:
+  the case is partial-failing on garbage (would create xpass noise / be unstable), and the canonical
+  wgpu-native expectations are regenerated on Windows — fold it in there on the next regen. The other
+  10 atomic built-ins and all storage/non-advanced workgroup cases pass on wgpu-native.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
