@@ -124,6 +124,31 @@ build/cts 'webgpu:api,validation,createBuffer:*'   # run a query
 ctest --test-dir build                    # if registered with CTest
 ```
 
+## Coding-agent command execution (codex output-polling constraint)
+
+The coding agent runs in **codex**, whose `exec_command` is asynchronous: it launches the process,
+then drains stdout in **30-second polling windows** with limited output per chunk. A command that
+streams a burst of output fills the stdout pipe buffer and **blocks on `write()` until codex reads it
+30 s later** (pipe back-pressure). This throttles throughput ~100×: a test/build that finishes in
+~25 s when run freely (Claude's Bash, the user's terminal) can take **30–73 min** inside codex purely
+from this drain — root-caused 2026-06-17 on the sibling yawgpu project from `~/.codex/sessions`
+receipts (the build "Finished" at +2.5 min; the remaining ~70 min was 30 s polls trickling test
+output). It is **not** build/link time and **not** lock contention.
+
+**Rule:** in a codex handoff, any long-running or verbose command (test suites, full builds —
+`ctest`, `cmake --build`, `build/cts_unittests`, and the cargo gates on backend deps) must redirect
+output to a file and report the exit code, never stream to the console:
+
+```bash
+ctest --test-dir build > /tmp/out.log 2>&1; echo "EXIT=$?"; tail -n 40 /tmp/out.log
+```
+
+This lets the process run at full speed while codex reads only the small tail. A test-name **filter
+does not avoid the cost** if the runner still spawns many binaries that each flush output; redirect to
+a file (preferred) or target a single binary. **Claude** runs the full build/test gate directly via
+its own Bash (no polling harness), so it remains the backstop. GPU CTS is Claude-only regardless (see
+"Verifying against yawgpu").
+
 ## Path hygiene
 
 Committed files (`docs/`, `specs/`, code) must **not** contain machine-specific paths: no absolute
