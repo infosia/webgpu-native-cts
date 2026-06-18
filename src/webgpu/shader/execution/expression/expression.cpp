@@ -251,8 +251,10 @@ std::string scalarWgsl(const Scalar& s) {
             // Exact: pack the 16-bit pattern into the low half of a u32 and take the low element.
             return "bitcast<vec2<f16>>(" + std::to_string(s.bits & 0xFFFFu) + "u).x";
         case ScalarKind::AbstractInt:
-            // AbstractInt literal: emit the signed decimal value (no suffix).
-            return std::to_string(static_cast<int32_t>(s.bits));
+            // AbstractInt literal: emit the signed 64-bit decimal value (no suffix). AbstractInt
+            // is 64-bit in WGSL, so 'bits64' carries the full literal (set from the i32 pattern
+            // by abstractInt(), or directly by abstractInt64()).
+            return std::to_string(s.bits64);
         case ScalarKind::AbstractFloat:
             // AbstractFloat literal: emit an exact decimal of the finite f32 value (no suffix).
             return floatLiteral(static_cast<double>(f32FromBits(s.bits)), "");

@@ -76,6 +76,11 @@ inline ExprType vecType(int width, ScalarKind kind) {
 struct Scalar {
     ScalarKind kind = ScalarKind::U32;
     uint32_t bits = 0;
+    // For AbstractInt only: the full 64-bit signed value to emit as an untyped integer literal.
+    // AbstractInt in WGSL is 64-bit, so element values may exceed the 32-bit 'bits' field (e.g.
+    // vector-access tests use elements of (i+1)*2^32). 'bits' still carries the low 32 bits / i32
+    // bit-pattern used by the bit-exact comparator; 'bits64' carries the literal to emit.
+    int64_t bits64 = 0;
 };
 
 inline Scalar u32(uint32_t v) {
@@ -101,9 +106,23 @@ inline Scalar f32Bits(uint32_t v) {
 inline Scalar f16Bits(uint16_t v) {
     return Scalar{ScalarKind::F16, static_cast<uint32_t>(v)};
 }
-// AbstractInt carrying an i32 bit pattern.
+// AbstractInt carrying an i32 bit pattern. 'bits' holds the i32 pattern (used by the comparator
+// when this value is bitcast); 'bits64' holds the literal value emitted (sign-extended i32).
 inline Scalar abstractInt(int32_t v) {
-    return Scalar{ScalarKind::AbstractInt, static_cast<uint32_t>(v)};
+    Scalar s;
+    s.kind = ScalarKind::AbstractInt;
+    s.bits = static_cast<uint32_t>(v);
+    s.bits64 = static_cast<int64_t>(v);
+    return s;
+}
+// AbstractInt carrying a full 64-bit literal value (for values outside the 32-bit range). 'bits'
+// holds the low 32 bits; 'bits64' holds the emitted literal.
+inline Scalar abstractInt64(int64_t v) {
+    Scalar s;
+    s.kind = ScalarKind::AbstractInt;
+    s.bits = static_cast<uint32_t>(static_cast<uint64_t>(v));
+    s.bits64 = v;
+    return s;
 }
 // AbstractFloat carrying an f32 bit pattern.
 inline Scalar abstractFloatBits(uint32_t v) {
