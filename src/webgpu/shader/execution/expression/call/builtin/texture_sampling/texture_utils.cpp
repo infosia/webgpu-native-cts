@@ -246,6 +246,9 @@ struct SampleCall {
     Vec3 coords;
     double level = 0.0;
     Vec3 derivativeMult{1.0, 0.0, 0.0};
+    Vec3 ddx{0.0, 0.0, 0.0};
+    Vec3 ddy{0.0, 0.0, 0.0};
+    double bias = 0.0;
     std::optional<std::array<int32_t, 3>> offset;
     std::optional<uint32_t> arrayIndex;
 };
@@ -261,6 +264,17 @@ struct MipMixWeights {
     std::array<double, kMipLevelWeightSteps + 1> nearest = {};
     std::array<double, kMipLevelWeightSteps + 1> linear = {};
 };
+
+struct SampleParamsData {
+    std::array<float, 4> coords = {};
+    std::array<float, 4> ddx = {};
+    std::array<float, 4> ddy = {};
+    std::array<float, 4> derivativeMult = {};
+    std::array<float, 4> scalars = {};
+    std::array<uint32_t, 4> indices = {};
+};
+
+static_assert(sizeof(SampleParamsData) == 96);
 
 enum class SampleKind {
     Sampled1D,
@@ -684,113 +698,167 @@ std::string textureType(const TextureCase& c) {
     return "texture_2d<f32>";
 }
 
-std::string coordExpr(const SampleCall& call, const TextureCase& c) {
+std::string coordParamExpr(std::string_view param, const TextureCase& c) {
     std::ostringstream out;
     switch (c.kind) {
         case SampleKind::Sampled1D:
-            out << wgslFloat(call.coords.x);
+            out << param << ".coords.x";
             break;
         case SampleKind::Sampled2D:
         case SampleKind::Sampled2DLodClamp:
         case SampleKind::Sampled2DArray:
         case SampleKind::Depth2D:
         case SampleKind::Depth2DArray:
-            out << "vec2f(" << wgslFloat(call.coords.x) << ", " << wgslFloat(call.coords.y) << ")";
+            out << param << ".coords.xy";
             break;
         default:
-            out << "vec3f(" << wgslFloat(call.coords.x) << ", " << wgslFloat(call.coords.y) << ", "
-                << wgslFloat(call.coords.z) << ")";
+            out << param << ".coords.xyz";
             break;
     }
     return out.str();
 }
 
-std::string derivativeMultExpr(const SampleCall& call, const TextureCase& c) {
+std::string derivativeMultParamExpr(std::string_view param, const TextureCase& c) {
     std::ostringstream out;
     if (c.textureDimension == WGPUTextureDimension_1D) {
-        out << wgslFloat(call.derivativeMult.x);
+        out << param << ".derivativeMult.x";
     } else if (c.textureDimension == WGPUTextureDimension_3D || isCubeKind(c.kind)) {
-        out << "vec3f(" << wgslFloat(call.derivativeMult.x) << ", "
-            << wgslFloat(call.derivativeMult.y) << ", " << wgslFloat(call.derivativeMult.z) << ")";
+        out << param << ".derivativeMult.xyz";
     } else {
-        out << "vec2f(" << wgslFloat(call.derivativeMult.x) << ", " << wgslFloat(call.derivativeMult.y) << ")";
+        out << param << ".derivativeMult.xy";
     }
     return out.str();
 }
 
-std::string coordExprForSample(const SampleCall& call, const TextureCase& c) {
-    if (c.builtin != "textureSample" || c.stage != "fragment") {
-        return coordExpr(call, c);
-    }
-    return "(" + coordExpr(call, c) + " + derivativeBase * " + derivativeMultExpr(call, c) + ")";
-}
-
-std::string intExpr(uint32_t value, const std::string& type) {
+std::string gradientParamExpr(std::string_view param, std::string_view field, const TextureCase& c) {
     std::ostringstream out;
-    if (type == "u32") {
-        out << value << "u";
+    if (c.textureDimension == WGPUTextureDimension_3D || isCubeKind(c.kind)) {
+        out << param << "." << field << ".xyz";
     } else {
-        out << "i32(" << value << "u)";
+        out << param << "." << field << ".xy";
     }
     return out.str();
 }
 
-std::string levelExpr(const SampleCall& call, const TextureCase& c) {
-    if (c.levelType == "u32") {
-        return std::to_string(static_cast<uint32_t>(call.level)) + "u";
+std::string coordParamExprForSample(std::string_view param, const TextureCase& c) {
+    if ((c.builtin != "textureSample" && c.builtin != "textureSampleBias") || c.stage != "fragment") {
+        return coordParamExpr(param, c);
     }
-    if (c.levelType == "i32") {
-        return "i32(" + std::to_string(static_cast<uint32_t>(call.level)) + "u)";
-    }
-    return wgslFloat(call.level);
+    return "(" + coordParamExpr(param, c) + " + derivativeBase * " + derivativeMultParamExpr(param, c) + ")";
 }
 
-std::string offsetExpr(const SampleCall& call, const TextureCase& c) {
-    if (!c.useOffset || !call.offset) {
+std::array<int32_t, 3> offsetForCallIndex(uint32_t i) {
+    return {
+        static_cast<int32_t>(i % 3u) - 1,
+        static_cast<int32_t>((i / 3u) % 3u) - 1,
+        static_cast<int32_t>((i / 9u) % 3u) - 1,
+    };
+}
+
+std::string offsetExprForCallIndex(uint32_t i, const TextureCase& c) {
+    if (!c.useOffset) {
         return {};
     }
+    const std::array<int32_t, 3> offset = offsetForCallIndex(i);
     std::ostringstream out;
     if (c.textureDimension == WGPUTextureDimension_3D) {
-        out << ", vec3i(" << (*call.offset)[0] << ", " << (*call.offset)[1] << ", " << (*call.offset)[2] << ")";
+        out << ", vec3i(" << offset[0] << ", " << offset[1] << ", " << offset[2] << ")";
     } else {
-        out << ", vec2i(" << (*call.offset)[0] << ", " << (*call.offset)[1] << ")";
+        out << ", vec2i(" << offset[0] << ", " << offset[1] << ")";
     }
     return out.str();
 }
 
-std::string sampleExpr(const SampleCall& call, const TextureCase& c) {
+std::string levelParamExpr(std::string_view param, const TextureCase& c) {
+    if (c.levelType == "u32") {
+        return "u32(" + std::string(param) + ".scalars.x)";
+    }
+    if (c.levelType == "i32") {
+        return "i32(" + std::string(param) + ".scalars.x)";
+    }
+    return std::string(param) + ".scalars.x";
+}
+
+std::string arrayIndexParamExpr(std::string_view param, const TextureCase& c) {
+    if (c.arrayIndexType == "u32") {
+        return std::string(param) + ".indices.x";
+    }
+    return "i32(" + std::string(param) + ".indices.x)";
+}
+
+std::string sampleExprFromParams(std::string_view param, const TextureCase& c, std::string_view offsetExpr = {}) {
     std::ostringstream expr;
-    const bool substituteLevel = c.builtin == "textureSample" && c.stage != "fragment";
+    const bool substituteLevel = (c.builtin == "textureSample" || c.builtin == "textureSampleBias") && c.stage != "fragment";
     const std::string builtin = substituteLevel ? "textureSampleLevel" : c.builtin;
-    expr << builtin << "(tex, samp, " << coordExprForSample(call, c);
+    expr << builtin << "(tex, samp, " << coordParamExprForSample(param, c);
     if (c.useArrayIndex) {
-        expr << ", " << intExpr(call.arrayIndex.value_or(0u), c.arrayIndexType);
+        expr << ", " << arrayIndexParamExpr(param, c);
     }
-    if (builtin == "textureSampleLevel") {
-        expr << ", " << levelExpr(call, c);
+    if (builtin == "textureSampleGrad") {
+        expr << ", " << gradientParamExpr(param, "ddx", c) << ", " << gradientParamExpr(param, "ddy", c);
+    } else if (builtin == "textureSampleBias") {
+        expr << ", " << param << ".scalars.y";
+    } else if (builtin == "textureSampleLevel") {
+        expr << ", " << levelParamExpr(param, c);
     }
-    expr << offsetExpr(call, c) << ")";
+    expr << offsetExpr << ")";
     if (c.isDepth) {
         return "vec4f(" + expr.str() + ", 0.0, 0.0, 1.0)";
     }
     return expr.str();
 }
 
-std::string buildComputeWgsl(const std::vector<SampleCall>& calls, const TextureCase& c) {
+bool usesUnconditionalCallSelection(const TextureCase& c) {
+    if ((c.builtin == "textureSample" || c.builtin == "textureSampleBias") && c.stage == "fragment") {
+        return true;
+    }
+    return c.builtin == "textureSampleGrad" && c.useArrayIndex;
+}
+
+void writeSampleParamsHeader(std::ostringstream& wgsl) {
+    wgsl << "struct SampleParams {\n"
+         << "  coords: vec4f,\n"
+         << "  ddx: vec4f,\n"
+         << "  ddy: vec4f,\n"
+         << "  derivativeMult: vec4f,\n"
+         << "  scalars: vec4f,\n"
+         << "  indices: vec4u,\n"
+         << "};\n"
+         << "@group(0) @binding(3) var<storage, read> params: array<SampleParams>;\n";
+}
+
+std::string buildComputeWgsl(uint32_t callCount, const TextureCase& c) {
     std::ostringstream wgsl;
-    wgsl << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
+    wgsl << "// texture-sampling structural shader; stage=" << c.stage << "; filter=" << c.filt << "\n"
+         << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
          << "@group(0) @binding(1) var samp: sampler;\n"
          << "@group(0) @binding(2) var<storage, read_write> out: array<vec4f>;\n"
+         << "const derivativeBase = vec4f(0.0);\n";
+    writeSampleParamsHeader(wgsl);
+    wgsl
          << "@compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id: vec3u) {\n"
-         << "  let i = id.x;\n";
-    for (size_t i = 0; i < calls.size(); ++i) {
-        wgsl << "  if (i == " << i << "u) { out[" << i << "] = " << sampleExpr(calls[i], c) << "; }\n";
+         << "  let i = id.x;\n"
+         << "  let p = params[i];\n";
+    if (usesUnconditionalCallSelection(c)) {
+        wgsl << "  var result = vec4f(0.0);\n";
+        for (uint32_t i = 0; i < callCount; ++i) {
+            wgsl << "  let call" << i << " = " << sampleExprFromParams("p", c, offsetExprForCallIndex(i, c)) << ";\n"
+                 << "  result = select(result, call" << i << ", i == " << i << "u);\n";
+        }
+        wgsl << "  out[i] = result;\n";
+    } else if (c.useOffset) {
+        for (uint32_t i = 0; i < callCount; ++i) {
+            wgsl << "  if (i == " << i << "u) { out[" << i << "] = "
+                 << sampleExprFromParams("p", c, offsetExprForCallIndex(i, c)) << "; }\n";
+        }
+    } else {
+        wgsl << "  out[i] = " << sampleExprFromParams("p", c) << ";\n";
     }
     wgsl << "}\n";
     return wgsl.str();
 }
 
-std::string buildRenderWgsl(const std::vector<SampleCall>& calls, const TextureCase& c) {
+std::string buildRenderWgsl(uint32_t callCount, const TextureCase& c) {
     std::ostringstream wgsl;
     const std::string derivativeType = c.textureDimension == WGPUTextureDimension_1D
         ? "f32"
@@ -798,30 +866,38 @@ std::string buildRenderWgsl(const std::vector<SampleCall>& calls, const TextureC
     const std::string zeroDerivative = c.textureDimension == WGPUTextureDimension_1D
         ? "0.0"
         : (c.textureDimension == WGPUTextureDimension_3D || isCubeKind(c.kind) ? "vec3f(0.0)" : "vec2f(0.0)");
-    wgsl << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
+    wgsl << "// texture-sampling structural shader; stage=" << c.stage << "; filter=" << c.filt << "\n"
+         << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
          << "@group(0) @binding(1) var samp: sampler;\n"
+         << "const unusedOutputBinding = 2u;\n";
+    writeSampleParamsHeader(wgsl);
+    wgsl
          << "struct VOut {\n"
          << "  @builtin(position) pos: vec4f,\n"
          << "  @location(0) @interpolate(flat, either) ndx: u32,\n"
          << "  @location(1) @interpolate(flat, either) result: vec4f,\n"
          << "};\n"
-         << "fn callTexture(i: u32, derivativeBase: " << derivativeType << ") -> vec4f {\n";
-    if (c.builtin == "textureSample" && c.stage == "fragment") {
+         << "fn callTexture(i: u32, derivativeBase: " << derivativeType << ") -> vec4f {\n"
+         << "  let p = params[i];\n";
+    if (usesUnconditionalCallSelection(c)) {
         wgsl << "  var result = vec4f(0.0);\n";
-        for (size_t i = 0; i < calls.size(); ++i) {
-            wgsl << "  let call" << i << " = " << sampleExpr(calls[i], c) << ";\n"
+        for (uint32_t i = 0; i < callCount; ++i) {
+            wgsl << "  let call" << i << " = " << sampleExprFromParams("p", c, offsetExprForCallIndex(i, c)) << ";\n"
                  << "  result = select(result, call" << i << ", i == " << i << "u);\n";
         }
         wgsl << "  return result;\n";
-    } else {
-        for (size_t i = 0; i < calls.size(); ++i) {
-            wgsl << "  if (i == " << i << "u) { return " << sampleExpr(calls[i], c) << "; }\n";
+    } else if (c.useOffset) {
+        for (uint32_t i = 0; i < callCount; ++i) {
+            wgsl << "  if (i == " << i << "u) { return "
+                 << sampleExprFromParams("p", c, offsetExprForCallIndex(i, c)) << "; }\n";
         }
         wgsl << "  return vec4f(0.0);\n";
+    } else {
+        wgsl << "  return " << sampleExprFromParams("p", c) << ";\n";
     }
     wgsl << "}\n"
          << "fn pixelPos(vertexIndex: u32, instanceIndex: u32) -> vec4f {\n"
-         << "  let width = " << calls.size() << ".0;\n"
+         << "  let width = " << callCount << ".0;\n"
          << "  let x0 = -1.0 + 2.0 * f32(instanceIndex) / width;\n"
          << "  let x1 = -1.0 + 2.0 * f32(instanceIndex + 1u) / width;\n"
          << "  let p = array(vec2f(x0, 3.0), vec2f(x1, -1.0), vec2f(x0, -1.0));\n"
@@ -893,18 +969,23 @@ std::vector<SampleCall> generateCalls(const TextureCase& c) {
             const double theta = static_cast<double>(i) * 2.399963229728653;
             call.coords = Vec3{0.5 + std::cos(theta) * r, 0.5 + std::sin(theta) * r, 0.0};
         }
-        call.level = c.builtin == "textureSample"
+        const bool gradientBuiltin = c.builtin == "textureSample" || c.builtin == "textureSampleGrad" || c.builtin == "textureSampleBias";
+        call.level = gradientBuiltin
             ? implicitMipLevelForCall(i, c.mipLevelCount)
             : (c.levelType == "f32" ? static_cast<double>(i % 5u) * 0.5 : static_cast<double>(i % c.mipLevelCount));
-        if (c.builtin == "textureSample") {
+        if (gradientBuiltin) {
             call.derivativeMult = Vec3{std::pow(2.0, call.level), 0.0, 0.0};
+            const double dx = std::pow(2.0, call.level) / static_cast<double>(std::max(1u, c.baseSize.width));
+            call.ddx = Vec3{dx, 0.0, 0.0};
+            call.ddy = Vec3{0.0, 0.0, 0.0};
+        }
+        if (c.builtin == "textureSampleBias") {
+            static constexpr std::array<double, 6> kBiases = {{-1.0, 0.5, 1.25, -0.75, 0.0, 1.0}};
+            call.bias = kBiases[i % kBiases.size()];
+            call.level = std::clamp(call.level + std::clamp(call.bias, -16.0, 15.99), 0.0, static_cast<double>(c.mipLevelCount - 1u));
         }
         if (c.useOffset) {
-            call.offset = std::array<int32_t, 3>{
-                static_cast<int32_t>(i % 3u) - 1,
-                static_cast<int32_t>((i / 3u) % 3u) - 1,
-                static_cast<int32_t>((i / 9u) % 3u) - 1,
-            };
+            call.offset = offsetForCallIndex(i);
         }
         if (c.useArrayIndex) {
             const uint32_t arrayCount = c.viewDimension == WGPUTextureViewDimension_CubeArray
@@ -915,6 +996,52 @@ std::vector<SampleCall> generateCalls(const TextureCase& c) {
         calls.push_back(call);
     }
     return calls;
+}
+
+std::vector<SampleParamsData> makeSampleParamsData(const std::vector<SampleCall>& calls) {
+    std::vector<SampleParamsData> out;
+    out.reserve(calls.size());
+    for (const SampleCall& call : calls) {
+        SampleParamsData data;
+        data.coords = {
+            static_cast<float>(call.coords.x),
+            static_cast<float>(call.coords.y),
+            static_cast<float>(call.coords.z),
+            0.0f,
+        };
+        data.ddx = {
+            static_cast<float>(call.ddx.x),
+            static_cast<float>(call.ddx.y),
+            static_cast<float>(call.ddx.z),
+            0.0f,
+        };
+        data.ddy = {
+            static_cast<float>(call.ddy.x),
+            static_cast<float>(call.ddy.y),
+            static_cast<float>(call.ddy.z),
+            0.0f,
+        };
+        data.derivativeMult = {
+            static_cast<float>(call.derivativeMult.x),
+            static_cast<float>(call.derivativeMult.y),
+            static_cast<float>(call.derivativeMult.z),
+            0.0f,
+        };
+        data.scalars = {
+            static_cast<float>(call.level),
+            static_cast<float>(call.bias),
+            0.0f,
+            0.0f,
+        };
+        data.indices = {
+            call.arrayIndex.value_or(0u),
+            0u,
+            0u,
+            0u,
+        };
+        out.push_back(data);
+    }
+    return out;
 }
 
 WGPUBindGroupLayout createBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t, const TextureCase& c) {
@@ -942,6 +1069,98 @@ WGPUBindGroupLayout createBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t, const 
     desc.entryCount = c.stage == "compute" ? entries.size() : 2;
     desc.entries = entries.data();
     return t.createBindGroupLayoutTracked(desc);
+}
+
+WGPUBindGroupLayout createCachedBindGroupLayout(WGPUDevice device, const TextureCase& c) {
+    std::array<WGPUBindGroupLayoutEntry, 4> entries = {{
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+    }};
+    const WGPUShaderStage visibility = stageVisibility(c.stage);
+    entries[0].binding = 0;
+    entries[0].visibility = visibility;
+    entries[0].texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+    entries[0].texture.sampleType = textureSampleType(c.isDepth, c.filt);
+    entries[0].texture.viewDimension = c.viewDimension;
+    entries[1].binding = 1;
+    entries[1].visibility = visibility;
+    entries[1].sampler = WGPU_SAMPLER_BINDING_LAYOUT_INIT;
+    entries[1].sampler.type = samplerBindingType(c.isDepth, c.filt);
+    entries[2].binding = 2;
+    entries[2].visibility = WGPUShaderStage_Compute;
+    entries[2].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entries[2].buffer.type = WGPUBufferBindingType_Storage;
+    entries[3].binding = 3;
+    entries[3].visibility = visibility;
+    entries[3].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entries[3].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+
+    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    desc.entryCount = entries.size();
+    desc.entries = entries.data();
+    return wgpuDeviceCreateBindGroupLayout(device, &desc);
+}
+
+struct SamplingPipelineBundle {
+    WGPUShaderModule module = nullptr;
+    WGPUBindGroupLayout bindGroupLayout = nullptr;
+    WGPUPipelineLayout pipelineLayout = nullptr;
+    WGPUComputePipeline computePipeline = nullptr;
+    WGPURenderPipeline renderPipeline = nullptr;
+};
+
+SamplingPipelineBundle createSamplingPipelineBundle(WGPUDevice device, const std::string& wgsl, const TextureCase& c) {
+    SamplingPipelineBundle bundle;
+
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = stringView(wgsl);
+    WGPUShaderModuleDescriptor moduleDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    moduleDesc.nextInChain = &source.chain;
+    bundle.module = wgpuDeviceCreateShaderModule(device, &moduleDesc);
+
+    bundle.bindGroupLayout = createCachedBindGroupLayout(device, c);
+    WGPUPipelineLayoutDescriptor pipelineLayoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pipelineLayoutDesc.bindGroupLayoutCount = 1;
+    pipelineLayoutDesc.bindGroupLayouts = &bundle.bindGroupLayout;
+    bundle.pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &pipelineLayoutDesc);
+
+    if (c.stage == "compute") {
+        WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        pipelineDesc.layout = bundle.pipelineLayout;
+        pipelineDesc.compute.module = bundle.module;
+        pipelineDesc.compute.entryPoint = stringView("main");
+        bundle.computePipeline = wgpuDeviceCreateComputePipeline(device, &pipelineDesc);
+    } else {
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format = WGPUTextureFormat_RGBA32Uint;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = bundle.module;
+        fragment.entryPoint = stringView("fsMain");
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+        WGPURenderPipelineDescriptor renderDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        renderDesc.layout = bundle.pipelineLayout;
+        renderDesc.vertex.module = bundle.module;
+        renderDesc.vertex.entryPoint = stringView("vsMain");
+        renderDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        renderDesc.multisample.count = 1;
+        renderDesc.fragment = &fragment;
+        bundle.renderPipeline = wgpuDeviceCreateRenderPipeline(device, &renderDesc);
+    }
+    return bundle;
+}
+
+const SamplingPipelineBundle& samplingPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureCase& c) {
+    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> cache;
+    const WGPUDevice device = t.device();
+    auto& deviceCache = cache[device];
+    auto it = deviceCache.find(wgsl);
+    if (it == deviceCache.end()) {
+        it = deviceCache.emplace(wgsl, createSamplingPipelineBundle(device, wgsl, c)).first;
+    }
+    return it->second;
 }
 
 void submit(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder) {
@@ -1388,13 +1607,18 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         expected.push_back(c.isDepth ? softwareSampleDepth(call, c, mipWeights) : softwareSampleColor(mips, c.format, call, c, mipWeights));
     }
 
-    const std::string wgsl = c.stage == "compute" ? buildComputeWgsl(calls, c) : buildRenderWgsl(calls, c);
-    WGPUShaderModule module = t.createShaderModuleTracked(wgsl);
-    WGPUBindGroupLayout bgl = createBindGroupLayout(t, c);
-    WGPUPipelineLayoutDescriptor pipelineLayoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
-    pipelineLayoutDesc.bindGroupLayoutCount = 1;
-    pipelineLayoutDesc.bindGroupLayouts = &bgl;
-    WGPUPipelineLayout pipelineLayout = t.createPipelineLayoutTracked(pipelineLayoutDesc);
+    const std::string wgsl = c.stage == "compute"
+        ? buildComputeWgsl(static_cast<uint32_t>(calls.size()), c)
+        : buildRenderWgsl(static_cast<uint32_t>(calls.size()), c);
+    const SamplingPipelineBundle& pipelineBundle = samplingPipelineForDevice(t, wgsl, c);
+
+    const std::vector<SampleParamsData> sampleParams = makeSampleParamsData(calls);
+    const uint64_t sampleParamsSize = static_cast<uint64_t>(sampleParams.size()) * sizeof(SampleParamsData);
+    WGPUBufferDescriptor sampleParamsDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    sampleParamsDesc.size = sampleParamsSize;
+    sampleParamsDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    WGPUBuffer sampleParamsBuffer = t.createBufferTracked(sampleParamsDesc);
+    t.queueWriteBuffer(sampleParamsBuffer, 0, sampleParams.data(), static_cast<size_t>(sampleParamsSize));
 
     const uint64_t outputSize = static_cast<uint64_t>(calls.size()) * 4u * sizeof(float);
     const uint32_t renderBytesPerRow = alignToU32(static_cast<uint32_t>(calls.size()) * 16u, 256u);
@@ -1403,10 +1627,11 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     bufferDesc.size = bufferSize;
     bufferDesc.usage = c.stage == "compute"
         ? WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc
-        : WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+        : WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
     WGPUBuffer outputBuffer = t.createBufferTracked(bufferDesc);
 
-    std::array<WGPUBindGroupEntry, 3> bgEntries = {{
+    std::array<WGPUBindGroupEntry, 4> bgEntries = {{
+        WGPU_BIND_GROUP_ENTRY_INIT,
         WGPU_BIND_GROUP_ENTRY_INIT,
         WGPU_BIND_GROUP_ENTRY_INIT,
         WGPU_BIND_GROUP_ENTRY_INIT,
@@ -1418,22 +1643,20 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     bgEntries[2].binding = 2;
     bgEntries[2].buffer = outputBuffer;
     bgEntries[2].size = outputSize;
+    bgEntries[3].binding = 3;
+    bgEntries[3].buffer = sampleParamsBuffer;
+    bgEntries[3].size = sampleParamsSize;
     WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-    bindGroupDesc.layout = bgl;
-    bindGroupDesc.entryCount = c.stage == "compute" ? bgEntries.size() : 2;
+    bindGroupDesc.layout = pipelineBundle.bindGroupLayout;
+    bindGroupDesc.entryCount = bgEntries.size();
     bindGroupDesc.entries = bgEntries.data();
     WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     if (c.stage == "compute") {
-        WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
-        pipelineDesc.layout = pipelineLayout;
-        pipelineDesc.compute.module = module;
-        pipelineDesc.compute.entryPoint = stringView("main");
-        WGPUComputePipeline pipeline = t.createComputePipelineTracked(pipelineDesc);
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
         WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
-        wgpuComputePassEncoderSetPipeline(pass, pipeline);
+        wgpuComputePassEncoderSetPipeline(pass, pipelineBundle.computePipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, static_cast<uint32_t>(calls.size()), 1, 1);
         wgpuComputePassEncoderEnd(pass);
@@ -1452,22 +1675,6 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         targetViewDesc.format = WGPUTextureFormat_RGBA32Uint;
         WGPUTextureView targetView = t.createViewTracked(target, targetViewDesc);
 
-        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
-        colorTarget.format = WGPUTextureFormat_RGBA32Uint;
-        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-        fragment.module = module;
-        fragment.entryPoint = stringView("fsMain");
-        fragment.targetCount = 1;
-        fragment.targets = &colorTarget;
-        WGPURenderPipelineDescriptor renderDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-        renderDesc.layout = pipelineLayout;
-        renderDesc.vertex.module = module;
-        renderDesc.vertex.entryPoint = stringView("vsMain");
-        renderDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-        renderDesc.multisample.count = 1;
-        renderDesc.fragment = &fragment;
-        WGPURenderPipeline pipeline = t.createRenderPipelineTracked(renderDesc);
-
         WGPURenderPassColorAttachment attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
         attachment.view = targetView;
         attachment.loadOp = WGPULoadOp_Clear;
@@ -1477,7 +1684,7 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &attachment;
         WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
-        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+        wgpuRenderPassEncoderSetPipeline(pass, pipelineBundle.renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, static_cast<uint32_t>(calls.size()), 0, 0);
         wgpuRenderPassEncoderEnd(pass);
@@ -1541,6 +1748,18 @@ TextureCase baseTextureSampleSampledCase(AllFeaturesMaxLimitsGpuTest& t, SampleK
     c.samplePoints = t.param<std::string>("samplePoints");
     c.mipLevelCount = kMipLevelCount;
     c.builtin = "textureSample";
+    return c;
+}
+
+TextureCase baseTextureSampleGradSampledCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+    TextureCase c = baseSampledCase(t, kind);
+    c.builtin = "textureSampleGrad";
+    return c;
+}
+
+TextureCase baseTextureSampleBiasSampledCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+    TextureCase c = baseTextureSampleSampledCase(t, kind);
+    c.builtin = "textureSampleBias";
     return c;
 }
 
@@ -1907,6 +2126,102 @@ void executeTextureSampleDepth3D(AllFeaturesMaxLimitsGpuTest& t) {
 
 void executeTextureSampleDepthCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseTextureSampleDepthCase(t, SampleKind::DepthCubeArray);
+    c.viewDimension = WGPUTextureViewDimension_CubeArray;
+    c.baseSize = baseSize(32, 32, 24);
+    c.mipLevelCount = 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleGradSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleGradSampledCase(t, SampleKind::Sampled2D);
+    c.baseSize = baseSize(8, 8, 1);
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    executeCase(t, c);
+}
+
+void executeTextureSampleGradSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string dim = t.param<std::string>("dim");
+    TextureCase c = baseTextureSampleGradSampledCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
+    c.textureDimension = dim == "3d" ? WGPUTextureDimension_3D : WGPUTextureDimension_2D;
+    c.viewDimension = dim == "3d" ? WGPUTextureViewDimension_3D : WGPUTextureViewDimension_Cube;
+    c.baseSize = dim == "3d" ? baseSize(8, 8, 8) : baseSize(32, 32, 6);
+    c.mipLevelCount = dim == "3d" ? kMipLevelCount : 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.modeW = addressModeFromShort(t.param<std::string>("modeW"));
+    c.useOffset = dim == "3d" && t.param<bool>("offset");
+    executeCase(t, c);
+}
+
+void executeTextureSampleGradSampled2DArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleGradSampledCase(t, SampleKind::Sampled2DArray);
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleGradSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleGradSampledCase(t, SampleKind::SampledCubeArray);
+    c.viewDimension = WGPUTextureViewDimension_CubeArray;
+    c.baseSize = baseSize(32, 32, 24);
+    c.mipLevelCount = 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleBiasSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleBiasSampledCase(t, SampleKind::Sampled2D);
+    c.baseSize = baseSize(8, 8, 1);
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    executeCase(t, c);
+}
+
+void executeTextureSampleBiasSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string dim = t.param<std::string>("dim");
+    TextureCase c = baseTextureSampleBiasSampledCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
+    c.textureDimension = dim == "3d" ? WGPUTextureDimension_3D : WGPUTextureDimension_2D;
+    c.viewDimension = dim == "3d" ? WGPUTextureViewDimension_3D : WGPUTextureViewDimension_Cube;
+    c.baseSize = dim == "3d" ? baseSize(8, 8, 8) : baseSize(32, 32, 6);
+    c.mipLevelCount = dim == "3d" ? kMipLevelCount : 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.modeW = addressModeFromShort(t.param<std::string>("modeW"));
+    c.useOffset = dim == "3d" && t.param<bool>("offset");
+    executeCase(t, c);
+}
+
+void executeTextureSampleBiasSampled2DArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleBiasSampledCase(t, SampleKind::Sampled2DArray);
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    c.baseSize = baseSize(8, 8, 4);
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleBiasSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleBiasSampledCase(t, SampleKind::SampledCubeArray);
     c.viewDimension = WGPUTextureViewDimension_CubeArray;
     c.baseSize = baseSize(32, 32, 24);
     c.mipLevelCount = 1;

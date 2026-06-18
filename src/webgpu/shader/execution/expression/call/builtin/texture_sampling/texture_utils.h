@@ -60,4 +60,14 @@ void executeTextureSampleDepth2DArray(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleDepth3D(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleDepthCubeArray(AllFeaturesMaxLimitsGpuTest& t);
 
+void executeTextureSampleGradSampled2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleGradSampled3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleGradSampled2DArray(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleGradSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t);
+
+void executeTextureSampleBiasSampled2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleBiasSampled3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleBiasSampled2DArray(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleBiasSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t);
+
 } // namespace cts::texture_utils
