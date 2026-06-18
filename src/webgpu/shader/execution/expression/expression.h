@@ -29,6 +29,13 @@ enum class ScalarKind {
     U32,
     I32,
     Bool,
+    F32,
+    F16,
+    // Abstract numeric types. These only appear as *parameter* (input) kinds for const-eval
+    // cases; they are emitted as untyped numeric literals (AbstractInt / AbstractFloat) and
+    // never used as storage/result kinds.
+    AbstractInt,
+    AbstractFloat,
 };
 
 // The input value source, mirroring upstream's InputSource.
@@ -62,7 +69,10 @@ inline ExprType vecType(int width, ScalarKind kind) {
     return ExprType{kind, width};
 }
 
-// A scalar value. For U32/I32 'bits' holds the 32-bit pattern; for Bool it is 0 or 1.
+// A scalar value. For U32/I32 'bits' holds the 32-bit pattern; for Bool it is 0 or 1; for
+// F32 it holds the 32-bit IEEE pattern; for F16 the 16-bit IEEE pattern (in the low 16 bits).
+// AbstractInt holds an i32 bit-pattern (the spec only bitcasts AbstractInt via its i32 value)
+// and AbstractFloat holds an f32 bit-pattern (emitted as an AbstractFloat literal).
 struct Scalar {
     ScalarKind kind = ScalarKind::U32;
     uint32_t bits = 0;
@@ -82,6 +92,22 @@ inline Scalar i32Bits(uint32_t v) {
 }
 inline Scalar boolean(bool v) {
     return Scalar{ScalarKind::Bool, v ? 1u : 0u};
+}
+// f32 from an existing 32-bit pattern.
+inline Scalar f32Bits(uint32_t v) {
+    return Scalar{ScalarKind::F32, v};
+}
+// f16 from an existing 16-bit pattern.
+inline Scalar f16Bits(uint16_t v) {
+    return Scalar{ScalarKind::F16, static_cast<uint32_t>(v)};
+}
+// AbstractInt carrying an i32 bit pattern.
+inline Scalar abstractInt(int32_t v) {
+    return Scalar{ScalarKind::AbstractInt, static_cast<uint32_t>(v)};
+}
+// AbstractFloat carrying an f32 bit pattern.
+inline Scalar abstractFloatBits(uint32_t v) {
+    return Scalar{ScalarKind::AbstractFloat, v};
 }
 
 // A value: a scalar (width 1) or a vector (width 2/3/4). Always holds 'width' elements.
@@ -109,10 +135,32 @@ inline CaseValue vec4(Scalar a, Scalar b, Scalar c, Scalar d) {
     return CaseValue::vec({a, b, c, d});
 }
 
+// Per-element acceptance for a result whose exact bits may be canonicalized by the GPU
+// (used for bitcast-to-float). 'any' accepts any bit pattern (the value is unbounded, e.g.
+// an Inf/NaN result in runtime mode). Otherwise the read-back bits must match one of
+// 'acceptBits' exactly. For float results this set is { exact } plus the flushed zero bit
+// patterns when the exact value is subnormal, plus any-NaN handling encoded by 'anyNaN'.
+struct ExpectedElement {
+    bool any = false;        // accept any bit pattern (unbounded result)
+    bool anyNaN = false;     // additionally accept any NaN bit pattern (float result is NaN)
+    int floatWidth = 0;      // 0 == integer-exact; 32 or 16 == float result element width
+    std::vector<uint32_t> acceptBits; // accepted exact bit patterns (low 16 bits used if width 16)
+};
+
 // A single expression test case: one input value per parameter and the expected result.
+// If 'expectedAccept' is non-empty it overrides bit-exact comparison of 'expected' and is used
+// per result element (its length must equal the result width). This is how bitcast expresses
+// NaN-any / subnormal-flush acceptance for float results without inflating integer comparisons.
 struct Case {
     std::vector<CaseValue> inputs;
     CaseValue expected;
+    std::vector<ExpectedElement> expectedAccept;
+
+    Case() = default;
+    Case(std::vector<CaseValue> in, CaseValue exp)
+        : inputs(std::move(in)), expected(std::move(exp)) {}
+    Case(std::vector<CaseValue> in, CaseValue exp, std::vector<ExpectedElement> acc)
+        : inputs(std::move(in)), expected(std::move(exp)), expectedAccept(std::move(acc)) {}
 };
 
 // ExpressionBuilder returns the WGSL used to evaluate an expression with the given input

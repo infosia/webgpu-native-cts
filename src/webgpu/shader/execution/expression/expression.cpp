@@ -6,8 +6,10 @@
 #include "webgpu/shader/execution/expression/expression.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -37,8 +39,22 @@ const char* scalarKindName(ScalarKind kind) {
             return "i32";
         case ScalarKind::Bool:
             return "bool";
+        case ScalarKind::F32:
+            return "f32";
+        case ScalarKind::F16:
+            return "f16";
+        case ScalarKind::AbstractInt:
+        case ScalarKind::AbstractFloat:
+            // Abstract numeric types are spelled implicitly via untyped literals; there is no
+            // concrete WGSL type name for them in this harness.
+            break;
     }
     std::abort();
+}
+
+// Element byte width: f16 is 2 bytes, everything else (u32/i32/f32/bool-as-u32) is 4.
+uint32_t elementBytes(ScalarKind kind) {
+    return kind == ScalarKind::F16 ? 2u : 4u;
 }
 
 // WGSL type spelling of an ExprType (e.g. "u32", "vec3<i32>").
@@ -69,12 +85,13 @@ struct SizeAlign {
 };
 
 SizeAlign sizeAndAlignmentOf(ExprType ty) {
-    // scalar: size 4, alignment 4 (u32/i32/bool all 4 bytes here).
-    SizeAlign out{4, 4};
+    // scalar: size = element bytes (4 for u32/i32/f32/bool, 2 for f16), alignment == size.
+    const uint32_t eb = elementBytes(ty.kind);
+    SizeAlign out{eb, eb};
     if (ty.width > 1) {
         const uint32_t n = ty.width == 3 ? 4u : static_cast<uint32_t>(ty.width);
-        out.size *= n;
-        out.alignment *= n;
+        out.size = eb * n;
+        out.alignment = eb * n;
     }
     return out;
 }
@@ -173,6 +190,29 @@ std::string toStorage(ExprType ty, const std::string& expr) {
     return expr;
 }
 
+// Emits a decimal literal that exactly represents the given finite float value, with an
+// explicit decimal point and the given WGSL suffix ('f' for f32, '' for AbstractFloat).
+// Uses round-trip-precise digits. Only used for finite values.
+std::string floatLiteral(double value, const char* suffix) {
+    std::ostringstream out;
+    out.precision(17);
+    out << value;
+    std::string s = out.str();
+    // Ensure a decimal point / exponent so it is parsed as a float, not an int.
+    if (s.find('.') == std::string::npos && s.find('e') == std::string::npos &&
+        s.find('E') == std::string::npos && s.find("inf") == std::string::npos &&
+        s.find("nan") == std::string::npos) {
+        s += ".0";
+    }
+    return s + suffix;
+}
+
+float f32FromBits(uint32_t bits) {
+    float f;
+    std::memcpy(&f, &bits, 4);
+    return f;
+}
+
 // WGSL literal for a scalar value as a const-expression input.
 std::string scalarWgsl(const Scalar& s) {
     switch (s.kind) {
@@ -185,6 +225,18 @@ std::string scalarWgsl(const Scalar& s) {
         }
         case ScalarKind::Bool:
             return s.bits != 0 ? "true" : "false";
+        case ScalarKind::F32:
+            // Exact: reinterpret the stored 32-bit pattern (handles all finite values precisely).
+            return "bitcast<f32>(" + std::to_string(s.bits) + "u)";
+        case ScalarKind::F16:
+            // Exact: pack the 16-bit pattern into the low half of a u32 and take the low element.
+            return "bitcast<vec2<f16>>(" + std::to_string(s.bits & 0xFFFFu) + "u).x";
+        case ScalarKind::AbstractInt:
+            // AbstractInt literal: emit the signed decimal value (no suffix).
+            return std::to_string(static_cast<int32_t>(s.bits));
+        case ScalarKind::AbstractFloat:
+            // AbstractFloat literal: emit an exact decimal of the finite f32 value (no suffix).
+            return floatLiteral(static_cast<double>(f32FromBits(s.bits)), "");
     }
     std::abort();
 }
@@ -194,8 +246,15 @@ std::string valueWgsl(const CaseValue& v, ScalarKind kind) {
     if (v.width == 1) {
         return scalarWgsl(v.elements[0]);
     }
+    // Abstract vectors are spelled without an explicit element type (vecN(...)).
+    const bool isAbstract =
+        kind == ScalarKind::AbstractInt || kind == ScalarKind::AbstractFloat;
     std::ostringstream out;
-    out << "vec" << v.width << "<" << scalarKindName(kind) << ">(";
+    if (isAbstract) {
+        out << "vec" << v.width << "(";
+    } else {
+        out << "vec" << v.width << "<" << scalarKindName(kind) << ">(";
+    }
     for (int i = 0; i < v.width; ++i) {
         if (i > 0) {
             out << ", ";
@@ -241,6 +300,15 @@ std::string buildShader(
     InputSource inputSource,
     const std::vector<Case>& cases) {
     std::ostringstream out;
+
+    // Emit `enable f16;` if any parameter or the result type is an f16 type.
+    bool usesF16 = resultType.kind == ScalarKind::F16;
+    for (ExprType ty : parameterTypes) {
+        usesF16 = usesF16 || ty.kind == ScalarKind::F16;
+    }
+    if (usesF16) {
+        out << "enable f16;\n";
+    }
 
     if (inputSource == InputSource::Const) {
         // Constant eval, 'direct' mode: assign each case's evaluated expression to the output.
@@ -321,11 +389,27 @@ std::vector<Case> packScalarsToVector(
         }
         std::vector<Scalar> rels;
         rels.reserve(static_cast<size_t>(vectorWidth));
+        bool anyAccept = false;
         for (int i = 0; i < vectorWidth; ++i) {
             const Case& src = cases[clampIdx(caseIdx + static_cast<size_t>(i))];
             rels.push_back(src.expected.elements[0]);
+            anyAccept = anyAccept || !src.expectedAccept.empty();
         }
         pc.expected = CaseValue::vec(std::move(rels));
+        if (anyAccept) {
+            pc.expectedAccept.reserve(static_cast<size_t>(vectorWidth));
+            for (int i = 0; i < vectorWidth; ++i) {
+                const Case& src = cases[clampIdx(caseIdx + static_cast<size_t>(i))];
+                if (!src.expectedAccept.empty()) {
+                    pc.expectedAccept.push_back(src.expectedAccept[0]);
+                } else {
+                    // No acceptance override on this source: require exact match of its expected.
+                    ExpectedElement ee;
+                    ee.acceptBits.push_back(src.expected.elements[0].bits);
+                    pc.expectedAccept.push_back(ee);
+                }
+            }
+        }
         packed.push_back(std::move(pc));
         caseIdx += static_cast<size_t>(vectorWidth);
     }
@@ -387,10 +471,12 @@ void submitBatch(
             const uint32_t base = static_cast<uint32_t>(caseIdx) * caseStride;
             structLayout(parameterTypes, inputSource, [&](const MemberInfo& m) {
                 const CaseValue& arg = cases[caseIdx].inputs[static_cast<size_t>(m.index)];
-                // Each element occupies 4 bytes; vec3 pads element[3] which we leave zero.
+                const uint32_t eb = elementBytes(m.type.kind);
+                // Each element occupies 'eb' bytes (2 for f16, 4 otherwise); vec3 pads the 4th
+                // element slot which we leave zero.
                 for (int e = 0; e < arg.width; ++e) {
                     const uint32_t bits = arg.elements[static_cast<size_t>(e)].bits;
-                    std::memcpy(&inputData[base + m.offset + static_cast<uint32_t>(e) * 4], &bits, 4);
+                    std::memcpy(&inputData[base + m.offset + static_cast<uint32_t>(e) * eb], &bits, eb);
                 }
             });
         }
@@ -411,7 +497,10 @@ void submitBatch(
         e1.binding = 1;
         e1.buffer = inputBuffer;
         e1.offset = 0;
-        e1.size = static_cast<uint64_t>(cases.size()) * caseStride;
+        // Storage/uniform binding sizes must be a multiple of 4; the buffer itself is allocated
+        // 4-aligned, so binding the rounded-up size stays within bounds (matters for f16, whose
+        // case stride can be 2 bytes).
+        e1.size = alignUp(static_cast<uint32_t>(cases.size()) * caseStride, 4);
         entries.push_back(e1);
     }
 
@@ -432,13 +521,15 @@ void submitBatch(
     WGPUCommandBuffer commands = t.finishTracked(encoder);
     wgpuQueueSubmit(t.queue(), 1, &commands);
 
-    // Read back and bit-exact compare.
+    // Read back and compare (bit-exact unless the case carries a per-element acceptance set).
     const ExprType result = resultType;
     const uint32_t stride = outputStride;
+    const uint32_t resElemBytes = elementBytes(resultType.kind);
     std::vector<Case> casesCopy = cases;
     t.expectGPUBufferValuesPassCheck(
         outputBuffer,
-        [result, stride, casesCopy](const uint8_t* data, size_t len) -> std::optional<std::string> {
+        [result, stride, resElemBytes, casesCopy](
+            const uint8_t* data, size_t len) -> std::optional<std::string> {
             std::ostringstream errs;
             int failures = 0;
             for (size_t caseIdx = 0; caseIdx < casesCopy.size(); ++caseIdx) {
@@ -448,24 +539,61 @@ void submitBatch(
                 got.elements.resize(static_cast<size_t>(result.width));
                 bool overflow = false;
                 for (int e = 0; e < result.width; ++e) {
-                    const size_t byteOff = off + static_cast<size_t>(e) * 4;
-                    if (byteOff + 4 > len) {
+                    const size_t byteOff = off + static_cast<size_t>(e) * resElemBytes;
+                    if (byteOff + resElemBytes > len) {
                         overflow = true;
                         break;
                     }
                     uint32_t bits = 0;
-                    std::memcpy(&bits, data + byteOff, 4);
+                    std::memcpy(&bits, data + byteOff, resElemBytes);
                     got.elements[static_cast<size_t>(e)] = Scalar{result.kind, bits};
                 }
                 if (overflow) {
                     return std::string("readback buffer too small");
                 }
                 const CaseValue& exp = casesCopy[caseIdx].expected;
+                const std::vector<ExpectedElement>& acc = casesCopy[caseIdx].expectedAccept;
                 bool matched = exp.width == got.width;
-                for (int e = 0; matched && e < exp.width; ++e) {
-                    if (exp.elements[static_cast<size_t>(e)].bits !=
-                        got.elements[static_cast<size_t>(e)].bits) {
-                        matched = false;
+                if (matched && !acc.empty()) {
+                    // Per-element acceptance: 'any' passes; otherwise the read-back bits must equal
+                    // one of acceptBits, with optional any-NaN acceptance for float results.
+                    for (int e = 0; matched && e < got.width; ++e) {
+                        const ExpectedElement& ee = acc[static_cast<size_t>(e)];
+                        const uint32_t gb = got.elements[static_cast<size_t>(e)].bits;
+                        if (ee.any) {
+                            continue;
+                        }
+                        bool ok = false;
+                        for (uint32_t ab : ee.acceptBits) {
+                            const uint32_t mask =
+                                ee.floatWidth == 16 ? 0xFFFFu : 0xFFFFFFFFu;
+                            if ((gb & mask) == (ab & mask)) {
+                                ok = true;
+                                break;
+                            }
+                        }
+                        if (!ok && ee.anyNaN) {
+                            // Accept any NaN bit pattern at the result element width.
+                            if (ee.floatWidth == 16) {
+                                const uint32_t exp16 = (gb >> 10) & 0x1Fu;
+                                const uint32_t mant16 = gb & 0x3FFu;
+                                ok = exp16 == 0x1Fu && mant16 != 0;
+                            } else {
+                                const uint32_t exp32 = (gb >> 23) & 0xFFu;
+                                const uint32_t mant32 = gb & 0x7FFFFFu;
+                                ok = exp32 == 0xFFu && mant32 != 0;
+                            }
+                        }
+                        if (!ok) {
+                            matched = false;
+                        }
+                    }
+                } else {
+                    for (int e = 0; matched && e < exp.width; ++e) {
+                        if (exp.elements[static_cast<size_t>(e)].bits !=
+                            got.elements[static_cast<size_t>(e)].bits) {
+                            matched = false;
+                        }
                     }
                 }
                 if (!matched) {
