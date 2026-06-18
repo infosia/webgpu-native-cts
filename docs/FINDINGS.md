@@ -1693,4 +1693,20 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-119 — yawgpu: `pack2x16float` / `unpack2x16float` error (Metal)
+
+- **Backend:** yawgpu (Metal). Deterministic.
+- **Found by:** `shader,execution,expression,call,builtin,pack2x16float:*` (4) and `unpack2x16float:*`
+  (4) — all input sources (const/uniform/storage_r/storage_rw) fail with `uncaptured error: queue
+  submit cannot use an error command buffer`. The 8 snorm/unorm pack/unpack builtins
+  (`{pack,unpack}{4x8,2x16}{snorm,unorm}`) all pass on yawgpu.
+- **Cross-check:** Dawn passes all 11 (port correct). `pack2x16float`/`unpack2x16float` are core WGSL
+  builtins (no `shader-f16` feature required — the f16 is internal), so this is a yawgpu/naga gap:
+  likely naga's MSL lowering emits `half`-typed code for the internal f16 (un)packing that yawgpu's
+  Metal pipeline rejects (yawgpu Metal lacks the f16 feature; cf. F-115-era f16 skips), whereas Dawn's
+  Metal handles it. Naga-MSL suspect — cross-check vs wgpu-native pending per [[naga-fix-crosscheck-wgpu-native]].
+- **Status:** OPEN (2026-06-18). cts port correct (Dawn-green) and committed; no cts-side action.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
