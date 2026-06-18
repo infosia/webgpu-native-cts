@@ -1648,4 +1648,22 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-116 — yawgpu: `arrayLength` off-by-one when binding size isn't a whole multiple of element stride (Metal)
+
+- **Backend:** yawgpu (Metal, Apple). Deterministic.
+- **Found by:** `shader,execution,expression,call,builtin,arrayLength:multiple_elements:buffer_size=1004;type="vec3<f32>"|"vec3<i32>"|"vec3<u32>";stride=16` — 3 cases. `GPU buffer mismatch: expected 62, got 63`.
+- **Observed:** for a runtime-sized `array<vec3<T>>` with element stride 16 bound over a 1004-byte
+  region, `arrayLength` returns **63**; the WGSL spec value is `floor((bindingSize − arrayOffset) /
+  elementStride) = floor(1004/16) = floor(62.75) = 62`. yawgpu over-counts by one when the binding
+  size is not a whole multiple of the element stride (here the element *size* 12 < *stride* 16, so the
+  trailing 12 bytes don't form a full strided element) — likely yawgpu rounds up / counts the last
+  element by size rather than stride.
+- **Cross-check:** **Dawn returns 62 (= the spec value, test passes)**; only yawgpu diverges. Likely
+  yawgpu-core's runtime-array-length derivation (the binding-size → element-count math), not naga.
+  wgpu-native cross-check pending per [[naga-fix-crosscheck-wgpu-native]].
+- **Status:** OPEN (2026-06-18). The cts port is correct (Dawn-green) and committed; no cts-side
+  action.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
