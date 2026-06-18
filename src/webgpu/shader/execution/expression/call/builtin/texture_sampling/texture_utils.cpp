@@ -14,6 +14,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 #include "webgpu/texture_format.h"
 #include "webgpu/util/texel_data.h"
@@ -1971,6 +1972,616 @@ TextureCase baseTextureSampleBaseClampToEdgeCase(AllFeaturesMaxLimitsGpuTest& t)
     return c;
 }
 
+constexpr uint32_t kMetadataMaxMipsForTest = 3;
+constexpr uint32_t kMetadataMaxSamplesForTest = 4;
+constexpr uint32_t kMetadataNumLayers = 36;
+
+struct MetadataQueryCase {
+    std::string stage = "compute";
+    std::string textureType;
+    std::string valueExpr;
+    WGPUTextureFormat format = WGPUTextureFormat_RGBA8Unorm;
+    WGPUTextureDimension textureDimension = WGPUTextureDimension_2D;
+    WGPUTextureViewDimension viewDimension = WGPUTextureViewDimension_2D;
+    WGPUTextureAspect aspect = WGPUTextureAspect_All;
+    WGPUTextureUsage usage = WGPUTextureUsage_TextureBinding;
+    WGPUTextureSampleType sampleType = WGPUTextureSampleType_Float;
+    bool storageTexture = false;
+    WGPUStorageTextureAccess storageAccess = WGPUStorageTextureAccess_BindingNotUsed;
+    WGPUExtent3D size = WGPUExtent3D{1, 1, 1};
+    uint32_t sampleCount = 1;
+    uint32_t textureMipCount = 1;
+    uint32_t baseMipLevel = 0;
+    uint32_t viewMipCount = WGPU_MIP_LEVEL_COUNT_UNDEFINED;
+    uint32_t baseArrayLayer = 0;
+    uint32_t arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
+    std::array<uint32_t, 4> expected = {0, 0, 0, 0};
+    uint32_t expectedCount = 1;
+};
+
+struct MetadataPipelineBundle {
+    WGPUShaderModule module = nullptr;
+    WGPUBindGroupLayout textureBindGroupLayout = nullptr;
+    WGPUBindGroupLayout resultBindGroupLayout = nullptr;
+    WGPUPipelineLayout pipelineLayout = nullptr;
+    WGPUComputePipeline computePipeline = nullptr;
+    WGPURenderPipeline renderPipeline = nullptr;
+};
+
+uint32_t paramU32(const ParamRecord& record, std::string_view key) {
+    return static_cast<uint32_t>(valueAs<int>(*findParam(record, key)));
+}
+
+uint32_t paramU32(const Fixture& t, std::string_view key) {
+    return static_cast<uint32_t>(t.param<int>(key));
+}
+
+std::string viewDimensionParam(const ParamRecord& record) {
+    return paramString(record, "dimensions");
+}
+
+WGPUTextureViewDimension parseViewDimension(std::string_view value) {
+    if (value == "1d") return WGPUTextureViewDimension_1D;
+    if (value == "2d") return WGPUTextureViewDimension_2D;
+    if (value == "2d-array") return WGPUTextureViewDimension_2DArray;
+    if (value == "3d") return WGPUTextureViewDimension_3D;
+    if (value == "cube") return WGPUTextureViewDimension_Cube;
+    if (value == "cube-array") return WGPUTextureViewDimension_CubeArray;
+    return WGPUTextureViewDimension_Undefined;
+}
+
+WGPUTextureDimension textureDimensionForView(WGPUTextureViewDimension dimension) {
+    switch (dimension) {
+        case WGPUTextureViewDimension_1D:
+            return WGPUTextureDimension_1D;
+        case WGPUTextureViewDimension_3D:
+            return WGPUTextureDimension_3D;
+        default:
+            return WGPUTextureDimension_2D;
+    }
+}
+
+std::string wgslDimensionName(WGPUTextureViewDimension dimension) {
+    switch (dimension) {
+        case WGPUTextureViewDimension_1D:
+            return "1d";
+        case WGPUTextureViewDimension_2D:
+            return "2d";
+        case WGPUTextureViewDimension_2DArray:
+            return "2d_array";
+        case WGPUTextureViewDimension_3D:
+            return "3d";
+        case WGPUTextureViewDimension_Cube:
+            return "cube";
+        case WGPUTextureViewDimension_CubeArray:
+            return "cube_array";
+        default:
+            return "2d";
+    }
+}
+
+WGPUTextureAspect parseAspect(std::string_view value) {
+    if (value == "depth-only") return WGPUTextureAspect_DepthOnly;
+    if (value == "stencil-only") return WGPUTextureAspect_StencilOnly;
+    return WGPUTextureAspect_All;
+}
+
+std::vector<Value> formatAspects(WGPUTextureFormat format) {
+    if (isDepthTextureFormat(format) && isStencilTextureFormat(format)) {
+        return values({"depth-only", "stencil-only"});
+    }
+    return values({"all"});
+}
+
+std::vector<Value> formatSamples(WGPUTextureFormat format) {
+    if (textureFormatInfo(format).multisample) {
+        return {Value(1), Value(static_cast<int>(kMetadataMaxSamplesForTest))};
+    }
+    return {Value(1)};
+}
+
+bool dimensionsValidForStorage(WGPUTextureViewDimension dimension) {
+    return dimension == WGPUTextureViewDimension_1D || dimension == WGPUTextureViewDimension_2D
+        || dimension == WGPUTextureViewDimension_2DArray || dimension == WGPUTextureViewDimension_3D;
+}
+
+std::vector<Value> viewDimensionsFor(WGPUTextureFormat format, uint32_t samples) {
+    if (samples > 1) {
+        return values({"2d"});
+    }
+    std::vector<Value> out;
+    for (const char* dim : {"1d", "2d", "2d-array", "3d", "cube", "cube-array"}) {
+        const WGPUTextureViewDimension view = parseViewDimension(dim);
+        if (textureFormatAndDimensionPossiblyCompatible(textureDimensionForView(view), format)) {
+            out.emplace_back(dim);
+        }
+    }
+    return out;
+}
+
+std::vector<Value> metadataMipCounts(WGPUTextureFormat, WGPUTextureViewDimension dimension, uint32_t samples) {
+    if (samples != 1 || textureDimensionForView(dimension) == WGPUTextureDimension_1D) {
+        return {Value(1)};
+    }
+    return {Value(1), Value(static_cast<int>(kMetadataMaxMipsForTest))};
+}
+
+std::vector<Value> metadataBaseMipLevels(uint32_t textureMipCount) {
+    std::vector<Value> out;
+    for (uint32_t i = 0; i < textureMipCount; ++i) {
+        out.emplace_back(static_cast<int>(i));
+    }
+    return out;
+}
+
+std::vector<Value> metadataDimensionsLevels(uint32_t samples, uint32_t textureMipCount, uint32_t baseMipLevel) {
+    if (samples > 1) {
+        return {Value::undef()};
+    }
+    std::vector<Value> out;
+    out.push_back(Value::undef());
+    for (uint32_t i = 0; i < textureMipCount - baseMipLevel; ++i) {
+        out.emplace_back(static_cast<int>(i));
+    }
+    return out;
+}
+
+uint32_t alignForMetadata(uint32_t value, uint32_t alignment) {
+    return alignToU32(value, alignment);
+}
+
+WGPUExtent3D metadataTestSize(WGPUTextureViewDimension dimension, WGPUTextureFormat format, uint32_t mipLevel) {
+    constexpr uint32_t kMinLen = 1u << kMetadataMaxMipsForTest;
+    constexpr uint32_t kNumCubeFaces = 6;
+    const TextureFormatInfo& info = textureFormatInfo(format);
+    const uint32_t bw = info.blockWidth;
+    const uint32_t bh = info.blockHeight;
+    switch (dimension) {
+        case WGPUTextureViewDimension_1D: {
+            const uint32_t w = alignForMetadata(kMinLen, bw) * 2u;
+            return WGPUExtent3D{w, 1, 1};
+        }
+        case WGPUTextureViewDimension_2D: {
+            const uint32_t w = alignForMetadata(kMinLen, bw) * 2u;
+            const uint32_t h = alignForMetadata(kMinLen, bh) * 3u;
+            return WGPUExtent3D{w, h, 1};
+        }
+        case WGPUTextureViewDimension_2DArray: {
+            const uint32_t w = alignForMetadata(kMinLen, bw) * 4u;
+            const uint32_t h = alignForMetadata(kMinLen, bh) * 3u;
+            return WGPUExtent3D{w, h, 4};
+        }
+        case WGPUTextureViewDimension_3D: {
+            const uint32_t w = alignForMetadata(kMinLen, bw) * 2u;
+            const uint32_t h = alignForMetadata(kMinLen, bh) * 3u;
+            const uint32_t d = kMinLen * 4u;
+            return WGPUExtent3D{w, h, d >> mipLevel};
+        }
+        case WGPUTextureViewDimension_Cube: {
+            const uint32_t l = alignForMetadata(kMinLen, bw) * alignForMetadata(kMinLen, bh) * 3u;
+            return WGPUExtent3D{l, l, kNumCubeFaces};
+        }
+        case WGPUTextureViewDimension_CubeArray: {
+            const uint32_t l = alignForMetadata(kMinLen, bw) * alignForMetadata(kMinLen, bh) * 4u;
+            return WGPUExtent3D{l, l, kNumCubeFaces * 3u};
+        }
+        default:
+            return WGPUExtent3D{1, 1, 1};
+    }
+}
+
+std::array<uint32_t, 4> expectedDimensions(WGPUTextureViewDimension dimension, WGPUExtent3D size, uint32_t mip) {
+    const uint32_t w = size.width >> mip;
+    const uint32_t h = std::max(1u, size.height) >> mip;
+    const uint32_t d = std::max(1u, size.depthOrArrayLayers) >> mip;
+    switch (dimension) {
+        case WGPUTextureViewDimension_1D:
+            return {w, 0, 0, 0};
+        case WGPUTextureViewDimension_3D:
+            return {w, h, d, 0};
+        default:
+            return {w, h, 0, 0};
+    }
+}
+
+uint32_t dimensionReturnCount(WGPUTextureViewDimension dimension) {
+    if (dimension == WGPUTextureViewDimension_1D) return 1;
+    if (dimension == WGPUTextureViewDimension_3D) return 3;
+    return 2;
+}
+
+bool formatLooksUint(WGPUTextureFormat format) {
+    return std::string_view(textureFormatInfo(format).identifier).find("uint") != std::string_view::npos;
+}
+
+bool formatLooksSint(WGPUTextureFormat format) {
+    return std::string_view(textureFormatInfo(format).identifier).find("sint") != std::string_view::npos;
+}
+
+WGPUTextureSampleType metadataSampleType(WGPUTextureFormat format, WGPUTextureAspect aspect, bool depthTextureType, uint32_t samples) {
+    if (aspect == WGPUTextureAspect_StencilOnly || isStencilOnlyFormat(format)) {
+        return WGPUTextureSampleType_Uint;
+    }
+    if (depthTextureType) {
+        return WGPUTextureSampleType_Depth;
+    }
+    if (isDepthTextureFormat(format)) {
+        return WGPUTextureSampleType_UnfilterableFloat;
+    }
+    if (formatLooksUint(format)) {
+        return WGPUTextureSampleType_Uint;
+    }
+    if (formatLooksSint(format)) {
+        return WGPUTextureSampleType_Sint;
+    }
+    if (samples > 1 || !isPossiblyFilterableAsTextureF32(format)) {
+        return WGPUTextureSampleType_UnfilterableFloat;
+    }
+    return WGPUTextureSampleType_Float;
+}
+
+std::string sampledWGSLTypeFor(WGPUTextureFormat format, WGPUTextureAspect aspect) {
+    if (aspect == WGPUTextureAspect_StencilOnly || isStencilOnlyFormat(format) || formatLooksUint(format)) {
+        return "u32";
+    }
+    if (formatLooksSint(format)) {
+        return "i32";
+    }
+    return "f32";
+}
+
+std::string storageAccessWGSL(WGPUStorageTextureAccess access) {
+    if (access == WGPUStorageTextureAccess_ReadOnly) return "read";
+    if (access == WGPUStorageTextureAccess_ReadWrite) return "read_write";
+    return "write";
+}
+
+WGPUStorageTextureAccess parseStorageAccessParam(std::string_view value) {
+    if (value == "read" || value == "read-only") return WGPUStorageTextureAccess_ReadOnly;
+    if (value == "read_write" || value == "read-write") return WGPUStorageTextureAccess_ReadWrite;
+    return WGPUStorageTextureAccess_WriteOnly;
+}
+
+std::string metadataCastWGSL(uint32_t expectedCount) {
+    if (expectedCount == 1) return "vec4u(getValue(), 0u, 0u, 0u)";
+    if (expectedCount == 2) return "vec4u(getValue(), 0u, 0u)";
+    if (expectedCount == 3) return "vec4u(getValue(), 0u)";
+    return "getValue()";
+}
+
+std::string buildMetadataWgsl(const MetadataQueryCase& c) {
+    std::ostringstream wgsl;
+    const std::string outputType = c.expectedCount == 1
+        ? "u32"
+        : ("vec" + std::to_string(c.expectedCount) + "u");
+    wgsl << "@group(0) @binding(0) var texture : " << c.textureType << ";\n"
+         << "fn getValue() -> " << outputType << " { return " << c.valueExpr << "; }\n"
+         << "struct VOut {\n"
+         << "  @builtin(position) pos: vec4f,\n"
+         << "  @location(0) @interpolate(flat, either) ndx: u32,\n"
+         << "  @location(1) @interpolate(flat, either) result: vec4u,\n"
+         << "};\n";
+    if (c.stage == "compute") {
+        wgsl << "@group(1) @binding(0) var<storage, read_write> results: array<vec4u>;\n"
+             << "@compute @workgroup_size(1) fn csCompute(@builtin(global_invocation_id) id: vec3u) {\n"
+             << "  results[id.x] = " << metadataCastWGSL(c.expectedCount) << ";\n"
+             << "}\n";
+    } else if (c.stage == "vertex") {
+        wgsl << "@vertex fn vsVertex(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VOut {\n"
+             << "  let positions = array(vec2f(-1, 3), vec2f(3, -1), vec2f(-1, -1));\n"
+             << "  return VOut(vec4f(positions[vertex_index], 0, 1), instance_index, " << metadataCastWGSL(c.expectedCount) << ");\n"
+             << "}\n"
+             << "@fragment fn fsVertex(v: VOut) -> @location(0) vec4u { return v.result; }\n";
+    } else {
+        wgsl << "@vertex fn vsFragment(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VOut {\n"
+             << "  let positions = array(vec2f(-1, 3), vec2f(3, -1), vec2f(-1, -1));\n"
+             << "  return VOut(vec4f(positions[vertex_index], 0, 1), instance_index, vec4u(0));\n"
+             << "}\n"
+             << "@fragment fn fsFragment(v: VOut) -> @location(0) vec4u { return " << metadataCastWGSL(c.expectedCount) << "; }\n";
+    }
+    return wgsl.str();
+}
+
+MetadataPipelineBundle createMetadataPipelineBundle(WGPUDevice device, const std::string& wgsl, const MetadataQueryCase& c) {
+    MetadataPipelineBundle bundle;
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = stringView(wgsl);
+    WGPUShaderModuleDescriptor moduleDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    moduleDesc.nextInChain = &source.chain;
+    bundle.module = wgpuDeviceCreateShaderModule(device, &moduleDesc);
+
+    WGPUBindGroupLayoutEntry textureEntry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+    textureEntry.binding = 0;
+    textureEntry.visibility = stageVisibility(c.stage);
+    if (c.storageTexture) {
+        textureEntry.storageTexture = WGPU_STORAGE_TEXTURE_BINDING_LAYOUT_INIT;
+        textureEntry.storageTexture.access = c.storageAccess;
+        textureEntry.storageTexture.format = c.format;
+        textureEntry.storageTexture.viewDimension = c.viewDimension;
+    } else {
+        textureEntry.texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+        textureEntry.texture.sampleType = c.sampleType;
+        textureEntry.texture.viewDimension = c.viewDimension;
+        textureEntry.texture.multisampled = c.sampleCount > 1 ? WGPU_TRUE : WGPU_FALSE;
+    }
+    WGPUBindGroupLayoutDescriptor textureLayoutDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    textureLayoutDesc.entryCount = 1;
+    textureLayoutDesc.entries = &textureEntry;
+    bundle.textureBindGroupLayout = wgpuDeviceCreateBindGroupLayout(device, &textureLayoutDesc);
+
+    std::array<WGPUBindGroupLayout, 2> layouts = {{bundle.textureBindGroupLayout, nullptr}};
+    uint32_t layoutCount = 1;
+    if (c.stage == "compute") {
+        WGPUBindGroupLayoutEntry resultEntry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        resultEntry.binding = 0;
+        resultEntry.visibility = WGPUShaderStage_Compute;
+        resultEntry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+        resultEntry.buffer.type = WGPUBufferBindingType_Storage;
+        resultEntry.buffer.minBindingSize = 16;
+        WGPUBindGroupLayoutDescriptor resultLayoutDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        resultLayoutDesc.entryCount = 1;
+        resultLayoutDesc.entries = &resultEntry;
+        bundle.resultBindGroupLayout = wgpuDeviceCreateBindGroupLayout(device, &resultLayoutDesc);
+        layouts[1] = bundle.resultBindGroupLayout;
+        layoutCount = 2;
+    }
+
+    WGPUPipelineLayoutDescriptor pipelineLayoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pipelineLayoutDesc.bindGroupLayoutCount = layoutCount;
+    pipelineLayoutDesc.bindGroupLayouts = layouts.data();
+    bundle.pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &pipelineLayoutDesc);
+    if (c.stage == "compute") {
+        WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        pipelineDesc.layout = bundle.pipelineLayout;
+        pipelineDesc.compute.module = bundle.module;
+        pipelineDesc.compute.entryPoint = stringView("csCompute");
+        bundle.computePipeline = wgpuDeviceCreateComputePipeline(device, &pipelineDesc);
+    } else {
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format = WGPUTextureFormat_RGBA32Uint;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = bundle.module;
+        fragment.entryPoint = stringView(c.stage == "vertex" ? "fsVertex" : "fsFragment");
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+        WGPURenderPipelineDescriptor renderDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        renderDesc.layout = bundle.pipelineLayout;
+        renderDesc.vertex.module = bundle.module;
+        renderDesc.vertex.entryPoint = stringView(c.stage == "vertex" ? "vsVertex" : "vsFragment");
+        renderDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        renderDesc.multisample.count = 1;
+        renderDesc.fragment = &fragment;
+        bundle.renderPipeline = wgpuDeviceCreateRenderPipeline(device, &renderDesc);
+    }
+    return bundle;
+}
+
+std::string metadataPipelineKey(const std::string& wgsl, const MetadataQueryCase& c) {
+    std::ostringstream key;
+    key << wgsl
+        << "\n// layout:"
+        << " stage=" << c.stage
+        << " view=" << static_cast<uint32_t>(c.viewDimension)
+        << " sampleType=" << static_cast<uint32_t>(c.sampleType)
+        << " multisampled=" << c.sampleCount
+        << " storage=" << (c.storageTexture ? 1 : 0)
+        << " storageAccess=" << static_cast<uint32_t>(c.storageAccess)
+        << " storageFormat=" << static_cast<uint32_t>(c.storageTexture ? c.format : WGPUTextureFormat_Undefined);
+    return key.str();
+}
+
+const MetadataPipelineBundle& metadataPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const MetadataQueryCase& c) {
+    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, MetadataPipelineBundle>> cache;
+    auto& deviceCache = cache[t.device()];
+    const std::string key = metadataPipelineKey(wgsl, c);
+    auto it = deviceCache.find(key);
+    if (it == deviceCache.end()) {
+        it = deviceCache.emplace(key, createMetadataPipelineBundle(t.device(), wgsl, c)).first;
+    }
+    return it->second;
+}
+
+void skipIfNoStorageTexturesInStage(AllFeaturesMaxLimitsGpuTest& t, const std::string& stage) {
+    const WGPUCompatibilityModeLimits limits = t.getCompatibilityModeLimits();
+    if (stage == "fragment" && limits.maxStorageTexturesInFragmentStage == 0) {
+        t.skip("device does not support storage textures in fragment shaders");
+    }
+    if (stage == "vertex" && limits.maxStorageTexturesInVertexStage == 0) {
+        t.skip("device does not support storage textures in vertex shaders");
+    }
+}
+
+void skipIfMetadataTextureUnsupported(AllFeaturesMaxLimitsGpuTest& t, const MetadataQueryCase& c) {
+    t.skipIfTextureFormatNotSupported(c.format);
+    t.skipIfTextureViewDimensionNotSupported(c.viewDimension);
+    t.skipIfTextureFormatAndDimensionNotCompatible(c.format, c.textureDimension);
+    if (c.sampleCount > 1 && !t.isTextureFormatMultisampled(c.format)) {
+        t.skip("texture format is not multisampled");
+    }
+    if ((c.usage & WGPUTextureUsage_RenderAttachment) != 0) {
+        t.skipIfTextureFormatNotUsableAsRenderAttachment(c.format);
+    }
+    if (c.storageTexture) {
+        skipIfNoStorageTexturesInStage(t, c.stage);
+        if (!t.isTextureFormatUsableWithStorageAccessMode(c.format, c.storageAccess)) {
+            t.skip("texture format is not usable with requested storage access mode");
+        }
+    }
+    if (c.textureDimension == WGPUTextureDimension_3D && isBCTextureFormat(c.format)
+        && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureCompressionBCSliced3D)) {
+        t.skip("3D BC compressed textures require texture-compression-bc-sliced-3d");
+    }
+    if (c.textureDimension == WGPUTextureDimension_3D && isASTCTextureFormat(c.format)
+        && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureCompressionASTCSliced3D)) {
+        t.skip("3D ASTC compressed textures require texture-compression-astc-sliced-3d");
+    }
+}
+
+void executeMetadataQuery(AllFeaturesMaxLimitsGpuTest& t, const MetadataQueryCase& c) {
+    skipIfMetadataTextureUnsupported(t, c);
+
+    WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    textureDesc.size = c.size;
+    textureDesc.mipLevelCount = c.textureMipCount;
+    textureDesc.sampleCount = c.sampleCount;
+    textureDesc.dimension = c.textureDimension;
+    textureDesc.format = c.format;
+    textureDesc.usage = c.usage;
+    WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    viewDesc.dimension = c.viewDimension;
+    viewDesc.format = c.storageTexture ? c.format : WGPUTextureFormat_Undefined;
+    viewDesc.aspect = c.aspect;
+    viewDesc.baseMipLevel = c.baseMipLevel;
+    viewDesc.mipLevelCount = c.viewMipCount;
+    viewDesc.baseArrayLayer = c.baseArrayLayer;
+    viewDesc.arrayLayerCount = c.arrayLayerCount;
+    WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+
+    WGPUBufferDescriptor resultDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    resultDesc.size = 256;
+    resultDesc.usage = c.stage == "compute"
+        ? WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc
+        : WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer resultBuffer = t.createBufferTracked(resultDesc);
+
+    const std::string wgsl = buildMetadataWgsl(c);
+    const MetadataPipelineBundle& pipeline = metadataPipelineForDevice(t, wgsl, c);
+
+    WGPUBindGroupEntry textureEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+    textureEntry.binding = 0;
+    textureEntry.textureView = view;
+    WGPUBindGroupDescriptor textureBindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    textureBindGroupDesc.layout = pipeline.textureBindGroupLayout;
+    textureBindGroupDesc.entryCount = 1;
+    textureBindGroupDesc.entries = &textureEntry;
+    WGPUBindGroup textureBindGroup = t.createBindGroupTracked(textureBindGroupDesc);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    if (c.stage == "compute") {
+        WGPUBindGroupEntry resultEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+        resultEntry.binding = 0;
+        resultEntry.buffer = resultBuffer;
+        resultEntry.size = 16;
+        WGPUBindGroupDescriptor resultBindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        resultBindGroupDesc.layout = pipeline.resultBindGroupLayout;
+        resultBindGroupDesc.entryCount = 1;
+        resultBindGroupDesc.entries = &resultEntry;
+        WGPUBindGroup resultBindGroup = t.createBindGroupTracked(resultBindGroupDesc);
+
+        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, textureBindGroup, 0, nullptr);
+        wgpuComputePassEncoderSetBindGroup(pass, 1, resultBindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
+        wgpuComputePassEncoderEnd(pass);
+        wgpuComputePassEncoderRelease(pass);
+    } else {
+        WGPUTextureDescriptor targetDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        targetDesc.size = WGPUExtent3D{1, 1, 1};
+        targetDesc.mipLevelCount = 1;
+        targetDesc.sampleCount = 1;
+        targetDesc.dimension = WGPUTextureDimension_2D;
+        targetDesc.format = WGPUTextureFormat_RGBA32Uint;
+        targetDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+        WGPUTexture target = t.createTextureTracked(targetDesc);
+        WGPUTextureViewDescriptor targetViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        targetViewDesc.dimension = WGPUTextureViewDimension_2D;
+        targetViewDesc.format = WGPUTextureFormat_RGBA32Uint;
+        WGPUTextureView targetView = t.createViewTracked(target, targetViewDesc);
+
+        WGPURenderPassColorAttachment attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        attachment.view = targetView;
+        attachment.loadOp = WGPULoadOp_Clear;
+        attachment.storeOp = WGPUStoreOp_Store;
+        attachment.clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.colorAttachmentCount = 1;
+        passDesc.colorAttachments = &attachment;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline.renderPipeline);
+        wgpuRenderPassEncoderSetBindGroup(pass, 0, textureBindGroup, 0, nullptr);
+        wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+        t.copyTextureToBuffer(encoder, target, resultBuffer, 256, targetDesc.size);
+    }
+    submit(t, encoder);
+
+    t.expectGPUBufferValuesPassCheck(
+        resultBuffer,
+        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            if (len < 16) {
+                return std::string("metadata output buffer too small");
+            }
+            for (uint32_t i = 0; i < 4; ++i) {
+                uint32_t got = 0;
+                std::memcpy(&got, actual + i * sizeof(uint32_t), sizeof(uint32_t));
+                if (got != c.expected[i]) {
+                    std::ostringstream msg;
+                    msg << "metadata query mismatch component " << i
+                        << ": expected " << c.expected[i] << ", got " << got
+                        << ", textureType " << c.textureType << ", stage " << c.stage;
+                    return msg.str();
+                }
+            }
+            return std::nullopt;
+        },
+        0,
+        16);
+}
+
+MetadataQueryCase dimensionsCase(AllFeaturesMaxLimitsGpuTest& t, bool depth, bool storage) {
+    MetadataQueryCase c;
+    c.stage = t.param<std::string>("stage");
+    c.format = parseTextureFormat(t.param<std::string>("format"));
+    c.viewDimension = parseViewDimension(t.param<std::string>("dimensions"));
+    c.textureDimension = textureDimensionForView(c.viewDimension);
+    c.aspect = parseAspect(t.param<std::string>("aspect"));
+    c.sampleCount = t.hasParam("samples") ? paramU32(t, "samples") : 1u;
+    c.textureMipCount = paramU32(t, "textureMipCount");
+    c.baseMipLevel = paramU32(t, "baseMipLevel");
+    const uint32_t queryLevel = (!t.hasParam("textureDimensionsLevel") || t.paramIsUndefined("textureDimensionsLevel"))
+        ? 0u
+        : paramU32(t, "textureDimensionsLevel");
+    const uint32_t mip = c.baseMipLevel + queryLevel;
+    c.size = metadataTestSize(c.viewDimension, c.format, 0);
+    c.expected = expectedDimensions(c.viewDimension, c.size, mip);
+    c.expectedCount = dimensionReturnCount(c.viewDimension);
+    c.usage = c.sampleCount == 1
+        ? WGPUTextureUsage_TextureBinding
+        : WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+    if (storage) {
+        c.storageTexture = true;
+        c.storageAccess = parseStorageAccessParam(t.param<std::string>("access"));
+        c.usage = WGPUTextureUsage_StorageBinding;
+        c.sampleType = WGPUTextureSampleType_BindingNotUsed;
+        c.viewMipCount = 1;
+        c.textureType = "texture_storage_" + wgslDimensionName(c.viewDimension) + "<"
+            + std::string(textureFormatInfo(c.format).identifier) + ", "
+            + storageAccessWGSL(c.storageAccess) + ">";
+        c.valueExpr = "textureDimensions(texture)";
+    } else if (depth) {
+        const std::string base = c.sampleCount > 1 ? "texture_depth_multisampled" : "texture_depth";
+        c.textureType = base + "_" + wgslDimensionName(c.viewDimension);
+        c.sampleType = WGPUTextureSampleType_Depth;
+        c.valueExpr = (!t.hasParam("textureDimensionsLevel") || t.paramIsUndefined("textureDimensionsLevel"))
+            ? "textureDimensions(texture)"
+            : ("textureDimensions(texture, " + std::to_string(queryLevel) + "u)");
+    } else {
+        const std::string base = c.sampleCount > 1 ? "texture_multisampled" : "texture";
+        c.textureType = base + "_" + wgslDimensionName(c.viewDimension) + "<"
+            + sampledWGSLTypeFor(c.format, c.aspect) + ">";
+        c.sampleType = metadataSampleType(c.format, c.aspect, false, c.sampleCount);
+        c.valueExpr = (!t.hasParam("textureDimensionsLevel") || t.paramIsUndefined("textureDimensionsLevel"))
+            ? "textureDimensions(texture)"
+            : ("textureDimensions(texture, " + std::to_string(queryLevel) + "u)");
+    }
+    return c;
+}
+
 } // namespace
 
 std::vector<Value> shortShaderStages() {
@@ -1986,6 +2597,19 @@ std::vector<Value> allTextureFormats() {
 
 std::vector<Value> depthStencilFormats() {
     return formatValues(kDepthStencilFormats);
+}
+
+std::vector<Value> possibleStorageTextureFormats() {
+    std::vector<WGPUTextureFormat> formats;
+    formats.reserve(kStorageTextureFormats.size() + 1u + kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly.size());
+    for (WGPUTextureFormat format : kStorageTextureFormats) {
+        formats.push_back(format);
+    }
+    formats.push_back(WGPUTextureFormat_BGRA8Unorm);
+    for (WGPUTextureFormat format : kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly) {
+        formats.push_back(format);
+    }
+    return formatValues(formats);
 }
 
 std::vector<Value> shortAddressModes() {
@@ -2050,6 +2674,26 @@ bool isSampled1DColorTextureFormatParam(const ParamRecord& record) {
 
 bool isComputeStage(const ParamRecord& record) {
     return paramString(record, "stage") == "compute";
+}
+
+bool isStorageReadWriteFormatParam(const ParamRecord& record) {
+    const WGPUTextureFormat format = paramFormat(record);
+    return textureFormatInList(format, kReadWriteStorageTextureFormats)
+        || textureFormatInList(format, kTextureFormatsTier2EnablesStorageReadWrite);
+}
+
+bool isStorageReadWriteAccessOrFormatSupported(const ParamRecord& record) {
+    const std::string access = paramString(record, "access");
+    const std::string accessMode = paramString(record, "access_mode");
+    const bool readWrite = access == "read_write" || accessMode == "read_write";
+    return !readWrite || isStorageReadWriteFormatParam(record);
+}
+
+bool isNotWritableStorageInVertexStage(const ParamRecord& record) {
+    const std::string access = paramString(record, "access");
+    const std::string accessMode = paramString(record, "access_mode");
+    const std::string value = access.empty() ? accessMode : access;
+    return paramString(record, "stage") != "vertex" || value == "read";
 }
 
 ParamsBuilder addSampledTextureCommonParams(ParamsBuilder u, bool includeModeU, bool includeModeV) {
@@ -2509,6 +3153,222 @@ void executeTextureSampleCompareLevelCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
 void executeTextureSampleBaseClampToEdge2D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseTextureSampleBaseClampToEdgeCase(t);
     executeCase(t, c);
+}
+
+std::vector<Value> textureMetadataAspectsForFormat(const ParamRecord& record) {
+    return formatAspects(paramFormat(record));
+}
+
+std::vector<Value> textureMetadataSamplesForFormat(const ParamRecord& record) {
+    return formatSamples(paramFormat(record));
+}
+
+std::vector<Value> textureMetadataViewDimensions(const ParamRecord& record) {
+    const uint32_t samples = findParam(record, "samples") == nullptr ? 1u : paramU32(record, "samples");
+    return viewDimensionsFor(paramFormat(record), samples);
+}
+
+std::vector<Value> textureMetadataStorageViewDimensions(const ParamRecord& record) {
+    std::vector<Value> out;
+    for (const Value& value : textureMetadataViewDimensions(record)) {
+        if (dimensionsValidForStorage(parseViewDimension(valueAs<std::string>(value)))) {
+            out.push_back(value);
+        }
+    }
+    return out;
+}
+
+std::vector<Value> textureMetadataMipCounts(const ParamRecord& record) {
+    const uint32_t samples = findParam(record, "samples") == nullptr ? 1u : paramU32(record, "samples");
+    return metadataMipCounts(paramFormat(record), parseViewDimension(viewDimensionParam(record)), samples);
+}
+
+std::vector<Value> textureMetadataBaseMipLevels(const ParamRecord& record) {
+    return metadataBaseMipLevels(paramU32(record, "textureMipCount"));
+}
+
+std::vector<Value> textureMetadataDimensionsLevels(const ParamRecord& record) {
+    const uint32_t samples = findParam(record, "samples") == nullptr ? 1u : paramU32(record, "samples");
+    return metadataDimensionsLevels(samples, paramU32(record, "textureMipCount"), paramU32(record, "baseMipLevel"));
+}
+
+void executeTextureDimensionsSampledAndMultisampled(AllFeaturesMaxLimitsGpuTest& t) {
+    executeMetadataQuery(t, dimensionsCase(t, false, false));
+}
+
+void executeTextureDimensionsDepth(AllFeaturesMaxLimitsGpuTest& t) {
+    MetadataQueryCase c = dimensionsCase(t, true, false);
+    if (c.aspect == WGPUTextureAspect_StencilOnly) {
+        t.skip("texture_depth_* cannot bind stencil-only texture views");
+    }
+    executeMetadataQuery(t, c);
+}
+
+void executeTextureDimensionsStorage(AllFeaturesMaxLimitsGpuTest& t) {
+    executeMetadataQuery(t, dimensionsCase(t, false, true));
+}
+
+void executeTextureDimensionsExternal(AllFeaturesMaxLimitsGpuTest& t) {
+    t.skip("texture_external is not exposed through the native C WebGPU API path used by this port");
+}
+
+void executeTextureNumLevelsSampled(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string textureType = t.param<std::string>("texture_type");
+    const std::string sampledType = t.param<std::string>("sampled_type");
+    const std::string viewType = t.param<std::string>("view_type");
+    MetadataQueryCase c;
+    c.stage = t.param<std::string>("stage");
+    c.viewDimension = parseViewDimension(textureType == "texture_1d" ? "1d"
+        : textureType == "texture_2d" ? "2d"
+        : textureType == "texture_2d_array" ? "2d-array"
+        : textureType == "texture_3d" ? "3d"
+        : textureType == "texture_cube" ? "cube"
+        : "cube-array");
+    c.textureDimension = textureDimensionForView(c.viewDimension);
+    c.format = sampledType == "i32" ? WGPUTextureFormat_RGBA8Sint
+        : sampledType == "u32" ? WGPUTextureFormat_RGBA8Uint
+        : WGPUTextureFormat_RGBA8Unorm;
+    c.sampleType = sampledType == "i32" ? WGPUTextureSampleType_Sint
+        : sampledType == "u32" ? WGPUTextureSampleType_Uint
+        : WGPUTextureSampleType_Float;
+    c.size = WGPUExtent3D{64, c.textureDimension == WGPUTextureDimension_1D ? 1u : 64u,
+        textureType.find("cube") != std::string::npos ? 6u : 1u};
+    c.textureMipCount = c.textureDimension == WGPUTextureDimension_1D ? 1u : 4u;
+    c.baseMipLevel = viewType == "partial" ? 1u : 0u;
+    c.viewMipCount = viewType == "partial" ? 2u : c.textureMipCount;
+    c.expected = {c.viewMipCount, 0, 0, 0};
+    c.expectedCount = 1;
+    c.textureType = textureType + "<" + sampledType + ">";
+    c.valueExpr = "textureNumLevels(texture)";
+    executeMetadataQuery(t, c);
+}
+
+void executeTextureNumLevelsDepth(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string textureType = t.param<std::string>("texture_type");
+    const std::string viewType = t.param<std::string>("view_type");
+    MetadataQueryCase c;
+    c.stage = t.param<std::string>("stage");
+    c.viewDimension = parseViewDimension(textureType == "texture_depth_2d" ? "2d"
+        : textureType == "texture_depth_2d_array" ? "2d-array"
+        : textureType == "texture_depth_cube" ? "cube"
+        : "cube-array");
+    c.textureDimension = textureDimensionForView(c.viewDimension);
+    c.format = WGPUTextureFormat_Depth32Float;
+    c.sampleType = WGPUTextureSampleType_Depth;
+    c.size = WGPUExtent3D{64, 64, textureType.find("cube") != std::string::npos ? 6u : 1u};
+    c.textureMipCount = 4;
+    c.baseMipLevel = viewType == "partial" ? 1u : 0u;
+    c.viewMipCount = viewType == "partial" ? 2u : c.textureMipCount;
+    c.expected = {c.viewMipCount, 0, 0, 0};
+    c.expectedCount = 1;
+    c.textureType = textureType;
+    c.valueExpr = "textureNumLevels(texture)";
+    executeMetadataQuery(t, c);
+}
+
+void executeTextureNumLayersSampled(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string textureType = t.param<std::string>("texture_type");
+    const std::string sampledType = t.param<std::string>("sampled_type");
+    const std::string viewType = t.param<std::string>("view_type");
+    const bool cubeArray = textureType == "texture_cube_array";
+    MetadataQueryCase c;
+    c.stage = t.param<std::string>("stage");
+    c.viewDimension = cubeArray ? WGPUTextureViewDimension_CubeArray : WGPUTextureViewDimension_2DArray;
+    c.textureDimension = WGPUTextureDimension_2D;
+    c.format = sampledType == "i32" ? WGPUTextureFormat_RGBA8Sint
+        : sampledType == "u32" ? WGPUTextureFormat_RGBA8Uint
+        : WGPUTextureFormat_RGBA8Unorm;
+    c.sampleType = sampledType == "i32" ? WGPUTextureSampleType_Sint
+        : sampledType == "u32" ? WGPUTextureSampleType_Uint
+        : WGPUTextureSampleType_Float;
+    c.size = WGPUExtent3D{1, 1, kMetadataNumLayers};
+    c.baseArrayLayer = viewType == "partial" ? 11u : 0u;
+    c.arrayLayerCount = viewType == "partial" ? 6u : kMetadataNumLayers;
+    c.expected = {c.arrayLayerCount / (cubeArray ? 6u : 1u), 0, 0, 0};
+    c.expectedCount = 1;
+    c.textureType = textureType + "<" + sampledType + ">";
+    c.valueExpr = "textureNumLayers(texture)";
+    executeMetadataQuery(t, c);
+}
+
+void executeTextureNumLayersArrayed(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string textureType = t.param<std::string>("texture_type");
+    const std::string viewType = t.param<std::string>("view_type");
+    const bool cubeArray = textureType == "texture_depth_cube_array";
+    MetadataQueryCase c;
+    c.stage = t.param<std::string>("stage");
+    c.viewDimension = cubeArray ? WGPUTextureViewDimension_CubeArray : WGPUTextureViewDimension_2DArray;
+    c.textureDimension = WGPUTextureDimension_2D;
+    c.format = WGPUTextureFormat_Depth32Float;
+    c.sampleType = WGPUTextureSampleType_Depth;
+    c.size = WGPUExtent3D{1, 1, kMetadataNumLayers};
+    c.baseArrayLayer = viewType == "partial" ? 11u : 0u;
+    c.arrayLayerCount = viewType == "partial" ? 6u : kMetadataNumLayers;
+    c.expected = {c.arrayLayerCount / (cubeArray ? 6u : 1u), 0, 0, 0};
+    c.expectedCount = 1;
+    c.textureType = textureType;
+    c.valueExpr = "textureNumLayers(texture)";
+    executeMetadataQuery(t, c);
+}
+
+void executeTextureNumLayersStorage(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string viewType = t.param<std::string>("view_type");
+    MetadataQueryCase c;
+    c.stage = t.param<std::string>("stage");
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    c.textureDimension = WGPUTextureDimension_2D;
+    c.format = parseTextureFormat(t.param<std::string>("format"));
+    c.storageTexture = true;
+    c.storageAccess = parseStorageAccessParam(t.param<std::string>("access_mode"));
+    c.usage = WGPUTextureUsage_StorageBinding;
+    c.size = WGPUExtent3D{1, 1, kMetadataNumLayers};
+    c.baseArrayLayer = viewType == "partial" ? 11u : 0u;
+    c.arrayLayerCount = viewType == "partial" ? 6u : kMetadataNumLayers;
+    c.expected = {c.arrayLayerCount, 0, 0, 0};
+    c.expectedCount = 1;
+    c.textureType = "texture_storage_2d_array<" + t.param<std::string>("format") + ", "
+        + storageAccessWGSL(c.storageAccess) + ">";
+    c.valueExpr = "textureNumLayers(texture)";
+    executeMetadataQuery(t, c);
+}
+
+void executeTextureNumSamplesSampled(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string sampledType = t.param<std::string>("sampled_type");
+    MetadataQueryCase c;
+    c.stage = t.param<std::string>("stage");
+    c.viewDimension = WGPUTextureViewDimension_2D;
+    c.textureDimension = WGPUTextureDimension_2D;
+    c.format = sampledType == "i32" ? WGPUTextureFormat_RGBA8Sint
+        : sampledType == "u32" ? WGPUTextureFormat_RGBA8Uint
+        : WGPUTextureFormat_RGBA8Unorm;
+    c.sampleType = sampledType == "i32" ? WGPUTextureSampleType_Sint
+        : sampledType == "u32" ? WGPUTextureSampleType_Uint
+        : WGPUTextureSampleType_UnfilterableFloat;
+    c.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+    c.sampleCount = 4;
+    c.size = WGPUExtent3D{1, 1, 1};
+    c.expected = {c.sampleCount, 0, 0, 0};
+    c.expectedCount = 1;
+    c.textureType = "texture_multisampled_2d<" + sampledType + ">";
+    c.valueExpr = "textureNumSamples(texture)";
+    executeMetadataQuery(t, c);
+}
+
+void executeTextureNumSamplesDepth(AllFeaturesMaxLimitsGpuTest& t) {
+    MetadataQueryCase c;
+    c.stage = t.param<std::string>("stage");
+    c.viewDimension = WGPUTextureViewDimension_2D;
+    c.textureDimension = WGPUTextureDimension_2D;
+    c.format = WGPUTextureFormat_Depth32Float;
+    c.sampleType = WGPUTextureSampleType_Depth;
+    c.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+    c.sampleCount = 4;
+    c.size = WGPUExtent3D{1, 1, 1};
+    c.expected = {c.sampleCount, 0, 0, 0};
+    c.expectedCount = 1;
+    c.textureType = "texture_depth_multisampled_2d";
+    c.valueExpr = "textureNumSamples(texture)";
+    executeMetadataQuery(t, c);
 }
 
 } // namespace cts::texture_utils

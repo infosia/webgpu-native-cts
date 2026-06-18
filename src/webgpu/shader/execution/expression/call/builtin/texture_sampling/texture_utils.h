@@ -17,6 +17,7 @@ namespace cts::texture_utils {
 std::vector<Value> shortShaderStages();
 std::vector<Value> allTextureFormats();
 std::vector<Value> depthStencilFormats();
+std::vector<Value> possibleStorageTextureFormats();
 std::vector<Value> shortAddressModes();
 std::vector<Value> samplePointMethods();
 std::vector<Value> cubeSamplePointMethods();
@@ -32,6 +33,9 @@ bool isIncrement2SampledFormatSupported(const ParamRecord& record);
 bool isSampledColorTextureFormatParam(const ParamRecord& record);
 bool isSampled1DColorTextureFormatParam(const ParamRecord& record);
 bool isComputeStage(const ParamRecord& record);
+bool isStorageReadWriteFormatParam(const ParamRecord& record);
+bool isStorageReadWriteAccessOrFormatSupported(const ParamRecord& record);
+bool isNotWritableStorageInVertexStage(const ParamRecord& record);
 
 ParamsBuilder addSampledTextureCommonParams(ParamsBuilder u, bool includeModeU, bool includeModeV);
 ParamsBuilder addDepthTextureCommonParams(ParamsBuilder u);
@@ -82,5 +86,25 @@ void executeTextureSampleCompareLevel2DArray(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleCompareLevelCubeArray(AllFeaturesMaxLimitsGpuTest& t);
 
 void executeTextureSampleBaseClampToEdge2D(AllFeaturesMaxLimitsGpuTest& t);
+
+std::vector<Value> textureMetadataAspectsForFormat(const ParamRecord& record);
+std::vector<Value> textureMetadataSamplesForFormat(const ParamRecord& record);
+std::vector<Value> textureMetadataViewDimensions(const ParamRecord& record);
+std::vector<Value> textureMetadataStorageViewDimensions(const ParamRecord& record);
+std::vector<Value> textureMetadataMipCounts(const ParamRecord& record);
+std::vector<Value> textureMetadataBaseMipLevels(const ParamRecord& record);
+std::vector<Value> textureMetadataDimensionsLevels(const ParamRecord& record);
+
+void executeTextureDimensionsSampledAndMultisampled(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureDimensionsDepth(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureDimensionsStorage(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureDimensionsExternal(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureNumLevelsSampled(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureNumLevelsDepth(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureNumLayersSampled(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureNumLayersArrayed(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureNumLayersStorage(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureNumSamplesSampled(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureNumSamplesDepth(AllFeaturesMaxLimitsGpuTest& t);
 
 } // namespace cts::texture_utils
