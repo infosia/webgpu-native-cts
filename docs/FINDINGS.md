@@ -1673,12 +1673,13 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Found by:** `shader,execution,expression,call,builtin,firstLeadingBit:u32` — the all-ones input
   `0xFFFFFFFF` returns `0xFFFFFFFF`; spec value is **31** (the most-significant set bit). Every other
   u32 value is correct (e.g. 0x1FFFFFFF→28, 0x7FFFFFFF→30), and the i32 variant is fully correct.
-- **Cross-check:** Dawn returns 31 (test passes). Specific to the u32 all-ones case — looks like
-  naga's lowering of `firstLeadingBit` for u32 mis-handles the all-ones input (treats it like the
-  signed/`-1` or the zero special-case). Likely naga (shared with wgpu-native) — cross-check pending
-  per [[naga-fix-crosscheck-wgpu-native]].
+- **Cross-check:** Dawn returns 31 (test passes). **wgpu-native (upstream naga) ALSO FAILS** the u32
+  all-ones case — 12 fails on the runtime path (`firstLeadingBit:u32:inputSource="uniform"/"storage_r"/
+  "storage_rw"`, all vectorize): `0xFFFFFFFF` returns `0xFFFFFFFF`, expected 31 (verified 2026-06-19,
+  `build/cts`). Confirms a real **upstream-naga** lowering defect for `firstLeadingBit(u32)` all-ones;
+  the yawgpu fix legitimately preempts a bug upstream naga still carries (per [[naga-fix-crosscheck-wgpu-native]]).
 - **Status:** **RESOLVED 2026-06-18** (yawgpu `ee77bf3`). Re-verified yawgpu/Metal: `firstLeadingBit:*`
-  0 fail. cts port was correct (Dawn-green) throughout.
+  0 fail. cts port was correct (Dawn-green) throughout. wgpu-native still fails (upstream naga unfixed).
 
 ## F-118 — yawgpu/naga: `insertBits` const-eval returns 0 (Metal)
 
@@ -1687,11 +1688,14 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   all 8 const-eval cases (signed/unsigned × width 1–4) return **0** instead of the inserted result
   (e.g. input `2303862050` → returns 0, expected 2303862050). The `uniform`/`storage_r`/`storage_rw`
   input sources (runtime evaluation) all pass — **only `inputSource=const` fails**.
-- **Cross-check:** Dawn passes all input sources. Runtime `insertBits` is correct on yawgpu; only the
-  **const-evaluation** path is wrong → a naga const-eval defect for `insertBits` (shared with
-  wgpu-native — cross-check pending per [[naga-fix-crosscheck-wgpu-native]]).
+- **Cross-check:** Dawn passes all input sources. **wgpu-native (upstream naga) ALSO FAILS** all 8
+  `insertBits:integer:inputSource="const";*` cases (return 0; verified 2026-06-19, `build/cts`), while
+  its `uniform`/`storage_r`/`storage_rw` runtime cases pass — identical signature to yawgpu. Confirms a
+  real **upstream-naga const-eval** defect for `insertBits`; the yawgpu fix preempts a bug upstream naga
+  still carries (per [[naga-fix-crosscheck-wgpu-native]]).
 - **Status:** **RESOLVED 2026-06-18** (yawgpu `ee77bf3`). Re-verified yawgpu/Metal: `insertBits:*` 0
-  fail (const-eval now correct). cts port was correct (Dawn-green) throughout.
+  fail (const-eval now correct). cts port was correct (Dawn-green) throughout. wgpu-native still fails
+  (upstream naga unfixed).
 
 ---
 
@@ -1702,14 +1706,17 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   (4) — all input sources (const/uniform/storage_r/storage_rw) fail with `uncaptured error: queue
   submit cannot use an error command buffer`. The 8 snorm/unorm pack/unpack builtins
   (`{pack,unpack}{4x8,2x16}{snorm,unorm}`) all pass on yawgpu.
-- **Cross-check:** Dawn passes all 11 (port correct). `pack2x16float`/`unpack2x16float` are core WGSL
-  builtins (no `shader-f16` feature required — the f16 is internal), so this is a yawgpu/naga gap:
-  likely naga's MSL lowering emits `half`-typed code for the internal f16 (un)packing that yawgpu's
-  Metal pipeline rejects (yawgpu Metal lacks the f16 feature; cf. F-115-era f16 skips), whereas Dawn's
-  Metal handles it. Naga-MSL suspect — cross-check vs wgpu-native pending per [[naga-fix-crosscheck-wgpu-native]].
+- **Cross-check:** Dawn passes all 11 (port correct). **wgpu-native (upstream naga) PASSES** both
+  `pack2x16float:*` and `unpack2x16float:*` (all 8, verified 2026-06-19, `build/cts`) — so this is **NOT
+  a naga bug**; it was **yawgpu-specific**. `pack2x16float`/`unpack2x16float` are core WGSL builtins (no
+  `shader-f16` feature required — the f16 is internal); naga's MSL lowering emits `half`-typed code for
+  the internal f16 (un)packing, which Dawn/wgpu-native's Metal handle but yawgpu's pipeline rejected
+  until it enabled the internal-f16 path. Cross-check (wgpu-native green) confirms the yawgpu-side fix
+  was the right layer (per [[naga-fix-crosscheck-wgpu-native]]).
 - **Status:** **RESOLVED 2026-06-18** (yawgpu `bc1d44b`, enable `SHADER_FLOAT16_IN_FLOAT32` for
   pack/unpack2x16float — confirms the internal-f16 diagnosis). Re-verified yawgpu/Metal:
   `pack2x16float:*` + `unpack2x16float:*` 0 fail (now run, no skip). cts port was correct (Dawn-green).
+  wgpu-native already passed (not a naga bug — yawgpu-local feature-gating).
 
 ---
 
