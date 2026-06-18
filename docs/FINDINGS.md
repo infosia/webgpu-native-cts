@@ -1677,7 +1677,8 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   naga's lowering of `firstLeadingBit` for u32 mis-handles the all-ones input (treats it like the
   signed/`-1` or the zero special-case). Likely naga (shared with wgpu-native) — cross-check pending
   per [[naga-fix-crosscheck-wgpu-native]].
-- **Status:** OPEN (2026-06-18). cts port correct (Dawn-green) and committed; no cts-side action.
+- **Status:** **RESOLVED 2026-06-18** (yawgpu `ee77bf3`). Re-verified yawgpu/Metal: `firstLeadingBit:*`
+  0 fail. cts port was correct (Dawn-green) throughout.
 
 ## F-118 — yawgpu/naga: `insertBits` const-eval returns 0 (Metal)
 
@@ -1689,7 +1690,8 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Cross-check:** Dawn passes all input sources. Runtime `insertBits` is correct on yawgpu; only the
   **const-evaluation** path is wrong → a naga const-eval defect for `insertBits` (shared with
   wgpu-native — cross-check pending per [[naga-fix-crosscheck-wgpu-native]]).
-- **Status:** OPEN (2026-06-18). cts port correct (Dawn-green) and committed; no cts-side action.
+- **Status:** **RESOLVED 2026-06-18** (yawgpu `ee77bf3`). Re-verified yawgpu/Metal: `insertBits:*` 0
+  fail (const-eval now correct). cts port was correct (Dawn-green) throughout.
 
 ---
 
@@ -1705,7 +1707,9 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   likely naga's MSL lowering emits `half`-typed code for the internal f16 (un)packing that yawgpu's
   Metal pipeline rejects (yawgpu Metal lacks the f16 feature; cf. F-115-era f16 skips), whereas Dawn's
   Metal handles it. Naga-MSL suspect — cross-check vs wgpu-native pending per [[naga-fix-crosscheck-wgpu-native]].
-- **Status:** OPEN (2026-06-18). cts port correct (Dawn-green) and committed; no cts-side action.
+- **Status:** **RESOLVED 2026-06-18** (yawgpu `bc1d44b`, enable `SHADER_FLOAT16_IN_FLOAT32` for
+  pack/unpack2x16float — confirms the internal-f16 diagnosis). Re-verified yawgpu/Metal:
+  `pack2x16float:*` + `unpack2x16float:*` 0 fail (now run, no skip). cts port was correct (Dawn-green).
 
 ---
 
