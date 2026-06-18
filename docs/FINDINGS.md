@@ -1661,8 +1661,9 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Cross-check:** **Dawn returns 62 (= the spec value, test passes)**; only yawgpu diverges. Likely
   yawgpu-core's runtime-array-length derivation (the binding-size → element-count math), not naga.
   wgpu-native cross-check pending per [[naga-fix-crosscheck-wgpu-native]].
-- **Status:** OPEN (2026-06-18). The cts port is correct (Dawn-green) and committed; no cts-side
-  action.
+- **Status:** **RESOLVED 2026-06-18** (yawgpu `94694e2`). Re-verified on yawgpu/Metal:
+  `arrayLength:*` now 205 pass / 0 fail (was 3 fail); the non-stride-multiple binding now floors to
+  the spec element count. yawgpu-core fix; the cts port was correct (Dawn-green) throughout.
 
 ---
 
