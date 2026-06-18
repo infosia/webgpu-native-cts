@@ -283,6 +283,81 @@ using ExpressionBuilder = std::function<std::string(const std::vector<std::strin
 // Returns a basic builtin-call expression builder, i.e. `name(v0, v1, ...)`.
 ExpressionBuilder builtin(const std::string& name);
 
+// ---------------------------------------------------------------------------
+// Layout helpers (shared with the structure-access port's custom run()).
+// These mirror upstream expression.ts's structLayout / structStride / align /
+// sizeAndAlignmentOf, exposed so the structure/index.spec.cpp port can pack a
+// heterogeneous-member struct buffer at the exact WGSL member offsets.
+// ---------------------------------------------------------------------------
+
+// Rounds 'n' up to the next multiple of 'alignment' (upstream util/math align()).
+uint32_t align(uint32_t n, uint32_t alignment);
+
+// size and alignment in bytes of a type, per upstream sizeAndAlignmentOf. 'source' affects only
+// array alignment (uniform requires array element alignment to be a multiple of 16).
+struct SizeAlign {
+    uint32_t size;
+    uint32_t alignment;
+};
+SizeAlign sizeAndAlignmentOf(const ExprType& ty, InputSource source);
+
+// Per-member layout info produced by structLayout().
+struct MemberLayout {
+    int index;       // member ordinal
+    ExprType type;   // member type
+    uint32_t size;   // member size in bytes (sizeAndAlignmentOf().size)
+    uint32_t alignment;
+    uint32_t offset; // byte offset of the member within the struct
+};
+
+// Whole-struct layout: 'size' is the offset past the last member, 'stride' is the size rounded up
+// to the struct alignment (whole struct size), 'alignment' the max member alignment.
+struct StructLayoutResult {
+    uint32_t size;
+    uint32_t stride;
+    uint32_t alignment;
+};
+
+// Walks the members of a struct, invoking 'cb' per member with its computed offset, returning the
+// whole-struct {size, stride, alignment}. 'cb' may be null (to compute the stride only).
+StructLayoutResult structLayout(
+    const std::vector<ExprType>& members,
+    InputSource source,
+    const std::function<void(const MemberLayout&)>& cb);
+
+// The whole-struct stride (size rounded to struct alignment) of the member types.
+uint32_t structStride(const std::vector<ExprType>& members, InputSource source);
+
+// WGSL type spelling of an ExprType (e.g. "u32", "vec3<f32>", "mat3x2<f32>"). bool is spelled as
+// 'bool' (not its u32 storage type); use storageWgslTypeName() for the storage-buffer spelling.
+std::string wgslTypeName(const ExprType& ty);
+// WGSL type spelling using the storage representation (bool -> u32).
+std::string storageWgslTypeName(const ExprType& ty);
+
+// WGSL constructor literal for a value of type 'ty' from its flattened scalar payload (canonical
+// order), e.g. "vec3<f32>(0.0, 0.0, 0.0)" or "5u". Mirrors upstream Value.wgsl().
+std::string valueWgsl(const CaseValue& v, const ExprType& ty);
+
+// Serializes a value of type 'ty' (scalar/vec/mat) into 'data' at byte offset 'offset', writing
+// each canonical scalar slot at its WGSL byte offset within the value (vec3 / matrix-column padding
+// is left untouched). 'data' must be large enough. Mirrors upstream Value.copyTo().
+void copyValueTo(
+    const CaseValue& v,
+    const ExprType& ty,
+    InputSource source,
+    std::vector<uint8_t>& data,
+    uint32_t offset);
+
+// Reads a value of type 'ty' back from 'data' at byte offset 'offset', producing its canonical
+// flattened scalar payload. Mirrors upstream Type.read(). Returns false on out-of-bounds.
+bool readValueFrom(
+    const ExprType& ty,
+    InputSource source,
+    const uint8_t* data,
+    size_t len,
+    uint32_t offset,
+    CaseValue& out);
+
 // Runs the list of expression tests, batching as needed and packing scalar cases into
 // vectors when 'vectorize' is non-zero (2/3/4). Bit-exact comparison.
 void run(

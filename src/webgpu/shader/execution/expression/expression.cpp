@@ -93,7 +93,7 @@ std::string storageTypeName(ExprType ty) {
 }
 
 // size and alignment in bytes of the type, per upstream sizeAndAlignmentOf.
-struct SizeAlign {
+struct SizeAlignImpl {
     uint32_t size;
     uint32_t alignment;
 };
@@ -101,17 +101,17 @@ struct SizeAlign {
 // size and alignment in bytes, per upstream sizeAndAlignmentOf. 'source' affects only the array
 // alignment (uniform requires array element alignment to be a multiple of 16; the
 // uniform_buffer_standard_layout gate is handled by the spec ports skipping such cases).
-SizeAlign sizeAndAlignmentOf(ExprType ty, InputSource source) {
+SizeAlignImpl sizeAndAlignmentOfImpl(ExprType ty, InputSource source) {
     if (ty.form == TypeForm::Matrix) {
         // matCxR: element-aligned columns; vec3 columns pad to 4 rows. size = colAlign * cols.
         const uint32_t eb = elementBytes(ty.kind);
         const uint32_t n = ty.width == 3 ? 4u : static_cast<uint32_t>(ty.width);
         const uint32_t colAlign = eb * n;
-        SizeAlign out{colAlign * static_cast<uint32_t>(ty.cols), colAlign};
+        SizeAlignImpl out{colAlign * static_cast<uint32_t>(ty.cols), colAlign};
         return out;
     }
     if (ty.form == TypeForm::Array) {
-        SizeAlign out = sizeAndAlignmentOf(*ty.element, source);
+        SizeAlignImpl out = sizeAndAlignmentOfImpl(*ty.element, source);
         // MAINTENANCE_TODO(#4485): remove when implementors support uniform_buffer_standard_layout.
         if (source == InputSource::Uniform) {
             out.alignment = alignUp(out.alignment, 16);
@@ -123,7 +123,7 @@ SizeAlign sizeAndAlignmentOf(ExprType ty, InputSource source) {
     }
     // scalar: size = element bytes (4 for u32/i32/f32/bool, 2 for f16), alignment == size.
     const uint32_t eb = elementBytes(ty.kind);
-    SizeAlign out{eb, eb};
+    SizeAlignImpl out{eb, eb};
     if (ty.width > 1) {
         const uint32_t n = ty.width == 3 ? 4u : static_cast<uint32_t>(ty.width);
         out.size = eb * n;
@@ -133,7 +133,7 @@ SizeAlign sizeAndAlignmentOf(ExprType ty, InputSource source) {
 }
 
 uint32_t strideOf(ExprType ty, InputSource source) {
-    SizeAlign sa = sizeAndAlignmentOf(ty, source);
+    SizeAlignImpl sa = sizeAndAlignmentOfImpl(ty, source);
     return alignUp(sa.size, sa.alignment);
 }
 
@@ -142,7 +142,7 @@ uint32_t strideOf(ExprType ty, InputSource source) {
 // per-element size when the element needs padding (and from sizeAndAlignmentOf().size/count, which
 // upstream computes from the un-strided element size).
 uint32_t arrayElementStride(const ExprType& arrayTy, InputSource source) {
-    SizeAlign elem = sizeAndAlignmentOf(*arrayTy.element, source);
+    SizeAlignImpl elem = sizeAndAlignmentOfImpl(*arrayTy.element, source);
     return alignUp(elem.size, elem.alignment);
 }
 
@@ -200,7 +200,7 @@ int scalarSlotCount(const ExprType& ty) {
 }
 
 // structLayout over the member types, invoking 'cb' per member, returning {size, stride}.
-struct MemberInfo {
+struct MemberInfoImpl {
     int index;
     ExprType type;
     uint32_t size;
@@ -208,23 +208,23 @@ struct MemberInfo {
     uint32_t offset;
 };
 
-struct StructLayout {
+struct StructLayoutImpl {
     uint32_t size;
     uint32_t stride;
     uint32_t alignment;
 };
 
-StructLayout structLayout(
+StructLayoutImpl structLayoutImpl(
     const std::vector<ExprType>& members,
     InputSource source,
-    const std::function<void(const MemberInfo&)>& cb) {
+    const std::function<void(const MemberInfoImpl&)>& cb) {
     uint32_t offset = 0;
     uint32_t alignment = 1;
     for (size_t i = 0; i < members.size(); ++i) {
-        SizeAlign sa = sizeAndAlignmentOf(members[i], source);
+        SizeAlignImpl sa = sizeAndAlignmentOfImpl(members[i], source);
         offset = alignUp(offset, sa.alignment);
         if (cb) {
-            cb(MemberInfo{static_cast<int>(i), members[i], sa.size, sa.alignment, offset});
+            cb(MemberInfoImpl{static_cast<int>(i), members[i], sa.size, sa.alignment, offset});
         }
         offset += sa.size;
         if (sa.alignment > alignment) {
@@ -237,11 +237,11 @@ StructLayout structLayout(
     }
     const uint32_t size = offset;
     const uint32_t stride = alignUp(size, alignment);
-    return StructLayout{size, stride, alignment};
+    return StructLayoutImpl{size, stride, alignment};
 }
 
-uint32_t structStride(const std::vector<ExprType>& members, InputSource source) {
-    return structLayout(members, source, nullptr).stride;
+uint32_t structStrideImpl(const std::vector<ExprType>& members, InputSource source) {
+    return structLayoutImpl(members, source, nullptr).stride;
 }
 
 // WGSL spelling of the struct members for the Input struct.
@@ -251,7 +251,7 @@ std::string wgslMembers(
     const std::function<std::string(int)>& memberName) {
     std::ostringstream out;
     int line = 0;
-    StructLayout layout = structLayout(members, source, [&](const MemberInfo& m) {
+    StructLayoutImpl layout = structLayoutImpl(members, source, [&](const MemberInfoImpl& m) {
         out << "  @size(" << m.size << ") " << memberName(line) << " : " << typeName(m.type) << ",\n";
         ++line;
     });
@@ -444,7 +444,7 @@ std::string valueWgslRec(const ExprType& ty, const std::vector<Scalar>& scalars,
 }
 
 // WGSL literal for a value of type 'ty' from its flattened scalar payload.
-std::string valueWgsl(const CaseValue& v, const ExprType& ty) {
+std::string valueWgslImpl(const CaseValue& v, const ExprType& ty) {
     size_t next = 0;
     return valueWgslRec(ty, v.elements, next);
 }
@@ -503,7 +503,7 @@ std::string buildShader(
             std::vector<std::string> args;
             args.reserve(parameterTypes.size());
             for (size_t p = 0; p < parameterTypes.size(); ++p) {
-                args.push_back(valueWgsl(cases[i].inputs[p], parameterTypes[p]));
+                args.push_back(valueWgslImpl(cases[i].inputs[p], parameterTypes[p]));
             }
             const std::string expr = exprBuilder(args);
             out << "  outputs[" << i << "].value = " << toStorage(resultType, expr) << ";\n";
@@ -641,7 +641,7 @@ void submitBatch(
     WGPUComputePipeline pipeline = createComputePipelineAuto(t, source);
 
     // Output buffer: one Output (stride-padded) per case.
-    const uint32_t outputStride = structStride({resultType}, InputSource::StorageRW);
+    const uint32_t outputStride = structStrideImpl({resultType}, InputSource::StorageRW);
     const uint64_t outputBufferSize = alignUp(static_cast<uint32_t>(cases.size()) * outputStride, 4);
     WGPUBufferDescriptor obDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
     obDesc.size = outputBufferSize;
@@ -654,12 +654,12 @@ void submitBatch(
     WGPUBuffer inputBuffer = nullptr;
     uint32_t caseStride = 0;
     if (inputSource != InputSource::Const) {
-        caseStride = structStride(parameterTypes, inputSource);
+        caseStride = structStrideImpl(parameterTypes, inputSource);
         const uint32_t inputSize = alignUp(static_cast<uint32_t>(cases.size()) * caseStride, 4);
         std::vector<uint8_t> inputData(inputSize, 0);
         for (size_t caseIdx = 0; caseIdx < cases.size(); ++caseIdx) {
             const uint32_t base = static_cast<uint32_t>(caseIdx) * caseStride;
-            structLayout(parameterTypes, inputSource, [&](const MemberInfo& m) {
+            structLayoutImpl(parameterTypes, inputSource, [&](const MemberInfoImpl& m) {
                 const CaseValue& arg = cases[caseIdx].inputs[static_cast<size_t>(m.index)];
                 // Walk the member's canonical scalar slots, writing each scalar at its WGSL byte
                 // offset within the member (handles scalar/vector/matrix/array, with vec3 / matrix
@@ -834,6 +834,88 @@ void submitBatch(
 }
 
 } // namespace
+
+uint32_t align(uint32_t n, uint32_t alignment) {
+    return alignUp(n, alignment);
+}
+
+SizeAlign sizeAndAlignmentOf(const ExprType& ty, InputSource source) {
+    // Delegate to the file-private implementation (struct names differ; copy fields).
+    const SizeAlignImpl sa = sizeAndAlignmentOfImpl(ty, source);
+    return SizeAlign{sa.size, sa.alignment};
+}
+
+StructLayoutResult structLayout(
+    const std::vector<ExprType>& members,
+    InputSource source,
+    const std::function<void(const MemberLayout&)>& cb) {
+    std::function<void(const MemberInfoImpl&)> innerCb;
+    if (cb) {
+        innerCb = [&](const MemberInfoImpl& m) {
+            cb(MemberLayout{m.index, m.type, m.size, m.alignment, m.offset});
+        };
+    }
+    const StructLayoutImpl sl = structLayoutImpl(members, source, innerCb);
+    return StructLayoutResult{sl.size, sl.stride, sl.alignment};
+}
+
+uint32_t structStride(const std::vector<ExprType>& members, InputSource source) {
+    return structStrideImpl(members, source);
+}
+
+std::string wgslTypeName(const ExprType& ty) {
+    return typeName(ty);
+}
+
+std::string storageWgslTypeName(const ExprType& ty) {
+    return storageTypeName(ty);
+}
+
+std::string valueWgsl(const CaseValue& v, const ExprType& ty) {
+    return valueWgslImpl(v, ty);
+}
+
+void copyValueTo(
+    const CaseValue& v,
+    const ExprType& ty,
+    InputSource source,
+    std::vector<uint8_t>& data,
+    uint32_t offset) {
+    const uint32_t eb = elementBytes(storageKind(ty.scalarKind()));
+    int slot = 0;
+    forEachStorageScalar(
+        ty, source, offset, slot, [&](int idx, uint32_t byteOff, ScalarKind) {
+            const uint32_t bits = v.elements[static_cast<size_t>(idx)].bits;
+            std::memcpy(&data[byteOff], &bits, eb);
+        });
+}
+
+bool readValueFrom(
+    const ExprType& ty,
+    InputSource source,
+    const uint8_t* data,
+    size_t len,
+    uint32_t offset,
+    CaseValue& out) {
+    const ScalarKind storeKind = storageKind(ty.scalarKind());
+    const uint32_t eb = elementBytes(storeKind);
+    const int slots = scalarSlotCount(ty);
+    out.width = slots;
+    out.elements.assign(static_cast<size_t>(slots), Scalar{storeKind, 0});
+    bool overflow = false;
+    int slot = 0;
+    forEachStorageScalar(
+        ty, source, offset, slot, [&](int idx, uint32_t byteOff, ScalarKind) {
+            if (static_cast<size_t>(byteOff) + eb > len) {
+                overflow = true;
+                return;
+            }
+            uint32_t bits = 0;
+            std::memcpy(&bits, data + byteOff, eb);
+            out.elements[static_cast<size_t>(idx)] = Scalar{storeKind, bits};
+        });
+    return !overflow;
+}
 
 const char* inputSourceName(InputSource source) {
     switch (source) {
