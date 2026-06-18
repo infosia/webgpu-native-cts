@@ -27,15 +27,15 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `api/validation` | 129 | 112 | 14 | 3 | 0 | 0 |
 | `api/operation` | 72 | 28 | 42 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
-| `shader/execution` | 239 | 38 | 0 | 0 | 201 | 0 |
+| `shader/execution` | 239 | 64 | 0 | 0 | 175 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **178** | **56** | **21** | **408** | **20** |
+| **Total** | **683** | **204** | **56** | **21** | **382** | **20** |
 
-> Reconciled 2026-06-13 to the on-disk `.spec.cpp` count: 214 files (complete + partial) under
-> `src/webgpu/` (api/validation 106, api/operation 70, shader/execution 38). `api/operation` has **every
+> Reconciled 2026-06-18 to the on-disk `.spec.cpp` count: 260 files (complete + partial) under
+> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 64). `api/operation` has **every
 > portable file opened** (70/72; only `buffers/{map_ArrayBuffer,map_detach}` are N/A — JS ArrayBuffer
 > detach), but it is **not fully complete**: per the area table 42 of those 70 files are **partial** —
 > they register their upstream test names but leave some bodies `.unimplemented()`. Most of those gaps are
@@ -150,6 +150,36 @@ temporary-instance `wgpuAdapterGetInfo` pattern). Surfaced **F-085** (yawgpu Mol
 interpolation / sample_mask, 92 cases) and **F-086** (yawgpu/naga-SPIR-V MoltenVK: compound-assignment
 eval order, discard derivatives, IO-struct-in-buffer — 3 single cases); both pending native-Vulkan
 confirmation.
+
+**Batch phaseY7 (shader/execution `expression/call/builtin/atomics`)** ported all 11 atomic built-in
+files (`atomicAdd/Sub/Max/Min/And/Or/Xor/Load/Store/Exchange/CompareExchangeWeak`, 29 g.test / 1445
+subcases) + a header-only harness (storage + workgroup atomics, compute readback). Dawn 1445/0,
+**yawgpu Metal 1445/0 (clean)**. Surfaced **F-113** (wgpu-native: workgroup `atomic` array not
+zero-initialized in `atomicExchange:exchange_workgroup_advanced`; Dawn + yawgpu green — bring-up
+reference).
+
+**Batch phaseY8 (shader/execution `textureSample*` family, 7 files)** ported `textureSampleLevel`,
+`textureSample`, `textureSampleBias`, `textureSampleGrad`, `textureSampleCompare`,
+`textureSampleCompareLevel`, `textureSampleBaseClampToEdge` on a C++ port of the upstream
+`texture_utils` **software-reference sampler** (~the hardest CTS harness: per-texel decode, filter
+weights, address modes, device-calibrated mip-mix weights, 1D/2D/3D/array/cube + cube-edge filtering,
+depth sampling, compressed materialization, a shared compute/fragment/vertex stage runner, invariant
+WGSL + per-call storage-buffer params + per-device pipeline cache). Dawn + yawgpu Metal green
+(textureSample family 394018/0 on yawgpu). Surfaced/resolved **F-114** (naga MSL `textureSampleGrad`
+emitted `gradient2d` regardless of dimension → 3D/cube broke; fixed dimension-aware in the naga fork)
+and a yawgpu resource-retention **leak** (released GPU resources not freed → linear RSS growth / OOM;
+fixed yawgpu-side: Metal `wait_idle` autorelease pool, `FutureRegistry` eviction, per-map command
+buffer, plus the cts harness made WGSL invariant so it no longer compiles a unique shader per subcase).
+
+**Batch phaseY9 (shader/execution remaining texture built-ins, 8 files)** ported `textureLoad`,
+`textureStore`, `textureGather`, `textureGatherCompare`, `textureDimensions`, `textureNumLevels`,
+`textureNumLayers`, `textureNumSamples` (38 g.test) on the phaseY8 harness — completing the texture
+built-in family (15 files). Dawn + yawgpu Metal green. `texture_external` is `.skip()` (no
+`GPUExternalTexture` via the C API). Surfaced/resolved **F-115** (yawgpu-core: `textureLoad` on
+combined depth-stencil formats errored; fixed `baa0c81`), and fixed a port-side **false-pass** that
+yawgpu exposed: `textureGather` of a depth texture through a color view reads implementation-defined
+G/B/A channels — upstream skips those (component>0 without `texture-component-swizzle`); the port had
+wrongly asserted 0 (Dawn returned 0 → false-pass; yawgpu returned the real texel), now skipped per spec.
 
 **Batch Y-5 / phase Y5 (api/operation lifecycle / reflection / immediate)** ported the final 15
 `api/operation` files: `reflection`, `labels`, `shader_module/compilation_info`,
