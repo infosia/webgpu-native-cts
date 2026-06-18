@@ -145,7 +145,42 @@ struct ExpectedElement {
     bool anyNaN = false;     // additionally accept any NaN bit pattern (float result is NaN)
     int floatWidth = 0;      // 0 == integer-exact; 32 or 16 == float result element width
     std::vector<uint32_t> acceptBits; // accepted exact bit patterns (low 16 bits used if width 16)
+    // Float acceptance interval (used by the pack/unpack float-result builtins). When
+    // 'interval' is set the read-back element is decoded as a 'floatWidth'-bit IEEE float
+    // and accepted iff its value lies within [lo, hi] inclusive (an exact match of an FP
+    // acceptance interval; the interval endpoints already incorporate any subnormal flush,
+    // so no extra flushing of the read-back value is performed). NaN is never accepted by an
+    // interval (use 'any' for the unbounded case).
+    bool interval = false;
+    double lo = 0.0;
+    double hi = 0.0;
 };
+
+// Builds an ExpectedElement that accepts any float value in the inclusive interval [lo, hi]
+// for a result element of the given IEEE width (32 or 16). The endpoints must already
+// incorporate subnormal-flush handling per the upstream acceptance interval.
+inline ExpectedElement acceptInterval(int floatWidth, double lo, double hi) {
+    ExpectedElement ee;
+    ee.floatWidth = floatWidth;
+    ee.interval = true;
+    ee.lo = lo;
+    ee.hi = hi;
+    return ee;
+}
+
+// Builds an ExpectedElement that accepts any value (the unbounded interval).
+inline ExpectedElement acceptAny() {
+    ExpectedElement ee;
+    ee.any = true;
+    return ee;
+}
+
+// Builds an ExpectedElement that accepts any of the given exact bit patterns.
+inline ExpectedElement acceptBitsSet(std::vector<uint32_t> bits) {
+    ExpectedElement ee;
+    ee.acceptBits = std::move(bits);
+    return ee;
+}
 
 // A single expression test case: one input value per parameter and the expected result.
 // If 'expectedAccept' is non-empty it overrides bit-exact comparison of 'expected' and is used

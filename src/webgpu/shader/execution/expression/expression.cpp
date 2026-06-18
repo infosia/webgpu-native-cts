@@ -213,6 +213,25 @@ float f32FromBits(uint32_t bits) {
     return f;
 }
 
+// Decodes a 16-bit IEEE-754 binary16 bit pattern to its exact value as a double.
+double f16BitsToDouble(uint16_t bits) {
+    const uint32_t sign = (bits >> 15) & 0x1u;
+    const uint32_t exp = (bits >> 10) & 0x1Fu;
+    const uint32_t mant = bits & 0x3FFu;
+    double value;
+    if (exp == 0) {
+        // Zero or subnormal: value = mant * 2^-24.
+        value = static_cast<double>(mant) * (1.0 / 16777216.0);
+    } else if (exp == 0x1F) {
+        value = (mant == 0) ? std::numeric_limits<double>::infinity()
+                            : std::numeric_limits<double>::quiet_NaN();
+    } else {
+        // Normal: (1 + mant/1024) * 2^(exp-15).
+        value = (1.0 + static_cast<double>(mant) / 1024.0) * std::ldexp(1.0, static_cast<int>(exp) - 15);
+    }
+    return sign ? -value : value;
+}
+
 // WGSL literal for a scalar value as a const-expression input.
 std::string scalarWgsl(const Scalar& s) {
     switch (s.kind) {
@@ -561,6 +580,22 @@ void submitBatch(
                         const ExpectedElement& ee = acc[static_cast<size_t>(e)];
                         const uint32_t gb = got.elements[static_cast<size_t>(e)].bits;
                         if (ee.any) {
+                            continue;
+                        }
+                        if (ee.interval) {
+                            // Decode the read-back element as a float and accept iff it lies
+                            // within the inclusive acceptance interval. NaN never matches.
+                            double v;
+                            if (ee.floatWidth == 16) {
+                                v = f16BitsToDouble(static_cast<uint16_t>(gb & 0xFFFFu));
+                            } else {
+                                float f;
+                                std::memcpy(&f, &gb, 4);
+                                v = static_cast<double>(f);
+                            }
+                            if (std::isnan(v) || !(v >= ee.lo && v <= ee.hi)) {
+                                matched = false;
+                            }
                             continue;
                         }
                         bool ok = false;
