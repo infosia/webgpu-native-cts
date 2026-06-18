@@ -29,6 +29,7 @@ bool cubeOffsetsUnsupported(const ParamRecord& record);
 bool isStage1Sampled2DSupported(const ParamRecord& record);
 bool isIncrement2SampledFormatSupported(const ParamRecord& record);
 bool isSampledColorTextureFormatParam(const ParamRecord& record);
+bool isSampled1DColorTextureFormatParam(const ParamRecord& record);
 bool isComputeStage(const ParamRecord& record);
 
 ParamsBuilder addSampledTextureCommonParams(ParamsBuilder u, bool includeModeU, bool includeModeV);
@@ -47,5 +48,16 @@ void executeTextureSampleLevelSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelDepth2D(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelDepth2DArray(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelDepth3D(AllFeaturesMaxLimitsGpuTest& t);
+
+void executeTextureSampleSampled1D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleSampled2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleSampled2DLodClamp(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleSampled2DArray(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleSampled3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleDepth2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleDepth2DArray(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleDepth3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleDepthCubeArray(AllFeaturesMaxLimitsGpuTest& t);
 
 } // namespace cts::texture_utils
