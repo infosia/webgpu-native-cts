@@ -89,12 +89,17 @@ backends build link-agnostically and run on real GPUs — verified on **macOS / 
 yawgpu Metal green (`460730`, 2 Dawn-leniency now `xfail`), yawgpu MoltenVK Vulkan-path residuals,
 wgpu-native bring-up. All eight Apple-masked native-Vulkan findings (F-105…F-112) resolved — seven
 fixed & re-verified on NVIDIA Vulkan (2026-06-15/16), F-111 a documented external-texture `xfail`.
-**Since (2026-06-18):** the `shader/execution` `atomics` built-ins (phaseY7) and the **entire
-`textureSample`/`Load`/`Store`/`Gather`/`Dimensions`/`NumLayers`/`NumLevels`/`NumSamples` texture
-built-in family** (phaseY8–Y9, 15 files on a ported `texture_utils` software-reference sampler) landed —
-each verified green on Dawn + yawgpu Metal, surfacing and resolving F-114 (naga `textureSampleGrad`
-3D/cube gradient lowering) and F-115 (yawgpu textureLoad combined depth-stencil), plus a yawgpu
-resource-retention leak fixed on the yawgpu side.
+**Since (2026-06-18/19):** the `shader/execution` `expression/call/builtin` family advanced through five
+batches — `atomics` (phaseY7), the **entire texture built-in family** (phaseY8–Y9, 15 files on a ported
+`texture_utils` software-reference sampler), the P2 **synchronization + derivatives** built-ins (phaseY10:
+`workgroupBarrier`/`storageBarrier`/`workgroupUniformLoad`/`arrayLength` + `dpdx`/`dpdy`/`fwidth`×coarse/fine),
+and the P3 **integer/bit/pack** built-ins (phaseY11: a generic `run()` expression harness + 16 integer/bit
+builtins, `bitcast`, and 11 float pack/unpack) — each verified green on Dawn + yawgpu Metal. This surfaced
+and resolved F-114 (naga `textureSampleGrad` 3D/cube gradient lowering), F-115 (yawgpu textureLoad combined
+depth-stencil), F-116 (yawgpu `arrayLength` off-by-one on non-stride-multiple bindings), F-117
+(`firstLeadingBit(u32)` all-ones), F-118 (`insertBits` const-eval), and F-119 (`pack2x16float`/
+`unpack2x16float`), plus a yawgpu resource-retention leak fixed on the yawgpu side. The F-117/F-118 defects
+are **confirmed upstream-naga** (wgpu-native fails them too, 2026-06-19 cross-check); F-119 was yawgpu-local.
 
 ### Port coverage
 
@@ -103,9 +108,9 @@ resource-retention leak fixed on the yawgpu side.
 ```mermaid
 pie showData
     title Upstream .spec.ts files (683)
-    "Ported — complete" : 204
+    "Ported — complete" : 244
     "Ported — partial" : 56
-    "Deferred (shader/validation, expression precision)" : 382
+    "Deferred (shader/validation, expression precision)" : 342
     "Not portable (N/A)" : 21
     "Todo" : 20
 ```
@@ -120,16 +125,16 @@ xychart-beta
     title "Coverage addressed (complete + partial + N/A) of upstream files, %"
     x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
     y-axis "addressed %" 0 --> 100
-    bar [100, 100, 27, 0, 41]
+    bar [100, 100, 44, 0, 47]
 ```
 
 | Area | Addressed* | Note |
 |------|----------:|------|
 | `api/validation` | **129 / 129 ✅** | **fully ported** — every file complete (112), partial (14), or N/A (3); no todo (Y-6 V1–V10: capability_checks/features + all 35 limits) |
 | `api/operation` | **72 / 72 ✅** | **fully ported** — every file complete (28), partial (42), or N/A (2); no todo. Partials leave some native-portable breadth deferred (vertical-first) |
-| `shader/execution` | 64 / 239 | structural files (`flow_control`, `memory_model`, `statement`, `shader_io`) + `expression/call/builtin` **`atomics` (11)** and the full **texture built-in family (15)** — `textureSample*`/`Load`/`Store`/`Gather*`/`Dimensions`/`NumLayers`/`NumLevels`/`NumSamples` on a ported `texture_utils` software sampler; rest (math/pack/access precision) deferred |
+| `shader/execution` | 104 / 239 | structural files (`flow_control`, `memory_model`, `statement`, `shader_io`) + `expression/call/builtin`: **`atomics` (11)**, the full **texture built-in family (15)**, P2 **sync/derivatives (13)** (`workgroupBarrier`/`storageBarrier`/`workgroupUniformLoad`/`arrayLength` + `dpdx`/`dpdy`/`fwidth`×coarse/fine), and P3 **integer/bit/pack (28)** via a generic `run()` harness (16 int/bit + `bitcast` + 11 float pack/unpack); rest (math/trig precision, `access/*`) deferred |
 | `shader/validation` | 0 / 207 | deferred |
-| **Total** | **281 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
+| **Total** | **321 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
 
 \* addressed = complete + partial + N/A (every upstream file resolved). Per-file detail and what each batch
 added: [COVERAGE](docs/COVERAGE.md).
@@ -143,7 +148,7 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Findings — 115 surfaced to date (F-001…F-115)
+### Findings — 119 surfaced to date (F-001…F-119)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
@@ -161,11 +166,19 @@ not zero-initialized — bring-up reference), **F-114** (yawgpu/naga: `textureSa
 emitted `gradient2d` for vec3 gradients — **fixed** in the naga fork, dimension-aware
 `gradient2d`/`gradient3d`/`gradientcube`), and **F-115** (yawgpu: `textureLoad` on combined
 depth-stencil — **fixed** yawgpu-core/HAL). Both yawgpu findings re-verified green on Metal.
+The 2026-06-18/19 phaseY10–Y11 sync/derivative/integer-bit/pack batches added four more, **all fixed on
+yawgpu and re-verified green on Metal**: **F-116** (`arrayLength` off-by-one when a storage binding's size
+isn't a whole stride multiple), **F-117** (`firstLeadingBit(u32)` of `0xFFFFFFFF` returned `0xFFFFFFFF`
+instead of 31), **F-118** (`insertBits` const-eval returned 0), and **F-119** (`pack2x16float`/
+`unpack2x16float` errored on yawgpu's f16-less Metal pipeline — fixed by enabling the internal-f16 path).
+**Cross-check (2026-06-19):** F-117 and F-118 reproduce on **wgpu-native** too → confirmed
+**upstream-naga** defects (the yawgpu fixes preempt bugs upstream naga still carries); F-119 passes on
+wgpu-native → it was **yawgpu-local** feature-gating, fixed at the right layer.
 
 | Bucket | # | Representative findings |
 |--------|--:|-------------------------|
-| **yawgpu — open implementation defects** | 0 | **yawgpu passes the entire ported suite on native Metal AND native Vulkan** — every finding F-005…F-115 fixed & re-verified; non-passes are the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` (not a defect, carried as `xfail`) and F-111 external-texture (documented feature gap, `xfail`) |
-| yawgpu — fixed & hardware-re-verified | 88 | F-005…F-082, F-087, F-114, F-115, the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed), the **2026-06-15** native-Vulkan pair **F-105** / **F-106**, the **2026-06-15** native-Vulkan batch **F-107** (storeOp `discard` zero-clear) / **F-108** (resolve/render through the WebGPU view format) / **F-109** (output-depth viewport clamp via `VK_EXT_depth_clip_enable`) / **F-110** (strip-topology primitive restart), and the **2026-06-16** **F-112** (storage-buffer bounds-check policy `Restrict` broke NVIDIA workgroup-atomic coherence — gated on `VK_EXT_robustness2`; *not* a naga defect) — all native-Vulkan-confirmed; plus the 2026-06-18 shader-texture batch **F-114** (naga `textureSampleGrad` 3D/cube dimension-aware gradient) and **F-115** (yawgpu-core textureLoad combined depth-stencil), both Metal-re-verified |
+| **yawgpu — open implementation defects** | 0 | **yawgpu passes the entire ported suite on native Metal AND native Vulkan** — every finding F-005…F-119 fixed & re-verified; non-passes are the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` (not a defect, carried as `xfail`) and F-111 external-texture (documented feature gap, `xfail`) |
+| yawgpu — fixed & hardware-re-verified | 92 | F-005…F-082, F-087, F-114, F-115, **F-116** (`arrayLength` off-by-one), **F-117** (`firstLeadingBit(u32)` all-ones — upstream-naga, wgpu-native also fails), **F-118** (`insertBits` const-eval — upstream-naga, wgpu-native also fails), **F-119** (`pack2x16float`/`unpack2x16float` internal-f16 gate — yawgpu-local, wgpu-native passes), the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed), the **2026-06-15** native-Vulkan pair **F-105** / **F-106**, the **2026-06-15** native-Vulkan batch **F-107** (storeOp `discard` zero-clear) / **F-108** (resolve/render through the WebGPU view format) / **F-109** (output-depth viewport clamp via `VK_EXT_depth_clip_enable`) / **F-110** (strip-topology primitive restart), and the **2026-06-16** **F-112** (storage-buffer bounds-check policy `Restrict` broke NVIDIA workgroup-atomic coherence — gated on `VK_EXT_robustness2`; *not* a naga defect) — all native-Vulkan-confirmed; plus the 2026-06-18 shader-texture batch **F-114** (naga `textureSampleGrad` 3D/cube dimension-aware gradient) and **F-115** (yawgpu-core textureLoad combined depth-stencil), both Metal-re-verified |
 | Spec in flux / feature gap — **not an implementation defect** | 2 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); F-111 `GPUExternalTexture` unsupported on the Vulkan backend (naga SPIR-V cannot lower `ImageClass::External`; Metal has full support) — both `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 23 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state; F-113 workgroup-atomic array zero-init |
 | MoltenVK-only translation artifacts — green on native Metal + native Vulkan, not yawgpu defects | 9 | **F-104** (`copyTextureToTexture` data, 14512 — native-Vulkan-confirmed green), F-070 MoltenVK SPIRV-Cross residue (`memory_layout`/`zero_init`/`robust_access_vertex`), F-033, F-045, F-053/F-068 residuals, F-083, F-086, maxComputeWorkgroupStorageSize SPIR-V compile residual |
@@ -179,11 +192,12 @@ on native Vulkan.
 
 #### Full cross-backend sweep — **2026-06-14** (whole suite, 234 files, per-file)
 
-> The headline whole-suite sweep below is the **234-file** snapshot. The **26 files added since**
-> (phaseY7 `atomics` + the phaseY8–Y9 texture built-in family) are each verified **green on Dawn +
-> yawgpu Metal** per-area at port time (e.g. textureSample family 394018/0 yawgpu; textureLoad/Gather/
-> Store/metadata all `fail=0` on both); a full whole-suite re-sweep at the grown 260-file listing is
-> pending and will refresh these totals.
+> The headline whole-suite sweep below is the **234-file** snapshot. The **66 files added since**
+> (phaseY7 `atomics`, the phaseY8–Y9 texture built-in family, the phaseY10 sync/derivative built-ins, and
+> the phaseY11 integer/bit/pack built-ins) are each verified **green on Dawn + yawgpu Metal** per-area at
+> port time (e.g. textureSample family 394018/0 yawgpu; textureLoad/Gather/Store/metadata all `fail=0` on
+> both; phaseY10/Y11 builtins `fail=0` after F-116…F-119 fixes); a full whole-suite re-sweep at the grown
+> 300-file listing is pending and will refresh these totals.
 
 The current headline numbers — every ported file run against each backend:
 
@@ -207,7 +221,7 @@ The current headline numbers — every ported file run against each backend:
   `fail=0 xfail=2`).
 - The **MoltenVK** `fail=15599` are **not yawgpu defects** and are **distinct from the native-Vulkan
   result** — each is green on native Metal *and* native Vulkan (F-104 native-Vulkan-confirmed green);
-  MoltenVK/SPIRV-Cross mistranslates them. See the [findings buckets](#findings--115-surfaced-to-date-f-001f-115) above.
+  MoltenVK/SPIRV-Cross mistranslates them. See the [findings buckets](#findings--119-surfaced-to-date-f-001f-119) above.
 - The native-Vulkan (NVIDIA) sweeps surfaced the genuine Apple-masked Vulkan-HAL/naga-path defects
   F-105/F-106, the F-107…F-110 batch, and F-112 (all fixed; per-finding detail in
   [FINDINGS](docs/FINDINGS.md)). Being Apple-masked, they never appeared in the Metal/MoltenVK rows.

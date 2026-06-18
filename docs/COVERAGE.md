@@ -27,15 +27,15 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `api/validation` | 129 | 112 | 14 | 3 | 0 | 0 |
 | `api/operation` | 72 | 28 | 42 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
-| `shader/execution` | 239 | 64 | 0 | 0 | 175 | 0 |
+| `shader/execution` | 239 | 104 | 0 | 0 | 135 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **204** | **56** | **21** | **382** | **20** |
+| **Total** | **683** | **244** | **56** | **21** | **342** | **20** |
 
-> Reconciled 2026-06-18 to the on-disk `.spec.cpp` count: 260 files (complete + partial) under
-> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 64). `api/operation` has **every
+> Reconciled 2026-06-19 to the on-disk `.spec.cpp` count: 300 files (complete + partial) under
+> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 104). `api/operation` has **every
 > portable file opened** (70/72; only `buffers/{map_ArrayBuffer,map_detach}` are N/A — JS ArrayBuffer
 > detach), but it is **not fully complete**: per the area table 42 of those 70 files are **partial** —
 > they register their upstream test names but leave some bodies `.unimplemented()`. Most of those gaps are
@@ -180,6 +180,33 @@ combined depth-stencil formats errored; fixed `baa0c81`), and fixed a port-side 
 yawgpu exposed: `textureGather` of a depth texture through a color view reads implementation-defined
 G/B/A channels — upstream skips those (component>0 without `texture-component-swizzle`); the port had
 wrongly asserted 0 (Dawn returned 0 → false-pass; yawgpu returned the real texel), now skipped per spec.
+
+**Batch phaseY10 (shader/execution P2 sync + derivative built-ins, 13 files)** ported the
+synchronization/runtime-array builtins `workgroupBarrier`, `storageBarrier`, `workgroupUniformLoad`,
+`arrayLength` (Stage 1; modelled on the phaseY7 atomics compute-readback pattern, not the FP framework)
+and the fragment-quad derivatives `dpdx`/`dpdxCoarse`/`dpdxFine`, `dpdy`/`dpdyCoarse`/`dpdyFine`,
+`fwidth`/`fwidthCoarse`/`fwidthFine` (Stage 2; a **self-contained** subtraction/addition/abs acceptance
+interval over `sparseScalarF32Range`, **not** the full upstream FP-interval framework). Dawn + yawgpu
+Metal green. Surfaced/resolved **F-116** (yawgpu-core: `arrayLength(&runtime_array)` off-by-one when a
+storage binding's size isn't a whole stride multiple; fixed `94694e2`). `subgroup*`/`quadBroadcast`/
+`quadSwap` deferred (optional subgroups feature, likely Dawn-skip).
+
+**Batch phaseY11 (shader/execution P3 integer/bit/pack built-ins, 28 files)** built the generic
+**`run()` expression harness** (`expression/expression.{h,cpp}` — input sources const/uniform/storage_r/
+storage_rw, vectorize 2/3/4, exact + float-interval per-element acceptance; the shared base for all
+remaining expression value builtins) and ported on it: **Stage 1** — 16 integer/bit builtins
+(`countOneBits`, `count{Leading,Trailing}Zeros`, `first{Leading,Trailing}Bit`, `reverseBits`,
+`extractBits`, `insertBits`, `dot4{I,U}8Packed`, `pack4x{I,U}8`/`pack4x{I,U}8Clamp`, `unpack4x{I,U}8`);
+**Stage 2** — `bitcast` (32 g.test, exact bit-reinterpret incl. f16/abstract types + NaN-any/subnormal
+acceptance); **Stage 3** — 11 float pack/unpack (`{pack,unpack}{4x8,2x16}{snorm,unorm}` + `2x16float`).
+Integer-EXACT comparison (a divergence is a real bug, not ULP). Dawn green throughout. Surfaced/resolved
+three yawgpu findings, **all fixed & Metal-re-verified**: **F-117** (`firstLeadingBit(u32)` of
+`0xFFFFFFFF` → `0xFFFFFFFF` instead of 31), **F-118** (`insertBits` const-eval → 0), **F-119**
+(`pack2x16float`/`unpack2x16float` errored on f16-less Metal). **wgpu-native cross-check (2026-06-19):**
+F-117 and F-118 reproduce on wgpu-native too → **upstream-naga** defects (yawgpu fixes preempt them);
+F-119 passes on wgpu-native → **yawgpu-local** feature-gating. REMAINING P3: `access/{array,vector,matrix,
+structure}` (separate `expression/access` tree). P4 math/trig/operator/constructor remain deferred
+(naga const-eval / FP-interval framework).
 
 **Batch Y-5 / phase Y5 (api/operation lifecycle / reflection / immediate)** ported the final 15
 `api/operation` files: `reflection`, `labels`, `shader_module/compilation_info`,
@@ -369,10 +396,13 @@ Notes on the pre-classified rows:
   workers — these depend on the web platform and have no native C-API analog. See
   [00-overview](00-overview.md) non-goals.
 - **`idl` (3) → N/A**: WebIDL surface/constant tests; the C API has no IDL layer.
-- **`shader/validation` (207) + `shader/execution` (239) → deferred**: shader validation is
-  mid-term; shader execution is the largest deferred effort. See [07-roadmap](07-roadmap.md)
-  phases 5–6. (Some `shader/validation` files may be reclassified to `todo` once that phase
-  starts.)
+- **`shader/validation` (207) → deferred; `shader/execution` (239) → 104 ported, 135 deferred**:
+  shader validation is mid-term; shader execution is progressing — all structural files plus the
+  `expression/call/builtin` `atomics`, texture, P2 sync/derivative, and P3 integer/bit/pack families are
+  ported (see the phaseY7–Y11 batches above). The remaining 135 deferred are `expression/access/*` and
+  the P4 math/trig/operator/constructor builtins (naga const-eval / FP-interval framework). See
+  [07-roadmap](07-roadmap.md) phases 5–6. (Some `shader/validation` files may be reclassified to `todo`
+  once that phase starts.)
 - **`api/regression`, `shader/regression`**: 0 files at this revision.
 
 These classifications are provisional; revisit per file when the area is worked.
