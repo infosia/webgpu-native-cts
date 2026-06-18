@@ -1597,4 +1597,29 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-114 — yawgpu: `textureSampleGrad` on 3D / cube textures errors (vec3 gradients) — cross-HAL (Metal)
+
+- **Backend:** yawgpu (Metal, Apple). Deterministic (same fail count at `--workers 1` and `8`).
+- **Found by:** `shader,execution,expression,call,builtin,textureSampleGrad:sampled_3d_coords:*`
+  (49815 fail) and `sampled_array_3d_coords:*` (7830 fail) — 57645 total, i.e. every
+  3D (`dim="3d"`) and cube (`dim="cube"`) subcase across all stages
+  (compute/fragment/vertex). The 2D / 2d-array Grad cases pass; `sampled_3d` Grad has
+  **0 passes** on yawgpu.
+- **Observed:** `uncaptured error: queue submit cannot use an error command buffer` — the
+  compute/render command buffer becomes an error object before submit, so nothing executes.
+- **Cross-check:** **Dawn passes textureSampleGrad fully (161865/0)**, so the port and WGSL
+  are correct. yawgpu's `textureSampleLevel`/`textureSample` on the SAME 3D/cube textures
+  pass (3D texture creation/upload/sampling is fine), so this is specific to the
+  `textureSampleGrad` builtin with vec3 gradients (3D/cube) — most likely naga's MSL lowering
+  of `textureSampleGrad` for a 3D/cube image, or a yawgpu-core validation of the grad call.
+  wgpu-native cross-check (shared upstream naga → would classify naga vs yawgpu-core) was
+  attempted but the wgpu-native run did not complete on this host (hung/too slow on the ~50k
+  -subcase query); **cross-check pending** per [[naga-fix-crosscheck-wgpu-native]].
+- **Status:** OPEN (2026-06-18). Surfaced after the yawgpu resource-leak fix made the full
+  textureSampleGrad query runnable without OOM. Handed to the yawgpu side for diagnosis
+  (naga-MSL `textureSampleGrad` 3D/cube path vs yawgpu-core). The cts port is correct
+  (Dawn-green) and committed; no cts-side action.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
