@@ -1627,4 +1627,23 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-115 — yawgpu: `textureLoad` on combined depth-stencil formats errors (Metal)
+
+- **Backend:** yawgpu (Metal, Apple). Deterministic.
+- **Found by:** `shader,execution,expression,call,builtin,textureLoad:*` — 384 fail, ALL
+  `format="depth24plus-stencil8"` (192) or `format="depth32float-stencil8"` (192), spread across
+  the arrayed / depth / multisampled / sampled_2d cases. Plain depth formats (depth16unorm,
+  depth24plus, depth32float) pass on yawgpu.
+- **Observed:** `uncaptured error: queue submit cannot use an error command buffer` — the command
+  buffer becomes an error object before submit.
+- **Cross-check:** **Dawn passes textureLoad fully (18048/0)**, and yawgpu passes textureLoad on the
+  depth-ONLY formats — so it is specific to the depth aspect of a COMBINED depth+stencil format under
+  textureLoad (the depth-only view / load of depth24plus-stencil8 / depth32float-stencil8). Likely
+  naga's MSL lowering of textureLoad on a depth aspect of a combined format, or yawgpu-core's
+  aspect-view validation. wgpu-native cross-check pending per [[naga-fix-crosscheck-wgpu-native]].
+- **Status:** OPEN (2026-06-18). The cts port is correct (Dawn-green) and committed; no cts-side
+  action. Handed to the yawgpu side for diagnosis (depth-aspect textureLoad of combined depth-stencil).
+
+---
+
 _Add new findings as `F-00N` with the same fields._
