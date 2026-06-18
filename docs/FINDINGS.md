@@ -1667,4 +1667,30 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-117 — yawgpu/naga: `firstLeadingBit(u32)` of `0xFFFFFFFF` returns `0xFFFFFFFF` instead of 31 (Metal)
+
+- **Backend:** yawgpu (Metal). Deterministic.
+- **Found by:** `shader,execution,expression,call,builtin,firstLeadingBit:u32` — the all-ones input
+  `0xFFFFFFFF` returns `0xFFFFFFFF`; spec value is **31** (the most-significant set bit). Every other
+  u32 value is correct (e.g. 0x1FFFFFFF→28, 0x7FFFFFFF→30), and the i32 variant is fully correct.
+- **Cross-check:** Dawn returns 31 (test passes). Specific to the u32 all-ones case — looks like
+  naga's lowering of `firstLeadingBit` for u32 mis-handles the all-ones input (treats it like the
+  signed/`-1` or the zero special-case). Likely naga (shared with wgpu-native) — cross-check pending
+  per [[naga-fix-crosscheck-wgpu-native]].
+- **Status:** OPEN (2026-06-18). cts port correct (Dawn-green) and committed; no cts-side action.
+
+## F-118 — yawgpu/naga: `insertBits` const-eval returns 0 (Metal)
+
+- **Backend:** yawgpu (Metal). Deterministic.
+- **Found by:** `shader,execution,expression,call,builtin,insertBits:integer:inputSource="const";*` —
+  all 8 const-eval cases (signed/unsigned × width 1–4) return **0** instead of the inserted result
+  (e.g. input `2303862050` → returns 0, expected 2303862050). The `uniform`/`storage_r`/`storage_rw`
+  input sources (runtime evaluation) all pass — **only `inputSource=const` fails**.
+- **Cross-check:** Dawn passes all input sources. Runtime `insertBits` is correct on yawgpu; only the
+  **const-evaluation** path is wrong → a naga const-eval defect for `insertBits` (shared with
+  wgpu-native — cross-check pending per [[naga-fix-crosscheck-wgpu-native]]).
+- **Status:** OPEN (2026-06-18). cts port correct (Dawn-green) and committed; no cts-side action.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
