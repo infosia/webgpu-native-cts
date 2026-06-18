@@ -1615,10 +1615,15 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   wgpu-native cross-check (shared upstream naga → would classify naga vs yawgpu-core) was
   attempted but the wgpu-native run did not complete on this host (hung/too slow on the ~50k
   -subcase query); **cross-check pending** per [[naga-fix-crosscheck-wgpu-native]].
-- **Status:** OPEN (2026-06-18). Surfaced after the yawgpu resource-leak fix made the full
-  textureSampleGrad query runnable without OOM. Handed to the yawgpu side for diagnosis
-  (naga-MSL `textureSampleGrad` 3D/cube path vs yawgpu-core). The cts port is correct
-  (Dawn-green) and committed; no cts-side action.
+- **Status:** **RESOLVED 2026-06-18** (naga fork `infosia/wgpu` `430e6e3c8`, pinned-rev bump in
+  yawgpu `2d2594f`). Root cause was naga's MSL backend: `put_image_sample_level` emitted
+  `metal::gradient2d` for `textureSampleGrad` regardless of texture dimension, so 3D/cube
+  produced `gradient2d(float3, float3)` → Metal compile error → error command buffer → the
+  generic "queue submit cannot use an error command buffer". Not a yawgpu-core/HAL bug (the
+  generated MSL string was the proof). Fix makes the gradient builtin dimension-aware
+  (`gradient2d`/`gradient3d`/`gradientcube`) + naga snapshot test. Re-verified on yawgpu/Metal:
+  `textureSampleGrad:*` **135945 pass / 0 fail / 0 crash** (was 78300/57645). Confirms the
+  naga-MSL attribution; no cts-side change.
 
 ---
 
