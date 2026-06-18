@@ -93,8 +93,11 @@ fixed & re-verified on NVIDIA Vulkan (2026-06-15/16), F-111 a documented externa
 batches — `atomics` (phaseY7), the **entire texture built-in family** (phaseY8–Y9, 15 files on a ported
 `texture_utils` software-reference sampler), the P2 **synchronization + derivatives** built-ins (phaseY10:
 `workgroupBarrier`/`storageBarrier`/`workgroupUniformLoad`/`arrayLength` + `dpdx`/`dpdy`/`fwidth`×coarse/fine),
-and the P3 **integer/bit/pack** built-ins (phaseY11: a generic `run()` expression harness + 16 integer/bit
-builtins, `bitcast`, and 11 float pack/unpack) — each verified green on Dawn + yawgpu Metal. This surfaced
+the P3 **integer/bit/pack** built-ins (phaseY11: a generic `run()` expression harness + 16 integer/bit
+builtins, `bitcast`, and 11 float pack/unpack), and the P3 **`expression/access/*`** tree (phaseY12:
+vector/array/matrix/structure indexing, swizzle & member access via a composite-value layout extension to
+`run()` — 5 files, Dawn + yawgpu Metal green, no new finding) — each verified green on Dawn + yawgpu Metal.
+This surfaced
 and resolved F-114 (naga `textureSampleGrad` 3D/cube gradient lowering), F-115 (yawgpu textureLoad combined
 depth-stencil), F-116 (yawgpu `arrayLength` off-by-one on non-stride-multiple bindings), F-117
 (`firstLeadingBit(u32)` all-ones), F-118 (`insertBits` const-eval), and F-119 (`pack2x16float`/
@@ -108,9 +111,9 @@ are **confirmed upstream-naga** (wgpu-native fails them too, 2026-06-19 cross-ch
 ```mermaid
 pie showData
     title Upstream .spec.ts files (683)
-    "Ported — complete" : 244
+    "Ported — complete" : 249
     "Ported — partial" : 56
-    "Deferred (shader/validation, expression precision)" : 342
+    "Deferred (shader/validation, expression precision)" : 337
     "Not portable (N/A)" : 21
     "Todo" : 20
 ```
@@ -125,16 +128,16 @@ xychart-beta
     title "Coverage addressed (complete + partial + N/A) of upstream files, %"
     x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
     y-axis "addressed %" 0 --> 100
-    bar [100, 100, 44, 0, 47]
+    bar [100, 100, 46, 0, 48]
 ```
 
 | Area | Addressed* | Note |
 |------|----------:|------|
 | `api/validation` | **129 / 129 ✅** | **fully ported** — every file complete (112), partial (14), or N/A (3); no todo (Y-6 V1–V10: capability_checks/features + all 35 limits) |
 | `api/operation` | **72 / 72 ✅** | **fully ported** — every file complete (28), partial (42), or N/A (2); no todo. Partials leave some native-portable breadth deferred (vertical-first) |
-| `shader/execution` | 104 / 239 | structural files (`flow_control`, `memory_model`, `statement`, `shader_io`) + `expression/call/builtin`: **`atomics` (11)**, the full **texture built-in family (15)**, P2 **sync/derivatives (13)** (`workgroupBarrier`/`storageBarrier`/`workgroupUniformLoad`/`arrayLength` + `dpdx`/`dpdy`/`fwidth`×coarse/fine), and P3 **integer/bit/pack (28)** via a generic `run()` harness (16 int/bit + `bitcast` + 11 float pack/unpack); rest (math/trig precision, `access/*`) deferred |
+| `shader/execution` | 109 / 239 | structural files (`flow_control`, `memory_model`, `statement`, `shader_io`) + `expression/call/builtin`: **`atomics` (11)**, the full **texture built-in family (15)**, P2 **sync/derivatives (13)** (`workgroupBarrier`/`storageBarrier`/`workgroupUniformLoad`/`arrayLength` + `dpdx`/`dpdy`/`fwidth`×coarse/fine), P3 **integer/bit/pack (28)** via a generic `run()` harness (16 int/bit + `bitcast` + 11 float pack/unpack), and **`expression/access/*` (5)** (vector/array/matrix/structure indexing & swizzle via a composite-value layout extension); rest (math/trig precision) deferred |
 | `shader/validation` | 0 / 207 | deferred |
-| **Total** | **321 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
+| **Total** | **326 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
 
 \* addressed = complete + partial + N/A (every upstream file resolved). Per-file detail and what each batch
 added: [COVERAGE](docs/COVERAGE.md).
