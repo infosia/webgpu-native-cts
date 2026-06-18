@@ -793,6 +793,22 @@ std::string wgslFloat(double value) {
     return out.str();
 }
 
+WGPUTextureFormat viewFormatForAspect(WGPUTextureFormat format, WGPUTextureAspect aspect) {
+    if (aspect == WGPUTextureAspect_DepthOnly) {
+        if (format == WGPUTextureFormat_Depth32FloatStencil8) {
+            return WGPUTextureFormat_Depth32Float;
+        }
+        if (format == WGPUTextureFormat_Depth24PlusStencil8) {
+            return WGPUTextureFormat_Depth24Plus;
+        }
+        return format;
+    }
+    if (aspect == WGPUTextureAspect_StencilOnly) {
+        return WGPUTextureFormat_Stencil8;
+    }
+    return format;
+}
+
 std::string textureType(const TextureCase& c) {
     const char* suffix = c.isDepth ? "" : "<f32>";
     switch (c.kind) {
@@ -1513,15 +1529,15 @@ std::string buildMaterializeWgsl(const TextureCase& c, WGPUExtent3D mipSize) {
     if (c.viewDimension == WGPUTextureViewDimension_1D) {
         wgsl << "  out[ndx] = textureLoad(tex, id.x, 0);\n";
     } else if (c.viewDimension == WGPUTextureViewDimension_2D) {
-        wgsl << "  out[ndx] = textureLoad(tex, id.xy, 0);\n";
+        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", f32(0.0));\n";
     } else if (c.viewDimension == WGPUTextureViewDimension_2DArray) {
-        wgsl << "  out[ndx] = textureLoad(tex, id.xy, id.z, 0);\n";
+        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", i32(id.z), f32(0.0));\n";
     } else if (c.viewDimension == WGPUTextureViewDimension_3D) {
-        wgsl << "  out[ndx] = textureLoad(tex, id.xyz, 0);\n";
+        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", f32(0.0));\n";
     } else if (c.viewDimension == WGPUTextureViewDimension_CubeArray) {
-        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", id.z / 6u, 0.0);\n";
+        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", i32(id.z / 6u), f32(0.0));\n";
     } else {
-        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", 0.0);\n";
+        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", f32(0.0));\n";
     }
     wgsl << "}\n";
     return wgsl.str();
@@ -1533,6 +1549,16 @@ std::vector<MipData> materializeCompressedTexels(AllFeaturesMaxLimitsGpuTest& t,
     TextureCase materializeCase = c;
     materializeCase.stage = "compute";
     materializeCase.filt = "nearest";
+    if (c.viewDimension == WGPUTextureViewDimension_2DArray) {
+        materializeCase.kind = SampleKind::Sampled2DArray;
+        materializeCase.useArrayIndex = true;
+    } else if (c.viewDimension == WGPUTextureViewDimension_3D) {
+        materializeCase.kind = SampleKind::Sampled3D;
+    } else if (c.viewDimension == WGPUTextureViewDimension_1D) {
+        materializeCase.kind = SampleKind::Sampled1D;
+    } else {
+        materializeCase.kind = SampleKind::Sampled2D;
+    }
     if (c.viewDimension == WGPUTextureViewDimension_Cube || c.viewDimension == WGPUTextureViewDimension_CubeArray) {
         materializeCase.kind = SampleKind::Sampled2DArray;
         materializeCase.viewDimension = WGPUTextureViewDimension_2DArray;
@@ -2582,6 +2608,745 @@ MetadataQueryCase dimensionsCase(AllFeaturesMaxLimitsGpuTest& t, bool depth, boo
     return c;
 }
 
+enum class LoadReturnKind {
+    Float,
+    Sint,
+    Uint,
+    Depth,
+};
+
+struct LoadCallData {
+    std::array<uint32_t, 4> coords = {};
+    std::array<uint32_t, 4> scalars = {};
+};
+
+static_assert(sizeof(LoadCallData) == 32);
+
+struct TextureLoadCase {
+    std::string stage = "compute";
+    std::string samplePoints = "texel-centre";
+    std::string textureType;
+    WGPUTextureFormat format = WGPUTextureFormat_RGBA8Unorm;
+    WGPUTextureDimension textureDimension = WGPUTextureDimension_2D;
+    WGPUTextureViewDimension viewDimension = WGPUTextureViewDimension_2D;
+    WGPUTextureAspect aspect = WGPUTextureAspect_All;
+    WGPUTextureUsage usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    WGPUTextureSampleType sampleType = WGPUTextureSampleType_Float;
+    WGPUStorageTextureAccess storageAccess = WGPUStorageTextureAccess_BindingNotUsed;
+    bool storageTexture = false;
+    bool isDepth = false;
+    bool multisampled = false;
+    uint32_t coordComponents = 2;
+    bool useLevel = true;
+    bool useArrayIndex = false;
+    bool useSampleIndex = false;
+    std::string coordType = "i32";
+    std::string levelType = "i32";
+    std::string arrayIndexType = "u32";
+    std::string sampleIndexType = "i32";
+    WGPUExtent3D baseSize = WGPUExtent3D{8, 8, 1};
+    uint32_t mipLevelCount = 1;
+    uint32_t sampleCount = 1;
+    uint32_t baseMipLevel = 0;
+    uint32_t viewMipCount = WGPU_MIP_LEVEL_COUNT_UNDEFINED;
+    uint32_t baseArrayLayer = 0;
+    uint32_t arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
+    LoadReturnKind returnKind = LoadReturnKind::Float;
+};
+
+struct TextureLoadPipelineBundle {
+    WGPUShaderModule module = nullptr;
+    WGPUBindGroupLayout bindGroupLayout = nullptr;
+    WGPUPipelineLayout pipelineLayout = nullptr;
+    WGPUComputePipeline computePipeline = nullptr;
+    WGPURenderPipeline renderPipeline = nullptr;
+};
+
+std::string stageFromLoadShort(const std::string& stage) {
+    if (stage == "c") return "compute";
+    if (stage == "f") return "fragment";
+    if (stage == "v") return "vertex";
+    return stage;
+}
+
+bool isCompressedFloatTextureLoadFormat(WGPUTextureFormat format) {
+    return isCompressedTextureFormat(format)
+        && std::string_view(textureFormatInfo(format).identifier).find("float") != std::string_view::npos;
+}
+
+LoadReturnKind loadReturnKindForFormat(WGPUTextureFormat format, bool depth) {
+    if (depth) return LoadReturnKind::Depth;
+    if (formatLooksUint(format) || isStencilOnlyFormat(format)) return LoadReturnKind::Uint;
+    if (formatLooksSint(format)) return LoadReturnKind::Sint;
+    return LoadReturnKind::Float;
+}
+
+std::string loadComponentType(LoadReturnKind kind) {
+    if (kind == LoadReturnKind::Uint) return "u32";
+    if (kind == LoadReturnKind::Sint) return "i32";
+    return "f32";
+}
+
+std::string appendLoadComponentType(const std::string& base, WGPUTextureFormat format, bool depth) {
+    if (depth || base.find("depth") != std::string::npos || base.find("storage") != std::string::npos) {
+        return base;
+    }
+    return base + "<" + loadComponentType(loadReturnKindForFormat(format, false)) + ">";
+}
+
+uint32_t bitsOfFloat(float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+float floatFromBits(uint32_t bits) {
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+uint32_t bitsOfI32(int32_t value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+double depthLoadValue(WGPUTextureFormat format, uint32_t mip, uint32_t layer) {
+    const double value = depthValue(mip, layer);
+    if (format == WGPUTextureFormat_Depth16Unorm) {
+        return static_cast<double>(static_cast<uint32_t>(std::floor(value * 65535.0))) / 65535.0;
+    }
+    return value;
+}
+
+std::array<uint32_t, 4> expectedLoadBits(std::array<double, 4> values, WGPUTextureFormat format, LoadReturnKind kind) {
+    std::array<uint32_t, 4> out = {0, 0, 0, 0};
+    if (kind == LoadReturnKind::Depth) {
+        out[0] = bitsOfFloat(static_cast<float>(values[0]));
+        return out;
+    }
+    const uint32_t components = isStencilOnlyFormat(format) ? 1u : componentCount(format);
+    for (uint32_t i = 0; i < 4; ++i) {
+        const double value = (i == 3 && components < 4) ? 1.0 : values[i];
+        if (kind == LoadReturnKind::Uint) {
+            out[i] = static_cast<uint32_t>(std::llround(value));
+        } else if (kind == LoadReturnKind::Sint) {
+            out[i] = bitsOfI32(static_cast<int32_t>(std::llround(value)));
+        } else {
+            out[i] = bitsOfFloat(static_cast<float>(value));
+        }
+    }
+    return out;
+}
+
+bool textureLoadBitsMatch(
+    WGPUTextureFormat format,
+    LoadReturnKind kind,
+    uint32_t component,
+    uint32_t expected,
+    uint32_t got) {
+    if (expected == got) {
+        return true;
+    }
+    if ((kind == LoadReturnKind::Float || kind == LoadReturnKind::Depth)
+        && format == WGPUTextureFormat_Depth16Unorm) {
+        return std::fabs(floatFromBits(expected) - floatFromBits(got)) <= (1.0f / 65535.0f);
+    }
+    if (kind == LoadReturnKind::Float && baseFormat(format) != format && component < 3u) {
+        return std::fabs(floatFromBits(expected) - floatFromBits(got)) <= 0.00025f;
+    }
+    return false;
+}
+
+uint32_t pseudoRandomU32(uint32_t i, uint32_t salt, uint32_t limit) {
+    if (limit == 0) return 0;
+    return hashU32({i + 1u, salt + 17u, limit + 31u, 0x9e3779b9u}) % limit;
+}
+
+std::vector<LoadCallData> makeLoadCalls(const TextureLoadCase& c) {
+    std::vector<LoadCallData> calls;
+    calls.reserve(kCallCount);
+    for (uint32_t i = 0; i < kCallCount; ++i) {
+        LoadCallData call;
+        const uint32_t level = c.useLevel ? (i % c.mipLevelCount) : 0u;
+        const WGPUExtent3D mipSize = physicalMipSize(c.baseSize, c.textureDimension, level);
+        if (c.samplePoints == "texel-centre") {
+            call.coords[0] = i % mipSize.width;
+            call.coords[1] = (i / std::max(1u, mipSize.width)) % std::max(1u, mipSize.height);
+            call.coords[2] = (i / std::max(1u, mipSize.width * std::max(1u, mipSize.height)))
+                % std::max(1u, mipSize.depthOrArrayLayers);
+        } else {
+            call.coords[0] = pseudoRandomU32(i, 1, mipSize.width);
+            call.coords[1] = pseudoRandomU32(i, 2, std::max(1u, mipSize.height));
+            call.coords[2] = pseudoRandomU32(i, 3, std::max(1u, mipSize.depthOrArrayLayers));
+        }
+        const uint32_t viewArrayLayers = c.arrayLayerCount == WGPU_ARRAY_LAYER_COUNT_UNDEFINED
+            ? std::max(1u, c.baseSize.depthOrArrayLayers - c.baseArrayLayer)
+            : c.arrayLayerCount;
+        call.scalars[0] = level;
+        call.scalars[1] = c.useArrayIndex ? (i % std::max(1u, viewArrayLayers)) : 0u;
+        call.scalars[2] = c.useSampleIndex ? (i % c.sampleCount) : 0u;
+        calls.push_back(call);
+    }
+    return calls;
+}
+
+std::string loadScalarExpr(const std::string& source, const std::string& type) {
+    return type == "u32" ? source : "i32(" + source + ")";
+}
+
+std::string loadSignedScalarExpr(const std::string& source) {
+    return "i32(" + source + ")";
+}
+
+std::string loadCoordExpr(const TextureLoadCase& c) {
+    if (!c.storageTexture) {
+        if (c.coordComponents == 1) return loadSignedScalarExpr("p.coords.x");
+        if (c.coordComponents == 2) return "vec2i(p.coords.xy)";
+        return "vec3i(p.coords.xyz)";
+    }
+    if (c.coordComponents == 1) return loadScalarExpr("p.coords.x", c.coordType);
+    if (c.coordComponents == 2) return c.coordType == "u32" ? "p.coords.xy" : "vec2i(p.coords.xy)";
+    return c.coordType == "u32" ? "p.coords.xyz" : "vec3i(p.coords.xyz)";
+}
+
+std::string loadCallWGSL(const TextureLoadCase& c) {
+    std::ostringstream call;
+    call << "textureLoad(tex, " << loadCoordExpr(c);
+    if (c.useArrayIndex) call << ", "
+        << (c.storageTexture ? loadScalarExpr("p.scalars.y", c.arrayIndexType) : loadSignedScalarExpr("p.scalars.y"));
+    if (c.useLevel) call << ", " << (c.storageTexture ? loadScalarExpr("p.scalars.x", c.levelType) : loadSignedScalarExpr("p.scalars.x"));
+    if (c.useSampleIndex) call << ", " << (c.storageTexture ? loadScalarExpr("p.scalars.z", c.sampleIndexType) : loadSignedScalarExpr("p.scalars.z"));
+    call << ")";
+    return call.str();
+}
+
+std::string loadResultExpr(const TextureLoadCase& c) {
+    const std::string call = loadCallWGSL(c);
+    if (c.returnKind == LoadReturnKind::Depth) return "bitcast<vec4u>(vec4f(" + call + ", 0.0, 0.0, 0.0))";
+    if (c.returnKind == LoadReturnKind::Uint) return call;
+    return "bitcast<vec4u>(" + call + ")";
+}
+
+std::string buildTextureLoadWgsl(uint32_t callCount, const TextureLoadCase& c) {
+    std::ostringstream wgsl;
+    wgsl << "@group(0) @binding(0) var tex: " << c.textureType << ";\n"
+         << "struct LoadParams { coords: vec4u, scalars: vec4u };\n"
+         << "@group(0) @binding(1) var<storage, read> params: array<LoadParams>;\n";
+    if (c.stage == "compute") {
+        wgsl << "@group(0) @binding(2) var<storage, read_write> out: array<vec4u>;\n"
+             << "@compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id: vec3u) {\n"
+             << "  let i = id.x;\n"
+             << "  let p = params[i];\n";
+        if (c.useLevel || c.useArrayIndex || c.useSampleIndex) {
+            wgsl << "  var result = vec4u(0u);\n";
+            for (uint32_t i = 0; i < callCount; ++i) {
+                wgsl << "  let call" << i << " = " << loadResultExpr(c) << ";\n"
+                     << "  result = select(result, call" << i << ", i == " << i << "u);\n";
+            }
+            wgsl << "  out[i] = result;\n";
+        } else {
+            wgsl << "  out[i] = " << loadResultExpr(c) << ";\n";
+        }
+        wgsl << "}\n";
+        return wgsl.str();
+    }
+
+    wgsl << "struct VOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat, either) ndx: u32, @location(1) @interpolate(flat, either) result: vec4u };\n"
+         << "fn pixelPos(vertexIndex: u32, instanceIndex: u32) -> vec4f {\n"
+         << "  let width = " << callCount << ".0;\n"
+         << "  let x0 = -1.0 + 2.0 * f32(instanceIndex) / width;\n"
+         << "  let x1 = -1.0 + 2.0 * f32(instanceIndex + 1u) / width;\n"
+         << "  let p = array(vec2f(x0, 3.0), vec2f(x1, -1.0), vec2f(x0, -1.0));\n"
+         << "  return vec4f(p[vertexIndex], 0.0, 1.0);\n"
+         << "}\n"
+         << "fn doLoad(i: u32) -> vec4u {\n"
+         << "  let p = params[i];\n";
+    if (c.useLevel || c.useArrayIndex || c.useSampleIndex) {
+        wgsl << "  var result = vec4u(0u);\n";
+        for (uint32_t i = 0; i < callCount; ++i) {
+            wgsl << "  let call" << i << " = " << loadResultExpr(c) << ";\n"
+                 << "  result = select(result, call" << i << ", i == " << i << "u);\n";
+        }
+        wgsl << "  return result;\n";
+    } else {
+        wgsl << "  return " << loadResultExpr(c) << ";\n";
+    }
+    wgsl << "}\n";
+    if (c.stage == "vertex") {
+        wgsl << "@vertex fn vsMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VOut {\n"
+             << "  return VOut(pixelPos(vertexIndex, instanceIndex), instanceIndex, doLoad(instanceIndex));\n"
+             << "}\n"
+             << "@fragment fn fsMain(v: VOut) -> @location(0) vec4u { return v.result; }\n";
+    } else {
+        wgsl << "@vertex fn vsMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VOut {\n"
+             << "  return VOut(pixelPos(vertexIndex, instanceIndex), instanceIndex, vec4u(0u));\n"
+             << "}\n"
+             << "@fragment fn fsMain(v: VOut) -> @location(0) vec4u { return doLoad(v.ndx); }\n";
+    }
+    return wgsl.str();
+}
+
+TextureLoadPipelineBundle createTextureLoadPipelineBundle(WGPUDevice device, const std::string& wgsl, const TextureLoadCase& c) {
+    TextureLoadPipelineBundle bundle;
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = stringView(wgsl);
+    WGPUShaderModuleDescriptor moduleDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    moduleDesc.nextInChain = &source.chain;
+    bundle.module = wgpuDeviceCreateShaderModule(device, &moduleDesc);
+
+    std::array<WGPUBindGroupLayoutEntry, 3> entries = {{
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+    }};
+    const WGPUShaderStage visibility = stageVisibility(c.stage);
+    entries[0].binding = 0;
+    entries[0].visibility = visibility;
+    if (c.storageTexture) {
+        entries[0].storageTexture = WGPU_STORAGE_TEXTURE_BINDING_LAYOUT_INIT;
+        entries[0].storageTexture.access = c.storageAccess;
+        entries[0].storageTexture.format = c.format;
+        entries[0].storageTexture.viewDimension = c.viewDimension;
+    } else {
+        entries[0].texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+        entries[0].texture.sampleType = c.sampleType;
+        entries[0].texture.viewDimension = c.viewDimension;
+        entries[0].texture.multisampled = c.multisampled ? WGPU_TRUE : WGPU_FALSE;
+    }
+    entries[1].binding = 1;
+    entries[1].visibility = visibility;
+    entries[1].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entries[1].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+    entries[2].binding = 2;
+    entries[2].visibility = WGPUShaderStage_Compute;
+    entries[2].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entries[2].buffer.type = WGPUBufferBindingType_Storage;
+
+    WGPUBindGroupLayoutDescriptor bglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    bglDesc.entryCount = c.stage == "compute" ? 3 : 2;
+    bglDesc.entries = entries.data();
+    bundle.bindGroupLayout = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
+    WGPUPipelineLayoutDescriptor pipelineLayoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pipelineLayoutDesc.bindGroupLayoutCount = 1;
+    pipelineLayoutDesc.bindGroupLayouts = &bundle.bindGroupLayout;
+    bundle.pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &pipelineLayoutDesc);
+    if (c.stage == "compute") {
+        WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        pipelineDesc.layout = bundle.pipelineLayout;
+        pipelineDesc.compute.module = bundle.module;
+        pipelineDesc.compute.entryPoint = stringView("main");
+        bundle.computePipeline = wgpuDeviceCreateComputePipeline(device, &pipelineDesc);
+    } else {
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format = WGPUTextureFormat_RGBA32Uint;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = bundle.module;
+        fragment.entryPoint = stringView("fsMain");
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+        WGPURenderPipelineDescriptor renderDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        renderDesc.layout = bundle.pipelineLayout;
+        renderDesc.vertex.module = bundle.module;
+        renderDesc.vertex.entryPoint = stringView("vsMain");
+        renderDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        renderDesc.multisample.count = 1;
+        renderDesc.fragment = &fragment;
+        bundle.renderPipeline = wgpuDeviceCreateRenderPipeline(device, &renderDesc);
+    }
+    return bundle;
+}
+
+std::string textureLoadPipelineKey(const std::string& wgsl, const TextureLoadCase& c) {
+    std::ostringstream key;
+    key << wgsl << "\n// layout:"
+        << " stage=" << c.stage
+        << " view=" << static_cast<uint32_t>(c.viewDimension)
+        << " sampleType=" << static_cast<uint32_t>(c.sampleType)
+        << " multisampled=" << (c.multisampled ? 1 : 0)
+        << " storage=" << (c.storageTexture ? 1 : 0)
+        << " storageAccess=" << static_cast<uint32_t>(c.storageAccess)
+        << " storageFormat=" << static_cast<uint32_t>(c.storageTexture ? c.format : WGPUTextureFormat_Undefined);
+    return key.str();
+}
+
+const TextureLoadPipelineBundle& textureLoadPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureLoadCase& c) {
+    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, TextureLoadPipelineBundle>> cache;
+    auto& deviceCache = cache[t.device()];
+    const std::string key = textureLoadPipelineKey(wgsl, c);
+    auto it = deviceCache.find(key);
+    if (it == deviceCache.end()) {
+        it = deviceCache.emplace(key, createTextureLoadPipelineBundle(t.device(), wgsl, c)).first;
+    }
+    return it->second;
+}
+
+std::vector<MipData> prepareTextureLoadMips(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, const TextureLoadCase& c) {
+    if (c.isDepth || (isDepthTextureFormat(c.format) && !c.storageTexture && !c.multisampled)) {
+        TextureCase tc;
+        tc.format = c.format;
+        tc.textureDimension = c.textureDimension;
+        tc.baseSize = c.baseSize;
+        tc.mipLevelCount = c.mipLevelCount;
+        initializeDepthTexture(t, texture, tc);
+        return {};
+    }
+    if (isStencilOnlyFormat(c.format) && !c.storageTexture && !c.multisampled) {
+        std::vector<MipData> mips;
+        mips.reserve(c.mipLevelCount);
+        for (uint32_t mip = 0; mip < c.mipLevelCount; ++mip) {
+            MipData mipData;
+            mipData.format = c.format;
+            mipData.layout = getTextureCopyLayout(c.format, c.textureDimension, c.baseSize, mip);
+            mipData.size = mipData.layout.mipSize;
+            mipData.data.assign(static_cast<size_t>(mipData.layout.byteLength), 0);
+            mips.push_back(std::move(mipData));
+        }
+        TextureCase tc;
+        tc.format = c.format;
+        tc.textureDimension = c.textureDimension;
+        tc.viewDimension = c.viewDimension;
+        tc.baseSize = c.baseSize;
+        tc.mipLevelCount = c.mipLevelCount;
+        uploadColorTexture(t, texture, tc, mips);
+        return {};
+    }
+    if (c.multisampled) {
+        return {};
+    }
+    TextureCase tc;
+    tc.format = c.format;
+    tc.textureDimension = c.textureDimension;
+    tc.viewDimension = c.viewDimension;
+    tc.baseSize = c.baseSize;
+    tc.mipLevelCount = c.mipLevelCount;
+    if (isCompressedTextureFormat(c.format)) {
+        std::vector<MipData> compressedMips = makeCompressedTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount);
+        uploadColorTexture(t, texture, tc, compressedMips);
+        return materializeCompressedTexels(t, texture, tc);
+    }
+    std::vector<MipData> mips = makeTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount, false);
+    uploadColorTexture(t, texture, tc, mips);
+    return mips;
+}
+
+void clearMultisampledTextureForLoad(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, const TextureLoadCase& c) {
+    const bool depthAttachment = c.isDepth || isDepthTextureFormat(c.format);
+    const bool stencilAttachment = isStencilOnlyFormat(c.format);
+    const bool combinedDepthStencilAttachment = depthAttachment && isStencilTextureFormat(c.format);
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    viewDesc.dimension = WGPUTextureViewDimension_2D;
+    viewDesc.format = combinedDepthStencilAttachment ? c.format
+        : viewFormatForAspect(
+            c.format,
+            depthAttachment ? WGPUTextureAspect_DepthOnly
+                            : stencilAttachment ? WGPUTextureAspect_StencilOnly
+                                                : WGPUTextureAspect_All);
+    if (combinedDepthStencilAttachment) {
+        viewDesc.aspect = WGPUTextureAspect_All;
+    } else if (depthAttachment) {
+        viewDesc.aspect = WGPUTextureAspect_DepthOnly;
+    } else if (stencilAttachment) {
+        viewDesc.aspect = WGPUTextureAspect_StencilOnly;
+    }
+    WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    if (depthAttachment) {
+        WGPURenderPassDepthStencilAttachment ds = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+        ds.view = view;
+        ds.depthReadOnly = WGPU_FALSE;
+        ds.depthLoadOp = WGPULoadOp_Clear;
+        ds.depthStoreOp = WGPUStoreOp_Store;
+        ds.depthClearValue = 0.5;
+        if (combinedDepthStencilAttachment) {
+            ds.stencilReadOnly = WGPU_FALSE;
+            ds.stencilLoadOp = WGPULoadOp_Clear;
+            ds.stencilStoreOp = WGPUStoreOp_Store;
+            ds.stencilClearValue = 0;
+        }
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.depthStencilAttachment = &ds;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+    } else if (stencilAttachment) {
+        WGPURenderPassDepthStencilAttachment ds = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+        ds.view = view;
+        ds.stencilReadOnly = WGPU_FALSE;
+        ds.stencilLoadOp = WGPULoadOp_Clear;
+        ds.stencilStoreOp = WGPUStoreOp_Store;
+        ds.stencilClearValue = 0;
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.depthStencilAttachment = &ds;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+    } else {
+        WGPURenderPassColorAttachment attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        attachment.view = view;
+        attachment.loadOp = WGPULoadOp_Clear;
+        attachment.storeOp = WGPUStoreOp_Store;
+        attachment.clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.colorAttachmentCount = 1;
+        passDesc.colorAttachments = &attachment;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+    }
+    submit(t, encoder);
+    if (depthAttachment) {
+        t.onSubmittedWorkDoneSync();
+    }
+}
+
+std::vector<std::array<uint32_t, 4>> expectedTextureLoadBits(const TextureLoadCase& c, const std::vector<LoadCallData>& calls, const std::vector<MipData>& mips) {
+    std::vector<std::array<uint32_t, 4>> expected;
+    expected.reserve(calls.size());
+    for (const LoadCallData& call : calls) {
+        if (c.multisampled) {
+            if (c.isDepth || isDepthTextureFormat(c.format)) {
+                // The multisampled depth texture is filled by initializeDepthTexture()
+                // (invoked from prepareTextureLoadMips because c.isDepth is true), which
+                // clears every sample of mip 0 / layer 0 to depthValue(0, 0). The earlier
+                // clearMultisampledTextureForLoad() depth clear is overwritten, so the value
+                // textureLoad observes for any sample_index is depthLoadValue(format, 0, 0),
+                // not the unrelated 0.5 used for the multisampled-color clear.
+                expected.push_back(expectedLoadBits({depthLoadValue(c.format, 0, 0), 0.0, 0.0, 0.0}, c.format, LoadReturnKind::Depth));
+            } else {
+                expected.push_back(expectedLoadBits({0.0, 0.0, 0.0, 0.0}, c.format, c.returnKind));
+            }
+            continue;
+        }
+        const uint32_t level = c.useLevel ? call.scalars[0] : c.baseMipLevel;
+        const uint32_t mipIndex = c.storageTexture ? c.baseMipLevel : level;
+        const uint32_t arrayIndex = c.useArrayIndex ? call.scalars[1] : 0u;
+        if (c.isDepth || (isDepthTextureFormat(c.format) && !c.storageTexture)) {
+            expected.push_back(expectedLoadBits({depthLoadValue(c.format, mipIndex, c.baseArrayLayer + arrayIndex), 0.0, 0.0, 0.0}, c.format, c.returnKind));
+            continue;
+        }
+        if (isStencilOnlyFormat(c.format) && !c.storageTexture) {
+            expected.push_back(expectedLoadBits({0.0, 0.0, 0.0, 0.0}, c.format, c.returnKind));
+            continue;
+        }
+        const MipData& mip = mips[mipIndex];
+        const uint32_t z = c.textureDimension == WGPUTextureDimension_3D
+            ? call.coords[2]
+            : c.baseArrayLayer + arrayIndex;
+        const TexelComponents comps = texelAt(mip, mip.format, static_cast<int32_t>(call.coords[0]), static_cast<int32_t>(call.coords[1]), static_cast<int32_t>(z));
+        expected.push_back(expectedLoadBits(resultTexel(comps, mip.format), mip.format, c.returnKind));
+    }
+    return expected;
+}
+
+void executeTextureLoadCase(AllFeaturesMaxLimitsGpuTest& t, TextureLoadCase c) {
+    c.stage = stageFromLoadShort(c.stage);
+    if (c.multisampled && isDepthTextureFormat(c.format)) {
+        c.isDepth = true;
+        c.returnKind = LoadReturnKind::Depth;
+        c.textureType = "texture_depth_multisampled_2d";
+        c.sampleType = WGPUTextureSampleType_Depth;
+        c.aspect = WGPUTextureAspect_DepthOnly;
+    }
+    if (c.multisampled && isDepthTextureFormat(c.format)
+        && (!c.isDepth || c.returnKind != LoadReturnKind::Depth
+            || c.textureType != "texture_depth_multisampled_2d"
+            || c.sampleType != WGPUTextureSampleType_Depth
+            || c.aspect != WGPUTextureAspect_DepthOnly)) {
+        t.fail("textureLoad MS-depth routing fell through to the color path");
+    }
+    t.skipIfTextureFormatNotSupported(c.format);
+    t.skipIfTextureViewDimensionNotSupported(c.viewDimension);
+    t.skipIfTextureFormatAndDimensionNotCompatible(c.format, c.textureDimension);
+    if (c.multisampled) {
+        if (!t.isTextureFormatMultisampled(c.format)) {
+            t.skip("texture format is not multisampled");
+        }
+        t.skipIfTextureFormatNotUsableAsRenderAttachment(c.format);
+    }
+    if (c.storageTexture) {
+        skipIfNoStorageTexturesInStage(t, c.stage);
+        if (!t.isTextureFormatUsableWithStorageAccessMode(c.format, c.storageAccess)) {
+            t.skip("texture format is not usable with requested storage access mode");
+        }
+    }
+    if (c.textureDimension == WGPUTextureDimension_3D && isBCTextureFormat(c.format)
+        && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureCompressionBCSliced3D)) {
+        t.skip("3D BC compressed textures require texture-compression-bc-sliced-3d");
+    }
+    if (c.textureDimension == WGPUTextureDimension_3D && isASTCTextureFormat(c.format)
+        && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureCompressionASTCSliced3D)) {
+        t.skip("3D ASTC compressed textures require texture-compression-astc-sliced-3d");
+    }
+
+    WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    textureDesc.size = c.baseSize;
+    textureDesc.mipLevelCount = c.mipLevelCount;
+    textureDesc.sampleCount = c.sampleCount;
+    textureDesc.dimension = c.textureDimension;
+    textureDesc.format = c.format;
+    textureDesc.usage = c.usage;
+    WGPUTexture texture = t.createTextureTracked(textureDesc);
+    if (c.multisampled) {
+        clearMultisampledTextureForLoad(t, texture, c);
+    }
+    const std::vector<MipData> mips = prepareTextureLoadMips(t, texture, c);
+    WGPUTexture loadTexture = texture;
+    if (isCompressedTextureFormat(c.format) && !c.storageTexture) {
+        WGPUTextureDescriptor loadTextureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        loadTextureDesc.size = c.baseSize;
+        loadTextureDesc.mipLevelCount = c.mipLevelCount;
+        loadTextureDesc.sampleCount = 1;
+        loadTextureDesc.dimension = c.textureDimension;
+        loadTextureDesc.format = WGPUTextureFormat_RGBA32Float;
+        loadTextureDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+        loadTexture = t.createTextureTracked(loadTextureDesc);
+
+        TextureCase materializedCase;
+        materializedCase.format = WGPUTextureFormat_RGBA32Float;
+        materializedCase.textureDimension = c.textureDimension;
+        materializedCase.viewDimension = c.viewDimension;
+        materializedCase.baseSize = c.baseSize;
+        materializedCase.mipLevelCount = c.mipLevelCount;
+        uploadColorTexture(t, loadTexture, materializedCase, mips);
+
+        c.format = WGPUTextureFormat_RGBA32Float;
+        c.aspect = WGPUTextureAspect_All;
+        c.sampleType = metadataSampleType(c.format, c.aspect, false, c.sampleCount);
+        c.returnKind = LoadReturnKind::Float;
+        if (c.viewDimension == WGPUTextureViewDimension_3D) {
+            c.textureType = appendLoadComponentType("texture_3d", c.format, false);
+        } else if (c.viewDimension == WGPUTextureViewDimension_2DArray) {
+            c.textureType = appendLoadComponentType("texture_2d_array", c.format, false);
+        } else if (c.viewDimension == WGPUTextureViewDimension_1D) {
+            c.textureType = appendLoadComponentType("texture_1d", c.format, false);
+        } else {
+            c.textureType = appendLoadComponentType("texture_2d", c.format, false);
+        }
+    }
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    viewDesc.dimension = c.viewDimension;
+    viewDesc.format = c.storageTexture ? c.format
+        : c.aspect == WGPUTextureAspect_All ? WGPUTextureFormat_Undefined
+                                            : viewFormatForAspect(c.format, c.aspect);
+    viewDesc.aspect = c.aspect;
+    viewDesc.baseMipLevel = c.baseMipLevel;
+    viewDesc.mipLevelCount = c.viewMipCount;
+    viewDesc.baseArrayLayer = c.baseArrayLayer;
+    viewDesc.arrayLayerCount = c.arrayLayerCount;
+    WGPUTextureView view = t.createViewTracked(loadTexture, viewDesc);
+
+    const std::vector<LoadCallData> calls = makeLoadCalls(c);
+    const std::vector<std::array<uint32_t, 4>> expected = expectedTextureLoadBits(c, calls, mips);
+    const uint64_t paramsSize = static_cast<uint64_t>(calls.size()) * sizeof(LoadCallData);
+    WGPUBufferDescriptor paramsDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    paramsDesc.size = paramsSize;
+    paramsDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    WGPUBuffer paramsBuffer = t.createBufferTracked(paramsDesc);
+    t.queueWriteBuffer(paramsBuffer, 0, calls.data(), static_cast<size_t>(paramsSize));
+
+    const uint64_t outputSize = static_cast<uint64_t>(calls.size()) * 4u * sizeof(uint32_t);
+    const uint32_t renderBytesPerRow = alignToU32(static_cast<uint32_t>(calls.size()) * 16u, 256u);
+    WGPUBufferDescriptor outputDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    outputDesc.size = c.stage == "compute" ? outputSize : renderBytesPerRow;
+    outputDesc.usage = c.stage == "compute"
+        ? WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc
+        : WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer outputBuffer = t.createBufferTracked(outputDesc);
+
+    const std::string wgsl = buildTextureLoadWgsl(static_cast<uint32_t>(calls.size()), c);
+    const TextureLoadPipelineBundle& pipeline = textureLoadPipelineForDevice(t, wgsl, c);
+
+    std::array<WGPUBindGroupEntry, 3> bgEntries = {{
+        WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT,
+    }};
+    bgEntries[0].binding = 0;
+    bgEntries[0].textureView = view;
+    bgEntries[1].binding = 1;
+    bgEntries[1].buffer = paramsBuffer;
+    bgEntries[1].size = paramsSize;
+    bgEntries[2].binding = 2;
+    bgEntries[2].buffer = outputBuffer;
+    bgEntries[2].size = outputSize;
+    WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bindGroupDesc.layout = pipeline.bindGroupLayout;
+    bindGroupDesc.entryCount = c.stage == "compute" ? 3 : 2;
+    bindGroupDesc.entries = bgEntries.data();
+    WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    if (c.stage == "compute") {
+        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, static_cast<uint32_t>(calls.size()), 1, 1);
+        wgpuComputePassEncoderEnd(pass);
+        wgpuComputePassEncoderRelease(pass);
+    } else {
+        WGPUTextureDescriptor targetDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        targetDesc.size = WGPUExtent3D{static_cast<uint32_t>(calls.size()), 1, 1};
+        targetDesc.mipLevelCount = 1;
+        targetDesc.sampleCount = 1;
+        targetDesc.dimension = WGPUTextureDimension_2D;
+        targetDesc.format = WGPUTextureFormat_RGBA32Uint;
+        targetDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+        WGPUTexture target = t.createTextureTracked(targetDesc);
+        WGPUTextureViewDescriptor targetViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        targetViewDesc.dimension = WGPUTextureViewDimension_2D;
+        targetViewDesc.format = WGPUTextureFormat_RGBA32Uint;
+        WGPUTextureView targetView = t.createViewTracked(target, targetViewDesc);
+        WGPURenderPassColorAttachment attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        attachment.view = targetView;
+        attachment.loadOp = WGPULoadOp_Clear;
+        attachment.storeOp = WGPUStoreOp_Store;
+        attachment.clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.colorAttachmentCount = 1;
+        passDesc.colorAttachments = &attachment;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline.renderPipeline);
+        wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuRenderPassEncoderDraw(pass, 3, static_cast<uint32_t>(calls.size()), 0, 0);
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+        t.copyTextureToBuffer(encoder, target, outputBuffer, renderBytesPerRow, targetDesc.size);
+    }
+    submit(t, encoder);
+
+    t.expectGPUBufferValuesPassCheck(
+        outputBuffer,
+        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            if (len < static_cast<size_t>(outputSize)) {
+                return std::string("textureLoad output buffer too small");
+            }
+            for (size_t i = 0; i < calls.size(); ++i) {
+                for (uint32_t component = 0; component < 4; ++component) {
+                    const size_t byteOffset = c.stage == "compute"
+                        ? (i * 4u + component) * sizeof(uint32_t)
+                        : i * 16u + component * sizeof(uint32_t);
+                    uint32_t got = 0;
+                    std::memcpy(&got, actual + byteOffset, sizeof(uint32_t));
+                    if (!textureLoadBitsMatch(c.format, c.returnKind, component, expected[i][component], got)) {
+                        std::ostringstream msg;
+                        msg << "textureLoad mismatch call " << i << " component " << component
+                            << ": expected bits " << expected[i][component] << ", got " << got
+                            << ", textureType " << c.textureType << ", stage " << c.stage
+                            << ", format " << textureFormatInfo(c.format).identifier;
+                        return msg.str();
+                    }
+                }
+            }
+            return std::nullopt;
+        },
+        0,
+        static_cast<size_t>(outputSize));
+}
+
 } // namespace
 
 std::vector<Value> shortShaderStages() {
@@ -3369,6 +4134,231 @@ void executeTextureNumSamplesDepth(AllFeaturesMaxLimitsGpuTest& t) {
     c.textureType = "texture_depth_multisampled_2d";
     c.valueExpr = "textureNumSamples(texture)";
     executeMetadataQuery(t, c);
+}
+
+std::vector<Value> textureLoadShaderStages() {
+    return values({"c", "f", "v"});
+}
+
+std::vector<Value> textureLoadMultisampledFormats() {
+    std::vector<Value> out;
+    for (WGPUTextureFormat format : kAllTextureFormats) {
+        if (textureFormatInfo(format).multisample) {
+            out.emplace_back(std::string(textureFormatInfo(format).identifier));
+        }
+    }
+    return out;
+}
+
+bool textureLoadFormatCompatibleWith1D(const ParamRecord& record) {
+    return textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension_1D, paramFormat(record));
+}
+
+bool textureLoadFormatCompatibleWith3D(const ParamRecord& record) {
+    const WGPUTextureFormat format = paramFormat(record);
+    return textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension_3D, format)
+        && !isBCTextureFormat(format)
+        && !isASTCTextureFormat(format);
+}
+
+bool textureLoadFormatNotCompressed(const ParamRecord& record) {
+    return !isCompressedTextureFormat(paramFormat(record));
+}
+
+bool textureLoadFormatNotCompressedFloat(const ParamRecord& record) {
+    return !isCompressedFloatTextureLoadFormat(paramFormat(record));
+}
+
+bool textureLoadFormatFillable(const ParamRecord& record) {
+    return !isCompressedFloatTextureLoadFormat(paramFormat(record));
+}
+
+bool textureLoadFormatHasDepth(const ParamRecord& record) {
+    return isDepthTextureFormat(paramFormat(record));
+}
+
+bool textureLoadDepthTextureTypeMatchesFormat(const ParamRecord& record) {
+    const std::string type = paramString(record, "texture_type");
+    return type.find("depth") == std::string::npos || isDepthTextureFormat(paramFormat(record));
+}
+
+std::vector<ParamRecord> textureLoadArrayedCoordinateParams() {
+    return {
+        {{"C", Value("i32")}, {"A", Value("u32")}, {"L", Value("u32")}},
+        {{"C", Value("u32")}, {"A", Value("u32")}, {"L", Value("u32")}},
+        {{"C", Value("u32")}, {"A", Value("i32")}, {"L", Value("u32")}},
+        {{"C", Value("u32")}, {"A", Value("u32")}, {"L", Value("i32")}},
+    };
+}
+
+bool textureLoadArrayLayerBaseValid(const ParamRecord& record) {
+    return paramU32(record, "depthOrArrayLayers") != 1u || paramU32(record, "baseArrayLayer") == 0u;
+}
+
+TextureLoadCase baseLoadSampled(AllFeaturesMaxLimitsGpuTest& t, WGPUTextureDimension dimension, WGPUTextureViewDimension viewDimension, uint32_t coordComponents, const std::string& typeBase) {
+    TextureLoadCase c;
+    c.stage = t.param<std::string>("stage");
+    c.samplePoints = t.param<std::string>("samplePoints");
+    c.format = parseTextureFormat(t.param<std::string>("format"));
+    c.textureDimension = dimension;
+    c.viewDimension = viewDimension;
+    c.coordComponents = coordComponents;
+    c.coordType = t.param<std::string>("C");
+    c.levelType = t.param<std::string>("L");
+    c.mipLevelCount = dimension == WGPUTextureDimension_1D ? 1 : 3;
+    c.returnKind = loadReturnKindForFormat(c.format, false);
+    c.textureType = appendLoadComponentType(typeBase, c.format, false);
+    c.sampleType = metadataSampleType(c.format, WGPUTextureAspect_All, false, 1);
+    if (isDepthTextureFormat(c.format)) {
+        c.isDepth = true;
+        c.returnKind = LoadReturnKind::Depth;
+        c.textureType = viewDimension == WGPUTextureViewDimension_2DArray ? "texture_depth_2d_array" : "texture_depth_2d";
+        c.sampleType = WGPUTextureSampleType_Depth;
+        c.aspect = WGPUTextureAspect_DepthOnly;
+        c.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+    } else if (isStencilOnlyFormat(c.format)) {
+        c.aspect = WGPUTextureAspect_StencilOnly;
+        c.sampleType = WGPUTextureSampleType_Uint;
+        c.textureType = appendLoadComponentType(typeBase, c.format, false);
+        c.returnKind = LoadReturnKind::Uint;
+    }
+    c.baseSize = dimension == WGPUTextureDimension_1D ? WGPUExtent3D{16, 1, 1}
+        : dimension == WGPUTextureDimension_3D ? WGPUExtent3D{8, 8, 8}
+        : WGPUExtent3D{8, 8, 1};
+    TextureCase tc;
+    tc.format = c.format;
+    tc.textureDimension = c.textureDimension;
+    tc.viewDimension = c.viewDimension;
+    tc.baseSize = c.baseSize;
+    tc.mipLevelCount = c.mipLevelCount;
+    c.baseSize = adjustedBaseSizeForFormat(tc);
+    return c;
+}
+
+void executeTextureLoadSampled1D(AllFeaturesMaxLimitsGpuTest& t) {
+    executeTextureLoadCase(t, baseLoadSampled(t, WGPUTextureDimension_1D, WGPUTextureViewDimension_1D, 1, "texture_1d"));
+}
+
+void executeTextureLoadSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
+    executeTextureLoadCase(t, baseLoadSampled(t, WGPUTextureDimension_2D, WGPUTextureViewDimension_2D, 2, "texture_2d"));
+}
+
+void executeTextureLoadSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
+    executeTextureLoadCase(t, baseLoadSampled(t, WGPUTextureDimension_3D, WGPUTextureViewDimension_3D, 3, "texture_3d"));
+}
+
+void executeTextureLoadMultisampled(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureLoadCase c;
+    c.stage = t.param<std::string>("stage");
+    c.samplePoints = t.param<std::string>("samplePoints");
+    c.format = parseTextureFormat(t.param<std::string>("format"));
+    c.isDepth = t.param<std::string>("texture_type") == "texture_depth_multisampled_2d";
+    c.multisampled = true;
+    c.sampleCount = 4;
+    c.mipLevelCount = 1;
+    c.useLevel = false;
+    c.useSampleIndex = true;
+    c.coordComponents = 2;
+    c.coordType = t.param<std::string>("C");
+    c.sampleIndexType = t.param<std::string>("S");
+    c.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+    if (isDepthTextureFormat(c.format)) {
+        c.isDepth = true;
+    }
+    c.returnKind = loadReturnKindForFormat(c.format, c.isDepth);
+    c.textureType = c.isDepth ? "texture_depth_multisampled_2d"
+                              : appendLoadComponentType("texture_multisampled_2d", c.format, false);
+    c.sampleType = c.isDepth ? WGPUTextureSampleType_Depth : metadataSampleType(c.format, WGPUTextureAspect_All, false, c.sampleCount);
+    c.aspect = (c.isDepth || isDepthTextureFormat(c.format)) ? WGPUTextureAspect_DepthOnly
+        : isStencilOnlyFormat(c.format) ? WGPUTextureAspect_StencilOnly
+                                        : WGPUTextureAspect_All;
+    c.baseSize = WGPUExtent3D{8, 8, 1};
+    executeTextureLoadCase(t, c);
+}
+
+void executeTextureLoadDepth(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureLoadCase c = baseLoadSampled(t, WGPUTextureDimension_2D, WGPUTextureViewDimension_2D, 2, "texture_depth_2d");
+    c.isDepth = true;
+    c.returnKind = LoadReturnKind::Depth;
+    c.textureType = "texture_depth_2d";
+    c.sampleType = WGPUTextureSampleType_Depth;
+    c.aspect = WGPUTextureAspect_DepthOnly;
+    c.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
+    executeTextureLoadCase(t, c);
+}
+
+void executeTextureLoadExternal(AllFeaturesMaxLimitsGpuTest& t) {
+    t.skip("texture_external is not exposed through the native C WebGPU API path used by this port");
+}
+
+void executeTextureLoadArrayed(AllFeaturesMaxLimitsGpuTest& t) {
+    const bool depthParam = t.param<std::string>("texture_type") == "texture_depth_2d_array";
+    TextureLoadCase c = baseLoadSampled(t, WGPUTextureDimension_2D, WGPUTextureViewDimension_2DArray, 2, depthParam ? "texture_depth_2d_array" : "texture_2d_array");
+    const bool depth = depthParam || isDepthTextureFormat(c.format);
+    c.isDepth = depth;
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    c.baseSize.depthOrArrayLayers = paramU32(t.params(), "depthOrArrayLayers");
+    c.textureType = depth ? "texture_depth_2d_array" : appendLoadComponentType("texture_2d_array", c.format, false);
+    c.returnKind = loadReturnKindForFormat(c.format, depth);
+    c.sampleType = depth ? WGPUTextureSampleType_Depth : metadataSampleType(c.format, c.aspect, false, 1);
+    c.aspect = depth ? WGPUTextureAspect_DepthOnly
+        : isStencilOnlyFormat(c.format) ? WGPUTextureAspect_StencilOnly
+                                        : WGPUTextureAspect_All;
+    c.usage = depth ? (WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment)
+                    : (WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst);
+    executeTextureLoadCase(t, c);
+}
+
+TextureLoadCase baseLoadStorage(AllFeaturesMaxLimitsGpuTest& t, WGPUTextureDimension dimension, WGPUTextureViewDimension viewDimension, uint32_t coordComponents, const std::string& typeName) {
+    TextureLoadCase c;
+    c.stage = t.param<std::string>("stage");
+    c.samplePoints = t.param<std::string>("samplePoints");
+    c.format = parseTextureFormat(t.param<std::string>("format"));
+    c.textureDimension = dimension;
+    c.viewDimension = viewDimension;
+    c.coordComponents = coordComponents;
+    c.coordType = t.param<std::string>("C");
+    c.useLevel = false;
+    c.storageTexture = true;
+    c.storageAccess = WGPUStorageTextureAccess_ReadOnly;
+    c.usage = WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopyDst;
+    c.returnKind = loadReturnKindForFormat(c.format, false);
+    c.textureType = typeName + "<" + std::string(textureFormatInfo(c.format).identifier) + ", read>";
+    c.sampleType = WGPUTextureSampleType_BindingNotUsed;
+    c.baseSize = dimension == WGPUTextureDimension_1D ? WGPUExtent3D{16, 1, 1}
+        : dimension == WGPUTextureDimension_3D ? WGPUExtent3D{8, 8, 8}
+        : WGPUExtent3D{8, 8, 1};
+    return c;
+}
+
+void executeTextureLoadStorage1D(AllFeaturesMaxLimitsGpuTest& t) {
+    executeTextureLoadCase(t, baseLoadStorage(t, WGPUTextureDimension_1D, WGPUTextureViewDimension_1D, 1, "texture_storage_1d"));
+}
+
+void executeTextureLoadStorage2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureLoadCase c = baseLoadStorage(t, WGPUTextureDimension_2D, WGPUTextureViewDimension_2D, 2, "texture_storage_2d");
+    c.mipLevelCount = 3;
+    c.baseMipLevel = paramU32(t.params(), "baseMipLevel");
+    c.viewMipCount = 1;
+    executeTextureLoadCase(t, c);
+}
+
+void executeTextureLoadStorage2DArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureLoadCase c = baseLoadStorage(t, WGPUTextureDimension_2D, WGPUTextureViewDimension_2DArray, 2, "texture_storage_2d_array");
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    c.mipLevelCount = 3;
+    c.baseMipLevel = paramU32(t.params(), "baseMipLevel");
+    c.viewMipCount = 1;
+    c.baseArrayLayer = paramU32(t.params(), "baseArrayLayer");
+    c.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
+    c.baseSize.depthOrArrayLayers = paramU32(t.params(), "depthOrArrayLayers");
+    executeTextureLoadCase(t, c);
+}
+
+void executeTextureLoadStorage3D(AllFeaturesMaxLimitsGpuTest& t) {
+    executeTextureLoadCase(t, baseLoadStorage(t, WGPUTextureDimension_3D, WGPUTextureViewDimension_3D, 3, "texture_storage_3d"));
 }
 
 } // namespace cts::texture_utils

@@ -107,4 +107,28 @@ void executeTextureNumLayersStorage(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureNumSamplesSampled(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureNumSamplesDepth(AllFeaturesMaxLimitsGpuTest& t);
 
+std::vector<Value> textureLoadShaderStages();
+std::vector<Value> textureLoadMultisampledFormats();
+bool textureLoadFormatCompatibleWith1D(const ParamRecord& record);
+bool textureLoadFormatCompatibleWith3D(const ParamRecord& record);
+bool textureLoadFormatNotCompressed(const ParamRecord& record);
+bool textureLoadFormatNotCompressedFloat(const ParamRecord& record);
+bool textureLoadFormatFillable(const ParamRecord& record);
+bool textureLoadFormatHasDepth(const ParamRecord& record);
+bool textureLoadDepthTextureTypeMatchesFormat(const ParamRecord& record);
+std::vector<ParamRecord> textureLoadArrayedCoordinateParams();
+bool textureLoadArrayLayerBaseValid(const ParamRecord& record);
+
+void executeTextureLoadSampled1D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadSampled2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadSampled3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadMultisampled(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadDepth(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadExternal(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadArrayed(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadStorage1D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadStorage2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadStorage2DArray(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureLoadStorage3D(AllFeaturesMaxLimitsGpuTest& t);
+
 } // namespace cts::texture_utils
