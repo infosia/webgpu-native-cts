@@ -13,6 +13,7 @@
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 
 #include "webgpu/texture_format.h"
 #include "webgpu/util/texel_data.h"
@@ -176,7 +177,10 @@ WGPUFilterMode filterModeFromString(const std::string& mode) {
     return mode == "linear" ? WGPUFilterMode_Linear : WGPUFilterMode_Nearest;
 }
 
-WGPUSamplerBindingType samplerBindingType(bool isDepth, const std::string& filt) {
+WGPUSamplerBindingType samplerBindingType(bool isDepth, const std::string& filt, bool comparisonSampler) {
+    if (comparisonSampler) {
+        return WGPUSamplerBindingType_Comparison;
+    }
     if (isDepth) {
         return WGPUSamplerBindingType_NonFiltering;
     }
@@ -188,6 +192,18 @@ WGPUTextureSampleType textureSampleType(bool isDepth, const std::string& filt) {
         return WGPUTextureSampleType_Depth;
     }
     return filt == "linear" ? WGPUTextureSampleType_Float : WGPUTextureSampleType_UnfilterableFloat;
+}
+
+WGPUCompareFunction compareFunctionFromString(const std::string& compare) {
+    if (compare == "never") return WGPUCompareFunction_Never;
+    if (compare == "less") return WGPUCompareFunction_Less;
+    if (compare == "equal") return WGPUCompareFunction_Equal;
+    if (compare == "less-equal") return WGPUCompareFunction_LessEqual;
+    if (compare == "greater") return WGPUCompareFunction_Greater;
+    if (compare == "not-equal") return WGPUCompareFunction_NotEqual;
+    if (compare == "greater-equal") return WGPUCompareFunction_GreaterEqual;
+    if (compare == "always") return WGPUCompareFunction_Always;
+    return WGPUCompareFunction_Undefined;
 }
 
 WGPUShaderStage stageVisibility(const std::string& stage) {
@@ -249,6 +265,7 @@ struct SampleCall {
     Vec3 ddx{0.0, 0.0, 0.0};
     Vec3 ddy{0.0, 0.0, 0.0};
     double bias = 0.0;
+    double depthRef = 0.0;
     std::optional<std::array<int32_t, 3>> offset;
     std::optional<uint32_t> arrayIndex;
 };
@@ -311,9 +328,12 @@ struct TextureCase {
     std::string stage = "compute";
     std::string filt = "nearest";
     std::string samplePoints = "texel-centre";
+    std::string compare = "less";
     WGPUAddressMode modeU = WGPUAddressMode_ClampToEdge;
     WGPUAddressMode modeV = WGPUAddressMode_ClampToEdge;
     WGPUAddressMode modeW = WGPUAddressMode_ClampToEdge;
+    bool comparisonSampler = false;
+    bool baseClampToEdge = false;
 };
 
 bool isCubeKind(SampleKind kind) {
@@ -566,10 +586,13 @@ std::array<double, 4> loadAddressed(
         y = wrapped[1];
         z = wrapped[2];
     } else {
-        x = static_cast<int32_t>(std::floor(applyAddressToTexelCoord(static_cast<double>(x), mip.size.width, c.modeU)));
-        y = static_cast<int32_t>(std::floor(applyAddressToTexelCoord(static_cast<double>(y), mip.size.height, c.modeV)));
+        const WGPUAddressMode modeU = c.baseClampToEdge ? WGPUAddressMode_ClampToEdge : c.modeU;
+        const WGPUAddressMode modeV = c.baseClampToEdge ? WGPUAddressMode_ClampToEdge : c.modeV;
+        const WGPUAddressMode modeW = c.baseClampToEdge ? WGPUAddressMode_ClampToEdge : c.modeW;
+        x = static_cast<int32_t>(std::floor(applyAddressToTexelCoord(static_cast<double>(x), mip.size.width, modeU)));
+        y = static_cast<int32_t>(std::floor(applyAddressToTexelCoord(static_cast<double>(y), mip.size.height, modeV)));
         if (c.textureDimension == WGPUTextureDimension_3D) {
-            z = static_cast<int32_t>(std::floor(applyAddressToTexelCoord(static_cast<double>(z), mip.size.depthOrArrayLayers, c.modeW)));
+            z = static_cast<int32_t>(std::floor(applyAddressToTexelCoord(static_cast<double>(z), mip.size.depthOrArrayLayers, modeW)));
         }
     }
     const WGPUTextureFormat texelFormat = mip.format == WGPUTextureFormat_Undefined ? format : mip.format;
@@ -660,6 +683,107 @@ std::array<double, 4> softwareSampleDepth(const SampleCall& call, const TextureC
     return {depthValue(mip, layer), 0.0, 0.0, 1.0};
 }
 
+double applyCompareToDepth(double src, WGPUCompareFunction compare, double ref) {
+    switch (compare) {
+        case WGPUCompareFunction_Never:
+            return 0.0;
+        case WGPUCompareFunction_Less:
+            return ref < src ? 1.0 : 0.0;
+        case WGPUCompareFunction_Equal:
+            return ref == src ? 1.0 : 0.0;
+        case WGPUCompareFunction_LessEqual:
+            return ref <= src ? 1.0 : 0.0;
+        case WGPUCompareFunction_Greater:
+            return ref > src ? 1.0 : 0.0;
+        case WGPUCompareFunction_NotEqual:
+            return ref != src ? 1.0 : 0.0;
+        case WGPUCompareFunction_GreaterEqual:
+            return ref >= src ? 1.0 : 0.0;
+        case WGPUCompareFunction_Always:
+            return 1.0;
+        default:
+            return 0.0;
+    }
+}
+
+double cubeDepthCompareTap(
+    uint32_t mipLevel,
+    uint32_t mipLevelSize,
+    int32_t x,
+    int32_t y,
+    int32_t layer,
+    WGPUCompareFunction compare,
+    double depthRef) {
+    const std::array<int32_t, 3> wrapped = wrapFaceCoordToCubeFaceAtEdgeBoundaries(mipLevelSize, x, y, layer);
+    return applyCompareToDepth(depthValue(mipLevel, static_cast<uint32_t>(wrapped[2])), compare, depthRef);
+}
+
+std::array<double, 4> sampleDepthCompareCubeOneMip(
+    const SampleCall& call,
+    const TextureCase& c,
+    uint32_t mipLevel,
+    WGPUCompareFunction compare) {
+    const WGPUExtent3D mipSize = physicalMipSize(c.baseSize, c.textureDimension, mipLevel);
+    const Vec3 faceCoord = normalizedCubeToFaceCoord(call.coords);
+    const int32_t arrayBase = c.useArrayIndex ? static_cast<int32_t>(*call.arrayIndex) * 6 : 0;
+    const int32_t layer = arrayBase + static_cast<int32_t>(faceCoord.z);
+
+    if (filterModeFromString(c.filt) == WGPUFilterMode_Nearest) {
+        const int32_t x = static_cast<int32_t>(std::floor(faceCoord.x * static_cast<double>(mipSize.width)));
+        const int32_t y = static_cast<int32_t>(std::floor(faceCoord.y * static_cast<double>(mipSize.height)));
+        const double result = cubeDepthCompareTap(mipLevel, mipSize.width, x, y, layer, compare, call.depthRef);
+        return {result, 0.0, 0.0, 1.0};
+    }
+
+    const double u = faceCoord.x * static_cast<double>(mipSize.width) - 0.5;
+    const double v = faceCoord.y * static_cast<double>(mipSize.height) - 0.5;
+    const int32_t x0 = static_cast<int32_t>(std::floor(u));
+    const int32_t y0 = static_cast<int32_t>(std::floor(v));
+    const double tx = u - std::floor(u);
+    const double ty = v - std::floor(v);
+    const double c00 = cubeDepthCompareTap(mipLevel, mipSize.width, x0, y0, layer, compare, call.depthRef);
+    const double c10 = cubeDepthCompareTap(mipLevel, mipSize.width, x0 + 1, y0, layer, compare, call.depthRef);
+    const double c01 = cubeDepthCompareTap(mipLevel, mipSize.width, x0, y0 + 1, layer, compare, call.depthRef);
+    const double c11 = cubeDepthCompareTap(mipLevel, mipSize.width, x0 + 1, y0 + 1, layer, compare, call.depthRef);
+    const double result = lerp(lerp(c00, c10, tx), lerp(c01, c11, tx), ty);
+    return {result, 0.0, 0.0, 1.0};
+}
+
+std::array<double, 4> softwareSampleDepthCompare(const SampleCall& call, const TextureCase& c, const MipMixWeights& weights) {
+    uint32_t layer = call.arrayIndex.value_or(0u);
+    if (isCubeKind(c.kind)) {
+        const Vec3 faceCoord = normalizedCubeToFaceCoord(call.coords);
+        layer = (c.useArrayIndex ? (*call.arrayIndex) * 6u : 0u) + static_cast<uint32_t>(faceCoord.z);
+    }
+    const double clampedLevel = std::clamp(call.level, c.lodMinClamp, c.lodMaxClamp);
+    const double level = std::clamp(clampedLevel, 0.0, static_cast<double>(c.mipLevelCount - c.baseMipLevel - 1u));
+    const uint32_t baseMip = c.baseMipLevel + static_cast<uint32_t>(std::floor(level));
+    const WGPUCompareFunction compare = compareFunctionFromString(c.compare);
+    if (isCubeKind(c.kind)) {
+        if (filterModeFromString(c.filt) == WGPUFilterMode_Nearest) {
+            const double mix = calibratedMixWeight(weights.nearest, level);
+            const uint32_t mip = std::min<uint32_t>(baseMip + (mix >= 0.5 ? 1u : 0u), c.mipLevelCount - 1u);
+            return sampleDepthCompareCubeOneMip(call, c, mip, compare);
+        }
+        const uint32_t mip0 = baseMip;
+        const uint32_t mip1 = std::min<uint32_t>(baseMip + 1u, c.mipLevelCount - 1u);
+        const double mix = calibratedMixWeight(weights.linear, level);
+        return mixTexel(sampleDepthCompareCubeOneMip(call, c, mip0, compare), sampleDepthCompareCubeOneMip(call, c, mip1, compare), mix);
+    }
+    if (filterModeFromString(c.filt) == WGPUFilterMode_Nearest) {
+        const double mix = calibratedMixWeight(weights.nearest, level);
+        const uint32_t mip = std::min<uint32_t>(baseMip + (mix >= 0.5 ? 1u : 0u), c.mipLevelCount - 1u);
+        const double result = applyCompareToDepth(depthValue(mip, layer), compare, call.depthRef);
+        return {result, 0.0, 0.0, 1.0};
+    }
+    const uint32_t mip0 = baseMip;
+    const uint32_t mip1 = std::min<uint32_t>(baseMip + 1u, c.mipLevelCount - 1u);
+    const double mix = calibratedMixWeight(weights.linear, level);
+    const double a = applyCompareToDepth(depthValue(mip0, layer), compare, call.depthRef);
+    const double b = applyCompareToDepth(depthValue(mip1, layer), compare, call.depthRef);
+    return {lerp(a, b, mix), 0.0, 0.0, 1.0};
+}
+
 std::string wgslFloat(double value) {
     std::ostringstream out;
     out.setf(std::ios::fixed);
@@ -741,7 +865,7 @@ std::string gradientParamExpr(std::string_view param, std::string_view field, co
 }
 
 std::string coordParamExprForSample(std::string_view param, const TextureCase& c) {
-    if ((c.builtin != "textureSample" && c.builtin != "textureSampleBias") || c.stage != "fragment") {
+    if ((c.builtin != "textureSample" && c.builtin != "textureSampleBias" && c.builtin != "textureSampleCompare") || c.stage != "fragment") {
         return coordParamExpr(param, c);
     }
     return "(" + coordParamExpr(param, c) + " + derivativeBase * " + derivativeMultParamExpr(param, c) + ")";
@@ -788,13 +912,18 @@ std::string arrayIndexParamExpr(std::string_view param, const TextureCase& c) {
 
 std::string sampleExprFromParams(std::string_view param, const TextureCase& c, std::string_view offsetExpr = {}) {
     std::ostringstream expr;
-    const bool substituteLevel = (c.builtin == "textureSample" || c.builtin == "textureSampleBias") && c.stage != "fragment";
-    const std::string builtin = substituteLevel ? "textureSampleLevel" : c.builtin;
+    const bool substituteLevel = (c.builtin == "textureSample" || c.builtin == "textureSampleBias" || c.builtin == "textureSampleCompare") && c.stage != "fragment";
+    std::string builtin = substituteLevel ? "textureSampleLevel" : c.builtin;
+    if (substituteLevel && c.builtin == "textureSampleCompare") {
+        builtin = "textureSampleCompareLevel";
+    }
     expr << builtin << "(tex, samp, " << coordParamExprForSample(param, c);
     if (c.useArrayIndex) {
         expr << ", " << arrayIndexParamExpr(param, c);
     }
-    if (builtin == "textureSampleGrad") {
+    if (builtin == "textureSampleCompare" || builtin == "textureSampleCompareLevel") {
+        expr << ", " << param << ".scalars.z";
+    } else if (builtin == "textureSampleGrad") {
         expr << ", " << gradientParamExpr(param, "ddx", c) << ", " << gradientParamExpr(param, "ddy", c);
     } else if (builtin == "textureSampleBias") {
         expr << ", " << param << ".scalars.y";
@@ -809,7 +938,7 @@ std::string sampleExprFromParams(std::string_view param, const TextureCase& c, s
 }
 
 bool usesUnconditionalCallSelection(const TextureCase& c) {
-    if ((c.builtin == "textureSample" || c.builtin == "textureSampleBias") && c.stage == "fragment") {
+    if ((c.builtin == "textureSample" || c.builtin == "textureSampleBias" || c.builtin == "textureSampleCompare") && c.stage == "fragment") {
         return true;
     }
     return c.builtin == "textureSampleGrad" && c.useArrayIndex;
@@ -831,7 +960,7 @@ std::string buildComputeWgsl(uint32_t callCount, const TextureCase& c) {
     std::ostringstream wgsl;
     wgsl << "// texture-sampling structural shader; stage=" << c.stage << "; filter=" << c.filt << "\n"
          << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
-         << "@group(0) @binding(1) var samp: sampler;\n"
+         << "@group(0) @binding(1) var samp: " << (c.comparisonSampler ? "sampler_comparison" : "sampler") << ";\n"
          << "@group(0) @binding(2) var<storage, read_write> out: array<vec4f>;\n"
          << "const derivativeBase = vec4f(0.0);\n";
     writeSampleParamsHeader(wgsl);
@@ -868,7 +997,7 @@ std::string buildRenderWgsl(uint32_t callCount, const TextureCase& c) {
         : (c.textureDimension == WGPUTextureDimension_3D || isCubeKind(c.kind) ? "vec3f(0.0)" : "vec2f(0.0)");
     wgsl << "// texture-sampling structural shader; stage=" << c.stage << "; filter=" << c.filt << "\n"
          << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
-         << "@group(0) @binding(1) var samp: sampler;\n"
+         << "@group(0) @binding(1) var samp: " << (c.comparisonSampler ? "sampler_comparison" : "sampler") << ";\n"
          << "const unusedOutputBinding = 2u;\n";
     writeSampleParamsHeader(wgsl);
     wgsl
@@ -969,15 +1098,23 @@ std::vector<SampleCall> generateCalls(const TextureCase& c) {
             const double theta = static_cast<double>(i) * 2.399963229728653;
             call.coords = Vec3{0.5 + std::cos(theta) * r, 0.5 + std::sin(theta) * r, 0.0};
         }
-        const bool gradientBuiltin = c.builtin == "textureSample" || c.builtin == "textureSampleGrad" || c.builtin == "textureSampleBias";
+        const bool gradientBuiltin = c.builtin == "textureSample" || c.builtin == "textureSampleGrad"
+            || c.builtin == "textureSampleBias" || c.builtin == "textureSampleCompare";
         call.level = gradientBuiltin
             ? implicitMipLevelForCall(i, c.mipLevelCount)
             : (c.levelType == "f32" ? static_cast<double>(i % 5u) * 0.5 : static_cast<double>(i % c.mipLevelCount));
+        if (c.builtin == "textureSampleCompareLevel" || c.builtin == "textureSampleBaseClampToEdge") {
+            call.level = 0.0;
+        }
         if (gradientBuiltin) {
             call.derivativeMult = Vec3{std::pow(2.0, call.level), 0.0, 0.0};
             const double dx = std::pow(2.0, call.level) / static_cast<double>(std::max(1u, c.baseSize.width));
             call.ddx = Vec3{dx, 0.0, 0.0};
             call.ddy = Vec3{0.0, 0.0, 0.0};
+        }
+        if (c.comparisonSampler) {
+            static constexpr std::array<double, 8> kDepthRefs = {{0.01, 0.18, 0.31, 0.44, 0.57, 0.70, 0.83, 0.96}};
+            call.depthRef = kDepthRefs[(i + static_cast<uint32_t>(compareFunctionFromString(c.compare))) % kDepthRefs.size()];
         }
         if (c.builtin == "textureSampleBias") {
             static constexpr std::array<double, 6> kBiases = {{-1.0, 0.5, 1.25, -0.75, 0.0, 1.0}};
@@ -1030,7 +1167,7 @@ std::vector<SampleParamsData> makeSampleParamsData(const std::vector<SampleCall>
         data.scalars = {
             static_cast<float>(call.level),
             static_cast<float>(call.bias),
-            0.0f,
+            static_cast<float>(call.depthRef),
             0.0f,
         };
         data.indices = {
@@ -1059,7 +1196,7 @@ WGPUBindGroupLayout createBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t, const 
     entries[1].binding = 1;
     entries[1].visibility = visibility;
     entries[1].sampler = WGPU_SAMPLER_BINDING_LAYOUT_INIT;
-    entries[1].sampler.type = samplerBindingType(c.isDepth, c.filt);
+    entries[1].sampler.type = samplerBindingType(c.isDepth, c.filt, c.comparisonSampler);
     entries[2].binding = 2;
     entries[2].visibility = WGPUShaderStage_Compute;
     entries[2].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
@@ -1087,7 +1224,7 @@ WGPUBindGroupLayout createCachedBindGroupLayout(WGPUDevice device, const Texture
     entries[1].binding = 1;
     entries[1].visibility = visibility;
     entries[1].sampler = WGPU_SAMPLER_BINDING_LAYOUT_INIT;
-    entries[1].sampler.type = samplerBindingType(c.isDepth, c.filt);
+    entries[1].sampler.type = samplerBindingType(c.isDepth, c.filt, c.comparisonSampler);
     entries[2].binding = 2;
     entries[2].visibility = WGPUShaderStage_Compute;
     entries[2].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
@@ -1597,6 +1734,9 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     samplerDesc.mipmapFilter = c.filt == "linear" ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
     samplerDesc.lodMinClamp = static_cast<float>(c.lodMinClamp);
     samplerDesc.lodMaxClamp = static_cast<float>(c.lodMaxClamp);
+    if (c.comparisonSampler) {
+        samplerDesc.compare = compareFunctionFromString(c.compare);
+    }
     WGPUSampler sampler = t.createSamplerTracked(samplerDesc);
 
     const std::vector<SampleCall> calls = generateCalls(c);
@@ -1604,7 +1744,15 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     std::vector<std::array<double, 4>> expected;
     expected.reserve(calls.size());
     for (const SampleCall& call : calls) {
-        expected.push_back(c.isDepth ? softwareSampleDepth(call, c, mipWeights) : softwareSampleColor(mips, c.format, call, c, mipWeights));
+        if (c.comparisonSampler) {
+            expected.push_back(softwareSampleDepthCompare(call, c, mipWeights));
+        } else if (c.isDepth) {
+            expected.push_back(softwareSampleDepth(call, c, mipWeights));
+        } else if (c.baseClampToEdge) {
+            expected.push_back(sampleColorOneMip(mips[0], c.format, call, c));
+        } else {
+            expected.push_back(softwareSampleColor(mips, c.format, call, c, mipWeights));
+        }
     }
 
     const std::string wgsl = c.stage == "compute"
@@ -1792,6 +1940,37 @@ TextureCase baseTextureSampleDepthCase(AllFeaturesMaxLimitsGpuTest& t, SampleKin
     return c;
 }
 
+TextureCase baseTextureSampleCompareCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind, std::string stage, std::string builtin) {
+    TextureCase c;
+    c.kind = kind;
+    c.format = parseTextureFormat(t.param<std::string>("format"));
+    c.stage = std::move(stage);
+    c.samplePoints = t.param<std::string>("samplePoints");
+    c.filt = t.param<std::string>("filt");
+    c.compare = t.param<std::string>("compare");
+    c.isDepth = true;
+    c.comparisonSampler = true;
+    c.builtin = std::move(builtin);
+    c.mipLevelCount = c.builtin == "textureSampleCompare" ? kMipLevelCount : kMipLevelCount;
+    return c;
+}
+
+TextureCase baseTextureSampleBaseClampToEdgeCase(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c;
+    c.kind = SampleKind::Sampled2D;
+    c.format = WGPUTextureFormat_RGBA8Unorm;
+    c.stage = t.param<std::string>("stage");
+    c.filt = t.param<std::string>("filt");
+    c.samplePoints = t.param<std::string>("samplePoints");
+    c.builtin = "textureSampleBaseClampToEdge";
+    c.baseClampToEdge = true;
+    c.baseSize = baseSize(8, 8, 1);
+    c.mipLevelCount = kMipLevelCount;
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    return c;
+}
+
 } // namespace
 
 std::vector<Value> shortShaderStages() {
@@ -1819,6 +1998,10 @@ std::vector<Value> samplePointMethods() {
 
 std::vector<Value> cubeSamplePointMethods() {
     return values({"cube-edges", "texel-centre", "spiral"});
+}
+
+std::vector<Value> compareFunctions() {
+    return values({"never", "less", "equal", "less-equal", "greater", "not-equal", "greater-equal", "always"});
 }
 
 bool isPotentiallyFilterableAndFillable(const ParamRecord& record) {
@@ -2230,6 +2413,101 @@ void executeTextureSampleBiasSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
     c.modeW = c.modeU;
     c.useArrayIndex = true;
     c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompare2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::Depth2D, "fragment", "textureSampleCompare");
+    c.baseSize = baseSize(8, 8, 1);
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompareCube(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::DepthCube, "fragment", "textureSampleCompare");
+    c.viewDimension = WGPUTextureViewDimension_Cube;
+    c.baseSize = baseSize(32, 32, 6);
+    c.mipLevelCount = 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompare2DArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::Depth2DArray, "fragment", "textureSampleCompare");
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompareCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::DepthCubeArray, "fragment", "textureSampleCompare");
+    c.viewDimension = WGPUTextureViewDimension_CubeArray;
+    c.baseSize = baseSize(32, 32, 24);
+    c.mipLevelCount = 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompareLevel2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::Depth2D, t.param<std::string>("stage"), "textureSampleCompareLevel");
+    c.baseSize = baseSize(8, 8, 1);
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompareLevelCube(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::DepthCube, t.param<std::string>("stage"), "textureSampleCompareLevel");
+    c.viewDimension = WGPUTextureViewDimension_Cube;
+    c.baseSize = baseSize(32, 32, 6);
+    c.mipLevelCount = 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompareLevel2DArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::Depth2DArray, t.param<std::string>("stage"), "textureSampleCompareLevel");
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompareLevelCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::DepthCubeArray, t.param<std::string>("stage"), "textureSampleCompareLevel");
+    c.viewDimension = WGPUTextureViewDimension_CubeArray;
+    c.baseSize = baseSize(8, 8, 24);
+    c.mipLevelCount = 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeCase(t, c);
+}
+
+void executeTextureSampleBaseClampToEdge2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseTextureSampleBaseClampToEdgeCase(t);
     executeCase(t, c);
 }
 

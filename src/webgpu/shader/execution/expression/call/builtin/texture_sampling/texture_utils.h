@@ -20,6 +20,7 @@ std::vector<Value> depthStencilFormats();
 std::vector<Value> shortAddressModes();
 std::vector<Value> samplePointMethods();
 std::vector<Value> cubeSamplePointMethods();
+std::vector<Value> compareFunctions();
 
 bool isPotentiallyFilterableAndFillable(const ParamRecord& record);
 bool isFilterNearestOrFormatPossiblyFilterableAsTextureF32(const ParamRecord& record);
@@ -69,5 +70,17 @@ void executeTextureSampleBiasSampled2D(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleBiasSampled3D(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleBiasSampled2DArray(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleBiasSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t);
+
+void executeTextureSampleCompare2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleCompareCube(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleCompare2DArray(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleCompareCubeArray(AllFeaturesMaxLimitsGpuTest& t);
+
+void executeTextureSampleCompareLevel2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleCompareLevelCube(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleCompareLevel2DArray(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleCompareLevelCubeArray(AllFeaturesMaxLimitsGpuTest& t);
+
+void executeTextureSampleBaseClampToEdge2D(AllFeaturesMaxLimitsGpuTest& t);
 
 } // namespace cts::texture_utils
