@@ -1641,8 +1641,10 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   textureLoad (the depth-only view / load of depth24plus-stencil8 / depth32float-stencil8). Likely
   naga's MSL lowering of textureLoad on a depth aspect of a combined format, or yawgpu-core's
   aspect-view validation. wgpu-native cross-check pending per [[naga-fix-crosscheck-wgpu-native]].
-- **Status:** OPEN (2026-06-18). The cts port is correct (Dawn-green) and committed; no cts-side
-  action. Handed to the yawgpu side for diagnosis (depth-aspect textureLoad of combined depth-stencil).
+- **Status:** **RESOLVED 2026-06-18** (yawgpu `baa0c81`, a yawgpu-core/HAL fix — naga rev unchanged,
+  confirming it was not a naga issue). Re-verified on yawgpu/Metal: `textureLoad:*` now 0 fail (was
+  384); the combined depth-stencil depth/stencil-aspect load path is fixed. The cts port was correct
+  (Dawn-green) throughout; no cts-side change.
 
 ---
 
