@@ -57,8 +57,15 @@ uint32_t elementBytes(ScalarKind kind) {
     return kind == ScalarKind::F16 ? 2u : 4u;
 }
 
-// WGSL type spelling of an ExprType (e.g. "u32", "vec3<i32>").
+// WGSL type spelling of an ExprType (e.g. "u32", "vec3<i32>", "mat2x3<f32>", "array<i32, 3>").
 std::string typeName(ExprType ty) {
+    if (ty.form == TypeForm::Matrix) {
+        return "mat" + std::to_string(ty.cols) + "x" + std::to_string(ty.width) + "<" +
+               scalarKindName(ty.kind) + ">";
+    }
+    if (ty.form == TypeForm::Array) {
+        return "array<" + typeName(*ty.element) + ", " + std::to_string(ty.count) + ">";
+    }
     if (ty.width == 1) {
         return scalarKindName(ty.kind);
     }
@@ -71,7 +78,14 @@ ScalarKind storageKind(ScalarKind kind) {
 }
 
 ExprType storageType(ExprType ty) {
-    return ExprType{storageKind(ty.kind), ty.width};
+    if (ty.form == TypeForm::Matrix) {
+        // Matrix element types are always float; storage type is unchanged.
+        return ty;
+    }
+    if (ty.form == TypeForm::Array) {
+        return arrayType(ty.count, storageType(*ty.element));
+    }
+    return vecType(ty.width, storageKind(ty.kind));
 }
 
 std::string storageTypeName(ExprType ty) {
@@ -84,7 +98,29 @@ struct SizeAlign {
     uint32_t alignment;
 };
 
-SizeAlign sizeAndAlignmentOf(ExprType ty) {
+// size and alignment in bytes, per upstream sizeAndAlignmentOf. 'source' affects only the array
+// alignment (uniform requires array element alignment to be a multiple of 16; the
+// uniform_buffer_standard_layout gate is handled by the spec ports skipping such cases).
+SizeAlign sizeAndAlignmentOf(ExprType ty, InputSource source) {
+    if (ty.form == TypeForm::Matrix) {
+        // matCxR: element-aligned columns; vec3 columns pad to 4 rows. size = colAlign * cols.
+        const uint32_t eb = elementBytes(ty.kind);
+        const uint32_t n = ty.width == 3 ? 4u : static_cast<uint32_t>(ty.width);
+        const uint32_t colAlign = eb * n;
+        SizeAlign out{colAlign * static_cast<uint32_t>(ty.cols), colAlign};
+        return out;
+    }
+    if (ty.form == TypeForm::Array) {
+        SizeAlign out = sizeAndAlignmentOf(*ty.element, source);
+        // MAINTENANCE_TODO(#4485): remove when implementors support uniform_buffer_standard_layout.
+        if (source == InputSource::Uniform) {
+            out.alignment = alignUp(out.alignment, 16);
+        }
+        // Upstream: out.size *= count (element size, not element stride). This matches the @size()
+        // used in the input struct member; the actual per-element WGSL stride is arrayElementStride().
+        out.size *= static_cast<uint32_t>(ty.count);
+        return out;
+    }
     // scalar: size = element bytes (4 for u32/i32/f32/bool, 2 for f16), alignment == size.
     const uint32_t eb = elementBytes(ty.kind);
     SizeAlign out{eb, eb};
@@ -96,9 +132,71 @@ SizeAlign sizeAndAlignmentOf(ExprType ty) {
     return out;
 }
 
-uint32_t strideOf(ExprType ty) {
-    SizeAlign sa = sizeAndAlignmentOf(ty);
+uint32_t strideOf(ExprType ty, InputSource source) {
+    SizeAlign sa = sizeAndAlignmentOf(ty, source);
     return alignUp(sa.size, sa.alignment);
+}
+
+// The per-element WGSL stride of an array type (align(elementSize, elementAlignment)). This is the
+// byte distance between consecutive array elements in the buffer, which can differ from the
+// per-element size when the element needs padding (and from sizeAndAlignmentOf().size/count, which
+// upstream computes from the un-strided element size).
+uint32_t arrayElementStride(const ExprType& arrayTy, InputSource source) {
+    SizeAlign elem = sizeAndAlignmentOf(*arrayTy.element, source);
+    return alignUp(elem.size, elem.alignment);
+}
+
+// Walks the canonical scalar slots of a (possibly composite) value of type 'ty', calling
+// cb(scalarIndex, byteOffset, scalarKind) for each scalar, in the same order CaseValue stores its
+// flattened scalar payload:
+//   ScalarVec : the 'width' scalars at consecutive element-byte offsets (vec3 leaves the 4th slot
+//               unwritten, i.e. no scalar is emitted for the pad).
+//   Matrix    : column-major; each column occupies an element-aligned stride (vec3 columns pad to 4
+//               rows) and within a column the rows are at consecutive element-byte offsets.
+//   Array     : each element laid out at its WGSL array stride, recursing into the element type.
+// 'baseOffset' is the byte offset of the value, 'scalarIndex' counts scalars across the whole value.
+void forEachStorageScalar(
+    const ExprType& ty,
+    InputSource source,
+    uint32_t baseOffset,
+    int& scalarIndex,
+    const std::function<void(int, uint32_t, ScalarKind)>& cb) {
+    const ScalarKind sk = storageKind(ty.scalarKind());
+    if (ty.form == TypeForm::Array) {
+        const uint32_t stride = arrayElementStride(ty, source);
+        for (int i = 0; i < ty.count; ++i) {
+            forEachStorageScalar(*ty.element, source, baseOffset + static_cast<uint32_t>(i) * stride,
+                                 scalarIndex, cb);
+        }
+        return;
+    }
+    const uint32_t eb = elementBytes(ty.kind);
+    if (ty.form == TypeForm::Matrix) {
+        const uint32_t n = ty.width == 3 ? 4u : static_cast<uint32_t>(ty.width);
+        const uint32_t colStride = eb * n;
+        for (int c = 0; c < ty.cols; ++c) {
+            const uint32_t colBase = baseOffset + static_cast<uint32_t>(c) * colStride;
+            for (int r = 0; r < ty.width; ++r) {
+                cb(scalarIndex++, colBase + static_cast<uint32_t>(r) * eb, sk);
+            }
+        }
+        return;
+    }
+    // Scalar / vector: 'width' consecutive elements (the vec3 pad slot is not a scalar).
+    for (int e = 0; e < ty.width; ++e) {
+        cb(scalarIndex++, baseOffset + static_cast<uint32_t>(e) * eb, sk);
+    }
+}
+
+// The number of canonical scalar slots in a value of type 'ty'.
+int scalarSlotCount(const ExprType& ty) {
+    if (ty.form == TypeForm::Array) {
+        return ty.count * scalarSlotCount(*ty.element);
+    }
+    if (ty.form == TypeForm::Matrix) {
+        return ty.cols * ty.width;
+    }
+    return ty.width;
 }
 
 // structLayout over the member types, invoking 'cb' per member, returning {size, stride}.
@@ -123,7 +221,7 @@ StructLayout structLayout(
     uint32_t offset = 0;
     uint32_t alignment = 1;
     for (size_t i = 0; i < members.size(); ++i) {
-        SizeAlign sa = sizeAndAlignmentOf(members[i]);
+        SizeAlign sa = sizeAndAlignmentOf(members[i], source);
         offset = alignUp(offset, sa.alignment);
         if (cb) {
             cb(MemberInfo{static_cast<int>(i), members[i], sa.size, sa.alignment, offset});
@@ -166,9 +264,29 @@ std::string wgslMembers(
     return out.str();
 }
 
-// WGSL expression converting a value from the storage type (bool: != 0).
-std::string fromStorage(ExprType ty, const std::string& expr) {
-    if (ty.kind == ScalarKind::Bool) {
+// Accumulates module-scope WGSL helper functions emitted by [from|to]Storage and hands out unique
+// identifiers, mirroring upstream's TypeConversionHelpers.
+struct TypeConversionHelpers {
+    std::string wgsl;
+    int next = 0;
+    std::string uniqueID() { return "cts_symbol_" + std::to_string(next++); }
+};
+
+// WGSL expression converting a value from the storage type (bool: != 0; array<bool>: per-element).
+std::string fromStorage(ExprType ty, const std::string& expr, TypeConversionHelpers& helpers) {
+    if (ty.form == TypeForm::Array && ty.element && ty.element->kind == ScalarKind::Bool &&
+        ty.element->form == TypeForm::ScalarVec && ty.element->width == 1) {
+        // array<u32, N> -> array<bool, N>
+        const std::string conv = helpers.uniqueID();
+        const std::string inTy = typeName(arrayType(ty.count, scalarType(ScalarKind::U32)));
+        const std::string outTy = typeName(ty);
+        helpers.wgsl += "\nfn " + conv + "(in : " + inTy + ") -> " + outTy + " {\n" +
+                        "  var out : " + outTy + ";\n" + "  for (var i = 0; i < " +
+                        std::to_string(ty.count) + "; i++) {\n" + "    out[i] = in[i] != 0;\n" +
+                        "  }\n" + "  return out;\n" + "}\n";
+        return conv + "(" + expr + ")";
+    }
+    if (ty.form == TypeForm::ScalarVec && ty.kind == ScalarKind::Bool) {
         if (ty.width == 1) {
             return expr + " != 0u";
         }
@@ -177,9 +295,10 @@ std::string fromStorage(ExprType ty, const std::string& expr) {
     return expr;
 }
 
-// WGSL expression converting a value to the storage type (bool: select(0,1,e)).
+// WGSL expression converting a value to the storage type (bool: select(0,1,e)). Result types in
+// these tests are scalar/vector/matrix only; array-of-bool results are not exercised.
 std::string toStorage(ExprType ty, const std::string& expr) {
-    if (ty.kind == ScalarKind::Bool) {
+    if (ty.form == TypeForm::ScalarVec && ty.kind == ScalarKind::Bool) {
         if (ty.width == 1) {
             return "select(0u, 1u, " + expr + ")";
         }
@@ -262,35 +381,80 @@ std::string scalarWgsl(const Scalar& s) {
     std::abort();
 }
 
-// WGSL literal for a value (scalar or vecN constructor).
-std::string valueWgsl(const CaseValue& v, ScalarKind kind) {
-    if (v.width == 1) {
-        return scalarWgsl(v.elements[0]);
+bool isAbstractKind(ScalarKind k) {
+    return k == ScalarKind::AbstractInt || k == ScalarKind::AbstractFloat;
+}
+
+// WGSL literal for a value (scalar, vecN, matCxR, or array constructor). 'scalars' is the value's
+// flattened scalar payload (CaseValue::elements, in canonical order); 'next' is the index of the
+// next scalar to consume and is advanced as the recursion walks the value. 'ty' supplies structure.
+std::string valueWgslRec(const ExprType& ty, const std::vector<Scalar>& scalars, size_t& next) {
+    if (ty.form == TypeForm::Array) {
+        // Abstract arrays are spelled without an explicit element type (array(...)).
+        const bool isAbstract = isAbstractKind(ty.element->scalarKind());
+        std::ostringstream out;
+        out << (isAbstract ? std::string("array(") : ("array<" + typeName(*ty.element) + ", " +
+                                                       std::to_string(ty.count) + ">("));
+        for (int i = 0; i < ty.count; ++i) {
+            if (i > 0) {
+                out << ", ";
+            }
+            out << valueWgslRec(*ty.element, scalars, next);
+        }
+        out << ")";
+        return out.str();
     }
-    // Abstract vectors are spelled without an explicit element type (vecN(...)).
-    const bool isAbstract =
-        kind == ScalarKind::AbstractInt || kind == ScalarKind::AbstractFloat;
+    if (ty.form == TypeForm::Matrix) {
+        const bool isAbstract = isAbstractKind(ty.kind);
+        std::ostringstream out;
+        if (isAbstract) {
+            out << "mat" << ty.cols << "x" << ty.width << "(";
+        } else {
+            out << "mat" << ty.cols << "x" << ty.width << "<" << scalarKindName(ty.kind) << ">(";
+        }
+        const int n = ty.cols * ty.width;
+        for (int i = 0; i < n; ++i) {
+            if (i > 0) {
+                out << ", ";
+            }
+            out << scalarWgsl(scalars[next++]);
+        }
+        out << ")";
+        return out.str();
+    }
+    if (ty.width == 1) {
+        return scalarWgsl(scalars[next++]);
+    }
+    // vecN. Abstract vectors are spelled without an explicit element type (vecN(...)).
+    const bool isAbstract = isAbstractKind(ty.kind);
     std::ostringstream out;
     if (isAbstract) {
-        out << "vec" << v.width << "(";
+        out << "vec" << ty.width << "(";
     } else {
-        out << "vec" << v.width << "<" << scalarKindName(kind) << ">(";
+        out << "vec" << ty.width << "<" << scalarKindName(ty.kind) << ">(";
     }
-    for (int i = 0; i < v.width; ++i) {
+    for (int i = 0; i < ty.width; ++i) {
         if (i > 0) {
             out << ", ";
         }
-        out << scalarWgsl(v.elements[static_cast<size_t>(i)]);
+        out << scalarWgsl(scalars[next++]);
     }
     out << ")";
     return out.str();
+}
+
+// WGSL literal for a value of type 'ty' from its flattened scalar payload.
+std::string valueWgsl(const CaseValue& v, const ExprType& ty) {
+    size_t next = 0;
+    return valueWgslRec(ty, v.elements, next);
 }
 
 // WGSL output struct + bound output array declaration.
 std::string wgslOutputs(ExprType resultType, size_t count) {
     std::ostringstream out;
     out << "struct Output {\n"
-        << "  @size(" << strideOf(resultType) << ") value : " << storageTypeName(resultType) << "\n"
+        << "  @size(" << strideOf(resultType, InputSource::StorageRW)
+        << ") value : " << storageTypeName(resultType) << "\n"
         << "};\n"
         << "@group(0) @binding(0) var<storage, read_write> outputs : array<Output, " << count
         << ">;\n";
@@ -339,7 +503,7 @@ std::string buildShader(
             std::vector<std::string> args;
             args.reserve(parameterTypes.size());
             for (size_t p = 0; p < parameterTypes.size(); ++p) {
-                args.push_back(valueWgsl(cases[i].inputs[p], parameterTypes[p].kind));
+                args.push_back(valueWgsl(cases[i].inputs[p], parameterTypes[p]));
             }
             const std::string expr = exprBuilder(args);
             out << "  outputs[" << i << "].value = " << toStorage(resultType, expr) << ";\n";
@@ -362,12 +526,17 @@ std::string buildShader(
     out << wgslOutputs(resultType, cases.size()) << "\n";
     out << wgslInputVar(inputSource, cases.size()) << "\n\n";
 
+    TypeConversionHelpers helpers;
     std::vector<std::string> args;
     args.reserve(parameterTypes.size());
     for (size_t p = 0; p < parameterTypes.size(); ++p) {
-        args.push_back(fromStorage(parameterTypes[p], "inputs[i].param" + std::to_string(p)));
+        args.push_back(
+            fromStorage(parameterTypes[p], "inputs[i].param" + std::to_string(p), helpers));
     }
     const std::string expr = toStorage(resultType, exprBuilder(args));
+    if (!helpers.wgsl.empty()) {
+        out << helpers.wgsl << "\n";
+    }
 
     out << "@compute @workgroup_size(1)\nfn main() {\n"
         << "  for (var i = 0; i < " << cases.size() << "; i++) {\n"
@@ -492,13 +661,17 @@ void submitBatch(
             const uint32_t base = static_cast<uint32_t>(caseIdx) * caseStride;
             structLayout(parameterTypes, inputSource, [&](const MemberInfo& m) {
                 const CaseValue& arg = cases[caseIdx].inputs[static_cast<size_t>(m.index)];
-                const uint32_t eb = elementBytes(m.type.kind);
-                // Each element occupies 'eb' bytes (2 for f16, 4 otherwise); vec3 pads the 4th
-                // element slot which we leave zero.
-                for (int e = 0; e < arg.width; ++e) {
-                    const uint32_t bits = arg.elements[static_cast<size_t>(e)].bits;
-                    std::memcpy(&inputData[base + m.offset + static_cast<uint32_t>(e) * eb], &bits, eb);
-                }
+                // Walk the member's canonical scalar slots, writing each scalar at its WGSL byte
+                // offset within the member (handles scalar/vector/matrix/array, with vec3 / matrix
+                // column / array stride padding left zero).
+                int slot = 0;
+                const uint32_t eb = elementBytes(storageKind(m.type.scalarKind()));
+                forEachStorageScalar(
+                    m.type, inputSource, base + m.offset, slot,
+                    [&](int idx, uint32_t byteOff, ScalarKind) {
+                        const uint32_t bits = arg.elements[static_cast<size_t>(idx)].bits;
+                        std::memcpy(&inputData[byteOff], &bits, eb);
+                    });
             });
         }
         WGPUBufferUsage usage = WGPUBufferUsage_CopySrc |
@@ -545,30 +718,36 @@ void submitBatch(
     // Read back and compare (bit-exact unless the case carries a per-element acceptance set).
     const ExprType result = resultType;
     const uint32_t stride = outputStride;
-    const uint32_t resElemBytes = elementBytes(resultType.kind);
+    const uint32_t resElemBytes = elementBytes(storageKind(resultType.scalarKind()));
+    const int resSlots = scalarSlotCount(resultType);
     std::vector<Case> casesCopy = cases;
     t.expectGPUBufferValuesPassCheck(
         outputBuffer,
-        [result, stride, resElemBytes, casesCopy](
+        [result, stride, resElemBytes, resSlots, casesCopy](
             const uint8_t* data, size_t len) -> std::optional<std::string> {
             std::ostringstream errs;
             int failures = 0;
             for (size_t caseIdx = 0; caseIdx < casesCopy.size(); ++caseIdx) {
                 const uint32_t off = static_cast<uint32_t>(caseIdx) * stride;
                 CaseValue got;
-                got.width = result.width;
-                got.elements.resize(static_cast<size_t>(result.width));
+                got.width = resSlots;
+                got.elements.resize(static_cast<size_t>(resSlots));
                 bool overflow = false;
-                for (int e = 0; e < result.width; ++e) {
-                    const size_t byteOff = off + static_cast<size_t>(e) * resElemBytes;
-                    if (byteOff + resElemBytes > len) {
-                        overflow = true;
-                        break;
-                    }
-                    uint32_t bits = 0;
-                    std::memcpy(&bits, data + byteOff, resElemBytes);
-                    got.elements[static_cast<size_t>(e)] = Scalar{result.kind, bits};
-                }
+                // Walk the result value's canonical scalar slots (handles matrix column / vec3
+                // padding) and read each scalar from its WGSL byte offset within the output value.
+                int slot = 0;
+                const ScalarKind resStoreKind = storageKind(result.scalarKind());
+                forEachStorageScalar(
+                    result, InputSource::StorageRW, off, slot,
+                    [&](int idx, uint32_t byteOff, ScalarKind) {
+                        if (static_cast<size_t>(byteOff) + resElemBytes > len) {
+                            overflow = true;
+                            return;
+                        }
+                        uint32_t bits = 0;
+                        std::memcpy(&bits, data + byteOff, resElemBytes);
+                        got.elements[static_cast<size_t>(idx)] = Scalar{resStoreKind, bits};
+                    });
                 if (overflow) {
                     return std::string("readback buffer too small");
                 }

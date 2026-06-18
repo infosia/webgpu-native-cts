@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -56,17 +57,65 @@ inline const std::vector<InputSource>& allInputSources() {
 const char* inputSourceName(InputSource source);
 InputSource inputSourceFromParam(const std::string& value);
 
-// A type: a scalar kind with a width (1 = scalar, 2/3/4 = vecN).
+// The structural form of an ExprType.
+//   ScalarVec : a scalar (width 1) or a vecN (width 2/3/4) of 'kind'.
+//   Matrix    : a matCxR of 'kind' (kind is f32/f16/abstract-float); 'cols' = C, 'width' = R (rows).
+//   Array     : array<element, count>; 'element' holds the element ExprType, 'count' the length.
+enum class TypeForm {
+    ScalarVec,
+    Matrix,
+    Array,
+};
+
+// A type. For ScalarVec: a scalar kind with a width (1 = scalar, 2/3/4 = vecN). For Matrix and
+// Array the additional fields describe the composite (see TypeForm). The default value is a u32
+// scalar, preserving all existing scalar/vector callers unchanged.
 struct ExprType {
-    ScalarKind kind = ScalarKind::U32;
-    int width = 1;
+    ScalarKind kind = ScalarKind::U32; // element scalar kind (for ScalarVec/Matrix; unused for Array)
+    int width = 1;                     // ScalarVec: vector width; Matrix: rows
+    TypeForm form = TypeForm::ScalarVec;
+    int cols = 0;                      // Matrix: number of columns
+    int count = 0;                     // Array: number of elements
+    std::shared_ptr<ExprType> element; // Array: element type
+
+    // The scalar element kind of this type (recursing into array elements).
+    ScalarKind scalarKind() const {
+        if (form == TypeForm::Array && element) {
+            return element->scalarKind();
+        }
+        return kind;
+    }
 };
 
 inline ExprType scalarType(ScalarKind kind) {
-    return ExprType{kind, 1};
+    ExprType ty;
+    ty.kind = kind;
+    ty.width = 1;
+    return ty;
 }
 inline ExprType vecType(int width, ScalarKind kind) {
-    return ExprType{kind, width};
+    ExprType ty;
+    ty.kind = kind;
+    ty.width = width;
+    return ty;
+}
+// A matCxR (columns x rows) of the given float element kind.
+inline ExprType matType(int cols, int rows, ScalarKind kind) {
+    ExprType ty;
+    ty.kind = kind;
+    ty.width = rows;
+    ty.cols = cols;
+    ty.form = TypeForm::Matrix;
+    return ty;
+}
+// An array<element, count>.
+inline ExprType arrayType(int count, ExprType element) {
+    ExprType ty;
+    ty.form = TypeForm::Array;
+    ty.count = count;
+    ty.element = std::make_shared<ExprType>(std::move(element));
+    ty.kind = ty.element->scalarKind();
+    return ty;
 }
 
 // A scalar value. For U32/I32 'bits' holds the 32-bit pattern; for Bool it is 0 or 1; for
@@ -129,7 +178,13 @@ inline Scalar abstractFloatBits(uint32_t v) {
     return Scalar{ScalarKind::AbstractFloat, v};
 }
 
-// A value: a scalar (width 1) or a vector (width 2/3/4). Always holds 'width' elements.
+// A value. For a scalar (width 1) or vecN (width 2/3/4) it holds 'width' elements. For a composite
+// (matrix or array) it holds all the scalar elements flattened in canonical order:
+//   Matrix : column-major (column 0 rows 0..R-1, column 1 rows 0..R-1, ...), 'width' == cols*rows.
+//   Array  : element 0's scalars, element 1's scalars, ... (each element flattened the same way),
+//            'width' == count * scalarsPerElement.
+// The structure (how to slice these scalars into columns/rows/elements with the right byte layout)
+// is supplied by the ExprType passed to run(); CaseValue only carries the ordered scalar payload.
 struct CaseValue {
     int width = 1;
     std::vector<Scalar> elements; // size == width
@@ -141,6 +196,10 @@ struct CaseValue {
         v.width = static_cast<int>(els.size());
         v.elements = std::move(els);
         return v;
+    }
+    // A composite value (matrix or array) from its flattened scalar payload (canonical order).
+    static CaseValue composite(std::vector<Scalar> els) {
+        return vec(std::move(els));
     }
 };
 
