@@ -335,6 +335,10 @@ struct TextureCase {
     WGPUAddressMode modeW = WGPUAddressMode_ClampToEdge;
     bool comparisonSampler = false;
     bool baseClampToEdge = false;
+    bool gather = false;
+    bool gatherCompare = false;
+    int gatherComponent = 0;
+    std::string gatherResultType = "f32";
 };
 
 bool isCubeKind(SampleKind kind) {
@@ -810,7 +814,11 @@ WGPUTextureFormat viewFormatForAspect(WGPUTextureFormat format, WGPUTextureAspec
 }
 
 std::string textureType(const TextureCase& c) {
-    const char* suffix = c.isDepth ? "" : "<f32>";
+    std::string suffixStr = c.isDepth ? "" : "<f32>";
+    if (c.gather && !c.isDepth) {
+        suffixStr = "<" + c.gatherResultType + ">";
+    }
+    const char* suffix = suffixStr.c_str();
     switch (c.kind) {
         case SampleKind::Sampled1D:
             return std::string("texture_1d") + suffix;
@@ -1076,7 +1084,12 @@ std::string buildRenderWgsl(uint32_t callCount, const TextureCase& c) {
 
 std::vector<SampleCall> generateCalls(const TextureCase& c) {
     std::vector<SampleCall> calls;
-    const bool cubeEdges = c.samplePoints == "cube-edges";
+    // For cube gather, generate interior (non-edge) face points with a 0.75
+    // sub-texel offset so the 2x2 footprint stays within a single face and is
+    // unambiguous. Upstream's cube gather likewise avoids face edges/corners,
+    // which are implementation-defined for gather.
+    const bool cubeGather = c.gather && isCubeKind(c.kind);
+    const bool cubeEdges = c.samplePoints == "cube-edges" && !cubeGather;
     const uint32_t n = cubeEdges ? 24u : kCallCount;
     calls.reserve(n);
     static constexpr std::array<Vec3, 24> cubeEdgeCoords = {{
@@ -1089,7 +1102,20 @@ std::vector<SampleCall> generateCalls(const TextureCase& c) {
     }};
     for (uint32_t i = 0; i < n; ++i) {
         SampleCall call;
-        if (cubeEdges) {
+        if (cubeGather) {
+            // Pick an interior texel on a rotating face and offset by 0.75.
+            const uint32_t w = std::max(2u, c.baseSize.width);
+            const uint32_t h = std::max(2u, std::max(1u, c.baseSize.height));
+            const uint32_t face = i % 6u;
+            const uint32_t tx = 1u + (i % std::max(1u, w - 2u));
+            const uint32_t ty = 1u + ((i / 6u) % std::max(1u, h - 2u));
+            const Vec3 uvLayer{
+                (static_cast<double>(tx) + 0.75) / static_cast<double>(w),
+                (static_cast<double>(ty) + 0.75) / static_cast<double>(h),
+                (static_cast<double>(face) + 0.5) / 6.0,
+            };
+            call.coords = normalized3DTextureCoordToCubeCoord(uvLayer);
+        } else if (cubeEdges) {
             call.coords = cubeEdgeCoords[i];
         } else if (c.samplePoints == "texel-centre") {
             const uint32_t x = i % c.baseSize.width;
@@ -1114,6 +1140,19 @@ std::vector<SampleCall> generateCalls(const TextureCase& c) {
             const double r = 0.13 + static_cast<double>(i % 17u) * 0.061;
             const double theta = static_cast<double>(i) * 2.399963229728653;
             call.coords = Vec3{0.5 + std::cos(theta) * r, 0.5 + std::sin(theta) * r, 0.0};
+        }
+        // Gather selects the 2x2 footprint of one channel. At a texel centre the
+        // footprint center lands exactly on a texel boundary (coord*W-0.5 is an
+        // integer), where the hardware may round the four texels in either
+        // direction. Snap non-cube gather coordinates to texel+0.75 so the
+        // footprint is unambiguous (matches upstream's 0.75 offset trick).
+        if (c.gather && !isCubeKind(c.kind)) {
+            const double w = static_cast<double>(c.baseSize.width);
+            const double h = static_cast<double>(std::max(1u, c.baseSize.height));
+            const double tx = std::floor(std::clamp(call.coords.x, 0.0, 1.0) * w);
+            const double ty = std::floor(std::clamp(call.coords.y, 0.0, 1.0) * h);
+            call.coords.x = (std::min(tx, w - 1.0) + 0.75) / w;
+            call.coords.y = (std::min(ty, h - 1.0) + 0.75) / h;
         }
         const bool gradientBuiltin = c.builtin == "textureSample" || c.builtin == "textureSampleGrad"
             || c.builtin == "textureSampleBias" || c.builtin == "textureSampleCompare";
@@ -3347,6 +3386,593 @@ void executeTextureLoadCase(AllFeaturesMaxLimitsGpuTest& t, TextureLoadCase c) {
         static_cast<size_t>(outputSize));
 }
 
+// ---------------------------------------------------------------------------
+// textureGather / textureGatherCompare
+//
+// Gather always reads mip level 0 with the 2x2 bilinear footprint and emits the
+// four corner texels of a single channel (no LOD, no blend). Reuses the texel
+// generation/upload, cube cross-face addressing, depth initialization, the
+// comparison applyCompareToDepth path, and the per-device pipeline cache.
+// ---------------------------------------------------------------------------
+
+bool gatherFormatIsUint(WGPUTextureFormat format) {
+    return formatLooksUint(format);
+}
+
+bool gatherFormatIsSint(WGPUTextureFormat format) {
+    return formatLooksSint(format);
+}
+
+std::string gatherResultTypeForFormat(WGPUTextureFormat format) {
+    if (gatherFormatIsUint(format) || isStencilOnlyFormat(format)) {
+        return "u32";
+    }
+    if (gatherFormatIsSint(format)) {
+        return "i32";
+    }
+    return "f32";
+}
+
+WGPUTextureSampleType gatherTextureSampleType(const TextureCase& c) {
+    if (c.isDepth) {
+        return WGPUTextureSampleType_Depth;
+    }
+    if (gatherFormatIsUint(c.format) || isStencilOnlyFormat(c.format)) {
+        return WGPUTextureSampleType_Uint;
+    }
+    if (gatherFormatIsSint(c.format)) {
+        return WGPUTextureSampleType_Sint;
+    }
+    // Depth formats reaching the color path (texture_2d<f32> over a depth
+    // texture) are unfilterable. Gather always uses a non-filtering sampler.
+    if (isDepthFormat(c.format)) {
+        return WGPUTextureSampleType_UnfilterableFloat;
+    }
+    return WGPUTextureSampleType_Float;
+}
+
+// Returns the four gather corner texels (component values) for one call. For
+// color textures the component is selected per the gather rules: missing
+// components yield 0.0 (component 1/2) or 1.0 (component 3). For depth the
+// single channel is used. The corner order matches the spec:
+//   x=(umin,vmax) y=(umax,vmax) z=(umax,vmin) w=(umin,vmin)
+std::array<double, 4> gatherColorTaps(const MipData& mip, const SampleCall& callIn, const TextureCase& c) {
+    SampleCall call = callIn;
+    if (isCubeKind(c.kind)) {
+        const Vec3 faceCoord = normalizedCubeToFaceCoord(call.coords);
+        const uint32_t arrayBase = c.useArrayIndex ? (*call.arrayIndex) * 6u : 0u;
+        call.coords = Vec3{faceCoord.x, faceCoord.y, 0.0};
+        call.arrayIndex = arrayBase + static_cast<uint32_t>(faceCoord.z);
+    }
+    const int32_t ox = call.offset ? (*call.offset)[0] : 0;
+    const int32_t oy = call.offset ? (*call.offset)[1] : 0;
+    const int32_t layer = call.arrayIndex ? static_cast<int32_t>(*call.arrayIndex) : 0;
+
+    const double u = call.coords.x * static_cast<double>(mip.size.width) - 0.5 + static_cast<double>(ox);
+    const double v = call.coords.y * static_cast<double>(mip.size.height) - 0.5 + static_cast<double>(oy);
+    const int32_t x0 = static_cast<int32_t>(std::floor(u));
+    const int32_t y0 = static_cast<int32_t>(std::floor(v));
+
+    const uint32_t comp = static_cast<uint32_t>(std::clamp(c.gatherComponent, 0, 3));
+    const std::array<double, 4> c00 = loadAddressed(mip, c.format, x0, y0, layer, c);
+    const std::array<double, 4> c10 = loadAddressed(mip, c.format, x0 + 1, y0, layer, c);
+    const std::array<double, 4> c01 = loadAddressed(mip, c.format, x0, y0 + 1, layer, c);
+    const std::array<double, 4> c11 = loadAddressed(mip, c.format, x0 + 1, y0 + 1, layer, c);
+    // loadAddressed -> resultTexel already applies the missing-channel rule
+    // (absent component -> 0.0, absent alpha -> 1.0).
+    return {c01[comp], c11[comp], c10[comp], c00[comp]};
+}
+
+std::array<double, 4> gatherDepthTaps(const SampleCall& callIn, const TextureCase& c) {
+    SampleCall call = callIn;
+    int32_t arrayBase = 0;
+    if (isCubeKind(c.kind)) {
+        const Vec3 faceCoord = normalizedCubeToFaceCoord(call.coords);
+        arrayBase = c.useArrayIndex ? static_cast<int32_t>(*call.arrayIndex) * 6 : 0;
+        call.coords = Vec3{faceCoord.x, faceCoord.y, static_cast<double>(arrayBase) + faceCoord.z};
+    }
+    const WGPUExtent3D mipSize = physicalMipSize(c.baseSize, c.textureDimension, 0);
+    const int32_t ox = call.offset ? (*call.offset)[0] : 0;
+    const int32_t oy = call.offset ? (*call.offset)[1] : 0;
+    const double u = call.coords.x * static_cast<double>(mipSize.width) - 0.5 + static_cast<double>(ox);
+    const double v = call.coords.y * static_cast<double>(mipSize.height) - 0.5 + static_cast<double>(oy);
+    const int32_t x0 = static_cast<int32_t>(std::floor(u));
+    const int32_t y0 = static_cast<int32_t>(std::floor(v));
+
+    const bool compare = c.gatherCompare;
+    const WGPUCompareFunction cmp = compareFunctionFromString(c.compare);
+    auto tap = [&](int32_t x, int32_t y) -> double {
+        uint32_t resolvedLayer;
+        if (isCubeKind(c.kind)) {
+            const std::array<int32_t, 3> wrapped =
+                wrapFaceCoordToCubeFaceAtEdgeBoundaries(mipSize.width, x, y, static_cast<int32_t>(call.coords.z));
+            resolvedLayer = static_cast<uint32_t>(wrapped[2]);
+        } else {
+            const WGPUAddressMode modeU = c.modeU;
+            const WGPUAddressMode modeV = c.modeV;
+            (void)std::floor(applyAddressToTexelCoord(static_cast<double>(x), mipSize.width, modeU));
+            (void)std::floor(applyAddressToTexelCoord(static_cast<double>(y), mipSize.height, modeV));
+            resolvedLayer = call.arrayIndex.value_or(0u);
+        }
+        const double d = depthValue(0u, resolvedLayer);
+        return compare ? applyCompareToDepth(d, cmp, call.depthRef) : d;
+    };
+    const double t00 = tap(x0, y0);
+    const double t10 = tap(x0 + 1, y0);
+    const double t01 = tap(x0, y0 + 1);
+    const double t11 = tap(x0 + 1, y0 + 1);
+    return {t01, t11, t10, t00};
+}
+
+std::string gatherExprFromParams(std::string_view param, const TextureCase& c, std::string_view offsetExpr) {
+    std::ostringstream expr;
+    const char* builtin = c.gatherCompare ? "textureGatherCompare" : "textureGather";
+    expr << builtin << "(";
+    if (!c.gatherCompare && !c.isDepth) {
+        expr << c.gatherComponent << ", ";
+    }
+    expr << "tex, samp, " << coordParamExpr(param, c);
+    if (c.useArrayIndex) {
+        expr << ", " << arrayIndexParamExpr(param, c);
+    }
+    if (c.gatherCompare) {
+        expr << ", " << param << ".scalars.z";
+    }
+    expr << offsetExpr << ")";
+    // The output buffer is array<vec4u>; bitcast covers f32/i32/depth, and is an
+    // identity for u32 gathers.
+    return "bitcast<vec4u>(" + expr.str() + ")";
+}
+
+std::string buildGatherWgsl(uint32_t callCount, const TextureCase& c) {
+    std::ostringstream wgsl;
+    wgsl << "// texture-gather structural shader; stage=" << c.stage << "\n"
+         << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
+         << "@group(0) @binding(1) var samp: " << (c.comparisonSampler ? "sampler_comparison" : "sampler") << ";\n";
+    writeSampleParamsHeader(wgsl);
+    const bool perCall = c.useOffset;
+    if (c.stage == "compute") {
+        wgsl << "@group(0) @binding(2) var<storage, read_write> out: array<vec4u>;\n"
+             << "@compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id: vec3u) {\n"
+             << "  let i = id.x;\n"
+             << "  let p = params[i];\n";
+        if (perCall) {
+            for (uint32_t i = 0; i < callCount; ++i) {
+                wgsl << "  if (i == " << i << "u) { out[" << i << "] = "
+                     << gatherExprFromParams("p", c, offsetExprForCallIndex(i, c)) << "; }\n";
+            }
+        } else {
+            wgsl << "  out[i] = " << gatherExprFromParams("p", c, {}) << ";\n";
+        }
+        wgsl << "}\n";
+        return wgsl.str();
+    }
+
+    wgsl << "const unusedOutputBinding = 2u;\n"
+         << "struct VOut {\n"
+         << "  @builtin(position) pos: vec4f,\n"
+         << "  @location(0) @interpolate(flat, either) ndx: u32,\n"
+         << "  @location(1) @interpolate(flat, either) result: vec4u,\n"
+         << "};\n"
+         << "fn doGather(i: u32) -> vec4u {\n"
+         << "  let p = params[i];\n";
+    if (perCall) {
+        wgsl << "  var result = vec4u(0u);\n";
+        for (uint32_t i = 0; i < callCount; ++i) {
+            wgsl << "  let call" << i << " = " << gatherExprFromParams("p", c, offsetExprForCallIndex(i, c)) << ";\n"
+                 << "  result = select(result, call" << i << ", i == " << i << "u);\n";
+        }
+        wgsl << "  return result;\n";
+    } else {
+        wgsl << "  return " << gatherExprFromParams("p", c, {}) << ";\n";
+    }
+    wgsl << "}\n"
+         << "fn pixelPos(vertexIndex: u32, instanceIndex: u32) -> vec4f {\n"
+         << "  let width = " << callCount << ".0;\n"
+         << "  let x0 = -1.0 + 2.0 * f32(instanceIndex) / width;\n"
+         << "  let x1 = -1.0 + 2.0 * f32(instanceIndex + 1u) / width;\n"
+         << "  let q = array(vec2f(x0, 3.0), vec2f(x1, -1.0), vec2f(x0, -1.0));\n"
+         << "  return vec4f(q[vertexIndex], 0.0, 1.0);\n"
+         << "}\n";
+    if (c.stage == "vertex") {
+        wgsl << "@vertex fn vsMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VOut {\n"
+             << "  return VOut(pixelPos(vertexIndex, instanceIndex), instanceIndex, doGather(instanceIndex));\n"
+             << "}\n"
+             << "@fragment fn fsMain(v: VOut) -> @location(0) vec4u { return v.result; }\n";
+    } else {
+        wgsl << "@vertex fn vsMain(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VOut {\n"
+             << "  return VOut(pixelPos(vertexIndex, instanceIndex), instanceIndex, vec4u(0u));\n"
+             << "}\n"
+             << "@fragment fn fsMain(v: VOut) -> @location(0) vec4u { return doGather(v.ndx); }\n";
+    }
+    return wgsl.str();
+}
+
+WGPUBindGroupLayout createGatherBindGroupLayout(WGPUDevice device, const TextureCase& c) {
+    std::array<WGPUBindGroupLayoutEntry, 4> entries = {{
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+    }};
+    const WGPUShaderStage visibility = stageVisibility(c.stage);
+    entries[0].binding = 0;
+    entries[0].visibility = visibility;
+    entries[0].texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+    entries[0].texture.sampleType = gatherTextureSampleType(c);
+    entries[0].texture.viewDimension = c.viewDimension;
+    entries[1].binding = 1;
+    entries[1].visibility = visibility;
+    entries[1].sampler = WGPU_SAMPLER_BINDING_LAYOUT_INIT;
+    entries[1].sampler.type = c.comparisonSampler
+        ? WGPUSamplerBindingType_Comparison
+        : WGPUSamplerBindingType_NonFiltering;
+    entries[2].binding = 2;
+    entries[2].visibility = WGPUShaderStage_Compute;
+    entries[2].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entries[2].buffer.type = WGPUBufferBindingType_Storage;
+    entries[3].binding = 3;
+    entries[3].visibility = visibility;
+    entries[3].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entries[3].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+
+    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    desc.entryCount = entries.size();
+    desc.entries = entries.data();
+    return wgpuDeviceCreateBindGroupLayout(device, &desc);
+}
+
+SamplingPipelineBundle createGatherPipelineBundle(WGPUDevice device, const std::string& wgsl, const TextureCase& c) {
+    SamplingPipelineBundle bundle;
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = stringView(wgsl);
+    WGPUShaderModuleDescriptor moduleDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    moduleDesc.nextInChain = &source.chain;
+    bundle.module = wgpuDeviceCreateShaderModule(device, &moduleDesc);
+
+    bundle.bindGroupLayout = createGatherBindGroupLayout(device, c);
+    WGPUPipelineLayoutDescriptor pipelineLayoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pipelineLayoutDesc.bindGroupLayoutCount = 1;
+    pipelineLayoutDesc.bindGroupLayouts = &bundle.bindGroupLayout;
+    bundle.pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &pipelineLayoutDesc);
+
+    if (c.stage == "compute") {
+        WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        pipelineDesc.layout = bundle.pipelineLayout;
+        pipelineDesc.compute.module = bundle.module;
+        pipelineDesc.compute.entryPoint = stringView("main");
+        bundle.computePipeline = wgpuDeviceCreateComputePipeline(device, &pipelineDesc);
+    } else {
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format = WGPUTextureFormat_RGBA32Uint;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = bundle.module;
+        fragment.entryPoint = stringView("fsMain");
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+        WGPURenderPipelineDescriptor renderDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        renderDesc.layout = bundle.pipelineLayout;
+        renderDesc.vertex.module = bundle.module;
+        renderDesc.vertex.entryPoint = stringView("vsMain");
+        renderDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        renderDesc.multisample.count = 1;
+        renderDesc.fragment = &fragment;
+        bundle.renderPipeline = wgpuDeviceCreateRenderPipeline(device, &renderDesc);
+    }
+    return bundle;
+}
+
+const SamplingPipelineBundle& gatherPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureCase& c) {
+    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> cache;
+    const WGPUDevice device = t.device();
+    auto& deviceCache = cache[device];
+    // The bind group layout depends on the texture sample type and sampler
+    // binding type, which are NOT all reflected in the WGSL string (e.g.
+    // texture_2d<f32> is shared by a filterable color format and a depth format
+    // sampled as unfilterable-float). Include them in the cache key.
+    std::ostringstream keyStream;
+    keyStream << wgsl << "\n// bgl: sampleType=" << static_cast<int>(gatherTextureSampleType(c))
+              << " comparison=" << (c.comparisonSampler ? 1 : 0)
+              << " view=" << static_cast<int>(c.viewDimension);
+    const std::string key = keyStream.str();
+    auto it = deviceCache.find(key);
+    if (it == deviceCache.end()) {
+        it = deviceCache.emplace(key, createGatherPipelineBundle(device, wgsl, c)).first;
+    }
+    return it->second;
+}
+
+void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
+    t.skipIfTextureFormatNotSupported(c.format);
+    if (c.viewDimension == WGPUTextureViewDimension_Cube || c.viewDimension == WGPUTextureViewDimension_CubeArray) {
+        t.skipIfTextureViewDimensionNotSupported(c.viewDimension);
+    }
+    c.baseSize = adjustedBaseSizeForFormat(c);
+    if (!c.isDepth) {
+        c.gatherResultType = gatherResultTypeForFormat(c.format);
+    }
+    // A depth format reaching the color path is sampled as texture_2d<f32>:
+    // upstream still exercises this (nearest filter only). The depth aspect is
+    // the only channel, so the spec yields 0.0 for component 1/2 and 1.0 for 3.
+    const bool colorViewOfDepth = !c.isDepth && isDepthFormat(c.format);
+    // A stencil-only format reaching the color path is sampled as
+    // texture_2d<u32> over the stencil aspect (the only channel).
+    const bool stencilViewOfFormat = !c.isDepth && isStencilOnlyFormat(c.format);
+    const bool useDepthInit = c.isDepth || colorViewOfDepth;
+    const WGPUTextureAspect viewAspect = stencilViewOfFormat
+        ? WGPUTextureAspect_StencilOnly
+        : (useDepthInit ? WGPUTextureAspect_DepthOnly : WGPUTextureAspect_All);
+
+    WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    textureDesc.size = c.baseSize;
+    textureDesc.mipLevelCount = c.mipLevelCount;
+    textureDesc.sampleCount = 1;
+    textureDesc.dimension = c.textureDimension;
+    textureDesc.format = c.format;
+    textureDesc.usage = (useDepthInit || stencilViewOfFormat)
+        ? (WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment)
+        : (WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst);
+    WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+    std::vector<MipData> mips;
+    if (useDepthInit) {
+        initializeDepthTexture(t, texture, c);
+    } else if (stencilViewOfFormat) {
+        // Stencil cleared to 0 across all mips; component 1/2 yields 0 by spec.
+        WGPUCommandEncoder stencilEncoder = t.createCommandEncoderTracked();
+        for (uint32_t mip = 0; mip < c.mipLevelCount; ++mip) {
+            WGPUTextureViewDescriptor sv = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+            sv.dimension = WGPUTextureViewDimension_2D;
+            sv.format = c.format;
+            sv.baseMipLevel = mip;
+            sv.mipLevelCount = 1;
+            sv.aspect = WGPUTextureAspect_All;
+            WGPUTextureView sview = t.createViewTracked(texture, sv);
+            WGPURenderPassDepthStencilAttachment ds = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+            ds.view = sview;
+            ds.stencilReadOnly = WGPU_FALSE;
+            ds.stencilLoadOp = WGPULoadOp_Clear;
+            ds.stencilStoreOp = WGPUStoreOp_Store;
+            ds.stencilClearValue = 0;
+            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            passDesc.depthStencilAttachment = &ds;
+            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(stencilEncoder, &passDesc);
+            wgpuRenderPassEncoderEnd(pass);
+            wgpuRenderPassEncoderRelease(pass);
+        }
+        submit(t, stencilEncoder);
+    } else if (isCompressedTextureFormat(c.format)) {
+        std::vector<MipData> compressedMips = makeCompressedTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount);
+        uploadColorTexture(t, texture, c, compressedMips);
+        mips = materializeCompressedTexels(t, texture, c);
+    } else {
+        mips = makeTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount, isCubeKind(c.kind));
+        uploadColorTexture(t, texture, c, mips);
+    }
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    viewDesc.dimension = c.viewDimension;
+    viewDesc.format = useDepthInit
+        ? viewFormatForAspect(c.format, WGPUTextureAspect_DepthOnly)
+        : (stencilViewOfFormat ? viewFormatForAspect(c.format, WGPUTextureAspect_StencilOnly) : c.format);
+    viewDesc.baseMipLevel = 0;
+    viewDesc.mipLevelCount = WGPU_MIP_LEVEL_COUNT_UNDEFINED;
+    viewDesc.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
+    viewDesc.aspect = viewAspect;
+    WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+
+    WGPUSamplerDescriptor samplerDesc = WGPU_SAMPLER_DESCRIPTOR_INIT;
+    samplerDesc.addressModeU = c.modeU;
+    samplerDesc.addressModeV = c.modeV;
+    samplerDesc.addressModeW = c.modeW;
+    // Gather ignores min/mag/mip filtering (it always emits the four corner
+    // texels of level 0). Use a non-filtering sampler so the binding is valid
+    // for every format, including uint/sint/unfilterable-float.
+    samplerDesc.minFilter = WGPUFilterMode_Nearest;
+    samplerDesc.magFilter = WGPUFilterMode_Nearest;
+    samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    if (c.comparisonSampler) {
+        samplerDesc.compare = compareFunctionFromString(c.compare);
+    }
+    WGPUSampler sampler = t.createSamplerTracked(samplerDesc);
+
+    // Per the spec (https://gpuweb.github.io/gpuweb/#reading-depth-stencil), a
+    // depth texture sampled through a color view (texture_2d<f32>) reads as
+    // (D, ?, ?, ?): the G/B/A components are implementation-defined unless the
+    // 'texture-component-swizzle' feature is enabled, in which case it reads as
+    // (D, 0, 0, 1). textureGather(component, ...) with component > 0 therefore
+    // selects an implementation-defined channel and must not be checked when the
+    // feature is absent. (Upstream texture_utils.ts checkResults skips the call
+    // entirely in this case; see getComponentsToCheck / the depth-stencil guard.)
+    const bool hasComponentSwizzle =
+        wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureComponentSwizzle);
+    const bool depthGatherUndefinedComponent =
+        colorViewOfDepth && c.gatherComponent > 0 && !hasComponentSwizzle;
+
+    const std::vector<SampleCall> calls = generateCalls(c);
+    std::vector<std::array<double, 4>> expected;
+    expected.reserve(calls.size());
+    for (const SampleCall& call : calls) {
+        if (stencilViewOfFormat) {
+            // Single-channel stencil cleared to 0; component 1/2 -> 0, 3 -> 1.
+            const double v = c.gatherComponent == 3 ? 1.0 : 0.0;
+            expected.push_back({v, v, v, v});
+        } else if (colorViewOfDepth) {
+            // texture_2d<f32> over a 1-channel depth texture: component 0 yields
+            // the depth corners. With texture-component-swizzle the read is
+            // (D, 0, 0, 1) so component 1/2 -> 0, 3 -> 1; without the feature the
+            // component 1/2/3 results are implementation-defined and are skipped
+            // below (depthGatherUndefinedComponent).
+            const int comp = c.gatherComponent;
+            if (comp == 0) {
+                TextureCase depthCase = c;
+                depthCase.isDepth = true;
+                expected.push_back(gatherDepthTaps(call, depthCase));
+            } else {
+                const double v = comp == 3 ? 1.0 : 0.0;
+                expected.push_back({v, v, v, v});
+            }
+        } else if (c.isDepth) {
+            expected.push_back(gatherDepthTaps(call, c));
+        } else {
+            expected.push_back(gatherColorTaps(mips[0], call, c));
+        }
+    }
+
+    const std::string wgsl = buildGatherWgsl(static_cast<uint32_t>(calls.size()), c);
+    const SamplingPipelineBundle& pipelineBundle = gatherPipelineForDevice(t, wgsl, c);
+
+    const std::vector<SampleParamsData> sampleParams = makeSampleParamsData(calls);
+    const uint64_t sampleParamsSize = static_cast<uint64_t>(sampleParams.size()) * sizeof(SampleParamsData);
+    WGPUBufferDescriptor sampleParamsDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    sampleParamsDesc.size = sampleParamsSize;
+    sampleParamsDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    WGPUBuffer sampleParamsBuffer = t.createBufferTracked(sampleParamsDesc);
+    t.queueWriteBuffer(sampleParamsBuffer, 0, sampleParams.data(), static_cast<size_t>(sampleParamsSize));
+
+    const uint64_t outputSize = static_cast<uint64_t>(calls.size()) * 4u * sizeof(uint32_t);
+    const uint32_t renderBytesPerRow = alignToU32(static_cast<uint32_t>(calls.size()) * 16u, 256u);
+    const uint64_t bufferSize = c.stage == "compute" ? outputSize : renderBytesPerRow;
+    WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bufferDesc.size = bufferSize;
+    bufferDesc.usage = c.stage == "compute"
+        ? WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc
+        : WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+    WGPUBuffer outputBuffer = t.createBufferTracked(bufferDesc);
+
+    std::array<WGPUBindGroupEntry, 4> bgEntries = {{
+        WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT,
+    }};
+    bgEntries[0].binding = 0;
+    bgEntries[0].textureView = view;
+    bgEntries[1].binding = 1;
+    bgEntries[1].sampler = sampler;
+    bgEntries[2].binding = 2;
+    bgEntries[2].buffer = outputBuffer;
+    bgEntries[2].size = outputSize;
+    bgEntries[3].binding = 3;
+    bgEntries[3].buffer = sampleParamsBuffer;
+    bgEntries[3].size = sampleParamsSize;
+    WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bindGroupDesc.layout = pipelineBundle.bindGroupLayout;
+    bindGroupDesc.entryCount = bgEntries.size();
+    bindGroupDesc.entries = bgEntries.data();
+    WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    if (c.stage == "compute") {
+        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipelineBundle.computePipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, static_cast<uint32_t>(calls.size()), 1, 1);
+        wgpuComputePassEncoderEnd(pass);
+        wgpuComputePassEncoderRelease(pass);
+    } else {
+        WGPUTextureDescriptor targetDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        targetDesc.size = WGPUExtent3D{static_cast<uint32_t>(calls.size()), 1, 1};
+        targetDesc.mipLevelCount = 1;
+        targetDesc.sampleCount = 1;
+        targetDesc.dimension = WGPUTextureDimension_2D;
+        targetDesc.format = WGPUTextureFormat_RGBA32Uint;
+        targetDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+        WGPUTexture target = t.createTextureTracked(targetDesc);
+        WGPUTextureViewDescriptor targetViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        targetViewDesc.dimension = WGPUTextureViewDimension_2D;
+        targetViewDesc.format = WGPUTextureFormat_RGBA32Uint;
+        WGPUTextureView targetView = t.createViewTracked(target, targetViewDesc);
+
+        WGPURenderPassColorAttachment attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        attachment.view = targetView;
+        attachment.loadOp = WGPULoadOp_Clear;
+        attachment.storeOp = WGPUStoreOp_Store;
+        attachment.clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.colorAttachmentCount = 1;
+        passDesc.colorAttachments = &attachment;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderSetPipeline(pass, pipelineBundle.renderPipeline);
+        wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuRenderPassEncoderDraw(pass, 3, static_cast<uint32_t>(calls.size()), 0, 0);
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+        t.copyTextureToBuffer(encoder, target, outputBuffer, renderBytesPerRow, targetDesc.size);
+    }
+    submit(t, encoder);
+
+    const bool intResult = !c.isDepth && !c.gatherCompare && c.gatherResultType != "f32";
+    const double tolerance = intResult
+        ? 0.0
+        : (c.isDepth ? 3.0 / 100.0 : comparisonToleranceForFormat(c.format, c.filt));
+    t.expectGPUBufferValuesPassCheck(
+        outputBuffer,
+        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            if (len < static_cast<size_t>(outputSize)) {
+                return std::string("textureGather output buffer too small");
+            }
+            if (depthGatherUndefinedComponent) {
+                // Every call selects an implementation-defined depth-texture
+                // component (G/B/A of a depth read without texture-component-
+                // swizzle); nothing is checkable. The pass still exercises that
+                // the shader compiles and runs.
+                return std::nullopt;
+            }
+            for (size_t i = 0; i < calls.size(); ++i) {
+                for (uint32_t component = 0; component < 4; ++component) {
+                    const size_t byteOffset = c.stage == "compute"
+                        ? (i * 4u + component) * sizeof(uint32_t)
+                        : i * 16u + component * sizeof(uint32_t);
+                    uint32_t gotBits = 0;
+                    std::memcpy(&gotBits, actual + byteOffset, sizeof(uint32_t));
+                    double got;
+                    if (c.gatherResultType == "u32" && !c.isDepth && !c.gatherCompare) {
+                        got = static_cast<double>(gotBits);
+                    } else if (c.gatherResultType == "i32" && !c.isDepth && !c.gatherCompare) {
+                        int32_t signedGot = 0;
+                        std::memcpy(&signedGot, &gotBits, sizeof(signedGot));
+                        got = static_cast<double>(signedGot);
+                    } else {
+                        got = static_cast<double>(floatFromBits(gotBits));
+                    }
+                    const double diff = std::abs(got - expected[i][component]);
+                    if (diff > tolerance) {
+                        std::ostringstream msg;
+                        msg << "textureGather mismatch call " << i << " component " << component
+                            << ": expected " << expected[i][component] << ", got " << got
+                            << ", diff " << diff << ", format " << textureFormatInfo(c.format).identifier
+                            << ", stage " << c.stage << ", tolerance " << tolerance;
+                        return msg.str();
+                    }
+                }
+            }
+            return std::nullopt;
+        },
+        0,
+        static_cast<size_t>(outputSize));
+}
+
+TextureCase baseGatherCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind, bool depth) {
+    TextureCase c;
+    c.kind = kind;
+    c.format = parseTextureFormat(t.param<std::string>("format"));
+    c.stage = t.param<std::string>("stage");
+    c.samplePoints = t.param<std::string>("samplePoints");
+    c.mipLevelCount = kMipLevelCount;
+    c.gather = true;
+    c.builtin = "textureGather";
+    if (depth) {
+        c.isDepth = true;
+        c.filt = "nearest";
+        c.gatherResultType = "f32";
+    } else {
+        c.filt = t.param<std::string>("filt");
+    }
+    return c;
+}
+
 } // namespace
 
 std::vector<Value> shortShaderStages() {
@@ -3918,6 +4544,171 @@ void executeTextureSampleCompareLevelCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
 void executeTextureSampleBaseClampToEdge2D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseTextureSampleBaseClampToEdgeCase(t);
     executeCase(t, c);
+}
+
+bool isGatherFillableFormatParam(const ParamRecord& record) {
+    const WGPUTextureFormat format = paramFormat(record);
+    if (isCompressedTextureFormat(format)) {
+        return !endsWithFormatToken(format, "float");
+    }
+    return true;
+}
+
+bool isGatherFilterNearestOrPossiblyFilterableParam(const ParamRecord& record) {
+    return paramString(record, "filt") == "nearest" || isPossiblyFilterableAsTextureF32(paramFormat(record));
+}
+
+void executeTextureGatherSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::Sampled2D, false);
+    c.gatherComponent = t.param<std::string>("C") == "i32" ? 1 : 2;
+    c.baseSize = baseSize(8, 8, 1);
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::SampledCube, false);
+    c.gatherComponent = t.param<std::string>("C") == "i32" ? 1 : 2;
+    c.viewDimension = WGPUTextureViewDimension_Cube;
+    c.baseSize = baseSize(8, 8, 6);
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherSampledArray2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::Sampled2DArray, false);
+    c.gatherComponent = t.param<std::string>("C") == "i32" ? 1 : 2;
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherSampledArray3D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::SampledCubeArray, false);
+    c.gatherComponent = t.param<std::string>("C") == "i32" ? 1 : 2;
+    c.viewDimension = WGPUTextureViewDimension_CubeArray;
+    c.baseSize = baseSize(8, 8, 24);
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherDepth2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::Depth2D, true);
+    c.baseSize = baseSize(8, 8, 1);
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherDepth3D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::DepthCube, true);
+    c.viewDimension = WGPUTextureViewDimension_Cube;
+    c.baseSize = baseSize(8, 8, 6);
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherDepthArray2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::Depth2DArray, true);
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherDepthArray3D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::DepthCubeArray, true);
+    c.viewDimension = WGPUTextureViewDimension_CubeArray;
+    c.baseSize = baseSize(8, 8, 24);
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherCompareArray2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::Depth2DArray, true);
+    c.builtin = "textureGatherCompare";
+    c.gatherCompare = true;
+    c.comparisonSampler = true;
+    c.filt = t.param<std::string>("filt");
+    c.compare = t.param<std::string>("compare");
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
+    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.useOffset = t.param<bool>("offset");
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherCompareArray3D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::DepthCubeArray, true);
+    c.builtin = "textureGatherCompare";
+    c.gatherCompare = true;
+    c.comparisonSampler = true;
+    c.filt = t.param<std::string>("filt");
+    c.compare = t.param<std::string>("compare");
+    c.viewDimension = WGPUTextureViewDimension_CubeArray;
+    c.baseSize = baseSize(8, 8, 24);
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherCompareSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::Depth2D, true);
+    c.builtin = "textureGatherCompare";
+    c.gatherCompare = true;
+    c.comparisonSampler = true;
+    c.filt = t.param<std::string>("filt");
+    c.compare = t.param<std::string>("compare");
+    c.baseSize = baseSize(8, 8, 1);
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.useOffset = t.param<bool>("offset");
+    executeGatherCase(t, c);
+}
+
+void executeTextureGatherCompareSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
+    TextureCase c = baseGatherCase(t, SampleKind::DepthCube, true);
+    c.builtin = "textureGatherCompare";
+    c.gatherCompare = true;
+    c.comparisonSampler = true;
+    c.filt = t.param<std::string>("filt");
+    c.compare = t.param<std::string>("compare");
+    c.viewDimension = WGPUTextureViewDimension_Cube;
+    c.baseSize = baseSize(8, 8, 6);
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.modeW = c.modeU;
+    executeGatherCase(t, c);
 }
 
 std::vector<Value> textureMetadataAspectsForFormat(const ParamRecord& record) {

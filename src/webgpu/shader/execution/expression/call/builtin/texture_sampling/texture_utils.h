@@ -87,6 +87,23 @@ void executeTextureSampleCompareLevelCubeArray(AllFeaturesMaxLimitsGpuTest& t);
 
 void executeTextureSampleBaseClampToEdge2D(AllFeaturesMaxLimitsGpuTest& t);
 
+void executeTextureGatherSampled2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherSampled3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherSampledArray2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherSampledArray3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherDepth2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherDepth3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherDepthArray2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherDepthArray3D(AllFeaturesMaxLimitsGpuTest& t);
+
+void executeTextureGatherCompareArray2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherCompareArray3D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherCompareSampled2D(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureGatherCompareSampled3D(AllFeaturesMaxLimitsGpuTest& t);
+
+bool isGatherFillableFormatParam(const ParamRecord& record);
+bool isGatherFilterNearestOrPossiblyFilterableParam(const ParamRecord& record);
+
 std::vector<Value> textureMetadataAspectsForFormat(const ParamRecord& record);
 std::vector<Value> textureMetadataSamplesForFormat(const ParamRecord& record);
 std::vector<Value> textureMetadataViewDimensions(const ParamRecord& record);
