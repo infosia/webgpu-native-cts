@@ -148,4 +148,16 @@ void executeTextureLoadStorage2D(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureLoadStorage2DArray(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureLoadStorage3D(AllFeaturesMaxLimitsGpuTest& t);
 
+std::vector<Value> storeViewDimensions();
+std::vector<Value> storeDimensions();
+bool storeReadWriteAccessOrFormatSupported(const ParamRecord& record);
+bool storeViewDimensionMipLevelValid(const ParamRecord& record);
+bool storeOutOfBoundsMipValid(const ParamRecord& record);
+bool storeOutOfBoundsArrayValid(const ParamRecord& record);
+
+void executeTextureStoreTexelFormats(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureStoreBgra8unormSwizzle(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureStoreOutOfBounds(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureStoreOutOfBoundsArray(AllFeaturesMaxLimitsGpuTest& t);
+
 } // namespace cts::texture_utils

@@ -3973,6 +3973,258 @@ TextureCase baseGatherCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind, bool
     return c;
 }
 
+// ---------------------------------------------------------------------------
+// textureStore
+//
+// A compute or fragment shader writes texels into a storage texture via
+// textureStore(); the texture is then copied back to a buffer and compared
+// against the values we expect the GPU to have encoded. The expected bytes are
+// produced with the project's own TexelRepresentation encoder (the same path
+// textureLoad trusts), with each component pre-clamped to the format's
+// representable range to match GPU saturation behavior. Read-back buffers are
+// zero-filled before the copy so a silently-skipped write is caught as a
+// mismatch rather than a false pass.
+// ---------------------------------------------------------------------------
+
+// WGSL component type for the storage format's channel type.
+std::string storeComponentType(WGPUTextureFormat format) {
+    return loadComponentType(loadReturnKindForFormat(format, false));
+}
+
+// Numeric value lists per format, mirroring upstream inputArray(). They include
+// out-of-range values so clamping/saturation behavior is exercised.
+std::vector<double> storeInputArray(WGPUTextureFormat format) {
+    const std::string_view id = textureFormatInfo(format).identifier;
+    auto is = [&](std::string_view s) { return id == s; };
+    if (is("r8snorm") || is("rg8snorm") || is("rgba8snorm") || is("r16snorm") || is("rg16snorm")
+        || is("rgba16snorm")) {
+        return {-1.1, 1.0, -0.6, -0.3, 0, 0.3, 0.6, 1.0, 1.1};
+    }
+    if (is("r8unorm") || is("rg8unorm") || is("rgba8unorm") || is("bgra8unorm") || is("r16unorm")
+        || is("rg16unorm") || is("rgba16unorm")) {
+        return {-0.1, 0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.1};
+    }
+    if (is("r8uint") || is("rg8uint") || is("rgba8uint")) {
+        return {0, 8, 16, 24, 32, 64, 100, 128, 200, 255, 256, 512};
+    }
+    if (is("rgba16uint")) {
+        return {0, 8, 16, 24, 32, 64, 100, 128, 200, 255, 0xffff, 0x1ffff};
+    }
+    if (is("rgba32uint") || is("r32uint") || is("rg32uint")) {
+        return {0, 8, 16, 24, 32, 64, 100, 128, 200, 255, 256, 512, 0xffffffffu};
+    }
+    if (is("r8sint") || is("rg8sint") || is("rgba8sint")) {
+        return {-128, -100, -64, -32, -16, -8, 0, 8, 16, 32, 64, 100, 127};
+    }
+    if (is("rgba16sint")) {
+        return {-32768, -32769, -100, -64, -32, -16, -8, 0, 8, 16, 32, 64, 100, 127, 0x7fff, 0x8000};
+    }
+    if (is("r32sint") || is("rg32sint") || is("rgba32sint")) {
+        return {-0x8000000, -32769, -100, -64, -32, -16, -8, 0, 8, 16, 32, 64, 100, 127, 0x7ffffff};
+    }
+    if (is("r16float") || is("rg16float") || is("rgba16float") || is("rgba32float") || is("r32float")
+        || is("rg32float")) {
+        return {-100, -50, -32, -16, -8, -1, 0, 1, 8, 16, 32, 50, 100};
+    }
+    if (is("r16uint") || is("rg16uint")) {
+        return {0, 1000, 32768, 65535, 65536, 70000};
+    }
+    if (is("r16sint") || is("rg16sint")) {
+        return {-32769, -32768, -1000, 0, 1000, 32767, 32768};
+    }
+    if (is("rgb10a2uint")) {
+        return {0, 500, 1023, 1024, 3, 4};
+    }
+    if (is("rgb10a2unorm")) {
+        return {-0.1, 0, 0.5, 1.0, 1.1};
+    }
+    if (is("rg11b10ufloat")) {
+        return {1, 0.5, 0, 1};
+    }
+    return {};
+}
+
+// Clamp a component value to the representable range of the destination
+// channel, matching the GPU's saturating textureStore behavior.
+double storeClampComponent(WGPUTextureFormat format, uint32_t componentIndex, double value) {
+    const TexelRepresentation& repr = texelRepresentation(format);
+    if (componentIndex >= 4) return value;
+    const ComponentDataType type = repr.dataTypes[componentIndex];
+    const uint32_t bits = repr.bitLengths[componentIndex];
+    switch (type) {
+        case ComponentDataType::Unorm:
+            return std::min(1.0, std::max(0.0, value));
+        case ComponentDataType::Snorm:
+            return std::min(1.0, std::max(-1.0, value));
+        case ComponentDataType::Uint: {
+            const double maxv = bits >= 32 ? 4294967295.0 : static_cast<double>((1u << bits) - 1u);
+            return std::min(maxv, std::max(0.0, value));
+        }
+        case ComponentDataType::Sint: {
+            const double maxv = bits >= 32 ? 2147483647.0 : static_cast<double>((1 << (bits - 1)) - 1);
+            const double minv = bits >= 32 ? -2147483648.0 : static_cast<double>(-(1 << (bits - 1)));
+            return std::min(maxv, std::max(minv, value));
+        }
+        default:
+            // Float / Ufloat: values used are simple and need no clamp.
+            return value;
+    }
+}
+
+// Encode a four-component texel value into its packed byte representation,
+// pre-clamping per channel to mirror GPU saturation.
+std::vector<uint8_t> storeEncodeTexel(WGPUTextureFormat format, const std::array<double, 4>& valuesIn) {
+    const TexelRepresentation& repr = texelRepresentation(format);
+    TexelComponents comps;
+    for (uint32_t i = 0; i < 4; ++i) {
+        comps.values[i] = storeClampComponent(format, i, valuesIn[i]);
+    }
+    return repr.packBits(repr.numberToBits(comps));
+}
+
+struct TextureStorePipelineBundle {
+    WGPUShaderModule module = nullptr;
+    WGPUBindGroupLayout bindGroupLayout = nullptr;
+    WGPUPipelineLayout pipelineLayout = nullptr;
+    WGPUComputePipeline computePipeline = nullptr;
+    WGPURenderPipeline renderPipeline = nullptr;
+    bool isCompute = true;
+};
+
+TextureStorePipelineBundle createTextureStorePipelineBundle(
+    WGPUDevice device,
+    const std::string& wgsl,
+    bool isCompute,
+    WGPUStorageTextureAccess access,
+    WGPUTextureFormat format,
+    WGPUTextureViewDimension viewDimension,
+    const std::string& computeEntry) {
+    TextureStorePipelineBundle bundle;
+    bundle.isCompute = isCompute;
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = stringView(wgsl);
+    WGPUShaderModuleDescriptor moduleDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    moduleDesc.nextInChain = &source.chain;
+    bundle.module = wgpuDeviceCreateShaderModule(device, &moduleDesc);
+
+    WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+    entry.binding = 0;
+    entry.visibility = isCompute ? WGPUShaderStage_Compute : WGPUShaderStage_Fragment;
+    entry.storageTexture = WGPU_STORAGE_TEXTURE_BINDING_LAYOUT_INIT;
+    entry.storageTexture.access = access;
+    entry.storageTexture.format = format;
+    entry.storageTexture.viewDimension = viewDimension;
+
+    WGPUBindGroupLayoutDescriptor bglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    bglDesc.entryCount = 1;
+    bglDesc.entries = &entry;
+    bundle.bindGroupLayout = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
+    WGPUPipelineLayoutDescriptor pipelineLayoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pipelineLayoutDesc.bindGroupLayoutCount = 1;
+    pipelineLayoutDesc.bindGroupLayouts = &bundle.bindGroupLayout;
+    bundle.pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &pipelineLayoutDesc);
+
+    if (isCompute) {
+        WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        pipelineDesc.layout = bundle.pipelineLayout;
+        pipelineDesc.compute.module = bundle.module;
+        pipelineDesc.compute.entryPoint = stringView(computeEntry);
+        bundle.computePipeline = wgpuDeviceCreateComputePipeline(device, &pipelineDesc);
+    } else {
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = bundle.module;
+        fragment.entryPoint = stringView("fs");
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+        WGPURenderPipelineDescriptor renderDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        renderDesc.layout = bundle.pipelineLayout;
+        renderDesc.vertex.module = bundle.module;
+        renderDesc.vertex.entryPoint = stringView("vs");
+        renderDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        renderDesc.multisample.count = 1;
+        renderDesc.fragment = &fragment;
+        bundle.renderPipeline = wgpuDeviceCreateRenderPipeline(device, &renderDesc);
+    }
+    return bundle;
+}
+
+const TextureStorePipelineBundle& textureStorePipelineForDevice(
+    AllFeaturesMaxLimitsGpuTest& t,
+    const std::string& wgsl,
+    bool isCompute,
+    WGPUStorageTextureAccess access,
+    WGPUTextureFormat format,
+    WGPUTextureViewDimension viewDimension,
+    const std::string& computeEntry) {
+    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, TextureStorePipelineBundle>> cache;
+    auto& deviceCache = cache[t.device()];
+    std::ostringstream key;
+    key << wgsl << "\n// layout:"
+        << " compute=" << (isCompute ? 1 : 0)
+        << " access=" << static_cast<uint32_t>(access)
+        << " format=" << static_cast<uint32_t>(format)
+        << " view=" << static_cast<uint32_t>(viewDimension)
+        << " entry=" << computeEntry;
+    const std::string keyStr = key.str();
+    auto it = deviceCache.find(keyStr);
+    if (it == deviceCache.end()) {
+        it = deviceCache
+                 .emplace(keyStr,
+                          createTextureStorePipelineBundle(t.device(), wgsl, isCompute, access, format,
+                                                           viewDimension, computeEntry))
+                 .first;
+    }
+    return it->second;
+}
+
+// Read back the given mip level of a texture into a freshly zero-filled buffer
+// and return the raw (256-byte-row-padded) bytes.
+std::vector<uint8_t> storeReadbackMip(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    WGPUTextureFormat format,
+    WGPUTextureDimension dimension,
+    WGPUExtent3D baseSize,
+    uint32_t mipLevel) {
+    const TextureCopyLayout layout = getTextureCopyLayout(format, dimension, baseSize, mipLevel);
+    const uint64_t bufferSize = alignToU32(static_cast<uint32_t>(layout.byteLength), 4u);
+    WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bufferDesc.size = bufferSize;
+    bufferDesc.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
+    WGPUBuffer buffer = t.createBufferTracked(bufferDesc);
+
+    // Zero-fill so unwritten texels / padding read back as zero (anti-false-pass).
+    const std::vector<uint8_t> zeros(static_cast<size_t>(bufferSize), 0);
+    t.queueWriteBuffer(buffer, 0, zeros.data(), zeros.size());
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPUTexelCopyTextureInfo srcInfo = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    srcInfo.texture = texture;
+    srcInfo.mipLevel = mipLevel;
+    srcInfo.origin = WGPUOrigin3D{0, 0, 0};
+    srcInfo.aspect = WGPUTextureAspect_All;
+    WGPUTexelCopyBufferInfo dstInfo = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+    dstInfo.buffer = buffer;
+    dstInfo.layout.offset = 0;
+    dstInfo.layout.bytesPerRow = layout.bytesPerRow;
+    dstInfo.layout.rowsPerImage = layout.rowsPerImage;
+    wgpuCommandEncoderCopyTextureToBuffer(encoder, &srcInfo, &dstInfo, &layout.mipSize);
+    submit(t, encoder);
+
+    std::vector<uint8_t> result;
+    t.expectGPUBufferValuesPassCheck(
+        buffer,
+        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+            result.assign(actual, actual + len);
+            return std::nullopt;
+        },
+        0,
+        static_cast<size_t>(layout.byteLength));
+    return result;
+}
+
 } // namespace
 
 std::vector<Value> shortShaderStages() {
@@ -5150,6 +5402,717 @@ void executeTextureLoadStorage2DArray(AllFeaturesMaxLimitsGpuTest& t) {
 
 void executeTextureLoadStorage3D(AllFeaturesMaxLimitsGpuTest& t) {
     executeTextureLoadCase(t, baseLoadStorage(t, WGPUTextureDimension_3D, WGPUTextureViewDimension_3D, 3, "texture_storage_3d"));
+}
+
+// ---------------------------------------------------------------------------
+// textureStore param helpers
+// ---------------------------------------------------------------------------
+
+std::vector<Value> storeViewDimensions() {
+    return values({"1d", "2d", "2d-array", "3d"});
+}
+
+std::vector<Value> storeDimensions() {
+    return values({"1d", "2d", "3d"});
+}
+
+bool storeReadWriteAccessOrFormatSupported(const ParamRecord& record) {
+    // unless(access === 'read_write' && !isTextureFormatPossiblyStorageReadWritable(format))
+    return paramString(record, "access") != "read_write" || isStorageReadWriteFormatParam(record);
+}
+
+bool storeViewDimensionMipLevelValid(const ParamRecord& record) {
+    // unless(viewDimension === '1d' && mipLevel !== 0)
+    const Value* mip = findParam(record, "mipLevel");
+    const int64_t mipLevel = mip == nullptr ? 0 : valueAs<int64_t>(*mip);
+    return !(paramString(record, "viewDimension") == "1d" && mipLevel != 0);
+}
+
+bool storeOutOfBoundsMipValid(const ParamRecord& record) {
+    const std::string dim = paramString(record, "dim");
+    const int64_t mipCount = valueAs<int64_t>(*findParam(record, "mipCount"));
+    const int64_t mip = valueAs<int64_t>(*findParam(record, "mip"));
+    if (dim == "1d") {
+        return mipCount == 1 && mip == 0;
+    }
+    if (dim == "3d") {
+        return mipCount <= 2 && mip < mipCount;
+    }
+    return mip < mipCount;
+}
+
+bool storeOutOfBoundsArrayValid(const ParamRecord& record) {
+    const int64_t baseLevel = valueAs<int64_t>(*findParam(record, "baseLevel"));
+    const int64_t arrayLevels = valueAs<int64_t>(*findParam(record, "arrayLevels"));
+    constexpr int64_t kArrayLevels = 4;
+    if (arrayLevels <= baseLevel) {
+        return false;
+    }
+    if (kArrayLevels < baseLevel + arrayLevels) {
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// textureStore: texel_formats
+// ---------------------------------------------------------------------------
+
+namespace {
+
+uint32_t bytesPerTexelForStore(WGPUTextureFormat format) {
+    return textureFormatInfo(format).bytesPerBlock;
+}
+
+WGPUTextureViewDimension storeParseViewDimension(const std::string& s) {
+    if (s == "1d") return WGPUTextureViewDimension_1D;
+    if (s == "2d") return WGPUTextureViewDimension_2D;
+    if (s == "2d-array") return WGPUTextureViewDimension_2DArray;
+    return WGPUTextureViewDimension_3D;
+}
+
+WGPUTextureDimension storeTextureDimensionFromView(const std::string& s) {
+    if (s == "1d") return WGPUTextureDimension_1D;
+    if (s == "3d") return WGPUTextureDimension_3D;
+    return WGPUTextureDimension_2D;  // 2d and 2d-array
+}
+
+std::string storeViewDimensionWGSL(const std::string& s) {
+    if (s == "2d-array") return "2d_array";
+    return s;
+}
+
+} // namespace
+
+void executeTextureStoreTexelFormats(AllFeaturesMaxLimitsGpuTest& t) {
+    const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+    const std::string viewDimension = t.param<std::string>("viewDimension");
+    const std::string stage = t.param<std::string>("stage");
+    const std::string accessStr = t.param<std::string>("access");
+    const uint32_t mipLevel = static_cast<uint32_t>(t.param<int64_t>("mipLevel"));
+    const WGPUStorageTextureAccess access =
+        accessStr == "read_write" ? WGPUStorageTextureAccess_ReadWrite : WGPUStorageTextureAccess_WriteOnly;
+
+    t.skipIfTextureFormatNotSupported(format);
+    if (!t.isTextureFormatUsableWithStorageAccessMode(format, access)) {
+        t.skip("texture format is not usable with requested storage access mode");
+    }
+    skipIfNoStorageTexturesInStage(t, stage);
+
+    const WGPUTextureViewDimension viewDim = storeParseViewDimension(viewDimension);
+    const WGPUTextureDimension dimension = storeTextureDimensionFromView(viewDimension);
+    t.skipIfTextureViewDimensionNotSupported(viewDim);
+    t.skipIfTextureFormatAndDimensionNotCompatible(format, dimension);
+
+    const std::string componentType = storeComponentType(format);
+    const std::vector<double> valuesArr = storeInputArray(format);
+    const uint32_t len = static_cast<uint32_t>(valuesArr.size());
+
+    const std::string suffix = endsWithFormatToken(format, "sint") ? "i"
+        : endsWithFormatToken(format, "uint")                      ? "u"
+                                                                   : "f";
+    const std::string swizzleWGSL = viewDimension == "1d" ? "x" : viewDimension == "3d" ? "xyz" : "xy";
+    const std::string layerWGSL = viewDimension == "2d-array" ? ", gid.z" : "";
+
+    std::ostringstream rangeWGSL;
+    for (uint32_t i = 0; i < len; ++i) {
+        if (i != 0) rangeWGSL << ",";
+        // Emit values as decimals; integer formats use i/u suffix.
+        const double v = valuesArr[i];
+        if (suffix == "f") {
+            std::ostringstream vs;
+            vs.precision(17);
+            vs << v;
+            rangeWGSL << vs.str();
+            if (vs.str().find('.') == std::string::npos && vs.str().find('e') == std::string::npos
+                && vs.str().find("inf") == std::string::npos) {
+                rangeWGSL << ".0";
+            }
+            rangeWGSL << suffix;
+        } else if (suffix == "u") {
+            rangeWGSL << static_cast<uint64_t>(static_cast<int64_t>(v)) << suffix;
+        } else {
+            rangeWGSL << static_cast<int64_t>(v) << suffix;
+        }
+    }
+
+    std::ostringstream wgsl;
+    wgsl << "const range = array(" << rangeWGSL.str() << ");\n"
+         << "@group(0) @binding(0) var tex : texture_storage_" << storeViewDimensionWGSL(viewDimension)
+         << "<" << textureFormatInfo(format).identifier << ", " << storageAccessWGSL(access) << ">;\n"
+         << "fn setValue(gid: vec3u) {\n"
+         << "  let ndx = gid.x + gid.y + gid.z;\n"
+         << "  let vecVal = vec4(\n"
+         << "    range[(ndx + 0) % " << len << "],\n"
+         << "    range[(ndx + 1) % " << len << "],\n"
+         << "    range[(ndx + 2) % " << len << "],\n"
+         << "    range[(ndx + 3) % " << len << "],\n"
+         << "  );\n"
+         << "  var val = vec4<" << componentType << ">(vecVal);\n"
+         << "  let coord = gid." << swizzleWGSL << ";\n"
+         << "  textureStore(tex, coord" << layerWGSL << ", val);\n"
+         << "}\n"
+         << "@compute @workgroup_size(" << len << ")\n"
+         << "fn cs(@builtin(global_invocation_id) gid : vec3u) {\n"
+         << "  setValue(gid);\n"
+         << "}\n"
+         << "struct VOut {\n"
+         << "  @builtin(position) pos: vec4f,\n"
+         << "  @location(0) @interpolate(flat, either) z: u32,\n"
+         << "}\n"
+         << "@vertex fn vs(@builtin(vertex_index) vNdx: u32, @builtin(instance_index) iNdx: u32) -> VOut {\n"
+         << "  let pos = array(vec2f(-1, 3), vec2f(3, -1), vec2f(-1, -1));\n"
+         << "  return VOut(vec4f(pos[vNdx], 0, 1), iNdx);\n"
+         << "}\n"
+         << "@fragment fn fs(v: VOut) -> @location(0) vec4f {\n"
+         << "  setValue(vec3u(u32(v.pos.x), u32(v.pos.y), v.z));\n"
+         << "  return vec4f(0);\n"
+         << "}\n";
+
+    // Choose a size so the mipLevel we will write to is the size we want to test.
+    const uint32_t mipMult = 1u << mipLevel;
+    const uint32_t size = len * mipMult;
+    const WGPUExtent3D mipLevel0Size{
+        size,
+        viewDimension == "1d" ? 1u : size,
+        viewDimension == "2d-array" ? len : viewDimension == "3d" ? size : 1u};
+    const WGPUExtent3D testMipLevelSize{
+        len,
+        viewDimension == "1d" ? 1u : len,
+        (viewDimension == "2d-array" || viewDimension == "3d") ? len : 1u};
+
+    WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    textureDesc.size = mipLevel0Size;
+    textureDesc.mipLevelCount = viewDimension == "1d" ? 1u : 3u;
+    textureDesc.dimension = dimension;
+    textureDesc.format = format;
+    textureDesc.usage = WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopySrc;
+    WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+    const bool isCompute = stage == "compute";
+    const TextureStorePipelineBundle& pipeline =
+        textureStorePipelineForDevice(t, wgsl.str(), isCompute, access, format, viewDim, "cs");
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    viewDesc.format = format;
+    viewDesc.dimension = viewDim;
+    viewDesc.baseMipLevel = mipLevel;
+    viewDesc.mipLevelCount = 1;
+    WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+
+    WGPUBindGroupEntry bgEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+    bgEntry.binding = 0;
+    bgEntry.textureView = view;
+    WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bindGroupDesc.layout = pipeline.bindGroupLayout;
+    bindGroupDesc.entryCount = 1;
+    bindGroupDesc.entries = &bgEntry;
+    WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    if (isCompute) {
+        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, testMipLevelSize.width,
+                                                 testMipLevelSize.height,
+                                                 testMipLevelSize.depthOrArrayLayers);
+        wgpuComputePassEncoderEnd(pass);
+        wgpuComputePassEncoderRelease(pass);
+    } else {
+        WGPUTextureDescriptor renderDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        renderDesc.size = WGPUExtent3D{testMipLevelSize.width, testMipLevelSize.height, 1};
+        renderDesc.dimension = WGPUTextureDimension_2D;
+        renderDesc.format = WGPUTextureFormat_RGBA8Unorm;
+        renderDesc.usage = WGPUTextureUsage_RenderAttachment;
+        WGPUTexture renderTarget = t.createTextureTracked(renderDesc);
+        WGPUTextureViewDescriptor rtViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        WGPUTextureView rtView = t.createViewTracked(renderTarget, rtViewDesc);
+        WGPURenderPassColorAttachment attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        attachment.view = rtView;
+        attachment.loadOp = WGPULoadOp_Clear;
+        attachment.storeOp = WGPUStoreOp_Store;
+        attachment.clearValue = WGPUColor{0, 0, 0, 0};
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.colorAttachmentCount = 1;
+        passDesc.colorAttachments = &attachment;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline.renderPipeline);
+        wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuRenderPassEncoderDraw(pass, 3, testMipLevelSize.depthOrArrayLayers, 0, 0);
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+    }
+    submit(t, encoder);
+
+    // Read back the written mip and build the expected (zero-padded) bytes.
+    const std::vector<uint8_t> got =
+        storeReadbackMip(t, texture, format, dimension, mipLevel0Size, mipLevel);
+    const TextureCopyLayout layout = getTextureCopyLayout(format, dimension, mipLevel0Size, mipLevel);
+    const uint32_t bytesPerTexel = bytesPerTexelForStore(format);
+    const uint32_t texelsPerRow = layout.bytesPerRow / bytesPerTexel;
+
+    std::vector<uint8_t> expected(static_cast<size_t>(layout.byteLength), 0);
+    for (uint32_t z = 0; z < testMipLevelSize.depthOrArrayLayers; ++z) {
+        for (uint32_t y = 0; y < testMipLevelSize.height; ++y) {
+            for (uint32_t x = 0; x < testMipLevelSize.width; ++x) {
+                const uint32_t id = x + y + z;
+                std::array<double, 4> vals{
+                    valuesArr[(id + 0u) % len],
+                    valuesArr[(id + 1u) % len],
+                    valuesArr[(id + 2u) % len],
+                    valuesArr[(id + 3u) % len]};
+                const std::vector<uint8_t> texel = storeEncodeTexel(format, vals);
+                const size_t byteOffset = static_cast<size_t>(z) * layout.bytesPerRow * layout.rowsPerImage
+                    + static_cast<size_t>(y) * layout.bytesPerRow + static_cast<size_t>(x) * bytesPerTexel;
+                for (size_t b = 0; b < texel.size() && byteOffset + b < expected.size(); ++b) {
+                    expected[byteOffset + b] = texel[b];
+                }
+            }
+        }
+    }
+    (void)texelsPerRow;
+
+    if (got.size() < expected.size()) {
+        t.fail("textureStore readback too small");
+    }
+    for (size_t i = 0; i < expected.size(); ++i) {
+        if (got[i] != expected[i]) {
+            std::ostringstream msg;
+            msg << "textureStore mismatch at byte " << i << ": expected " << static_cast<uint32_t>(expected[i])
+                << ", got " << static_cast<uint32_t>(got[i]) << ", format " << textureFormatInfo(format).identifier
+                << ", viewDimension " << viewDimension << ", stage " << stage << ", access " << accessStr
+                << ", mipLevel " << mipLevel;
+            t.fail(msg.str());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// textureStore: bgra8unorm_swizzle
+// ---------------------------------------------------------------------------
+
+void executeTextureStoreBgra8unormSwizzle(AllFeaturesMaxLimitsGpuTest& t) {
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_BGRA8UnormStorage)) {
+        t.skip("device does not have feature bgra8unorm-storage");
+    }
+    const WGPUTextureFormat format = WGPUTextureFormat_BGRA8Unorm;
+    struct V { double r, g, b, a; };
+    const std::array<V, 8> values = {{
+        {-1.1, 0.6, 0.4, 1},
+        {1.1, 0.6, 0.4, 1},
+        {0.4, -1.1, 0.6, 1},
+        {0.4, 1.1, 0.6, 1},
+        {0.6, 0.4, -1.1, 1},
+        {0.6, 0.4, 1.1, 1},
+        {0.2, 0.4, 0.6, 1},
+        {-0.2, -0.4, -0.6, 1},
+    }};
+    const uint32_t numTexels = static_cast<uint32_t>(values.size());
+
+    std::ostringstream wgsl;
+    wgsl << "@group(0) @binding(0) var tex : texture_storage_1d<bgra8unorm, write>;\n"
+         << "const values = array(";
+    for (const V& v : values) {
+        wgsl << "vec4(" << v.r << "," << v.g << "," << v.b << "," << v.a << "),\n";
+    }
+    wgsl << ");\n"
+         << "@compute @workgroup_size(" << numTexels << ")\n"
+         << "fn main(@builtin(global_invocation_id) gid : vec3u) {\n"
+         << "  let value = values[gid.x];\n"
+         << "  textureStore(tex, gid.x, value);\n"
+         << "}";
+
+    WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    textureDesc.size = WGPUExtent3D{numTexels, 1, 1};
+    textureDesc.dimension = WGPUTextureDimension_1D;
+    textureDesc.format = format;
+    textureDesc.usage = WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopySrc;
+    WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+    const TextureStorePipelineBundle& pipeline = textureStorePipelineForDevice(
+        t, wgsl.str(), true, WGPUStorageTextureAccess_WriteOnly, format, WGPUTextureViewDimension_1D, "main");
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    viewDesc.format = format;
+    viewDesc.dimension = WGPUTextureViewDimension_1D;
+    WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+
+    WGPUBindGroupEntry bgEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+    bgEntry.binding = 0;
+    bgEntry.textureView = view;
+    WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bindGroupDesc.layout = pipeline.bindGroupLayout;
+    bindGroupDesc.entryCount = 1;
+    bindGroupDesc.entries = &bgEntry;
+    WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
+    wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+    wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
+    wgpuComputePassEncoderEnd(pass);
+    wgpuComputePassEncoderRelease(pass);
+    submit(t, encoder);
+
+    const std::vector<uint8_t> got =
+        storeReadbackMip(t, texture, format, WGPUTextureDimension_1D, textureDesc.size, 0);
+    std::vector<uint8_t> expected(got.size(), 0);
+    for (uint32_t x = 0; x < numTexels; ++x) {
+        const V& v = values[x];
+        // bgra8unorm: the GPU stores the vec4 (r,g,b,a) value; TexelRepresentation
+        // already encodes the BGRA byte order, so feed it (r,g,b,a) directly.
+        const std::vector<uint8_t> texel = storeEncodeTexel(format, {v.r, v.g, v.b, v.a});
+        for (size_t b = 0; b < texel.size(); ++b) {
+            expected[static_cast<size_t>(x) * 4 + b] = texel[b];
+        }
+    }
+    for (size_t i = 0; i < numTexels * 4u && i < expected.size(); ++i) {
+        if (got[i] != expected[i]) {
+            std::ostringstream msg;
+            msg << "textureStore bgra8unorm_swizzle mismatch at byte " << i << ": expected "
+                << static_cast<uint32_t>(expected[i]) << ", got " << static_cast<uint32_t>(got[i]);
+            t.fail(msg.str());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// textureStore: out_of_bounds
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr uint32_t kStoreOOBWidth = 256;
+
+WGPUExtent3D storeOOBTextureSize(uint32_t numTexels, WGPUTextureDimension dim) {
+    WGPUExtent3D size{1, 1, 1};
+    if (dim == WGPUTextureDimension_1D) {
+        size.width = numTexels;
+    } else if (dim == WGPUTextureDimension_2D) {
+        size.width = kStoreOOBWidth;
+        size.height = numTexels / kStoreOOBWidth;
+        size.depthOrArrayLayers = 1;
+    } else {
+        size.width = kStoreOOBWidth;
+        size.height = numTexels / (2 * kStoreOOBWidth);
+        size.depthOrArrayLayers = 2;
+    }
+    return size;
+}
+
+std::string storeOOBTextureType(WGPUTextureDimension dim) {
+    if (dim == WGPUTextureDimension_1D) return "texture_storage_1d<r32uint, write>";
+    if (dim == WGPUTextureDimension_2D) return "texture_storage_2d<r32uint, write>";
+    return "texture_storage_3d<r32uint, write>";
+}
+
+std::string storeOOBIndexToCoord(WGPUTextureDimension dim, const std::string& type) {
+    if (dim == WGPUTextureDimension_1D) {
+        return "fn indexToCoord(id : u32) -> " + type + " {\n  return " + type + "(id);\n}";
+    }
+    if (dim == WGPUTextureDimension_2D) {
+        return "fn indexToCoord(id : u32) -> vec2<" + type + "> {\n  return vec2<" + type + ">(" + type
+            + "(id % width), " + type + "(id / width));\n}";
+    }
+    return "fn indexToCoord(id : u32) -> vec3<" + type
+        + "> {\n  const half = numTexels / depth;\n  let half_id = id % half;\n  return vec3<" + type + ">("
+        + type + "(half_id % width), " + type + "(half_id / width), " + type + "(id / half));\n}";
+}
+
+std::string storeOOBValue(WGPUTextureDimension dim, const std::string& type) {
+    if (dim == WGPUTextureDimension_1D) {
+        if (type == "i32") {
+            return "if gid.x % 3 == 0 {\n          coords = -coords;\n        } else {\n          coords = "
+                   "coords + numTexels;\n        }";
+        }
+        return "coords = coords + numTexels;";
+    }
+    if (dim == WGPUTextureDimension_2D) {
+        if (type == "i32") {
+            return "if gid.x % 3 == 0 {\n          coords.x = -coords.x;\n        } else {\n          "
+                   "coords.y = coords.y + height;\n        }";
+        }
+        return "if gid.x % 3 == 1 {\n          coords.x = coords.x + width;\n        } else {\n          "
+               "coords.y = coords.y + height;\n        }";
+    }
+    if (type == "i32") {
+        return "if gid.x % 3 == 0 {\n          coords.x = -coords.x;\n        } else if gid.x % 5 == 0 {\n  "
+               "        coords.y = coords.y + height;\n        } else {\n          coords.z = coords.z + "
+               "depth;\n        }";
+    }
+    return "if gid.x % 3 == 1 {\n          coords.x = coords.x + width;\n        } else if gid.x % 5 == 1 "
+           "{\n          coords.y = coords.y + height;\n        } else {\n          coords.z = 2 * "
+           "depth;\n        }";
+}
+
+uint32_t storeOOBMipTexels(uint32_t numTexels, WGPUTextureDimension dim, uint32_t mip) {
+    uint32_t texels = numTexels;
+    if (mip == 0) return texels;
+    if (dim == WGPUTextureDimension_2D) {
+        texels /= (1u << mip);
+        texels /= (1u << mip);
+    } else if (dim == WGPUTextureDimension_3D) {
+        texels /= (1u << mip);
+        texels /= (1u << mip);
+        texels /= (1u << mip);
+    }
+    return texels;
+}
+
+} // namespace
+
+void executeTextureStoreOutOfBounds(AllFeaturesMaxLimitsGpuTest& t) {
+    const WGPUTextureFormat format = WGPUTextureFormat_R32Uint;
+    const std::string dimStr = t.param<std::string>("dim");
+    const std::string coords = t.param<std::string>("coords");
+    const uint32_t mipCount = static_cast<uint32_t>(t.param<int64_t>("mipCount"));
+    const uint32_t mip = static_cast<uint32_t>(t.param<int64_t>("mip"));
+    const WGPUTextureDimension dim = dimStr == "1d" ? WGPUTextureDimension_1D
+        : dimStr == "3d"                            ? WGPUTextureDimension_3D
+                                                    : WGPUTextureDimension_2D;
+    const WGPUTextureViewDimension viewDim = dimStr == "1d" ? WGPUTextureViewDimension_1D
+        : dimStr == "3d"                                    ? WGPUTextureViewDimension_3D
+                                                            : WGPUTextureViewDimension_2D;
+
+    skipIfNoStorageTexturesInStage(t, "compute");
+
+    const uint32_t numTexels = 4096;
+    const uint32_t viewTexels = storeOOBMipTexels(numTexels, dim, mip);
+    const WGPUExtent3D textureSize = storeOOBTextureSize(numTexels, dim);
+    const WGPUExtent3D mipSize = physicalMipSize(textureSize, dim, mip);
+
+    WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    textureDesc.size = textureSize;
+    textureDesc.dimension = dim;
+    textureDesc.format = format;
+    textureDesc.mipLevelCount = mipCount;
+    textureDesc.usage = WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopySrc;
+    WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+    const std::string oobValue = storeOOBValue(dim, coords);
+    const uint32_t wgxSize = 32;
+    const uint32_t numWgsX = viewTexels / wgxSize;
+
+    std::ostringstream wgsl;
+    wgsl << "@group(0) @binding(0) var tex : " << storeOOBTextureType(dim) << ";\n"
+         << "const numTexels = " << viewTexels << ";\n"
+         << "const width = " << mipSize.width << ";\n"
+         << "const height = " << mipSize.height << ";\n"
+         << "const depth = " << mipSize.depthOrArrayLayers << ";\n"
+         << storeOOBIndexToCoord(dim, coords) << "\n"
+         << "@compute @workgroup_size(" << wgxSize << ")\n"
+         << "fn main(@builtin(global_invocation_id) gid : vec3u) {\n"
+         << "  var coords = indexToCoord(gid.x);\n"
+         << "  if gid.x % 2 == 1 {\n    " << oobValue << "\n  }\n"
+         << "  textureStore(tex, coords, vec4u(gid.x));\n"
+         << "}";
+
+    const TextureStorePipelineBundle& pipeline = textureStorePipelineForDevice(
+        t, wgsl.str(), true, WGPUStorageTextureAccess_WriteOnly, format, viewDim, "main");
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    viewDesc.format = format;
+    viewDesc.dimension = viewDim;
+    viewDesc.baseArrayLayer = 0;
+    viewDesc.arrayLayerCount = 1;
+    viewDesc.baseMipLevel = mip;
+    viewDesc.mipLevelCount = 1;
+    WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+
+    WGPUBindGroupEntry bgEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+    bgEntry.binding = 0;
+    bgEntry.textureView = view;
+    WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bindGroupDesc.layout = pipeline.bindGroupLayout;
+    bindGroupDesc.entryCount = 1;
+    bindGroupDesc.entries = &bgEntry;
+    WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
+    wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+    wgpuComputePassEncoderDispatchWorkgroups(pass, numWgsX, 1, 1);
+    wgpuComputePassEncoderEnd(pass);
+    wgpuComputePassEncoderRelease(pass);
+    submit(t, encoder);
+
+    for (uint32_t m = 0; m < mipCount; ++m) {
+        const std::vector<uint8_t> got =
+            storeReadbackMip(t, texture, format, dim, textureSize, m);
+        const TextureCopyLayout layout = getTextureCopyLayout(format, dim, textureSize, m);
+        const WGPUExtent3D mSize = physicalMipSize(textureSize, dim, m);
+        const uint32_t bytesPerTexel = 4;  // r32uint
+
+        // Expected r32uint values laid out densely per upstream (no padding because
+        // sizes are chosen so each row is a multiple of 256 bytes).
+        std::vector<uint8_t> expected(static_cast<size_t>(layout.byteLength), 0);
+        const uint32_t mipTexels = storeOOBMipTexels(numTexels, dim, m);
+        for (uint32_t x = 0; x < mipTexels; ++x) {
+            uint32_t value = 0;
+            if (m == mip && (x % 2) == 0) {
+                value = x;
+            }
+            // Map linear texel index to (col,row,slice) layout in the readback buffer.
+            const uint32_t texelsPerRow = layout.bytesPerRow / bytesPerTexel;
+            const uint32_t rowTexels = mSize.width;
+            const uint32_t sliceRows = mSize.height;
+            const uint32_t z = (rowTexels * sliceRows == 0) ? 0 : x / (rowTexels * sliceRows);
+            const uint32_t rem = (rowTexels * sliceRows == 0) ? x : x % (rowTexels * sliceRows);
+            const uint32_t y = rowTexels == 0 ? 0 : rem / rowTexels;
+            const uint32_t col = rowTexels == 0 ? 0 : rem % rowTexels;
+            const size_t byteOffset = static_cast<size_t>(z) * layout.bytesPerRow * layout.rowsPerImage
+                + static_cast<size_t>(y) * layout.bytesPerRow + static_cast<size_t>(col) * bytesPerTexel;
+            (void)texelsPerRow;
+            if (byteOffset + 4 <= expected.size()) {
+                std::memcpy(expected.data() + byteOffset, &value, sizeof(value));
+            }
+        }
+
+        if (got.size() < expected.size()) {
+            t.fail("textureStore out_of_bounds readback too small");
+        }
+        for (size_t i = 0; i < expected.size(); ++i) {
+            if (got[i] != expected[i]) {
+                std::ostringstream msg;
+                msg << "textureStore out_of_bounds mismatch (mip " << m << ") at byte " << i << ": expected "
+                    << static_cast<uint32_t>(expected[i]) << ", got " << static_cast<uint32_t>(got[i])
+                    << ", dim " << dimStr << ", coords " << coords << ", mipCount " << mipCount << ", mip "
+                    << mip;
+                t.fail(msg.str());
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// textureStore: out_of_bounds_array
+// ---------------------------------------------------------------------------
+
+void executeTextureStoreOutOfBoundsArray(AllFeaturesMaxLimitsGpuTest& t) {
+    const WGPUTextureFormat format = WGPUTextureFormat_R32Uint;
+    const uint32_t baseLevel = static_cast<uint32_t>(t.param<int64_t>("baseLevel"));
+    const uint32_t arrayLevels = static_cast<uint32_t>(t.param<int64_t>("arrayLevels"));
+    const std::string type = t.param<std::string>("type");
+    constexpr uint32_t kArrayLevels = 4;
+
+    skipIfNoStorageTexturesInStage(t, "compute");
+
+    const uint32_t width = 64;
+    const uint32_t height = 64;
+    const uint32_t baseTexels = width * height;
+    const uint32_t numTexels = baseTexels * kArrayLevels;
+    const uint32_t viewTexels = baseTexels * arrayLevels;
+    const WGPUExtent3D textureSize{width, height, kArrayLevels};
+
+    WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    textureDesc.size = textureSize;
+    textureDesc.dimension = WGPUTextureDimension_2D;
+    textureDesc.format = format;
+    textureDesc.mipLevelCount = 1;
+    textureDesc.usage = WGPUTextureUsage_StorageBinding | WGPUTextureUsage_CopySrc;
+    WGPUTexture texture = t.createTextureTracked(textureDesc);
+
+    const uint32_t wgxSize = 32;
+    const uint32_t numWgsX = numTexels / wgxSize;
+
+    std::string oobValue = "layer = layer + layers;";
+    if (type == "i32") {
+        oobValue = "if gid.x % 3 == 0 {\n        layer = -(layer + layers);\n      } else {\n        layer "
+                   "= layer + layers;\n      }";
+    }
+
+    std::ostringstream wgsl;
+    wgsl << "@group(0) @binding(0) var tex : texture_storage_2d_array<r32uint, write>;\n"
+         << "const numTexels = " << viewTexels << ";\n"
+         << "const width = " << width << ";\n"
+         << "const height = " << height << ";\n"
+         << "const layers = " << arrayLevels << ";\n"
+         << "const layerTexels = numTexels / layers;\n"
+         << "@compute @workgroup_size(" << wgxSize << ")\n"
+         << "fn main(@builtin(global_invocation_id) gid : vec3u) {\n"
+         << "  let layer_id = gid.x % layerTexels;\n"
+         << "  var x = " << type << "(layer_id % width);\n"
+         << "  var y = " << type << "(layer_id / width);\n"
+         << "  var layer = " << type << "(gid.x / layerTexels);\n"
+         << "  if gid.x % 2 == 1 {\n    " << oobValue << "\n  }\n"
+         << "  textureStore(tex, vec2(x, y), layer, vec4u(gid.x));\n"
+         << "}";
+
+    const TextureStorePipelineBundle& pipeline = textureStorePipelineForDevice(
+        t, wgsl.str(), true, WGPUStorageTextureAccess_WriteOnly, format,
+        WGPUTextureViewDimension_2DArray, "main");
+
+    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    viewDesc.format = format;
+    viewDesc.dimension = WGPUTextureViewDimension_2DArray;
+    viewDesc.baseArrayLayer = baseLevel;
+    viewDesc.arrayLayerCount = arrayLevels;
+    viewDesc.baseMipLevel = 0;
+    viewDesc.mipLevelCount = 1;
+    WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+
+    WGPUBindGroupEntry bgEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+    bgEntry.binding = 0;
+    bgEntry.textureView = view;
+    WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bindGroupDesc.layout = pipeline.bindGroupLayout;
+    bindGroupDesc.entryCount = 1;
+    bindGroupDesc.entries = &bgEntry;
+    WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
+
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
+    wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+    wgpuComputePassEncoderDispatchWorkgroups(pass, numWgsX, 1, 1);
+    wgpuComputePassEncoderEnd(pass);
+    wgpuComputePassEncoderRelease(pass);
+    submit(t, encoder);
+
+    const std::vector<uint8_t> got =
+        storeReadbackMip(t, texture, format, WGPUTextureDimension_2D, textureSize, 0);
+    const TextureCopyLayout layout = getTextureCopyLayout(format, WGPUTextureDimension_2D, textureSize, 0);
+    const uint32_t bytesPerTexel = 4;
+    const uint32_t baseOffsetTexels = baseTexels * baseLevel;
+
+    std::vector<uint8_t> expected(static_cast<size_t>(layout.byteLength), 0);
+    for (uint32_t x = 0; x < numTexels; ++x) {
+        uint32_t value = 0;
+        const bool inRange = x >= baseOffsetTexels && x < baseTexels * (baseLevel + arrayLevels);
+        if (inRange && (x % 2) == 0) {
+            value = x - baseOffsetTexels;
+        }
+        // Layout: texel x belongs to slice (x / baseTexels), with (col,row) inside.
+        const uint32_t z = x / baseTexels;
+        const uint32_t within = x % baseTexels;
+        const uint32_t y = within / width;
+        const uint32_t col = within % width;
+        const size_t byteOffset = static_cast<size_t>(z) * layout.bytesPerRow * layout.rowsPerImage
+            + static_cast<size_t>(y) * layout.bytesPerRow + static_cast<size_t>(col) * bytesPerTexel;
+        if (byteOffset + 4 <= expected.size()) {
+            std::memcpy(expected.data() + byteOffset, &value, sizeof(value));
+        }
+    }
+
+    if (got.size() < expected.size()) {
+        t.fail("textureStore out_of_bounds_array readback too small");
+    }
+    for (size_t i = 0; i < expected.size(); ++i) {
+        if (got[i] != expected[i]) {
+            std::ostringstream msg;
+            msg << "textureStore out_of_bounds_array mismatch at byte " << i << ": expected "
+                << static_cast<uint32_t>(expected[i]) << ", got " << static_cast<uint32_t>(got[i])
+                << ", baseLevel " << baseLevel << ", arrayLevels " << arrayLevels << ", type " << type;
+            t.fail(msg.str());
+        }
+    }
 }
 
 } // namespace cts::texture_utils
