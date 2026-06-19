@@ -270,8 +270,14 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
     bool hasLanguageFeature(std::string_view feature) {
         ensureContext();
         const std::string key(feature);
-        auto it = languageFeatureCache_.find(key);
-        if (it != languageFeatureCache_.end()) {
+        // Cache probe results per worker THREAD (not per case): the non-Dawn path
+        // trial-compiles a snippet per feature, and re-probing every case would add
+        // ~hundreds of thousands of shader-module creations across a large run (e.g.
+        // uniformity, 181k cases) and re-pressure the backend. The answer is constant
+        // for the thread's (thread_local) device.
+        thread_local std::unordered_map<std::string, bool> featureCache;
+        auto it = featureCache.find(key);
+        if (it != featureCache.end()) {
             return it->second;
         }
 
@@ -300,7 +306,7 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             name = WGPUWGSLLanguageFeatureName_SubgroupUniformity;
         } else {
             fail("hasLanguageFeature: unknown feature name '" + key + "'");
-            languageFeatureCache_[key] = false;
+            featureCache[key] = false;
             return false;
         }
         supported = wgpuInstanceHasWGSLLanguageFeature(ctxInstance_, name) != WGPU_FALSE;
@@ -343,7 +349,7 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             supported = false;
         }
 #endif
-        languageFeatureCache_[key] = supported;
+        featureCache[key] = supported;
         return supported;
     }
 
@@ -655,67 +661,71 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
 
   private:
     void ensureContext() {
-        if (ctxDevice_ != nullptr) {
-            return;
-        }
-        ctxInstance_ = createInstance();
-        if (ctxInstance_ == nullptr) {
-            fail("failed to create WGPUInstance for shader validation");
-        }
-        AdapterResult adapter = requestAdapterSync(ctxInstance_, nullptr);
-        if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
-            fail("failed to request adapter: " + adapter.message);
-        }
-        ctxAdapter_ = adapter.adapter;
+        // The instance/adapter/device are reused across ALL cases on a worker
+        // thread (thread_local), created once per thread and intentionally leaked
+        // at process exit. Creating a fresh device PER CASE exhausts some backends
+        // (yawgpu) at scale — thousands of validation cases cause device-creation
+        // failures and spurious mass fails. thread_local also avoids cross-thread
+        // device races (--workers N runs N threads in one process).
+        thread_local WGPUInstance tlInstance = nullptr;
+        thread_local WGPUAdapter tlAdapter = nullptr;
+        thread_local WGPUDevice tlDevice = nullptr;
 
-        WGPULimits limits = WGPU_LIMITS_INIT;
-        const bool haveLimits = wgpuAdapterGetLimits(ctxAdapter_, &limits) == WGPUStatus_Success;
+        if (tlDevice == nullptr) {
+            tlInstance = createInstance();
+            if (tlInstance == nullptr) {
+                fail("failed to create WGPUInstance for shader validation");
+            }
+            AdapterResult adapter = requestAdapterSync(tlInstance, nullptr);
+            if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
+                fail("failed to request adapter: " + adapter.message);
+            }
+            tlAdapter = adapter.adapter;
 
-        WGPUSupportedFeatures supported = WGPU_SUPPORTED_FEATURES_INIT;
-        wgpuAdapterGetFeatures(ctxAdapter_, &supported);
+            WGPULimits limits = WGPU_LIMITS_INIT;
+            const bool haveLimits = wgpuAdapterGetLimits(tlAdapter, &limits) == WGPUStatus_Success;
 
-        WGPUDeviceDescriptor desc = WGPU_DEVICE_DESCRIPTOR_INIT;
-        desc.requiredFeatureCount = supported.featureCount;
-        desc.requiredFeatures = supported.features;
-        if (haveLimits) {
-            desc.requiredLimits = &limits;
-        }
-        DeviceResult device = requestDeviceSync(ctxInstance_, ctxAdapter_, &desc);
-        wgpuSupportedFeaturesFreeMembers(supported);
+            WGPUSupportedFeatures supported = WGPU_SUPPORTED_FEATURES_INIT;
+            wgpuAdapterGetFeatures(tlAdapter, &supported);
 
-        if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
-            // Retry with no extra features/limits to maximize portability.
-            WGPUDeviceDescriptor fallback = WGPU_DEVICE_DESCRIPTOR_INIT;
-            device = requestDeviceSync(ctxInstance_, ctxAdapter_, &fallback);
+            WGPUDeviceDescriptor desc = WGPU_DEVICE_DESCRIPTOR_INIT;
+            desc.requiredFeatureCount = supported.featureCount;
+            desc.requiredFeatures = supported.features;
+            if (haveLimits) {
+                desc.requiredLimits = &limits;
+            }
+            DeviceResult device = requestDeviceSync(tlInstance, tlAdapter, &desc);
+            wgpuSupportedFeaturesFreeMembers(supported);
+
+            if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
+                // Retry with no extra features/limits to maximize portability.
+                WGPUDeviceDescriptor fallback = WGPU_DEVICE_DESCRIPTOR_INIT;
+                device = requestDeviceSync(tlInstance, tlAdapter, &fallback);
+            }
+            if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
+                fail("failed to request shader-validation device: " + device.message);
+            }
+            tlDevice = device.device;
         }
-        if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
-            fail("failed to request shader-validation device: " + device.message);
-        }
-        ctxDevice_ = device.device;
+
+        ctxInstance_ = tlInstance;
+        ctxAdapter_ = tlAdapter;
+        ctxDevice_ = tlDevice;
     }
 
     void releaseContext() {
-        if (ctxDevice_ != nullptr) {
-            wgpuDeviceRelease(ctxDevice_);
-            ctxDevice_ = nullptr;
-        }
-        if (ctxAdapter_ != nullptr) {
-            wgpuAdapterRelease(ctxAdapter_);
-            ctxAdapter_ = nullptr;
-        }
-        if (ctxInstance_ != nullptr) {
-            wgpuInstanceRelease(ctxInstance_);
-            ctxInstance_ = nullptr;
-        }
+        // The context is thread_local and reused across cases — do NOT release it
+        // per case (that is the per-case-device exhaustion this design avoids).
+        // Just drop this fixture's non-owning views.
+        ctxInstance_ = nullptr;
+        ctxAdapter_ = nullptr;
+        ctxDevice_ = nullptr;
     }
 
+    // Non-owning views of the thread_local context (see ensureContext()).
     WGPUInstance ctxInstance_ = nullptr;
     WGPUAdapter ctxAdapter_ = nullptr;
     WGPUDevice ctxDevice_ = nullptr;
-
-    // Cache of hasLanguageFeature() results, keyed by upstream feature name
-    // (probed once per fixture/instance).
-    std::unordered_map<std::string, bool> languageFeatureCache_;
 };
 
 // Upstream UniqueFeaturesAndLimitsShaderValidationTest is functionally identical
