@@ -1720,7 +1720,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
-## F-120 — upstream-naga: shader/validation under/over-validation (47 cases, not a yawgpu defect)
+## F-120 — upstream-naga: shader/validation under/over-validation (yawgpu-only = 0 area-wide; yawgpu work item)
 
 - **Backend:** yawgpu (Metal) AND wgpu-native — **identical**. Deterministic.
 - **Found by:** `shader,validation,shader_io,*` (phaseSV1 batch). 34 cases where
@@ -1738,7 +1738,18 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Also `decl/` (13, phaseSV1):** `override:array_size` (3), `var:module_scope_types` (4),
   `var:shader_stage` (5), `var:address_space_access_mode` (1) — mix of "unexpected validation error for
   valid shader" (naga over-strict) and "got none" (naga over-lenient). yawgpu fail=13 == wgpu-native
-  fail=13, yawgpu-only=0 → upstream-naga. (extension/ + shader_io decl total: 34 + 13 = 47.)
+  fail=13, yawgpu-only=0 → upstream-naga.
+- **Also `functions/`+`types/`+`const_assert/` (20 signatures / 267 cases) and `uniformity/`
+  (phaseSV1, per-g.test cross-check):** `uniformity:basics` alone ~21473 cases where both naga backends
+  diverge from Dawn's uniformity analysis (naga's uniformity diagnostics differ from Tint's), plus
+  binary_expressions (768), function_variables (130), pointers (37), etc. **Every one shared with
+  wgpu-native — yawgpu-only = 0 across the ENTIRE shader/validation area ported so far** (subgroup
+  g.tests skip on both backends: no `subgroups` feature on Metal). const_assert fully clean on yawgpu.
+- **Headline:** the whole shader/validation pivot (extension/shader_io/decl/functions/types/const_assert/
+  uniformity) surfaced **zero yawgpu-only findings** — yawgpu inherits naga's frontend behavior exactly.
+  The only yawgpu-specific finding from the pivot is **F-121** (f16, an execution path, not validation).
+  Measuring these on yawgpu at scale required the enabler thread_local-context fix (commit `9762c2a`);
+  per-g.test cross-check is reliable (aggregate runs still scale-degrade for the 181k-case uniformity). (extension/ + shader_io decl total: 34 + 13 = 47.)
 - **Status:** **OPEN — yawgpu to fix in its naga fork** (shared upstream-naga root; user wants full CTS
   pass). cts ports are correct (Dawn-green, faithful). Re-verify when the fork fix lands. wgpu-native
   fails these (and more in shader_io — broader naga under-validation, bring-up reference); fixing in
