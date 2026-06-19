@@ -290,6 +290,10 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             name = WGPUWGSLLanguageFeatureName_UniformBufferStandardLayout;
         } else if (feature == "texture_formats_tier1") {
             name = WGPUWGSLLanguageFeatureName_TextureFormatsTier1;
+        } else if (feature == "texture_and_sampler_let") {
+            name = WGPUWGSLLanguageFeatureName_TextureAndSamplerLet;
+        } else if (feature == "swizzle_assignment") {
+            name = WGPUWGSLLanguageFeatureName_SwizzleAssignment;
         } else {
             fail("hasLanguageFeature: unknown feature name '" + key + "'");
             languageFeatureCache_[key] = false;
@@ -311,6 +315,15 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             supported = compilesWithoutError(
                 "@group(0) @binding(0) var<uniform> u : array<f32, 4>;"
                 "\n@compute @workgroup_size(1) fn main() { _ = u[0]; }");
+        } else if (feature == "texture_and_sampler_let") {
+            // A `let` holding a texture handle is valid only with this feature.
+            supported = compilesWithoutError(
+                "@group(0) @binding(0) var t : texture_2d<f32>;"
+                "\nfn f() { let x = t; _ = x; }");
+        } else if (feature == "swizzle_assignment") {
+            // Assigning to a multi-component swizzle is valid only with this feature.
+            supported = compilesWithoutError(
+                "fn f() { var v : vec4f; v.xy = vec2(1.0, 2.0); }");
         } else {
             // texture_formats_tier1 (a real optional feature with no clean,
             // backend-portable trial-compile probe) and any unrecognized name:

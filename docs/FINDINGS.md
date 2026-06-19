@@ -1720,7 +1720,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
-## F-120 — upstream-naga: shader/validation `shader_io` under-validation (34 cases, not a yawgpu defect)
+## F-120 — upstream-naga: shader/validation under/over-validation (47 cases, not a yawgpu defect)
 
 - **Backend:** yawgpu (Metal) AND wgpu-native — **identical**. Deterministic.
 - **Found by:** `shader,validation,shader_io,*` (phaseSV1 batch). 34 cases where
@@ -1733,9 +1733,13 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   wgpu-native's fails (yawgpu-only divergences = **0**); Dawn passes all. naga (shared frontend) is more
   lenient than the WGSL spec / Dawn here. **Not a yawgpu finding** (per [[naga-fix-crosscheck-wgpu-native]]
   + the user's yawgpu-over-naga priority — recorded, not chased).
-- **Status:** **OPEN (upstream-naga, out of scope).** cts port is correct (Dawn-green, faithful). Carried
-  as a known naga-lineage divergence; yawgpu inherits it. wgpu-native fails these and ~245 more shader_io
-  cases (broader naga under-validation, bring-up reference).
+- **Also `decl/` (13, phaseSV1):** `override:array_size` (3), `var:module_scope_types` (4),
+  `var:shader_stage` (5), `var:address_space_access_mode` (1) — mix of "unexpected validation error for
+  valid shader" (naga over-strict) and "got none" (naga over-lenient). yawgpu fail=13 == wgpu-native
+  fail=13, yawgpu-only=0 → upstream-naga. (extension/ + shader_io decl total: 34 + 13 = 47.)
+- **Status:** **OPEN (upstream-naga, out of scope).** cts ports are correct (Dawn-green, faithful). Carried
+  as a known naga-lineage divergence; yawgpu inherits it. wgpu-native fails these (and more in shader_io —
+  broader naga under-validation, bring-up reference).
 
 ---
 
