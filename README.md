@@ -209,7 +209,7 @@ port (40 files), and yawgpu's **`shader-f16`** landing:
 | Backend | Platform | pass | skip | fail | crash | Verdict |
 |---------|----------|-----:|-----:|-----:|------:|---------|
 | **Dawn** (oracle) | Metal | 1513210 | 81631 | **0** | 0 | green (oracle). The raw whole-suite run reports 2441 `fail`, but every one is `adapter is "consumed"` / GPU-state-degradation collateral that **passes when re-run per-file** — excluded here |
-| **yawgpu** | Metal | 1214197 | 357861 | **22781** | 0 | api + shader/execution **fail=0** (incl. f16, now running — see below). The 22781 are all `shader/validation` = **upstream-naga** (F-120, shared with wgpu-native — yawgpu-only=0, yawgpu to fix in its fork). Raw whole-suite `fail=25224` includes ~2443 GPU-state-degradation collateral (`createBindGroupLayout` 1032, `copyBufferToBuffer` 342, … all **fail=0 re-run alone**) — excluded here |
+| **yawgpu** | Metal | 1214197 | 357861 | **22467** | 0 | api + shader/execution **fail=0** (incl. f16). The remaining fails are all `shader/validation:uniformity` = **upstream-naga** uniformity-analysis (F-120, shared with wgpu-native — yawgpu-only=0). The structural `shader/validation` slices (shader_io/decl/functions/types, ~314) were **fixed in yawgpu's naga fork 2026-06-20** (`fail=0`). Whole-suite degradation collateral (~2443, `fail=0` per-file) excluded |
 | **wgpu-native** | Metal | 997922 | 395185 | 37490 | 38054 | bring-up reference (panic-heavy, **not** triaged to `fail=0`): `crash=38054` dominated by `shader/execution` 31026 (no `shader-f16` + unimplemented paths panic rather than skip); `fail=37490` is mostly `shader/validation` 23467 (the F-120 shared-naga block **plus** broader naga under-validation wgpu-native-specific, e.g. shader_io was 279 vs yawgpu's 34) + api degradation collateral. Contained via crash-resume |
 
 **On the skips (and `shader-f16`):** yawgpu's **`shader-f16` now runs** — the ~310 previously-failing f16
@@ -245,10 +245,11 @@ grown 345-file listing is pending (needs the Windows/NVIDIA host, not this Mac).
   every such signature returns `fail=0` when its file is re-run alone.
 - yawgpu's **Metal HAL** passes all of `api/*` and `shader/execution` (real `fail=0` per-file, incl. the
   now-running f16 cases; the 2 Dawn-leniency `draw,index_buffer_format_dirtying` cases are carried as
-  `xfail` in `expectations/yawgpu.txt`). The new non-passes are entirely in **`shader/validation`**: 22781
+  `xfail` in `expectations/yawgpu.txt`). The remaining non-passes are in **`shader/validation`**: ~22467
   cases where yawgpu matches **upstream naga** (wgpu-native fails them identically — yawgpu-only = 0) but
-  diverges from Dawn/Tint (F-120, e.g. `uniformity:basics` ~21473) — a shared-naga work item yawgpu will
-  fix in its fork, not a yawgpu-core defect.
+  diverges from Dawn/Tint — the **uniformity-analysis** diagnostics (F-120, e.g. `uniformity:basics`
+  ~21473). The **structural** `shader/validation` slices (shader_io/decl/functions/types, ~314) were
+  **fixed in yawgpu's naga fork (2026-06-20)**; uniformity-analysis remains, a shared-naga work item.
 - The **MoltenVK** translation artifacts (F-104 `copyTextureToTexture` 14512 + the F-070-family SPIRV-Cross
   residue ~1032) are **not yawgpu defects** — each is green on native Metal *and* native Vulkan
   (F-104 native-Vulkan-confirmed green); MoltenVK/SPIRV-Cross mistranslates them. The rest of MoltenVK's
