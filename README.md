@@ -161,56 +161,50 @@ added: [COVERAGE](docs/COVERAGE.md).
 
 ### Findings — 121 surfaced to date (F-001…F-121)
 
-The full per-finding record (what, which backend, root cause, status) lives in
-[FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
-test pass. Full cross-backend sweep **2026-06-14**: Dawn `534184/0`, **yawgpu Metal `460730` fail=0**
-(the 2 Dawn-leniency cases are now carried as `xfail`, not a defect), yawgpu MoltenVK Vulkan-path
-residuals (below), wgpu-native bring-up. **Native-Vulkan** (NVIDIA) runs of the same suite surfaced
-eight genuine Vulkan-HAL/naga-path divergences that Apple's coherent memory / tiler behaviour had
-masked — **F-105**, **F-106**, the **F-107…F-110** batch, and **F-112** — all **fixed and
-native-Vulkan-re-verified 2026-06-15/16**, plus **F-111** (external-texture feature gap, documented
-`xfail`, not a defect). **F-112** is the cross-check payoff: suspected to be a naga workgroup-atomic
-SPIR-V defect, but wgpu-native passed the same case with byte-identical SPIR-V, so the real cause was
-yawgpu's storage-buffer bounds-check policy (`Restrict`), fixed by gating it on `VK_EXT_robustness2`.
-The 2026-06-18 shader texture/atomics batches added **F-113** (wgpu-native: workgroup `atomic` array
-not zero-initialized — bring-up reference), **F-114** (yawgpu/naga: `textureSampleGrad` on 3D/cube
-emitted `gradient2d` for vec3 gradients — **fixed** in the naga fork, dimension-aware
-`gradient2d`/`gradient3d`/`gradientcube`), and **F-115** (yawgpu: `textureLoad` on combined
-depth-stencil — **fixed** yawgpu-core/HAL). Both yawgpu findings re-verified green on Metal.
-The 2026-06-18/19 phaseY10–Y11 sync/derivative/integer-bit/pack batches added four more, **all fixed on
-yawgpu and re-verified green on Metal**: **F-116** (`arrayLength` off-by-one when a storage binding's size
-isn't a whole stride multiple), **F-117** (`firstLeadingBit(u32)` of `0xFFFFFFFF` returned `0xFFFFFFFF`
-instead of 31), **F-118** (`insertBits` const-eval returned 0), and **F-119** (`pack2x16float`/
-`unpack2x16float` errored on yawgpu's f16-less Metal pipeline — fixed by enabling the internal-f16 path).
-**Cross-check (2026-06-19):** F-117 and F-118 reproduce on **wgpu-native** too → confirmed
-**upstream-naga** defects (the yawgpu fixes preempt bugs upstream naga still carries); F-119 passes on
-wgpu-native → it was **yawgpu-local** feature-gating, fixed at the right layer.
+**Current state only** — the full per-finding record (what, which backend, root cause, fix history,
+commit hashes) lives in [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced —
+never masked to make a test pass. The headline: **yawgpu has zero open implementation defects** on
+native Metal *and* native Vulkan; the only open conformance gap left in the suite is **upstream-naga**
+(`shader/validation` uniformity-analysis, F-120 — shared with wgpu-native, yawgpu-only = 0).
 
-| Bucket | # | Representative findings |
-|--------|--:|-------------------------|
-| **yawgpu — open implementation defects** | 0 | **yawgpu passes the entire ported suite on native Metal AND native Vulkan** — every finding F-005…F-119 fixed & re-verified; non-passes are the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` (not a defect, carried as `xfail`) and F-111 external-texture (documented feature gap, `xfail`) |
-| yawgpu — fixed & hardware-re-verified | 92 | F-005…F-082, F-087, F-114, F-115, **F-116** (`arrayLength` off-by-one), **F-117** (`firstLeadingBit(u32)` all-ones — upstream-naga, wgpu-native also fails), **F-118** (`insertBits` const-eval — upstream-naga, wgpu-native also fails), **F-119** (`pack2x16float`/`unpack2x16float` internal-f16 gate — yawgpu-local, wgpu-native passes), the **2026-06-14** batch F-070/F-089/F-090/F-091/F-092/F-093/F-094/F-095/F-096/F-098/F-099/F-100/F-101/F-102/F-103 (re-verified green on Metal; F-095/F-096/F-100/F-103 also MoltenVK; F-103 native-Vulkan-confirmed), the **2026-06-15** native-Vulkan pair **F-105** / **F-106**, the **2026-06-15** native-Vulkan batch **F-107** (storeOp `discard` zero-clear) / **F-108** (resolve/render through the WebGPU view format) / **F-109** (output-depth viewport clamp via `VK_EXT_depth_clip_enable`) / **F-110** (strip-topology primitive restart), and the **2026-06-16** **F-112** (storage-buffer bounds-check policy `Restrict` broke NVIDIA workgroup-atomic coherence — gated on `VK_EXT_robustness2`; *not* a naga defect) — all native-Vulkan-confirmed; plus the 2026-06-18 shader-texture batch **F-114** (naga `textureSampleGrad` 3D/cube dimension-aware gradient) and **F-115** (yawgpu-core textureLoad combined depth-stencil), both Metal-re-verified |
-| Spec in flux / feature gap — **not an implementation defect** | 2 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb/gpuweb#5457, cts#4510 pending); F-111 `GPUExternalTexture` unsupported on the Vulkan backend (naga SPIR-V cannot lower `ImageClass::External`; Metal has full support) — both `xfail` in the Vulkan-only expectation files |
-| wgpu-native — open | 23 | panics F-001–F-021 (contained via `--isolate`); F-015 view-usage validation; F-027/F-028 3D copy/readback; F-036/F-045/F-048/F-052/F-056 rendering; F-084 weak memory; F-088 lifecycle panics; F-097 device-lost state; F-113 workgroup-atomic array zero-init |
-| MoltenVK-only translation artifacts — green on native Metal + native Vulkan, not yawgpu defects | 9 | **F-104** (`copyTextureToTexture` data, 14512 — native-Vulkan-confirmed green), F-070 MoltenVK SPIRV-Cross residue (`memory_layout`/`zero_init`/`robust_access_vertex`), F-033, F-045, F-053/F-068 residuals, F-083, F-086, maxComputeWorkgroupStorageSize SPIR-V compile residual |
+| Bucket | # | Detail |
+|--------|--:|--------|
+| **yawgpu — open implementation defects** | **0** | Passes the entire ported suite on native Metal AND native Vulkan. Non-passes are the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` and F-111 external-texture — both `xfail`, not defects |
+| **upstream-naga — open** (shared with wgpu-native) | **1** | **F-120** `shader/validation` uniformity-analysis (~22467 cases). yawgpu matches upstream naga; wgpu-native fails identically → yawgpu-only = 0. To be fixed in yawgpu's naga fork |
+| yawgpu — fixed & hardware-re-verified | 92 | F-005…F-119 (full list + commits in [FINDINGS](docs/FINDINGS.md)) |
+| Spec in flux / feature gap — **not a defect** | 2 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb#5457, cts#4510 pending); F-111 `GPUExternalTexture` on the Vulkan backend — both `xfail` in the Vulkan-only expectation files |
+| wgpu-native — open | 23 | panics F-001–F-021 (contained via `--isolate`); F-015/F-027/F-028/F-036/F-045/F-048/F-052/F-056/F-084/F-088/F-097/F-113 |
+| MoltenVK-only translation artifacts — green on native Metal + native Vulkan | 9 | F-104 `copyTextureToTexture` (14512, native-Vulkan-green), F-070 SPIRV-Cross residue, F-033, F-045, F-053/F-068 residuals, F-083, F-086, maxComputeWorkgroupStorageSize |
 
-Buckets overlap where a finding affects several backends (e.g. F-045, F-082). **naga-lineage residuals
-F-070/F-091/F-100 are all fixed on yawgpu** (Metal-green, 2026-06-14); the remaining MoltenVK-only failures
-(F-104, `memory_layout`/`zero_init`) are SPIRV-Cross translation artifacts — yawgpu's Vulkan HAL is correct
-on native Vulkan.
+Buckets overlap where a finding affects several backends (e.g. F-045, F-082).
 
 ### Test results
 
 #### Metal whole-suite sweep — **2026-06-19** (current, 345 files, `webgpu:*:*` `--workers 8`)
 
-This is the current headline, refreshed after the phaseY7–Y12 execution work, the `shader/validation`
-port (40 files), and yawgpu's **`shader-f16`** landing:
+The current headline, refreshed after the phaseY7–Y12 execution work, the `shader/validation` port
+(40 files), and yawgpu's **`shader-f16`** landing. Whole-suite totals first; then **fails/crashes
+broken out by area** (`api/*` vs `shader/execution` vs `shader/validation`) so naga-lineage defects
+are not conflated with yawgpu's own implementation.
 
 | Backend | Platform | pass | skip | fail | crash | Verdict |
 |---------|----------|-----:|-----:|-----:|------:|---------|
-| **Dawn** (oracle) | Metal | 1513210 | 81631 | **0** | 0 | green (oracle). The raw whole-suite run reports 2441 `fail`, but every one is `adapter is "consumed"` / GPU-state-degradation collateral that **passes when re-run per-file** — excluded here |
-| **yawgpu** | Metal | 1214197 | 357861 | **22467** | 0 | api + shader/execution **fail=0** (incl. f16). The remaining fails are all `shader/validation:uniformity` = **upstream-naga** uniformity-analysis (F-120, shared with wgpu-native — yawgpu-only=0). The structural `shader/validation` slices (shader_io/decl/functions/types, ~314) were **fixed in yawgpu's naga fork 2026-06-20** (`fail=0`). Whole-suite degradation collateral (~2443, `fail=0` per-file) excluded |
-| **wgpu-native** | Metal | 997922 | 395185 | 37490 | 38054 | bring-up reference (panic-heavy, **not** triaged to `fail=0`): `crash=38054` dominated by `shader/execution` 31026 (no `shader-f16` + unimplemented paths panic rather than skip); `fail=37490` is mostly `shader/validation` 23467 (the F-120 shared-naga block **plus** broader naga under-validation wgpu-native-specific, e.g. shader_io was 279 vs yawgpu's 34) + api degradation collateral. Contained via crash-resume |
+| **Dawn** (oracle) | Metal | 1513210 | 81631 | **0** | 0 | green (oracle). Raw whole-suite 2441 `fail` is all `adapter is "consumed"` / GPU-state-degradation collateral that passes per-file — excluded |
+| **yawgpu** | Metal | 1214197 | 357861 | **22467** | 0 | `api/*` + `shader/execution` **fail=0** (incl. f16); every fail is `shader/validation` — see area split. Whole-suite degradation collateral (~2443, `fail=0` per-file) excluded |
+| **wgpu-native** | Metal | 997922 | 395185 | 37490 | 38054 | bring-up reference (panic-heavy, **not** triaged to `fail=0`) — see area split. Contained via crash-resume |
+
+**Fails / crashes by area** — where each backend's non-passes actually live (the api vs shader split
+that isolates naga):
+
+| Backend | `api/*` | `shader/execution` | `shader/validation` |
+|---------|---------|--------------------|---------------------|
+| **yawgpu** | fail 0 · crash 0 | fail 0 · crash 0 (incl. f16) | **fail 22467** — all **upstream-naga** uniformity-analysis (F-120, yawgpu-only = 0). Structural slices (shader_io/decl/functions/types, ~314) **fixed in yawgpu's naga fork 2026-06-20**, `fail=0` |
+| **wgpu-native** | api degradation collateral (`fail=0` per-file) | **crash 31026** — no `shader-f16` + unimplemented paths panic rather than skip | **fail 23467** — the F-120 shared-naga block **plus** broader wgpu-native-specific naga under-validation (e.g. `shader_io` 279 vs yawgpu's 34) |
+
+> **The api vs shader split is the point:** yawgpu's implementation (`api/*` + `shader/execution`) is
+> **fully green**; the 22467 yawgpu "fails" are entirely **naga frontend** (`shader/validation`), and
+> wgpu-native — built on upstream naga — fails the same block, confirming it is a naga defect (F-120),
+> not a yawgpu one.
 
 **On the skips (and `shader-f16`):** yawgpu's **`shader-f16` now runs** — the ~310 previously-failing f16
 execution cases (F-121) pass and the f16 cases that used to *skip* on yawgpu now execute (e.g. `access/*`
