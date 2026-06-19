@@ -230,8 +230,8 @@ double implicitMipLevelForCall(uint32_t index, uint32_t mipLevelCount) {
     if (mipLevelCount <= 1) {
         return 0.0;
     }
-    static constexpr std::array<double, 6> kLevels = {{0.20, 0.80, 1.20, 1.80, 0.35, 1.65}};
-    return std::min(kLevels[index % kLevels.size()], static_cast<double>(mipLevelCount - 1u));
+    static constexpr std::array<double, 6> kMipLevels = {{0.20, 0.80, 1.20, 1.80, 0.35, 1.65}};
+    return std::min(kMipLevels[index % kMipLevels.size()], static_cast<double>(mipLevelCount - 1u));
 }
 
 double rand01(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
@@ -1717,7 +1717,7 @@ void initializeDepthTexture(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture,
             ds.depthReadOnly = WGPU_FALSE;
             ds.depthLoadOp = WGPULoadOp_Clear;
             ds.depthStoreOp = WGPUStoreOp_Store;
-            ds.depthClearValue = depthValue(mip, layer);
+            ds.depthClearValue = static_cast<float>(depthValue(mip, layer));
             if (textureFormatInfo(c.format).hasStencil) {
                 ds.stencilReadOnly = WGPU_FALSE;
                 ds.stencilLoadOp = WGPULoadOp_Clear;

@@ -17,8 +17,8 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> testGroup = MakeTestGroup<AllFeaturesMaxL
 CTS_TEST(testGroup, "load_storage")
     .params([](ParamsBuilder u) { return mapIdParams(u); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const int workgroupSize = t.param<int64_t>("workgroupSize");
-        const int dispatchSize = t.param<int64_t>("dispatchSize");
+        const int workgroupSize = static_cast<int>(t.param<int64_t>("workgroupSize"));
+        const int dispatchSize = static_cast<int>(t.param<int64_t>("dispatchSize"));
         const ScalarType scalarType = scalarTypeFromParam(t.param<std::string>("scalarType"));
         const MapId& mapId = mapIdFromParam(t.param<std::string>("mapId"));
         const uint32_t numInvocations = static_cast<uint32_t>(workgroupSize * dispatchSize);
@@ -53,8 +53,8 @@ CTS_TEST(testGroup, "load_storage")
 CTS_TEST(testGroup, "load_workgroup")
     .params([](ParamsBuilder u) { return mapIdParams(u); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const int workgroupSize = t.param<int64_t>("workgroupSize");
-        const int dispatchSize = t.param<int64_t>("dispatchSize");
+        const int workgroupSize = static_cast<int>(t.param<int64_t>("workgroupSize"));
+        const int dispatchSize = static_cast<int>(t.param<int64_t>("dispatchSize"));
         const ScalarType scalarType = scalarTypeFromParam(t.param<std::string>("scalarType"));
         const MapId& mapId = mapIdFromParam(t.param<std::string>("mapId"));
         const uint32_t numInvocations = static_cast<uint32_t>(workgroupSize);

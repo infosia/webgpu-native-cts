@@ -17,8 +17,8 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> testGroup = MakeTestGroup<AllFeaturesMaxL
 CTS_TEST(testGroup, "compare_exchange_weak_storage_basic")
     .params([](ParamsBuilder u) { return mapIdParams(u); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const int workgroupSize = t.param<int64_t>("workgroupSize");
-        const int dispatchSize = t.param<int64_t>("dispatchSize");
+        const int workgroupSize = static_cast<int>(t.param<int64_t>("workgroupSize"));
+        const int dispatchSize = static_cast<int>(t.param<int64_t>("dispatchSize"));
         const ScalarType scalarType = scalarTypeFromParam(t.param<std::string>("scalarType"));
         const MapId& mapId = mapIdFromParam(t.param<std::string>("mapId"));
         const uint32_t n = static_cast<uint32_t>(workgroupSize * dispatchSize);
@@ -60,8 +60,8 @@ CTS_TEST(testGroup, "compare_exchange_weak_storage_basic")
 CTS_TEST(testGroup, "compare_exchange_weak_workgroup_basic")
     .params([](ParamsBuilder u) { return mapIdParams(u); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const int workgroupSize = t.param<int64_t>("workgroupSize");
-        const int dispatchSize = t.param<int64_t>("dispatchSize");
+        const int workgroupSize = static_cast<int>(t.param<int64_t>("workgroupSize"));
+        const int dispatchSize = static_cast<int>(t.param<int64_t>("dispatchSize"));
         const ScalarType scalarType = scalarTypeFromParam(t.param<std::string>("scalarType"));
         const MapId& mapId = mapIdFromParam(t.param<std::string>("mapId"));
         const uint32_t n = static_cast<uint32_t>(workgroupSize);
@@ -109,7 +109,7 @@ CTS_TEST(testGroup, "compare_exchange_weak_workgroup_basic")
 CTS_TEST(testGroup, "compare_exchange_weak_storage_advanced")
     .params([](ParamsBuilder u) { return onlyWorkgroupParams(u); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const int workgroupSize = t.param<int64_t>("workgroupSize");
+        const int workgroupSize = static_cast<int>(t.param<int64_t>("workgroupSize"));
         const ScalarType scalarType = scalarTypeFromParam(t.param<std::string>("scalarType"));
         const WGPULimits limits = t.getLimits();
         if (static_cast<uint32_t>(workgroupSize) > limits.maxComputeWorkgroupSizeX) {
@@ -149,7 +149,7 @@ CTS_TEST(testGroup, "compare_exchange_weak_storage_advanced")
 CTS_TEST(testGroup, "compare_exchange_weak_workgroup_advanced")
     .params([](ParamsBuilder u) { return onlyWorkgroupParams(u); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const int workgroupSize = t.param<int64_t>("workgroupSize");
+        const int workgroupSize = static_cast<int>(t.param<int64_t>("workgroupSize"));
         const ScalarType scalarType = scalarTypeFromParam(t.param<std::string>("scalarType"));
         const WGPULimits limits = t.getLimits();
         if (static_cast<uint32_t>(workgroupSize) > limits.maxComputeWorkgroupSizeX) {
