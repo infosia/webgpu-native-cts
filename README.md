@@ -208,8 +208,8 @@ port (40 files), and yawgpu's **`shader-f16`** landing:
 
 | Backend | Platform | pass | skip | fail | crash | Verdict |
 |---------|----------|-----:|-----:|-----:|------:|---------|
-| **Dawn** (oracle) | Metal | 1513210 | 81631 | 2441 \* | 0 | green — \*the 2441 are whole-suite `adapter is "consumed"` / GPU-state-degradation collateral; **real fail=0 per-file** (oracle) |
-| **yawgpu** | Metal | 1214197 | 357861 | 25224 † | 0 | api + shader/execution **fail=0** (incl. f16, now running — see below); shader/validation **22781 = upstream-naga** (F-120, shared with wgpu-native, yawgpu to fix in its fork). †≈2443 of the 25224 are the same whole-suite degradation collateral as Dawn's 2441 (`createBindGroupLayout` 1032, `copyBufferToBuffer` 342, … all **fail=0 re-run alone**); the real, reproducible fails are the 22781 shader/validation upstream-naga divergences |
+| **Dawn** (oracle) | Metal | 1513210 | 81631 | **0** | 0 | green (oracle). The raw whole-suite run reports 2441 `fail`, but every one is `adapter is "consumed"` / GPU-state-degradation collateral that **passes when re-run per-file** — excluded here |
+| **yawgpu** | Metal | 1214197 | 357861 | **22781** | 0 | api + shader/execution **fail=0** (incl. f16, now running — see below). The 22781 are all `shader/validation` = **upstream-naga** (F-120, shared with wgpu-native — yawgpu-only=0, yawgpu to fix in its fork). Raw whole-suite `fail=25224` includes ~2443 GPU-state-degradation collateral (`createBindGroupLayout` 1032, `copyBufferToBuffer` 342, … all **fail=0 re-run alone**) — excluded here |
 | **wgpu-native** | Metal | 997922 | 395185 | 37490 | 38054 | bring-up reference (panic-heavy, **not** triaged to `fail=0`): `crash=38054` dominated by `shader/execution` 31026 (no `shader-f16` + unimplemented paths panic rather than skip); `fail=37490` is mostly `shader/validation` 23467 (the F-120 shared-naga block **plus** broader naga under-validation wgpu-native-specific, e.g. shader_io was 279 vs yawgpu's 34) + api degradation collateral. Contained via crash-resume |
 
 **On the skips (and `shader-f16`):** yawgpu's **`shader-f16` now runs** — the ~310 previously-failing f16
@@ -224,7 +224,7 @@ Metal adapter genuinely lacks** — chiefly `subgroups` (the `uniformity` subgro
 
 | Backend | Platform | pass | skip | fail | crash | Verdict |
 |---------|----------|-----:|-----:|-----:|------:|---------|
-| **yawgpu** | Vulkan (MoltenVK) | 1198558 | 357861 | 40863 | 0 | Vulkan-path residuals — **no new yawgpu-core defects**. Decomposes into: **F-120** shader/validation 22781 (upstream-naga, identical on Metal — shared frontend, not a MoltenVK artifact); **F-104** `copyTextureToTexture` 14512 (MoltenVK-only translation artifact, **native-Vulkan-green**, fail=14512 in isolation); **F-070-family** SPIRV-Cross residue ~1032 (`zero_init` 801 / `robust_access_vertex` 139 / `shader_io,fragment_builtins` 92, MoltenVK-only); and ~2538 whole-suite degradation collateral (`createBindGroupLayout` 1032, `copyBufferToBuffer` 342, … all **fail=0 re-run alone**). f16 now runs (skip matches Metal's 357861) |
+| **yawgpu** | Vulkan (MoltenVK) | 1198558 | 357861 | **38325** | 0 | Vulkan-path residuals — **no new yawgpu-core defects**. Decomposes into: **F-120** shader/validation 22781 (upstream-naga, identical on Metal — shared frontend, not a MoltenVK artifact); **F-104** `copyTextureToTexture` 14512 (MoltenVK-only translation artifact, **native-Vulkan-green**, fail=14512 in isolation); **F-070-family** SPIRV-Cross residue ~1032 (`zero_init` 801 / `robust_access_vertex` 139 / `shader_io,fragment_builtins` 92, MoltenVK-only). Raw whole-suite `fail=40863` also includes ~2538 GPU-state-degradation collateral (`createBindGroupLayout` 1032, … **fail=0 re-run alone**) — excluded here. f16 now runs (skip matches Metal's 357861) |
 
 #### Native Vulkan / wgpu-native — **2026-06-14** (234-file snapshot, re-sweep pending)
 
