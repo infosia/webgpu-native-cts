@@ -294,6 +294,10 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             name = WGPUWGSLLanguageFeatureName_TextureAndSamplerLet;
         } else if (feature == "swizzle_assignment") {
             name = WGPUWGSLLanguageFeatureName_SwizzleAssignment;
+        } else if (feature == "subgroup_id") {
+            name = WGPUWGSLLanguageFeatureName_SubgroupId;
+        } else if (feature == "subgroup_uniformity") {
+            name = WGPUWGSLLanguageFeatureName_SubgroupUniformity;
         } else {
             fail("hasLanguageFeature: unknown feature name '" + key + "'");
             languageFeatureCache_[key] = false;
@@ -324,6 +328,14 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             // Assigning to a multi-component swizzle is valid only with this feature.
             supported = compilesWithoutError(
                 "fn f() { var v : vec4f; v.xy = vec2(1.0, 2.0); }");
+        } else if (feature == "unrestricted_pointer_parameters") {
+            // Passing a pointer into a non-function/private address space as a
+            // function parameter is valid only when this relaxation is supported.
+            supported = compilesWithoutError(
+                "var<workgroup> v : u32;"
+                "\nfn bar(p : ptr<workgroup, u32>) { _ = *p; }"
+                "\nfn foo() { bar(&v); }"
+                "\n@compute @workgroup_size(1) fn main() { foo(); }");
         } else {
             // texture_formats_tier1 (a real optional feature with no clean,
             // backend-portable trial-compile probe) and any unrecognized name:
@@ -350,6 +362,24 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
     void skipIfDeviceDoesNotHaveFeature(WGPUFeatureName feature, const std::string& name) {
         if (!deviceHasFeature(feature)) {
             skip("device does not have required feature: " + name);
+        }
+    }
+
+    // ---- Conditional skip (mirrors upstream t.skipIf(cond, msg)) -----------
+    void skipIf(bool condition, const std::string& message = "") {
+        if (condition) {
+            skip(message.empty() ? "skipped" : message);
+        }
+    }
+
+    // ---- Skip the case if a WGSL language feature is unsupported -----------
+    // Mirrors upstream t.skipIfLanguageFeatureNotSupported(name). Distinct from
+    // hasLanguageFeature (which sets the *expected* result): this SKIPS the case
+    // when the feature is absent, so an unsupported-feature backend neither
+    // false-passes nor false-fails.
+    void skipIfLanguageFeatureNotSupported(std::string_view feature) {
+        if (!hasLanguageFeature(feature)) {
+            skip(std::string("WGSL language feature not supported: ") + std::string(feature));
         }
     }
 
