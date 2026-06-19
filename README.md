@@ -210,6 +210,7 @@ port (40 files), and yawgpu's **`shader-f16`** landing:
 |---------|----------|-----:|-----:|-----:|------:|---------|
 | **Dawn** (oracle) | Metal | 1513210 | 81631 | 2441 \* | 0 | green — \*the 2441 are whole-suite `adapter is "consumed"` / GPU-state-degradation collateral; **real fail=0 per-file** (oracle) |
 | **yawgpu** | Metal | 1214197 | 357861 | 25224 † | 0 | api + shader/execution **fail=0** (incl. f16, now running — see below); shader/validation **22781 = upstream-naga** (F-120, shared with wgpu-native, yawgpu to fix in its fork). †≈2443 of the 25224 are the same whole-suite degradation collateral as Dawn's 2441 (`createBindGroupLayout` 1032, `copyBufferToBuffer` 342, … all **fail=0 re-run alone**); the real, reproducible fails are the 22781 shader/validation upstream-naga divergences |
+| **wgpu-native** | Metal | 997922 | 395185 | 37490 | 38054 | bring-up reference (panic-heavy, **not** triaged to `fail=0`): `crash=38054` dominated by `shader/execution` 31026 (no `shader-f16` + unimplemented paths panic rather than skip); `fail=37490` is mostly `shader/validation` 23467 (the F-120 shared-naga block **plus** broader naga under-validation wgpu-native-specific, e.g. shader_io was 279 vs yawgpu's 34) + api degradation collateral. Contained via crash-resume |
 
 **On the skips (and `shader-f16`):** yawgpu's **`shader-f16` now runs** — the ~310 previously-failing f16
 execution cases (F-121) pass and the f16 cases that used to *skip* on yawgpu now execute (e.g. `access/*`
