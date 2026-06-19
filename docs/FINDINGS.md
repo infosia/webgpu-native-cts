@@ -1729,17 +1729,20 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   without `flat`), `pipeline_stage:placement` (6), `workgroup_size:*` (7), `locations:stage_inout` (4),
   `align:parsing` (1, align > max i32), `id:id_non_override` (1), `interpolate:interpolation_validation`
   (1), `size:*` (2). Dawn rejects all 34 (oracle green).
-- **Cross-check:** **3-way classifier → upstream-naga.** yawgpu's 34 fails are a strict subset of
-  wgpu-native's fails (yawgpu-only divergences = **0**); Dawn passes all. naga (shared frontend) is more
-  lenient than the WGSL spec / Dawn here. **Not a yawgpu finding** (per [[naga-fix-crosscheck-wgpu-native]]
-  + the user's yawgpu-over-naga priority — recorded, not chased).
+- **Cross-check:** **3-way classifier → upstream-naga** (shared root). yawgpu's 34 fails are a strict
+  subset of wgpu-native's fails (yawgpu-only divergences = **0**); Dawn passes all. naga (shared frontend)
+  is more lenient than the WGSL spec / Dawn here. Root is in the shared naga frontend, **not** yawgpu-core
+  — but **yawgpu WILL address it in its naga fork** (user goal 2026-06-19: yawgpu should pass all CTS
+  wherever possible; user is working on it). So this is a **yawgpu work item**, tracked here for them to
+  fix in-fork, not a "won't fix".
 - **Also `decl/` (13, phaseSV1):** `override:array_size` (3), `var:module_scope_types` (4),
   `var:shader_stage` (5), `var:address_space_access_mode` (1) — mix of "unexpected validation error for
   valid shader" (naga over-strict) and "got none" (naga over-lenient). yawgpu fail=13 == wgpu-native
   fail=13, yawgpu-only=0 → upstream-naga. (extension/ + shader_io decl total: 34 + 13 = 47.)
-- **Status:** **OPEN (upstream-naga, out of scope).** cts ports are correct (Dawn-green, faithful). Carried
-  as a known naga-lineage divergence; yawgpu inherits it. wgpu-native fails these (and more in shader_io —
-  broader naga under-validation, bring-up reference).
+- **Status:** **OPEN — yawgpu to fix in its naga fork** (shared upstream-naga root; user wants full CTS
+  pass). cts ports are correct (Dawn-green, faithful). Re-verify when the fork fix lands. wgpu-native
+  fails these (and more in shader_io — broader naga under-validation, bring-up reference); fixing in
+  yawgpu's fork won't help wgpu-native (upstream naga unchanged) unless upstreamed.
 
 ---
 
