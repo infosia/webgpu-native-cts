@@ -286,6 +286,8 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             name = WGPUWGSLLanguageFeatureName_UnrestrictedPointerParameters;
         } else if (feature == "pointer_composite_access") {
             name = WGPUWGSLLanguageFeatureName_PointerCompositeAccess;
+        } else if (feature == "uniform_buffer_standard_layout") {
+            name = WGPUWGSLLanguageFeatureName_UniformBufferStandardLayout;
         } else if (feature == "texture_formats_tier1") {
             name = WGPUWGSLLanguageFeatureName_TextureFormatsTier1;
         } else {

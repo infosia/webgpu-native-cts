@@ -1720,4 +1720,23 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-120 — upstream-naga: shader/validation `shader_io` under-validation (34 cases, not a yawgpu defect)
+
+- **Backend:** yawgpu (Metal) AND wgpu-native — **identical**. Deterministic.
+- **Found by:** `shader,validation,shader_io,*` (phaseSV1 batch). 34 cases where
+  the spec requires a validation error but **both naga-based backends accept** the shader ("expected a
+  validation error, got none"): `interpolate:integral_types` (12 — `@interpolate` on integral vertex IO
+  without `flat`), `pipeline_stage:placement` (6), `workgroup_size:*` (7), `locations:stage_inout` (4),
+  `align:parsing` (1, align > max i32), `id:id_non_override` (1), `interpolate:interpolation_validation`
+  (1), `size:*` (2). Dawn rejects all 34 (oracle green).
+- **Cross-check:** **3-way classifier → upstream-naga.** yawgpu's 34 fails are a strict subset of
+  wgpu-native's fails (yawgpu-only divergences = **0**); Dawn passes all. naga (shared frontend) is more
+  lenient than the WGSL spec / Dawn here. **Not a yawgpu finding** (per [[naga-fix-crosscheck-wgpu-native]]
+  + the user's yawgpu-over-naga priority — recorded, not chased).
+- **Status:** **OPEN (upstream-naga, out of scope).** cts port is correct (Dawn-green, faithful). Carried
+  as a known naga-lineage divergence; yawgpu inherits it. wgpu-native fails these and ~245 more shader_io
+  cases (broader naga under-validation, bring-up reference).
+
+---
+
 _Add new findings as `F-00N` with the same fields._
