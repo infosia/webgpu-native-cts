@@ -1739,4 +1739,27 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-121 — yawgpu: newly-landed `shader-f16` errors the pipeline for f16 in access/bitcast (Metal)
+
+- **Backend:** yawgpu (Metal). Deterministic. Exposed by yawgpu enabling the `shader-f16` feature
+  (yawgpu `cace46a`), which converted ~640 previously-skipped f16 cases into runs.
+- **Found by:** `shader,execution,expression,access,*` (200) and `…,call,builtin,bitcast:*` (110) =
+  **310 f16 cases** that now RUN on yawgpu and **fail with a uniform signature**: `uncaptured error:
+  queue submit cannot use an error command buffer` (i.e. the compute pipeline/shader module for the f16
+  shader becomes an error object). Breakdown by input source: **`const` dominant (178)** + runtime
+  (`storage_r` 24, `storage_rw` 24, `uniform` 24) + ~60 `vector,components` (swizzle) f16 cases. The
+  `const` (const-eval) path fails almost entirely; runtime fails only for specific f16 type pairs (some
+  runtime f16 bitcast, e.g. `f16_to_f16:storage_r`, pass). Same error class as F-119 (internal-f16) and
+  the const-eval shape of F-118.
+- **Cross-check:** **Dawn passes all 310** (oracle — Dawn/Metal has shader-f16). **wgpu-native SKIPS
+  them** (its Metal adapter does not expose `shader-f16`), so it can't serve as the naga baseline here —
+  but these live in yawgpu's **own freshly-landed f16 implementation** (naga-fork f16 lowering /
+  yawgpu-core f16 pipeline), and Dawn proves the spec behavior, so this is a **yawgpu finding**, not
+  upstream-naga. cts ports are correct (Dawn-green, faithful; value-EXACT).
+- **Status:** **OPEN (yawgpu).** Reproduce: `build-yawgpu/cts "webgpu:shader,execution,expression,access,*:*"`
+  and `"…,bitcast:*"` → 200 + 110 fail. Likely a single root cause (f16 const-eval / MSL half lowering
+  emitting an error pipeline). Surfaced/unmasked.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
