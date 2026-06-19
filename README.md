@@ -201,21 +201,31 @@ on native Vulkan.
 
 ### Test results
 
-#### Full cross-backend sweep — **2026-06-14** (whole suite, 234 files, per-file)
+#### Metal whole-suite sweep — **2026-06-19** (current, 345 files, `webgpu:*:*` `--workers 8`)
 
-> The headline whole-suite sweep below is the **234-file** snapshot. The **66 files added since**
-> (phaseY7 `atomics`, the phaseY8–Y9 texture built-in family, the phaseY10 sync/derivative built-ins, and
-> the phaseY11 integer/bit/pack built-ins) are each verified **green on Dawn + yawgpu Metal** per-area at
-> port time (e.g. textureSample family 394018/0 yawgpu; textureLoad/Gather/Store/metadata all `fail=0` on
-> both; phaseY10/Y11 builtins `fail=0` after F-116…F-119 fixes); a full whole-suite re-sweep at the grown
-> 300-file listing is pending and will refresh these totals.
+This is the current headline, refreshed after the phaseY7–Y12 execution work, the `shader/validation`
+port (40 files), and yawgpu's **`shader-f16`** landing:
 
-The current headline numbers — every ported file run against each backend:
+| Backend | Platform | pass | skip | fail | crash | Verdict |
+|---------|----------|-----:|-----:|-----:|------:|---------|
+| **Dawn** (oracle) | Metal | 1513210 | 81631 | 2441 \* | 0 | green — \*the 2441 are whole-suite `adapter is "consumed"` / GPU-state-degradation collateral; **real fail=0 per-file** (oracle) |
+| **yawgpu** | Metal | 1214197 | 357861 | 25224 † | 0 | api + shader/execution **fail=0** (incl. f16, now running — see below); shader/validation **22781 = upstream-naga** (F-120, shared with wgpu-native, yawgpu to fix in its fork). †≈2443 of the 25224 are the same whole-suite degradation collateral as Dawn's 2441 (`createBindGroupLayout` 1032, `copyBufferToBuffer` 342, … all **fail=0 re-run alone**); the real, reproducible fails are the 22781 shader/validation upstream-naga divergences |
+
+**On the skips (and `shader-f16`):** yawgpu's **`shader-f16` now runs** — the ~310 previously-failing f16
+execution cases (F-121) pass and the f16 cases that used to *skip* on yawgpu now execute (e.g. `access/*`
+skip 664→12, `bitcast` skip 134→0). The skip total is nonetheless **larger** than the old 234-file
+snapshot because the `shader/validation` port added a big block of **feature-gated skips that yawgpu's
+Metal adapter genuinely lacks** — chiefly `subgroups` (the `uniformity` subgroup g.tests alone skip
+~133k) and `unrestricted_pointer_parameters` (alias_analysis ~19k). Those are legitimate
+"feature-unsupported" skips (Dawn has the features and runs them), not maskable and not defects.
+
+#### Vulkan / MoltenVK sweep — **2026-06-14** (234-file snapshot, re-sweep pending)
+
+These rows predate the phaseY7–Y12 + shader/validation work; a native-Vulkan/MoltenVK re-sweep at the
+grown 345-file listing is pending.
 
 | Backend | Platform | pass | skip | fail | crash | xfail | Verdict |
 |---------|----------|-----:|-----:|-----:|------:|------:|---------|
-| **Dawn** (oracle) | Metal | 534184 | 63364 | **0** | 0 | — | fully green |
-| **yawgpu** | Metal | 460730 | 136816 | **0** | 0 | 2 | green — the 2 `xfail` are the documented Dawn-leniency `draw,index_buffer_format_dirtying` (yawgpu *stricter*, not a defect), now carried in `expectations/yawgpu.txt` |
 | **yawgpu** | Vulkan (native, NVIDIA) | 402163 † | 183397 | **0** † | 0 | 94 | **green — every ported file `fail=0` in per-file isolation.** F-005…F-112 all fixed & native-Vulkan-re-verified (2026-06-15/16, incl. F-112 storage-buffer bounds policy); F-085 (92) + F-111 (2) = 94 `xfail`. † whole-suite via 48-shard batches: the raw run's ~12k `fail` is **stochastic GPU-state-degradation collateral** (each signature isolates `fail=0`), so the real fail is **0** and `pass` is a degradation-depressed lower bound |
 | **yawgpu** | Vulkan (MoltenVK) | 445041 | 136816 | 15599 | 0 | 92 | Vulkan-path residuals, **all Metal-green AND native-Vulkan-green** — MoltenVK/SPIRV-Cross translation artifacts (F-104 `copyTextureToTexture` 14512 + F-070/`zero_init`/`robust_access_vertex` shader residue); F-085 92 `xfail` |
 | **wgpu-native** | Vulkan (`--isolate`, per-case) | 25668 | 10200 | 5680 | 6808 | — | bring-up reference (known panic-heavy state) |
@@ -227,9 +237,12 @@ The current headline numbers — every ported file run against each backend:
   GPU-state-degradation collateral** — at this suite size (~597k subcases) a single process accumulates
   resource pressure (`HAL queue submission failed` / `out of memory` / `shader compilation failed`), and
   every such signature returns `fail=0` when its file is re-run alone.
-- yawgpu's **Metal HAL** likewise passes the entire ported suite; the only non-passes are the 2
-  Dawn-leniency cases, now carried as `xfail` in `expectations/yawgpu.txt` (so a `--expectations` run is
-  `fail=0 xfail=2`).
+- yawgpu's **Metal HAL** passes all of `api/*` and `shader/execution` (real `fail=0` per-file, incl. the
+  now-running f16 cases; the 2 Dawn-leniency `draw,index_buffer_format_dirtying` cases are carried as
+  `xfail` in `expectations/yawgpu.txt`). The new non-passes are entirely in **`shader/validation`**: 22781
+  cases where yawgpu matches **upstream naga** (wgpu-native fails them identically — yawgpu-only = 0) but
+  diverges from Dawn/Tint (F-120, e.g. `uniformity:basics` ~21473) — a shared-naga work item yawgpu will
+  fix in its fork, not a yawgpu-core defect.
 - The **MoltenVK** `fail=15599` are **not yawgpu defects** and are **distinct from the native-Vulkan
   result** — each is green on native Metal *and* native Vulkan (F-104 native-Vulkan-confirmed green);
   MoltenVK/SPIRV-Cross mistranslates them. See the [findings buckets](#findings--121-surfaced-to-date-f-001f-121) above.
