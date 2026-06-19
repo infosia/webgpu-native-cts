@@ -1759,6 +1759,16 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   pointers 37, …) — the WGSL **uniformity-analysis** diagnostics, a separate/larger naga area not covered
   by these fixes; still shared with wgpu-native (yawgpu-only=0), Dawn-green. cts ports correct throughout.
   Re-verify uniformity when a naga uniformity-analysis fix lands.
+- **Spec basis (verified 2026-06-20, [WGSL §uniformity](https://www.w3.org/TR/WGSL/#uniformity)):** this is
+  **spec-mandated, not implementation discretion** — Dawn/Tint is correct, naga is non-conformant. Uniformity
+  analysis is required; non-uniform control flow use of: derivatives/`textureSample*` → triggering rule
+  `derivative_uniformity` (default **error**, author-overridable via `diagnostic(off, derivative_uniformity)`,
+  which the CTS uses where applicable); subgroup/quad builtins → `subgroup_uniformity` (default error);
+  **barriers (`workgroupBarrier`/`storageBarrier`/`textureBarrier`) + `workgroupUniformLoad` → a
+  non-filterable shader-creation error** ("must only be called in uniform control flow"). naga does not
+  implement (full) uniformity analysis, so it accepts these — fixing this in yawgpu's naga fork means
+  **implementing WGSL uniformity analysis** (a substantial feature), which is why it remained after the
+  structural-validation fixes.
 
 ---
 
