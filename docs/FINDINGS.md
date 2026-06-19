@@ -1774,9 +1774,11 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   but these live in yawgpu's **own freshly-landed f16 implementation** (naga-fork f16 lowering /
   yawgpu-core f16 pipeline), and Dawn proves the spec behavior, so this is a **yawgpu finding**, not
   upstream-naga. cts ports are correct (Dawn-green, faithful; value-EXACT).
-- **Status:** **OPEN (yawgpu).** Reproduce: `build-yawgpu/cts "webgpu:shader,execution,expression,access,*:*"`
-  and `"…,bitcast:*"` → 200 + 110 fail. Likely a single root cause (f16 const-eval / MSL half lowering
-  emitting an error pipeline). Surfaced/unmasked.
+- **Status:** **RESOLVED 2026-06-19** (yawgpu `c937a32` f16 bitcast via naga-fork rev bump + `a900cf8`
+  const struct/array containing a matrix errored Metal pipelines). Re-verified yawgpu/Metal: `access,*`
+  **0 fail** (pass=2511, skip=12 = non-f16 uniform_buffer_standard_layout), `bitcast` **0 fail**
+  (pass=458), and the full `call,builtin,*` sweep **702903 pass / 0 fail** (was 110). cts ports were
+  correct (Dawn-green) throughout. Confirms the diagnosis (f16 const-eval / MSL half lowering).
 
 ---
 

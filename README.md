@@ -103,6 +103,14 @@ depth-stencil), F-116 (yawgpu `arrayLength` off-by-one on non-stride-multiple bi
 (`firstLeadingBit(u32)` all-ones), F-118 (`insertBits` const-eval), and F-119 (`pack2x16float`/
 `unpack2x16float`), plus a yawgpu resource-retention leak fixed on the yawgpu side. The F-117/F-118 defects
 are **confirmed upstream-naga** (wgpu-native fails them too, 2026-06-19 cross-check); F-119 was yawgpu-local.
+**Then (2026-06-19) the `shader/validation` area opened** (phaseSV1, 40 files: extension/shader_io/decl/
+functions/types/const_assert/uniformity) on a ported `ShaderValidationTest` enabler, run as a **3-backend
+cross-check** (Dawn + yawgpu + wgpu-native) since yawgpu uses a naga fork. Result: **zero yawgpu-only
+findings** — every yawgpu divergence is shared with wgpu-native (upstream-naga, F-120, which yawgpu will
+fix in its naga fork). Separately, yawgpu **landed `shader-f16`**, which converted ~640 previously-skipped
+f16 cases into runs and exposed **F-121** (f16 in access-indexing/swizzle + bitcast errored the pipeline —
+const-eval dominant); **now fixed** (yawgpu `c937a32`/`a900cf8`) and re-verified green (`access,*` +
+`bitcast` 0 fail; full `call,builtin,*` 702903 pass / 0 fail).
 
 ### Port coverage
 
@@ -111,9 +119,9 @@ are **confirmed upstream-naga** (wgpu-native fails them too, 2026-06-19 cross-ch
 ```mermaid
 pie showData
     title Upstream .spec.ts files (683)
-    "Ported — complete" : 249
+    "Ported — complete" : 289
     "Ported — partial" : 56
-    "Deferred (shader/validation, expression precision)" : 337
+    "Deferred (shader/validation, expression precision)" : 297
     "Not portable (N/A)" : 21
     "Todo" : 20
 ```
@@ -128,7 +136,7 @@ xychart-beta
     title "Coverage addressed (complete + partial + N/A) of upstream files, %"
     x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
     y-axis "addressed %" 0 --> 100
-    bar [100, 100, 46, 0, 48]
+    bar [100, 100, 46, 19, 54]
 ```
 
 | Area | Addressed* | Note |
@@ -136,8 +144,8 @@ xychart-beta
 | `api/validation` | **129 / 129 ✅** | **fully ported** — every file complete (112), partial (14), or N/A (3); no todo (Y-6 V1–V10: capability_checks/features + all 35 limits) |
 | `api/operation` | **72 / 72 ✅** | **fully ported** — every file complete (28), partial (42), or N/A (2); no todo. Partials leave some native-portable breadth deferred (vertical-first) |
 | `shader/execution` | 109 / 239 | structural files (`flow_control`, `memory_model`, `statement`, `shader_io`) + `expression/call/builtin`: **`atomics` (11)**, the full **texture built-in family (15)**, P2 **sync/derivatives (13)** (`workgroupBarrier`/`storageBarrier`/`workgroupUniformLoad`/`arrayLength` + `dpdx`/`dpdy`/`fwidth`×coarse/fine), P3 **integer/bit/pack (28)** via a generic `run()` harness (16 int/bit + `bitcast` + 11 float pack/unpack), and **`expression/access/*` (5)** (vector/array/matrix/structure indexing & swizzle via a composite-value layout extension); rest (math/trig precision) deferred |
-| `shader/validation` | 0 / 207 | deferred |
-| **Total** | **326 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
+| `shader/validation` | 40 / 207 | `extension` (5), `shader_io` (14), `decl` (7), `functions` (2), `types` (10), `const_assert` (1), `uniformity` (1) — on a ported `ShaderValidationTest` enabler (`expectCompileResult`/`expectPipelineResult` + 3-backend cross-check). **Zero yawgpu-only findings** (all divergences shared with wgpu-native = upstream-naga, F-120); rest (`expression`/`parse`/`statement` bulk) deferred |
+| **Total** | **366 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
 
 \* addressed = complete + partial + N/A (every upstream file resolved). Per-file detail and what each batch
 added: [COVERAGE](docs/COVERAGE.md).
@@ -151,7 +159,7 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Findings — 119 surfaced to date (F-001…F-119)
+### Findings — 121 surfaced to date (F-001…F-121)
 
 The full per-finding record (what, which backend, root cause, status) lives in
 [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced — never masked to make a
@@ -224,7 +232,7 @@ The current headline numbers — every ported file run against each backend:
   `fail=0 xfail=2`).
 - The **MoltenVK** `fail=15599` are **not yawgpu defects** and are **distinct from the native-Vulkan
   result** — each is green on native Metal *and* native Vulkan (F-104 native-Vulkan-confirmed green);
-  MoltenVK/SPIRV-Cross mistranslates them. See the [findings buckets](#findings--119-surfaced-to-date-f-001f-119) above.
+  MoltenVK/SPIRV-Cross mistranslates them. See the [findings buckets](#findings--121-surfaced-to-date-f-001f-121) above.
 - The native-Vulkan (NVIDIA) sweeps surfaced the genuine Apple-masked Vulkan-HAL/naga-path defects
   F-105/F-106, the F-107…F-110 batch, and F-112 (all fixed; per-finding detail in
   [FINDINGS](docs/FINDINGS.md)). Being Apple-masked, they never appeared in the Metal/MoltenVK rows.

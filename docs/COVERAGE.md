@@ -26,16 +26,17 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
 | `api/validation` | 129 | 112 | 14 | 3 | 0 | 0 |
 | `api/operation` | 72 | 28 | 42 | 2 | 0 | 0 |
-| `shader/validation` | 207 | 0 | 0 | 0 | 207 | 0 |
+| `shader/validation` | 207 | 40 | 0 | 0 | 167 | 0 |
 | `shader/execution` | 239 | 109 | 0 | 0 | 130 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **249** | **56** | **21** | **337** | **20** |
+| **Total** | **683** | **289** | **56** | **21** | **297** | **20** |
 
-> Reconciled 2026-06-19 to the on-disk `.spec.cpp` count: 305 files (complete + partial) under
-> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 109). `api/operation` has **every
+> Reconciled 2026-06-19 to the on-disk `.spec.cpp` count: 345 files (complete + partial) under
+> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 109, shader/validation 40).
+> `api/operation` has **every
 > portable file opened** (70/72; only `buffers/{map_ArrayBuffer,map_detach}` are N/A — JS ArrayBuffer
 > detach), but it is **not fully complete**: per the area table 42 of those 70 files are **partial** —
 > they register their upstream test names but leave some bodies `.unimplemented()`. Most of those gaps are
