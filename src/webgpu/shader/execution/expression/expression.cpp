@@ -680,16 +680,26 @@ std::string buildShader(
     const std::vector<ExprType>& parameterTypes,
     ExprType resultType,
     InputSource inputSource,
-    const std::vector<Case>& cases) {
+    const std::vector<Case>& cases,
+    const std::string& predeclaration = "") {
     std::ostringstream out;
 
-    // Emit `enable f16;` if any parameter or the result type is an f16 type.
-    bool usesF16 = resultType.kind == ScalarKind::F16;
-    for (ExprType ty : parameterTypes) {
-        usesF16 = usesF16 || ty.kind == ScalarKind::F16;
+    // Emit `enable f16;` if any parameter or the result type is an f16 type, or if the module-scope
+    // predeclaration references f16 (e.g. a struct with an f16 member whose selected output member is
+    // a different, non-f16 member -- the module still needs the directive to compile).
+    bool usesF16 = resultType.scalarKind() == ScalarKind::F16;
+    for (const ExprType& ty : parameterTypes) {
+        usesF16 = usesF16 || ty.scalarKind() == ScalarKind::F16;
     }
+    usesF16 = usesF16 || predeclaration.find("f16") != std::string::npos;
     if (usesF16) {
         out << "enable f16;\n";
+    }
+
+    // Module-scope predeclaration (helper functions/structs) after the header, before everything
+    // else. Mirrors upstream basicExpressionWithPredeclarationBuilder.
+    if (!predeclaration.empty()) {
+        out << predeclaration << "\n";
     }
 
     if (inputSource == InputSource::Const) {
@@ -894,10 +904,11 @@ void submitBatch(
     ExprType resultType,
     InputSource inputSource,
     const std::vector<Case>& cases,
-    const std::string& compoundOp = "") {
+    const std::string& compoundOp = "",
+    const std::string& predeclaration = "") {
     const std::string source =
         compoundOp.empty()
-            ? buildShader(exprBuilder, parameterTypes, resultType, inputSource, cases)
+            ? buildShader(exprBuilder, parameterTypes, resultType, inputSource, cases, predeclaration)
             : buildCompoundShader(compoundOp, parameterTypes, resultType, inputSource, cases);
     WGPUComputePipeline pipeline = createComputePipelineAuto(t, source);
 
@@ -1396,7 +1407,8 @@ void runImpl(
     ExprType resultType,
     InputSource inputSource,
     int vectorize,
-    const std::vector<Case>& cases) {
+    const std::vector<Case>& cases,
+    const std::string& predeclaration = "") {
     std::vector<ExprType> params = parameterTypes;
     ExprType result = resultType;
     std::vector<Case> work = cases;
@@ -1440,7 +1452,7 @@ void runImpl(
         const size_t end = std::min(i + casesPerBatch, work.size());
         std::vector<Case> batch(work.begin() + static_cast<std::ptrdiff_t>(i),
                                 work.begin() + static_cast<std::ptrdiff_t>(end));
-        submitBatch(t, exprBuilder, params, result, inputSource, batch, compoundOp);
+        submitBatch(t, exprBuilder, params, result, inputSource, batch, compoundOp, predeclaration);
     }
 }
 
@@ -1455,6 +1467,19 @@ void run(
     int vectorize,
     const std::vector<Case>& cases) {
     runImpl(t, exprBuilder, "", parameterTypes, resultType, inputSource, vectorize, cases);
+}
+
+void runWithPredeclaration(
+    GpuTest& t,
+    const ExpressionBuilder& exprBuilder,
+    const std::string& predeclaration,
+    const std::vector<ExprType>& parameterTypes,
+    ExprType resultType,
+    InputSource inputSource,
+    int vectorize,
+    const std::vector<Case>& cases) {
+    runImpl(t, exprBuilder, "", parameterTypes, resultType, inputSource, vectorize, cases,
+            predeclaration);
 }
 
 void runCompound(

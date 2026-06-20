@@ -8,10 +8,12 @@
 // they accept either result for subnormals (anyOf), which needs the FP-aware acceptance framework.
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "webgpu/shader/execution/expression/expression.h"
+#include "webgpu/shader/execution/expression/floating_point.h"
 #include "webgpu/shader/execution/expression/unary/unary_ranges_common.h"
 
 using namespace cts;
@@ -66,6 +68,42 @@ CTS_TEST(testGroup, "i32").params(allSourceParams).fn([](AllFeaturesMaxLimitsGpu
         inputSourceFromParam(t.param<std::string>("inputSource")), vec, cases);
 });
 
-// NOTE: g.test('f32'), g.test('f16') are DEFERRED to Stage B (float source; subnormal anyOf).
+// isSubnormalNumberF32(n) = n in the open interval (f32.negative.max, f32.positive.min) (includes 0).
+bool isSubnormalNumberF32(double n) {
+    return n > fp::f32NegativeMax() && n < fp::f32PositiveMin();
+}
+
+// An f32 Scalar carrying quantizeToF32(value) (i.e. f32(value)).
+Scalar f32From(double value) {
+    float f = static_cast<float>(fp::quantize(fp::FPKind::F32, value));
+    uint32_t bits;
+    std::memcpy(&bits, &f, 4);
+    return f32Bits(bits);
+}
+
+// bool(f32): false if 0.0/-0.0, true otherwise; subnormals accept either (anyOf). Bit-EXACT.
+CTS_TEST(testGroup, "f32").params(allSourceParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
+    std::vector<Case> cases;
+    for (double f : fp::scalarF32Range()) {
+        std::vector<uint32_t> accept;
+        if (f != 0.0) {
+            accept.push_back(1u); // bool(true)
+        }
+        if (isSubnormalNumberF32(f)) {
+            accept.push_back(0u); // bool(false)
+        }
+        // Use the first accepted value as the nominal expected (width only); accept set governs.
+        const bool nominal = !accept.empty() && accept[0] == 1u;
+        cases.push_back(Case({CaseValue(f32From(f))}, CaseValue(boolean(nominal)),
+                             {acceptBitsSet(accept)}));
+    }
+    const int vec = cfgVectorize(t);
+    run(t, convBuilder(vec), {scalarType(ScalarKind::F32)}, BOOL,
+        inputSourceFromParam(t.param<std::string>("inputSource")), vec, cases);
+});
+
+CTS_TEST(testGroup, "f16").params(allSourceParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
+    t.skip("f16 source deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+});
 
 } // namespace

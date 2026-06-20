@@ -420,6 +420,19 @@ void run(
     int vectorize, // 0 == scalar (undefined), else 2/3/4
     const std::vector<Case>& cases);
 
+// Like run(), but injects 'predeclaration' (module-scope WGSL: helper functions, structs, etc.)
+// after the header (enable directives) and before everything else, mirroring upstream
+// basicExpressionWithPredeclarationBuilder. 'exprBuilder' typically calls into a predeclared helper.
+void runWithPredeclaration(
+    GpuTest& t,
+    const ExpressionBuilder& exprBuilder,
+    const std::string& predeclaration,
+    const std::vector<ExprType>& parameterTypes,
+    ExprType resultType,
+    InputSource inputSource,
+    int vectorize,
+    const std::vector<Case>& cases);
+
 // Like run(), but evaluates a compound-assignment operator (e.g. "+=", "<<=") instead of a plain
 // expression. Mirrors upstream compoundAssignmentBuilder: for each case it computes
 // 'lhs op= rhs' via a mutable temporary. resultType must equal the LHS (parameterTypes[0]) type.

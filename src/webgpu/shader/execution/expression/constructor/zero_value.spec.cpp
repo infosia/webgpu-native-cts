@@ -3,10 +3,14 @@
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
 //
-// Execution Tests for zero value constructors. The 'structure' g.test is deferred to Stage B
-// (it needs module-scope struct predeclaration support in the harness).
+// Execution Tests for zero value constructors. The 'structure' g.test uses the harness's module-
+// scope predeclaration support (runWithPredeclaration). NOTE: upstream's 'member_types' param is an
+// array of type names; Value cannot hold an array, so it is encoded as a comma-delimited string
+// (e.g. "i32,u32"). This changes only the spelling of the member_types query component; the test
+// logic and case/subcase structure are identical.
 
 #include <cstdint>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -144,7 +148,87 @@ CTS_TEST(testGroup, "array")
             {Case({}, zeroValue(ty))});
     });
 
-// NOTE: g.test('structure') is DEFERRED to Stage B (it needs module-scope struct predeclaration in
-// the harness).
+// Parse a member type name into an ExprType (scalar/vec/mat) used by the 'structure' test.
+ExprType memberExprType(const std::string& name) {
+    if (name == "vec3f") {
+        return vecType(3, ScalarKind::F32);
+    }
+    if (name == "vec4i") {
+        return vecType(4, ScalarKind::I32);
+    }
+    if (name == "vec2i") {
+        return vecType(2, ScalarKind::I32);
+    }
+    if (name == "mat3x2f") {
+        return matType(3, 2, ScalarKind::F32);
+    }
+    return scalarType(scalarKind(name));
+}
+
+// Split "a,b,c" into {"a","b","c"}.
+std::vector<std::string> splitMemberTypes(const std::string& csv) {
+    std::vector<std::string> out;
+    std::stringstream ss(csv);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        out.push_back(item);
+    }
+    return out;
+}
+
+bool containsF16(const std::vector<std::string>& types) {
+    for (const std::string& t : types) {
+        if (t == "f16") {
+            return true;
+        }
+    }
+    return false;
+}
+
+CTS_TEST(testGroup, "structure")
+    .params([](ParamsBuilder u) {
+        return u.combine("member_types", {"bool", "u32", "vec3f", "i32,u32",
+                                          "i32,f16,vec4i,mat3x2f", "bool,u32,f16,vec3f,vec2i",
+                                          "i32,u32,f32,f16,vec3f,vec4i"})
+            .combine("nested", {false, true})
+            .beginSubcases()
+            .expand("member_index", [](const ParamRecord& p) {
+                const Value* v = findParam(p, "member_types");
+                std::vector<Value> idx;
+                if (v != nullptr) {
+                    const size_t n = splitMemberTypes(valueAs<std::string>(*v)).size();
+                    for (size_t i = 0; i < n; ++i) {
+                        idx.push_back(Value(static_cast<int64_t>(i)));
+                    }
+                }
+                return idx;
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const std::vector<std::string> types = splitMemberTypes(t.param<std::string>("member_types"));
+        const bool nested = t.param<bool>("nested");
+        const int memberIndex = static_cast<int>(t.param<int64_t>("member_index"));
+        if (containsF16(types) && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+            t.skip("shader-f16 feature not available");
+        }
+        const ExprType memberType = memberExprType(types[static_cast<size_t>(memberIndex)]);
+
+        // Build the struct predeclaration (placed at module scope; WGSL is order-independent).
+        std::string members;
+        for (size_t i = 0; i < types.size(); ++i) {
+            members += "  member_" + std::to_string(i) + " : " + types[i] + ",\n";
+        }
+        std::string predeclaration = "struct MyStruct {\n" + members + "};\n" +
+                                     "struct OuterStruct {\n  pre : i32,\n  inner : MyStruct,\n" +
+                                     "  post : i32,\n};";
+
+        const std::string expr =
+            nested ? ("OuterStruct().inner.member_" + std::to_string(memberIndex))
+                   : ("MyStruct().member_" + std::to_string(memberIndex));
+        ExpressionBuilder fixed = [expr](const std::vector<std::string>&) { return expr; };
+
+        runWithPredeclaration(t, fixed, predeclaration, {}, memberType, InputSource::Const, 0,
+                              {Case({}, zeroValue(memberType))});
+    });
 
 } // namespace
