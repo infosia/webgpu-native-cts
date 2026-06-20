@@ -46,8 +46,7 @@ std::vector<double> atanhRange(fp::FPKind kind) {
     std::vector<double> p = fp::biasedRange(fp::positiveLessThanOne(kind), 0.9, 20);
     v.insert(v.end(), p.begin(), p.end());
     v.push_back(1.0);
-    const std::vector<double>& base =
-        kind == fp::FPKind::Abstract ? fp::scalarF64Range() : fp::scalarF32Range();
+    const std::vector<double> base = fp::scalarRangeForKind(kind);
     v.insert(v.end(), base.begin(), base.end());
     return v;
 }
@@ -72,5 +71,13 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const bool isConst = cfgInputSource(t) == InputSource::Const;
+    auto cases = fp::generateScalarToIntervalCases(
+        fp::FPKind::F16, atanhRange(fp::FPKind::F16), /*finite=*/isConst,
+        [](double n) { return fp::atanhInterval(fp::FPKind::F16, n); });
+    run(t, builtin("atanh"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });

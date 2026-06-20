@@ -167,5 +167,12 @@ CTS_TEST(g, "f32").params(allSourcesDims).fn([](AllFeaturesMaxLimitsGpuTest& t) 
 });
 
 CTS_TEST(g, "f16").params(allSourcesDims).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const int dim = static_cast<int>(t.param<int64_t>("dim"));
+    auto cases = fp::generateDeterminantCases(fp::FPKind::F16, makeMatrices(dim + 16, dim, 16),
+                                              isConst(t));
+    run(t, builtin("determinant"), {matType(dim, dim, ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), 0, cases);
 });

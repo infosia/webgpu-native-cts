@@ -39,8 +39,10 @@ int cfgVectorize(const Fixture& t) {
 
 // [kIssue2766Value, ...scalarRange()].
 std::vector<double> roundRange(fp::FPKind kind) {
-    // kIssue2766Value: 0x8000_0000 (f32) / 0x8000_0000_0000_0000 (abstract) — as a plain number.
-    const double issue = kind == fp::FPKind::Abstract ? 9223372036854775808.0 : 2147483648.0;
+    // kIssue2766Value: 0x8000_0000 (f32) / 0x8000_0000_0000_0000 (abstract) / 0x8000 (f16).
+    const double issue = kind == fp::FPKind::Abstract ? 9223372036854775808.0
+                         : kind == fp::FPKind::F16    ? 32768.0
+                                                      : 2147483648.0;
     std::vector<double> v = {issue};
     const std::vector<double> base = fp::scalarRangeForKind(kind);
     v.insert(v.end(), base.begin(), base.end());
@@ -66,5 +68,12 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = fp::generateScalarToIntervalCases(
+        fp::FPKind::F16, roundRange(fp::FPKind::F16), /*finite=*/false,
+        [](double n) { return fp::roundInterval(fp::FPKind::F16, n); });
+    run(t, builtin("round"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });

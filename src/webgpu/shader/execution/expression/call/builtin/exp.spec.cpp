@@ -50,6 +50,18 @@ std::vector<double> expInputs() {
     return v;
 }
 
+// f16_inputs (exp.cache.ts).
+std::vector<double> expF16Inputs() {
+    std::vector<double> v = {0.0, -12.0, fp::f16NegativeMin()};
+    std::vector<double> a = fp::biasedRange(fp::f16NegativeMax(), -11.0, 100);
+    v.insert(v.end(), a.begin(), a.end());
+    std::vector<double> b = fp::biasedRange(fp::f16PositiveMin(), 11.0, 100);
+    v.insert(v.end(), b.begin(), b.end());
+    std::vector<double> c = fp::linearRange(12.0, 709.0, 10);
+    v.insert(v.end(), c.begin(), c.end());
+    return v;
+}
+
 } // namespace
 
 CTS_TEST(g, "abstract_float").params(constOnlyVectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
@@ -70,5 +82,13 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const bool isConst = cfgInputSource(t) == InputSource::Const;
+    auto cases = fp::generateScalarToIntervalCases(
+        fp::FPKind::F16, expF16Inputs(), /*finite=*/isConst,
+        [](double n) { return fp::expInterval(fp::FPKind::F16, n); });
+    run(t, builtin("exp"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });

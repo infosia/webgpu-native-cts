@@ -41,8 +41,7 @@ int cfgVectorize(const Fixture& t) {
 // linearRange(-1, 1, 100) ++ scalarRange().
 std::vector<double> acosRange(fp::FPKind kind) {
     std::vector<double> v = fp::linearRange(-1.0, 1.0, 100);
-    const std::vector<double>& base =
-        kind == fp::FPKind::Abstract ? fp::scalarF64Range() : fp::scalarF32Range();
+    const std::vector<double> base = fp::scalarRangeForKind(kind);
     v.insert(v.end(), base.begin(), base.end());
     return v;
 }
@@ -67,5 +66,13 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const bool isConst = cfgInputSource(t) == InputSource::Const;
+    auto cases = fp::generateScalarToIntervalCases(
+        fp::FPKind::F16, acosRange(fp::FPKind::F16), /*finite=*/isConst,
+        [](double n) { return fp::acosInterval(fp::FPKind::F16, n); });
+    run(t, builtin("acos"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });

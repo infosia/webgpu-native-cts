@@ -32,6 +32,7 @@ bool isConst(const Fixture& t) { return cfgInputSource(t) == InputSource::Const;
 
 ExprType vecAF(int dim) { return vecType(dim, ScalarKind::AbstractFloat); }
 ExprType vecF32(int dim) { return vecType(dim, ScalarKind::F32); }
+ExprType vecF16(int dim) { return vecType(dim, ScalarKind::F16); }
 
 std::vector<Case> abstractCases(int dim) {
     auto cases = fp::generateFaceForwardCases(
@@ -42,6 +43,11 @@ std::vector<Case> abstractCases(int dim) {
 std::vector<Case> f32Cases(int dim, bool constStage) {
     return fp::generateFaceForwardCases(fp::FPKind::F32, fp::sparseVectorF32Range(dim),
                                         fp::sparseVectorF32Range(dim), fp::sparseVectorF32Range(dim),
+                                        constStage);
+}
+std::vector<Case> f16Cases(int dim, bool constStage) {
+    return fp::generateFaceForwardCases(fp::FPKind::F16, fp::sparseVectorF16Range(dim),
+                                        fp::sparseVectorF16Range(dim), fp::sparseVectorF16Range(dim),
                                         constStage);
 }
 
@@ -74,11 +80,23 @@ CTS_TEST(g, "f32_vec4").params(allSources).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16_vec2").params(allSources).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    run(t, builtin("faceForward"), {vecF16(2), vecF16(2), vecF16(2)}, vecF16(2), cfgInputSource(t), 0,
+        f16Cases(2, isConst(t)));
 });
 CTS_TEST(g, "f16_vec3").params(allSources).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    run(t, builtin("faceForward"), {vecF16(3), vecF16(3), vecF16(3)}, vecF16(3), cfgInputSource(t), 0,
+        f16Cases(3, isConst(t)));
 });
 CTS_TEST(g, "f16_vec4").params(allSources).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    run(t, builtin("faceForward"), {vecF16(4), vecF16(4), vecF16(4)}, vecF16(4), cfgInputSource(t), 0,
+        f16Cases(4, isConst(t)));
 });

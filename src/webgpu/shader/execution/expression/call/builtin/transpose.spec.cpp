@@ -56,5 +56,13 @@ CTS_TEST(g, "f32").params(allSourcesCR).fn([](AllFeaturesMaxLimitsGpuTest& t) {
 });
 
 CTS_TEST(g, "f16").params(allSourcesCR).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const int cols = static_cast<int>(t.param<int64_t>("cols"));
+    const int rows = static_cast<int>(t.param<int64_t>("rows"));
+    auto cases = fp::generateTransposeCases(fp::FPKind::F16, fp::sparseMatrixF16Range(cols, rows),
+                                            isConst(t));
+    run(t, builtin("transpose"), {matType(cols, rows, ScalarKind::F16)},
+        matType(rows, cols, ScalarKind::F16), cfgInputSource(t), 0, cases);
 });

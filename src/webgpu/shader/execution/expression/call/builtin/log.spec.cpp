@@ -41,15 +41,15 @@ int cfgVectorize(const Fixture& t) {
 // linearRange(positive.min, 0.5, 20) ++ linearRange(0.5, 2.0, 20) ++
 // biasedRange(2.0, 2^32, 1000) ++ scalarRange().
 std::vector<double> logRange(fp::FPKind kind) {
-    const double posMin =
-        kind == fp::FPKind::Abstract ? fp::f64PositiveMin() : fp::f32PositiveMin();
+    const double posMin = kind == fp::FPKind::Abstract  ? fp::f64PositiveMin()
+                          : kind == fp::FPKind::F16      ? fp::f16PositiveMin()
+                                                         : fp::f32PositiveMin();
     std::vector<double> v = fp::linearRange(posMin, 0.5, 20);
     std::vector<double> a = fp::linearRange(0.5, 2.0, 20);
     v.insert(v.end(), a.begin(), a.end());
     std::vector<double> b = fp::biasedRange(2.0, 4294967296.0, 1000);
     v.insert(v.end(), b.begin(), b.end());
-    const std::vector<double>& base =
-        kind == fp::FPKind::Abstract ? fp::scalarF64Range() : fp::scalarF32Range();
+    const std::vector<double> base = fp::scalarRangeForKind(kind);
     v.insert(v.end(), base.begin(), base.end());
     return v;
 }
@@ -74,5 +74,13 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const bool isConst = cfgInputSource(t) == InputSource::Const;
+    auto cases = fp::generateScalarToIntervalCases(
+        fp::FPKind::F16, logRange(fp::FPKind::F16), /*finite=*/isConst,
+        [](double n) { return fp::logInterval(fp::FPKind::F16, n); });
+    run(t, builtin("log"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });

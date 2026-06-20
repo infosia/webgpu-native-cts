@@ -43,33 +43,33 @@ int cfgVectorize(const Fixture& t) {
     return t.paramIsUndefined("vectorize") ? 0 : static_cast<int>(t.param<int64_t>("vectorize"));
 }
 
-// mixIntervals order: imprecise, precise. Inherited -> f32 math.
-std::vector<fp::ScalarTripleToInterval> mixOps() {
-    return {[](double x, double y, double z) { return fp::mixImpreciseInterval(fp::FPKind::F32, x, y, z); },
-            [](double x, double y, double z) { return fp::mixPreciseInterval(fp::FPKind::F32, x, y, z); }};
+// mixIntervals order: imprecise, precise. Inherited accuracy: abstract uses f32 math, f16 uses f16.
+std::vector<fp::ScalarTripleToInterval> mixOps(fp::FPKind kind) {
+    const fp::FPKind mathKind = kind == fp::FPKind::F16 ? fp::FPKind::F16 : fp::FPKind::F32;
+    return {[mathKind](double x, double y, double z) { return fp::mixImpreciseInterval(mathKind, x, y, z); },
+            [mathKind](double x, double y, double z) { return fp::mixPreciseInterval(mathKind, x, y, z); }};
 }
 
 std::vector<Case> scalarCases(fp::FPKind kind, bool constStage) {
-    const std::vector<double>& r = kind == fp::FPKind::Abstract ? fp::sparseScalarF64Range()
-                                                                : fp::sparseScalarF32Range();
+    const std::vector<double>& r = fp::sparseScalarRange(kind);
     std::vector<Case> cases =
-        fp::generateScalarTripleToIntervalCases(kind, r, r, r, /*finite=*/constStage, mixOps());
+        fp::generateScalarTripleToIntervalCases(kind, r, r, r, /*finite=*/constStage, mixOps(kind));
     const size_t n = kind == fp::FPKind::Abstract ? 50 : cases.size();
     return fp::selectNCases("mix_scalar", n, cases);
 }
 
 std::vector<Case> vecCases(fp::FPKind kind, int dim, bool constStage) {
     const std::vector<std::vector<double>> vr = fp::sparseVectorRange(kind, dim);
-    const std::vector<double>& sr = kind == fp::FPKind::Abstract ? fp::sparseScalarF64Range()
-                                                                 : fp::sparseScalarF32Range();
+    const std::vector<double>& sr = fp::sparseScalarRange(kind);
     std::vector<Case> cases = fp::generateVectorPairScalarToVectorComponentWiseCase(
-        kind, vr, vr, sr, /*finite=*/constStage, mixOps());
+        kind, vr, vr, sr, /*finite=*/constStage, mixOps(kind));
     const size_t n = kind == fp::FPKind::Abstract ? 50 : cases.size();
     return fp::selectNCases("mix_vector", n, cases);
 }
 
 ExprType vecAF(int dim) { return vecType(dim, ScalarKind::AbstractFloat); }
 ExprType vecF32(int dim) { return vecType(dim, ScalarKind::F32); }
+ExprType vecF16(int dim) { return vecType(dim, ScalarKind::F16); }
 
 } // namespace
 
@@ -122,16 +122,37 @@ CTS_TEST(g, "f32_nonmatching_vec4").params(sourceOnly).fn([](AllFeaturesMaxLimit
         cfgInputSource(t), 0, cases);
 });
 
-// --- f16 (deferred) ---
+// --- f16 ---
 CTS_TEST(g, "f16_matching").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = scalarCases(fp::FPKind::F16, isConst(t));
+    run(t, builtin("mix"),
+        {scalarType(ScalarKind::F16), scalarType(ScalarKind::F16), scalarType(ScalarKind::F16)},
+        scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });
 CTS_TEST(g, "f16_nonmatching_vec2").params(sourceOnly).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = vecCases(fp::FPKind::F16, 2, isConst(t));
+    run(t, builtin("mix"), {vecF16(2), vecF16(2), scalarType(ScalarKind::F16)}, vecF16(2),
+        cfgInputSource(t), 0, cases);
 });
 CTS_TEST(g, "f16_nonmatching_vec3").params(sourceOnly).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = vecCases(fp::FPKind::F16, 3, isConst(t));
+    run(t, builtin("mix"), {vecF16(3), vecF16(3), scalarType(ScalarKind::F16)}, vecF16(3),
+        cfgInputSource(t), 0, cases);
 });
 CTS_TEST(g, "f16_nonmatching_vec4").params(sourceOnly).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = vecCases(fp::FPKind::F16, 4, isConst(t));
+    run(t, builtin("mix"), {vecF16(4), vecF16(4), scalarType(ScalarKind::F16)}, vecF16(4),
+        cfgInputSource(t), 0, cases);
 });

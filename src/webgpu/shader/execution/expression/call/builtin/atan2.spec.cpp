@@ -43,8 +43,12 @@ int cfgVectorize(const Fixture& t) {
 std::vector<double> atan2Range(fp::FPKind kind) {
     const std::vector<double>& s = fp::sparseScalarRange(kind);
     std::vector<double> v(s.begin(), s.end());
-    const double negMax = kind == fp::FPKind::Abstract ? fp::f64NegativeMax() : fp::f32NegativeMax();
-    const double posMin = kind == fp::FPKind::Abstract ? fp::f64PositiveMin() : fp::f32PositiveMin();
+    const double negMax = kind == fp::FPKind::Abstract  ? fp::f64NegativeMax()
+                          : kind == fp::FPKind::F16      ? fp::f16NegativeMax()
+                                                         : fp::f32NegativeMax();
+    const double posMin = kind == fp::FPKind::Abstract  ? fp::f64PositiveMin()
+                          : kind == fp::FPKind::F16      ? fp::f16PositiveMin()
+                                                         : fp::f32PositiveMin();
     std::vector<double> l = fp::linearRange(negMax, posMin, 10);
     v.insert(v.end(), l.begin(), l.end());
     return v;
@@ -72,5 +76,14 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const bool isConst = cfgInputSource(t) == InputSource::Const;
+    auto r = atan2Range(fp::FPKind::F16);
+    auto cases = fp::generateScalarPairToIntervalCases(
+        fp::FPKind::F16, r, r, /*finite=*/isConst,
+        [](double y, double x) { return fp::atan2Interval(fp::FPKind::F16, y, x); });
+    run(t, builtin("atan2"), {scalarType(ScalarKind::F16), scalarType(ScalarKind::F16)},
+        scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });

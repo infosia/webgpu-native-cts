@@ -7,7 +7,10 @@
 // result = t*t*(3-2t). Inherited accuracy (abstract as accurate as f32). For const inputs low must
 // differ from high (validForConst). f16 is deferred (no Metal oracle).
 
+#include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include "webgpu/shader/execution/expression/expression.h"
@@ -40,17 +43,39 @@ int cfgVectorize(const Fixture& t) {
     return t.paramIsUndefined("vectorize") ? 0 : static_cast<int>(t.param<int64_t>("vectorize"));
 }
 
-// smoothStepInterval as a single ScalarTripleToInterval (low, high, x). Inherited -> f32 math.
-std::vector<fp::ScalarTripleToInterval> smoothOps() {
-    return {[](double low, double high, double x) {
-        return fp::smoothStepInterval(fp::FPKind::F32, low, high, x);
+// smoothStepInterval as a single ScalarTripleToInterval (low, high, x). Inherited accuracy:
+// abstract uses f32 math, f16 uses f16.
+std::vector<fp::ScalarTripleToInterval> smoothOps(fp::FPKind kind) {
+    const fp::FPKind mathKind = kind == fp::FPKind::F16 ? fp::FPKind::F16 : fp::FPKind::F32;
+    return {[mathKind](double low, double high, double x) {
+        return fp::smoothStepInterval(mathKind, low, high, x);
     }};
 }
 
-// Decode a case input scalar (f32 bit pattern or abstract-float f64) back to its double value.
+// Decode a 16-bit IEEE-754 binary16 pattern to a double.
+double f16BitsToF64(uint16_t bits) {
+    const uint32_t sign = (bits >> 15) & 0x1u;
+    const uint32_t exp = (bits >> 10) & 0x1fu;
+    const uint32_t mant = bits & 0x3ffu;
+    double value;
+    if (exp == 0) {
+        value = std::ldexp(static_cast<double>(mant), -24); // subnormal/zero: mant * 2^-24
+    } else if (exp == 0x1f) {
+        value = mant == 0 ? std::numeric_limits<double>::infinity()
+                          : std::numeric_limits<double>::quiet_NaN();
+    } else {
+        value = std::ldexp(1.0 + static_cast<double>(mant) / 1024.0, static_cast<int>(exp) - 15);
+    }
+    return sign ? -value : value;
+}
+
+// Decode a case input scalar (f32/f16 bit pattern or abstract-float f64) back to its double value.
 double inputValue(fp::FPKind kind, const Scalar& s) {
     if (kind == fp::FPKind::Abstract) {
         return s.f64;
+    }
+    if (kind == fp::FPKind::F16) {
+        return f16BitsToF64(static_cast<uint16_t>(s.bits));
     }
     float f;
     std::memcpy(&f, &s.bits, 4);
@@ -59,10 +84,9 @@ double inputValue(fp::FPKind kind, const Scalar& s) {
 
 // validForConst: low (input 0) != high (input 1). Filter applies only for const input source.
 std::vector<Case> smoothCases(fp::FPKind kind, bool constStage) {
-    const std::vector<double>& r = kind == fp::FPKind::Abstract ? fp::sparseScalarF64Range()
-                                                                : fp::sparseScalarF32Range();
+    const std::vector<double>& r = fp::sparseScalarRange(kind);
     std::vector<Case> all = fp::generateScalarTripleToIntervalCases(
-        kind, r, r, r, /*finite=*/constStage, smoothOps());
+        kind, r, r, r, /*finite=*/constStage, smoothOps(kind));
     if (!constStage) {
         return all;
     }
@@ -95,5 +119,11 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = smoothCases(fp::FPKind::F16, isConst(t));
+    run(t, builtin("smoothstep"),
+        {scalarType(ScalarKind::F16), scalarType(ScalarKind::F16), scalarType(ScalarKind::F16)},
+        scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });

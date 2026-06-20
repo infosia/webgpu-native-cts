@@ -174,11 +174,38 @@ CTS_TEST(g, "f32_mat").params(sourceColsRows).fn([](AllFeaturesMaxLimitsGpuTest&
 });
 
 CTS_TEST(g, "f16").params(sourceVectorizeUndef).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    // f32(e) where e is f16: all f16 values are exactly representable in f32. Input is f16, output is
+    // f32 (correctly-rounded interval, width 32). Built manually for the distinct in/out kinds.
+    std::vector<Case> cases;
+    for (double n : fp::scalarF16Range()) {
+        const fp::FPInterval iv = fp::correctlyRoundedInterval(fp::FPKind::F32, n);
+        Case c;
+        c.inputs.push_back(CaseValue(fp::scalarInput(fp::FPKind::F16, n)));
+        c.expected = CaseValue(f32Bits(0u));
+        c.expectedAccept.push_back(acceptInterval(32, iv.begin, iv.end));
+        cases.push_back(std::move(c));
+    }
+    run(t, f32ConvExpr(cfgVectorize(t)), {scalarType(ScalarKind::F16)}, F32, cfgInputSource(t),
+        cfgVectorize(t), cases);
 });
 
 CTS_TEST(g, "f16_mat").params(sourceColsRows).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const int cols = static_cast<int>(t.param<int64_t>("cols"));
+    const int rows = static_cast<int>(t.param<int64_t>("rows"));
+    const ExprType mtIn = matType(cols, rows, ScalarKind::F16);
+    const ExprType mtOut = matType(cols, rows, ScalarKind::F32);
+    const bool isConst = cfgInputSource(t) == InputSource::Const;
+    // f16 matrix -> f32 matrix: input f16, output f32, each element correctly-rounded to f32.
+    auto cases = fp::generateMatrixToMatrixCases(fp::FPKind::F16, fp::FPKind::F32,
+                                                 fp::sparseMatrixF16Range(cols, rows),
+                                                 /*finite=*/isConst, correctlyRoundedMatrixOp());
+    run(t, matConvExpr(cols, rows), {mtIn}, mtOut, cfgInputSource(t), 0, cases);
 });
 
 CTS_TEST(g, "abstract_float").params(constVectorizeUndef).fn([](AllFeaturesMaxLimitsGpuTest& t) {

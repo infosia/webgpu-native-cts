@@ -51,11 +51,21 @@ const std::vector<double> kCommonValues = {
 };
 // f32-specific values: 10.0001, -10.0001, 0x8000_0000 (a number).
 const std::vector<double> kF32Specific = {10.0001, -10.0001, 2147483648.0};
+// f16-specific values: 10.0078125, -10.0078125, 658.5, 0x8000 (a number).
+const std::vector<double> kF16Specific = {10.0078125, -10.0078125, 658.5, 32768.0};
 
 std::vector<double> f32Range() {
     std::vector<double> v = kCommonValues;
     v.insert(v.end(), kF32Specific.begin(), kF32Specific.end());
     const std::vector<double> base = fp::scalarF32Range();
+    v.insert(v.end(), base.begin(), base.end());
+    return v;
+}
+
+std::vector<double> f16Range() {
+    std::vector<double> v = kCommonValues;
+    v.insert(v.end(), kF16Specific.begin(), kF16Specific.end());
+    const std::vector<double> base = fp::scalarRangeForKind(fp::FPKind::F16);
     v.insert(v.end(), base.begin(), base.end());
     return v;
 }
@@ -151,5 +161,12 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = fp::generateScalarToIntervalCases(
+        fp::FPKind::F16, f16Range(), /*finite=*/false,
+        [](double n) { return fp::fractInterval(fp::FPKind::F16, n); });
+    run(t, builtin("fract"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });

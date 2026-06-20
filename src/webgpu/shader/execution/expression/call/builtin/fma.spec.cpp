@@ -39,13 +39,13 @@ int cfgVectorize(const Fixture& t) {
     return t.paramIsUndefined("vectorize") ? 0 : static_cast<int>(t.param<int64_t>("vectorize"));
 }
 
-std::vector<fp::ScalarTripleToInterval> fmaOps() {
-    return {[](double x, double y, double z) { return fp::fmaInterval(fp::FPKind::F32, x, y, z); }};
+std::vector<fp::ScalarTripleToInterval> fmaOps(fp::FPKind kind) {
+    const fp::FPKind mathKind = kind == fp::FPKind::F16 ? fp::FPKind::F16 : fp::FPKind::F32;
+    return {[mathKind](double x, double y, double z) { return fp::fmaInterval(mathKind, x, y, z); }};
 }
 std::vector<Case> fmaCases(fp::FPKind kind, bool constStage) {
-    const std::vector<double>& r = kind == fp::FPKind::Abstract ? fp::sparseScalarF64Range()
-                                                                : fp::sparseScalarF32Range();
-    return fp::generateScalarTripleToIntervalCases(kind, r, r, r, /*finite=*/constStage, fmaOps());
+    const std::vector<double>& r = fp::sparseScalarRange(kind);
+    return fp::generateScalarTripleToIntervalCases(kind, r, r, r, /*finite=*/constStage, fmaOps(kind));
 }
 
 } // namespace
@@ -66,5 +66,11 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = fmaCases(fp::FPKind::F16, isConst(t));
+    run(t, builtin("fma"),
+        {scalarType(ScalarKind::F16), scalarType(ScalarKind::F16), scalarType(ScalarKind::F16)},
+        scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });

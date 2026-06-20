@@ -42,22 +42,24 @@ int cfgVectorize(const Fixture& t) {
 // biasedRange(1, 2, 100) ++ scalarRange().
 std::vector<double> acoshRange(fp::FPKind kind) {
     std::vector<double> v = fp::biasedRange(1.0, 2.0, 100);
-    const std::vector<double>& base =
-        kind == fp::FPKind::Abstract ? fp::scalarF64Range() : fp::scalarF32Range();
+    const std::vector<double> base = fp::scalarRangeForKind(kind);
     v.insert(v.end(), base.begin(), base.end());
     return v;
 }
 
-std::vector<fp::ScalarToInterval> acoshOps() {
-    return {[](double n) { return fp::acoshAlternativeInterval(fp::FPKind::F32, n); },
-            [](double n) { return fp::acoshPrimaryInterval(fp::FPKind::F32, n); }};
+// The cache uses FP[trait!=='abstract'?trait:'f32'].acoshIntervals, so abstract uses F32 and f16
+// uses the genuine f16 formulations.
+std::vector<fp::ScalarToInterval> acoshOps(fp::FPKind opKind) {
+    return {[opKind](double n) { return fp::acoshAlternativeInterval(opKind, n); },
+            [opKind](double n) { return fp::acoshPrimaryInterval(opKind, n); }};
 }
 
 } // namespace
 
 CTS_TEST(g, "abstract_float").params(constOnlyVectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     auto cases = fp::generateScalarToIntervalCasesAnyOf(
-        fp::FPKind::Abstract, acoshRange(fp::FPKind::Abstract), /*finite=*/true, acoshOps());
+        fp::FPKind::Abstract, acoshRange(fp::FPKind::Abstract), /*finite=*/true,
+        acoshOps(fp::FPKind::F32));
     run(t, builtin("acosh"), {scalarType(ScalarKind::AbstractFloat)},
         scalarType(ScalarKind::AbstractFloat), InputSource::Const, cfgVectorize(t), cases);
 });
@@ -65,11 +67,18 @@ CTS_TEST(g, "abstract_float").params(constOnlyVectorizeParams).fn([](AllFeatures
 CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     const bool isConst = cfgInputSource(t) == InputSource::Const;
     auto cases = fp::generateScalarToIntervalCasesAnyOf(
-        fp::FPKind::F32, acoshRange(fp::FPKind::F32), /*finite=*/isConst, acoshOps());
+        fp::FPKind::F32, acoshRange(fp::FPKind::F32), /*finite=*/isConst, acoshOps(fp::FPKind::F32));
     run(t, builtin("acosh"), {scalarType(ScalarKind::F32)}, scalarType(ScalarKind::F32),
         cfgInputSource(t), cfgVectorize(t), cases);
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const bool isConst = cfgInputSource(t) == InputSource::Const;
+    auto cases = fp::generateScalarToIntervalCasesAnyOf(
+        fp::FPKind::F16, acoshRange(fp::FPKind::F16), /*finite=*/isConst, acoshOps(fp::FPKind::F16));
+    run(t, builtin("acosh"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });

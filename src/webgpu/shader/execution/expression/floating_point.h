@@ -216,6 +216,9 @@ std::vector<double> scalarRangeForKind(FPKind kind);
 // scalarF16Range (math.ts): f16 values spread over the f16 bit space. Used by quantizeToF16 and the
 // f16 builtin variants. Default counts {pos_sub:10, pos_norm:50, neg_*=pos_*}.
 std::vector<double> scalarF16Range();
+// Count-parameterized f16 scalar range (math.ts scalarF16Range with explicit counts). E.g. f16
+// arithmetic negation uses {neg_norm:250, neg_sub:20, pos_sub:20, pos_norm:250}.
+std::vector<double> scalarF16RangeCounts(int negNorm, int negSub, int posSub, int posNorm);
 // sparseScalarF16Range (math.ts kInterestingF16Values): minimal f16 coverage set.
 const std::vector<double>& sparseScalarF16Range();
 // Dense / sparse vector + sparse matrix f16 ranges (kVectorF16Values / kSparseVectorF16Values /
@@ -244,6 +247,11 @@ std::vector<int64_t> fullI64Range();
 using ScalarToInterval = std::function<FPInterval(double)>;
 using ScalarPairToInterval = std::function<FPInterval(double, double)>;
 using ScalarTripleToInterval = std::function<FPInterval(double, double, double)>;
+
+// Encode a scalar input value for the kind (F32 -> f32 bits, F16 -> exact f16 bit pattern of the
+// f16-quantized value, Abstract -> exact f64 AbstractFloat literal). Exposed for spec files that
+// build cases with a distinct input vs result kind (e.g. f32(f16_value): f16 input, f32 result).
+Scalar scalarInput(FPKind kind, double v);
 
 // abs/floor/ceil/trunc/sqrt/cos: one f32 (or abstract) scalar in, one scalar interval out.
 std::vector<Case> generateScalarToIntervalCases(

@@ -31,6 +31,7 @@ bool isConst(const Fixture& t) { return cfgInputSource(t) == InputSource::Const;
 
 ExprType vecAF() { return vecType(3, ScalarKind::AbstractFloat); }
 ExprType vecF32() { return vecType(3, ScalarKind::F32); }
+ExprType vecF16() { return vecType(3, ScalarKind::F16); }
 
 } // namespace
 
@@ -47,5 +48,10 @@ CTS_TEST(g, "f32").params(allSources).fn([](AllFeaturesMaxLimitsGpuTest& t) {
 });
 
 CTS_TEST(g, "f16").params(allSources).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = fp::generateCrossCases(fp::FPKind::F16, fp::vectorF16Range(3), fp::vectorF16Range(3),
+                                        isConst(t));
+    run(t, builtin("cross"), {vecF16(), vecF16()}, vecF16(), cfgInputSource(t), 0, cases);
 });

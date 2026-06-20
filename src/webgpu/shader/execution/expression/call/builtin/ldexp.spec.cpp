@@ -78,5 +78,19 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    std::vector<Case> cases;
+    if (isConst(t)) {
+        cases = fp::generateLdexpCases(fp::FPKind::F16, fp::sparseScalarF16Range(),
+                                       constE2(fp::FPKind::F16), /*finite=*/false,
+                                       /*constStage=*/true, /*e2IsAbstractInt=*/false);
+    } else {
+        cases = fp::generateLdexpCases(fp::FPKind::F16, fp::sparseScalarF16Range(),
+                                       fp::sparseI32Range(), /*finite=*/false,
+                                       /*constStage=*/false, /*e2IsAbstractInt=*/false);
+    }
+    run(t, builtin("ldexp"), {scalarType(ScalarKind::F16), scalarType(ScalarKind::I32)},
+        scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });

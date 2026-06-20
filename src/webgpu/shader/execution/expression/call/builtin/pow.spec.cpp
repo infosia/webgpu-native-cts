@@ -38,7 +38,7 @@ int cfgVectorize(const Fixture& t) {
     return t.paramIsUndefined("vectorize") ? 0 : static_cast<int>(t.param<int64_t>("vectorize"));
 }
 std::vector<double> scalarRange(fp::FPKind kind) {
-    return kind == fp::FPKind::Abstract ? fp::scalarF64Range() : fp::scalarF32Range();
+    return fp::scalarRangeForKind(kind);
 }
 
 } // namespace
@@ -63,5 +63,14 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    const bool isConst = cfgInputSource(t) == InputSource::Const;
+    auto r = scalarRange(fp::FPKind::F16);
+    auto cases = fp::generateScalarPairToIntervalCases(
+        fp::FPKind::F16, r, r, /*finite=*/isConst,
+        [](double x, double y) { return fp::powInterval(fp::FPKind::F16, x, y); });
+    run(t, builtin("pow"), {scalarType(ScalarKind::F16), scalarType(ScalarKind::F16)},
+        scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });

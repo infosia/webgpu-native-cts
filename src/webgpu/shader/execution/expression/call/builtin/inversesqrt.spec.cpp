@@ -53,6 +53,13 @@ std::vector<double> abstractInputs() {
     v.insert(v.end(), b.begin(), b.end());
     return v;
 }
+// f16: linearRange(f16.positive.min, 1, 100) ++ biasedRange(1, 2^15, 1000).
+std::vector<double> f16Inputs() {
+    std::vector<double> v = fp::linearRange(fp::f16PositiveMin(), 1.0, 100);
+    std::vector<double> b = fp::biasedRange(1.0, 32768.0, 1000);
+    v.insert(v.end(), b.begin(), b.end());
+    return v;
+}
 
 } // namespace
 
@@ -73,5 +80,12 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = fp::generateScalarToIntervalCases(
+        fp::FPKind::F16, f16Inputs(), /*finite=*/false,
+        [](double n) { return fp::inverseSqrtInterval(fp::FPKind::F16, n); });
+    run(t, builtin("inverseSqrt"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });
