@@ -1791,6 +1791,289 @@ std::vector<int64_t> biasedRangeBigIntS64(int64_t a, int64_t b, int numSteps) {
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// Vector / matrix acceptance-interval helpers (phaseY13 Stage B/3b). All compute at f32 precision
+// (kF) because every geometric/matrix builtin ported here has inherited accuracy. Faithful ports of
+// util/floating_point.ts's *IntervalImpl. They build on the elementary *Iv helpers above.
+// ---------------------------------------------------------------------------
+
+// Convenience: elementary ops on point doubles (mirror multiplicationInterval(x, y) etc.).
+FPInterval mulIv2(double x, double y) { return multiplicationIv(toIntervalPoint(kF, x), toIntervalPoint(kF, y)); }
+FPInterval subIv2(double x, double y) { return subtractionIv(toIntervalPoint(kF, x), toIntervalPoint(kF, y)); }
+
+// All permutations of a list of intervals (Heap's algorithm), for order-independent fp summation.
+void permuteIntervals(std::vector<FPInterval>& a, size_t k,
+                      std::vector<std::vector<FPInterval>>& out) {
+    if (k == 1) {
+        out.push_back(a);
+        return;
+    }
+    for (size_t i = 0; i < k; ++i) {
+        permuteIntervals(a, k - 1, out);
+        if (k % 2 == 0) {
+            std::swap(a[i], a[k - 1]);
+        } else {
+            std::swap(a[0], a[k - 1]);
+        }
+    }
+}
+
+// spanIntervals over the reduce(additionInterval) of every permutation of 'terms'.
+FPInterval spanPermutedSums(std::vector<FPInterval> terms) {
+    std::vector<std::vector<FPInterval>> perms;
+    permuteIntervals(terms, terms.size(), perms);
+    std::vector<FPInterval> sums;
+    sums.reserve(perms.size());
+    for (const std::vector<FPInterval>& p : perms) {
+        FPInterval acc = p.front();
+        for (size_t i = 1; i < p.size(); ++i) {
+            acc = additionIv(acc, p[i]);
+        }
+        sums.push_back(acc);
+    }
+    return spanIntervals(sums);
+}
+
+// dot(x, y): sum of x[i]*y[i] with order-independent accumulation (vec2 is order-free).
+FPInterval dotIv(const std::vector<double>& x, const std::vector<double>& y) {
+    std::vector<FPInterval> mults;
+    mults.reserve(x.size());
+    for (size_t i = 0; i < x.size(); ++i) {
+        mults.push_back(mulIv2(x[i], y[i]));
+    }
+    if (mults.size() == 2) {
+        return additionIv(mults[0], mults[1]);
+    }
+    return spanPermutedSums(mults);
+}
+
+// length(v) = sqrt(dot(v, v)).
+FPInterval lengthVecIv(const std::vector<double>& v) { return sqrtIv(dotIv(v, v)); }
+// length(scalar) = sqrt(scalar*scalar).
+FPInterval lengthScalarIv(double n) { return sqrtIv(mulIv2(n, n)); }
+
+// distance(x, y) = length(x - y) (vector form: length of componentwise subtraction interval).
+FPInterval distanceVecIv(const std::vector<double>& x, const std::vector<double>& y) {
+    std::vector<FPInterval> diff;
+    diff.reserve(x.size());
+    for (size_t i = 0; i < x.size(); ++i) {
+        diff.push_back(subIv2(x[i], y[i]));
+    }
+    // length of an interval vector: sqrt(dot(diff, diff)).
+    std::vector<FPInterval> mults;
+    mults.reserve(diff.size());
+    for (size_t i = 0; i < diff.size(); ++i) {
+        mults.push_back(multiplicationIv(diff[i], diff[i]));
+    }
+    FPInterval d;
+    if (mults.size() == 2) {
+        d = additionIv(mults[0], mults[1]);
+    } else {
+        d = spanPermutedSums(mults);
+    }
+    return sqrtIv(d);
+}
+// distance(scalar) = length(x - y).
+FPInterval distanceScalarIv(double x, double y) {
+    FPInterval diff = subIv2(x, y);
+    return sqrtIv(multiplicationIv(diff, diff));
+}
+
+// cross(x, y) (vec3) -> three component intervals (or unbounded vec on OOB).
+std::vector<FPInterval> crossIv(const std::vector<double>& x, const std::vector<double>& y) {
+    FPInterval r0 = subtractionIv(mulIv2(x[1], y[2]), mulIv2(x[2], y[1]));
+    FPInterval r1 = subtractionIv(mulIv2(x[2], y[0]), mulIv2(x[0], y[2]));
+    FPInterval r2 = subtractionIv(mulIv2(x[0], y[1]), mulIv2(x[1], y[0]));
+    if (r0.isFinite() && r1.isFinite() && r2.isFinite()) {
+        return {r0, r1, r2};
+    }
+    return {unboundedInterval(kF), unboundedInterval(kF), unboundedInterval(kF)};
+}
+
+// reflect(x, y) = x - 2*dot(x,y)*y, componentwise.
+std::vector<FPInterval> reflectIv(const std::vector<double>& x, const std::vector<double>& y) {
+    const size_t w = x.size();
+    FPInterval t = multiplicationIv(toIntervalPoint(kF, 2.0), dotIv(x, y));
+    std::vector<FPInterval> result;
+    result.reserve(w);
+    bool oob = false;
+    for (size_t i = 0; i < w; ++i) {
+        FPInterval rhs = multiplicationIv(toIntervalPoint(kF, y[i]), t);
+        FPInterval r = subtractionIv(toIntervalPoint(kF, x[i]), rhs);
+        if (!r.isFinite()) {
+            oob = true;
+        }
+        result.push_back(r);
+    }
+    if (oob) {
+        return std::vector<FPInterval>(w, unboundedInterval(kF));
+    }
+    return result;
+}
+
+// normalize(v) = v / length(v), componentwise.
+std::vector<FPInterval> normalizeIv(const std::vector<double>& v) {
+    const size_t w = v.size();
+    FPInterval len = lengthVecIv(v);
+    std::vector<FPInterval> result;
+    result.reserve(w);
+    bool oob = false;
+    for (size_t i = 0; i < w; ++i) {
+        FPInterval r = divisionIv(toIntervalPoint(kF, v[i]), len);
+        if (!r.isFinite()) {
+            oob = true;
+        }
+        result.push_back(r);
+    }
+    if (oob) {
+        return std::vector<FPInterval>(w, unboundedInterval(kF));
+    }
+    return result;
+}
+
+// refract(i, s, r): full upstream refractInterval. Returns the vec of component intervals, the zero
+// vector (k.end < 0), or the unbounded vec (k non-finite / k contains zero-or-subnormal, or OOB).
+bool intervalContainsZeroOrSubnormal(const FPInterval& iv) {
+    // Upstream FPInterval.containsZeroOrSubnormals(): the interval may be flushed to zero (includes
+    // subnormals and zero) unless it lies entirely below negative.subnormal.min or above
+    // positive.subnormal.max. negative.subnormal.min = kF32NegSubMin (most-negative subnormal).
+    return !(iv.end < kF32NegSubMin || iv.begin > kF32PosSubMax);
+}
+
+std::vector<FPInterval> refractIv(const std::vector<double>& i, const std::vector<double>& s,
+                                  double r) {
+    const size_t w = i.size();
+    FPInterval rSquared = mulIv2(r, r);
+    FPInterval dot = dotIv(s, i);
+    FPInterval dotSquared = multiplicationIv(dot, dot);
+    FPInterval oneMinusDotSquared = subtractionIv(toIntervalPoint(kF, 1.0), dotSquared);
+    FPInterval k =
+        subtractionIv(toIntervalPoint(kF, 1.0), multiplicationIv(rSquared, oneMinusDotSquared));
+    if (!k.isFinite() || intervalContainsZeroOrSubnormal(k)) {
+        return std::vector<FPInterval>(w, unboundedInterval(kF));
+    }
+    if (k.end < 0.0) {
+        return std::vector<FPInterval>(w, toIntervalPoint(kF, 0.0));
+    }
+    FPInterval dotTimesR = multiplicationIv(dot, toIntervalPoint(kF, r));
+    FPInterval kSqrt = sqrtIv(k);
+    FPInterval t = additionIv(dotTimesR, kSqrt); // r*dot(i,s) + sqrt(k)
+    std::vector<FPInterval> result;
+    result.reserve(w);
+    bool oob = false;
+    for (size_t idx = 0; idx < w; ++idx) {
+        FPInterval iR = mulIv2(i[idx], r);
+        FPInterval sT = multiplicationIv(toIntervalPoint(kF, s[idx]), t);
+        FPInterval rr = subtractionIv(iR, sT);
+        if (!rr.isFinite()) {
+            oob = true;
+        }
+        result.push_back(rr);
+    }
+    if (oob) {
+        return std::vector<FPInterval>(w, unboundedInterval(kF));
+    }
+    return result;
+}
+
+// faceForward(x, y, z): candidate result vectors (anyOf), each a vec or 'undefined' (signalled by an
+// empty vector meaning OOB-skip). Mirrors faceForwardIntervalsImpl. Returns pair{candidates, hadOOB}.
+struct FaceForwardResult {
+    std::vector<std::vector<FPInterval>> candidates; // each is a width-sized vec
+    bool hadUndefined = false;                       // dot OOB => undefined candidate present
+};
+
+FaceForwardResult faceForwardIv(const std::vector<double>& x, const std::vector<double>& y,
+                                const std::vector<double>& z) {
+    const size_t w = x.size();
+    // positive_x: identity through round/flush; negative_x: negation.
+    std::vector<FPInterval> positiveX;
+    std::vector<FPInterval> negativeX;
+    positiveX.reserve(w);
+    negativeX.reserve(w);
+    for (size_t idx = 0; idx < w; ++idx) {
+        positiveX.push_back(correctlyRoundedInterval(kF, x[idx])); // round/flush of the value
+        negativeX.push_back(negationIv(toIntervalPoint(kF, x[idx])));
+    }
+    FPInterval dot = dotIv(z, y);
+    FaceForwardResult out;
+    if (!dot.isFinite()) {
+        out.hadUndefined = true;
+    }
+    if (dot.begin < 0.0 || dot.end < 0.0) {
+        out.candidates.push_back(positiveX);
+    }
+    if (dot.begin >= 0.0 || dot.end >= 0.0) {
+        out.candidates.push_back(negativeX);
+    }
+    return out;
+}
+
+// determinant of a 2x2/3x3/4x4 matrix given column-major Array2D m[col][row].
+FPInterval determinant2x2Iv(const std::vector<std::vector<double>>& m) {
+    return subtractionIv(mulIv2(m[0][0], m[1][1]), mulIv2(m[0][1], m[1][0]));
+}
+
+std::vector<std::vector<double>> minorNxN(const std::vector<std::vector<double>>& m, size_t col,
+                                          size_t row) {
+    const size_t dim = m.size();
+    std::vector<std::vector<double>> result;
+    for (size_t c = 0; c < dim; ++c) {
+        if (c == col) {
+            continue;
+        }
+        std::vector<double> rowVec;
+        for (size_t rr = 0; rr < dim; ++rr) {
+            if (rr == row) {
+                continue;
+            }
+            rowVec.push_back(m[c][rr]);
+        }
+        result.push_back(std::move(rowVec));
+    }
+    return result;
+}
+
+FPInterval determinant3x3Iv(const std::vector<std::vector<double>>& m) {
+    FPInterval A = multiplicationIv(toIntervalPoint(kF, m[0][0]), determinant2x2Iv(minorNxN(m, 0, 0)));
+    FPInterval B = multiplicationIv(toIntervalPoint(kF, -m[0][1]), determinant2x2Iv(minorNxN(m, 0, 1)));
+    FPInterval C = multiplicationIv(toIntervalPoint(kF, m[0][2]), determinant2x2Iv(minorNxN(m, 0, 2)));
+    return spanPermutedSums({A, B, C});
+}
+
+FPInterval determinant4x4Iv(const std::vector<std::vector<double>>& m) {
+    FPInterval A = multiplicationIv(toIntervalPoint(kF, m[0][0]), determinant3x3Iv(minorNxN(m, 0, 0)));
+    FPInterval B = multiplicationIv(toIntervalPoint(kF, -m[0][1]), determinant3x3Iv(minorNxN(m, 0, 1)));
+    FPInterval C = multiplicationIv(toIntervalPoint(kF, m[0][2]), determinant3x3Iv(minorNxN(m, 0, 2)));
+    FPInterval D = multiplicationIv(toIntervalPoint(kF, -m[0][3]), determinant3x3Iv(minorNxN(m, 0, 3)));
+    return spanPermutedSums({A, B, C, D});
+}
+
+FPInterval determinantIv(const std::vector<std::vector<double>>& m) {
+    switch (m.size()) {
+        case 2:
+            return determinant2x2Iv(m);
+        case 3:
+            return determinant3x3Iv(m);
+        default:
+            return determinant4x4Iv(m);
+    }
+}
+
+// transpose(m): m is column-major m[col][row] (cols x rows); result is rows x cols, correctly
+// rounded element move. Returns column-major result[i][j] (i in [0,rows), j in [0,cols)).
+std::vector<std::vector<FPInterval>> transposeIv(const std::vector<std::vector<double>>& m) {
+    const size_t numCols = m.size();
+    const size_t numRows = m[0].size();
+    std::vector<std::vector<FPInterval>> result(numRows, std::vector<FPInterval>(numCols, FPInterval()));
+    for (size_t ic = 0; ic < numCols; ++ic) {
+        for (size_t jr = 0; jr < numRows; ++jr) {
+            result[jr][ic] = correctlyRoundedInterval(kF, m[ic][jr]);
+        }
+    }
+    return result;
+}
+
 } // namespace
 
 std::vector<int64_t> fullI64Range() {
@@ -2306,6 +2589,583 @@ int32_t quantizeToI32(double n) {
         return INT32_MIN;
     }
     return static_cast<int32_t>(std::trunc(n));
+}
+
+// ---------------------------------------------------------------------------
+// phaseY13 Stage B/3b ranges.
+// ---------------------------------------------------------------------------
+
+const std::vector<double>& interestingF32Values() { return sparseScalarF32Range(); }
+const std::vector<double>& interestingF64Values() { return sparseScalarF64Range(); }
+
+namespace {
+// kVectorF32Values / kVectorF64Values from math.ts: insert each interesting value into a fixed
+// template tuple per dimension. 'interesting' is the scalar sparse range for the kind.
+std::vector<std::vector<double>> denseVectorRange(const std::vector<double>& interesting, int dim) {
+    std::vector<std::vector<double>> out;
+    if (dim == 2) {
+        for (double f : interesting) {
+            out.push_back({f, 1.0});
+            out.push_back({-1.0, f});
+        }
+    } else if (dim == 3) {
+        for (double f : interesting) {
+            out.push_back({f, 1.0, -2.0});
+            out.push_back({-1.0, f, 2.0});
+            out.push_back({1.0, -2.0, f});
+        }
+    } else {
+        for (double f : interesting) {
+            out.push_back({f, -1.0, 2.0, 3.0});
+            out.push_back({1.0, f, -2.0, 3.0});
+            out.push_back({1.0, 2.0, f, -3.0});
+            out.push_back({-1.0, 2.0, -3.0, f});
+        }
+    }
+    return out;
+}
+
+// kSparseMatrixF32Values / kSparseMatrixF64Values: for each interesting value at index idx, build a
+// cols x rows matrix m[col][row] where one position carries 'f' and the others carry +/-idx, exactly
+// per the idx % (cols*rows) selection rule in math.ts.
+std::vector<std::vector<std::vector<double>>> sparseMatrixRangeImpl(const std::vector<double>& interesting,
+                                                                   int cols, int rows) {
+    std::vector<std::vector<std::vector<double>>> out;
+    const int n = cols * rows;
+    for (size_t idx = 0; idx < interesting.size(); ++idx) {
+        const double f = interesting[idx];
+        const double i = static_cast<double>(idx);
+        std::vector<std::vector<double>> m(static_cast<size_t>(cols),
+                                           std::vector<double>(static_cast<size_t>(rows), 0.0));
+        // Position k = c*rows + r (column-major flatten). Sign: +idx for even k, -idx for odd k.
+        int k = 0;
+        for (int c = 0; c < cols; ++c) {
+            for (int r = 0; r < rows; ++r) {
+                const bool isF = (static_cast<int>(idx) % n) == k;
+                const double filler = (k % 2 == 0) ? i : -i;
+                m[static_cast<size_t>(c)][static_cast<size_t>(r)] = isF ? f : filler;
+                ++k;
+            }
+        }
+        out.push_back(std::move(m));
+    }
+    return out;
+}
+} // namespace
+
+std::vector<std::vector<double>> vectorF32Range(int dim) {
+    return denseVectorRange(sparseScalarF32Range(), dim);
+}
+std::vector<std::vector<double>> vectorF64Range(int dim) {
+    return denseVectorRange(sparseScalarF64Range(), dim);
+}
+std::vector<std::vector<double>> vectorRange(FPKind kind, int dim) {
+    return kind == FPKind::Abstract ? vectorF64Range(dim) : vectorF32Range(dim);
+}
+std::vector<std::vector<std::vector<double>>> sparseMatrixF32Range(int cols, int rows) {
+    return sparseMatrixRangeImpl(sparseScalarF32Range(), cols, rows);
+}
+std::vector<std::vector<std::vector<double>>> sparseMatrixF64Range(int cols, int rows) {
+    return sparseMatrixRangeImpl(sparseScalarF64Range(), cols, rows);
+}
+std::vector<std::vector<std::vector<double>>> sparseMatrixRange(FPKind kind, int cols, int rows) {
+    return kind == FPKind::Abstract ? sparseMatrixF64Range(cols, rows)
+                                     : sparseMatrixF32Range(cols, rows);
+}
+
+// ---------------------------------------------------------------------------
+// phaseY13 Stage B/3b Case generators.
+// ---------------------------------------------------------------------------
+
+namespace {
+// Build a vec input CaseValue from quantized scalars of the result kind.
+CaseValue vecInput(FPKind kind, const std::vector<double>& q) {
+    std::vector<Scalar> els;
+    els.reserve(q.size());
+    for (double e : q) {
+        els.push_back(scalarInput(kind, e));
+    }
+    return CaseValue::vec(els);
+}
+// Build a matrix input CaseValue (column-major flatten) from quantized m[col][row].
+CaseValue matInput(FPKind kind, const std::vector<std::vector<double>>& q) {
+    std::vector<Scalar> els;
+    for (const std::vector<double>& col : q) {
+        for (double e : col) {
+            els.push_back(scalarInput(kind, e));
+        }
+    }
+    return CaseValue::composite(els);
+}
+std::vector<double> quantizeVec(FPKind kind, const std::vector<double>& v) {
+    std::vector<double> q;
+    q.reserve(v.size());
+    for (double e : v) {
+        q.push_back(quantize(kind, e));
+    }
+    return q;
+}
+std::vector<std::vector<double>> quantizeMat(FPKind kind, const std::vector<std::vector<double>>& m) {
+    std::vector<std::vector<double>> q;
+    q.reserve(m.size());
+    for (const std::vector<double>& col : m) {
+        q.push_back(quantizeVec(kind, col));
+    }
+    return q;
+}
+} // namespace
+
+std::vector<Case> generateLengthScalarCases(FPKind kind, const std::vector<double>& params,
+                                            bool finiteFilter) {
+    std::vector<Case> cases;
+    for (double e : params) {
+        const double q = quantize(kind, e);
+        const FPInterval iv = lengthScalarIv(q);
+        if (finiteFilter && !iv.isFinite()) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(CaseValue(scalarInput(kind, q)));
+        c.expected = CaseValue(scalarInput(kind, q));
+        c.expectedAccept.push_back(intervalToExpected(kind, iv));
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateLengthVectorCases(FPKind kind,
+                                            const std::vector<std::vector<double>>& vectors,
+                                            bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& v : vectors) {
+        const std::vector<double> q = quantizeVec(kind, v);
+        const FPInterval iv = lengthVecIv(q);
+        if (finiteFilter && !iv.isFinite()) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(vecInput(kind, q));
+        c.expected = CaseValue(scalarInput(kind, q[0]));
+        c.expectedAccept.push_back(intervalToExpected(kind, iv));
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateDistanceScalarCases(FPKind kind, const std::vector<double>& param0s,
+                                              const std::vector<double>& param1s, bool finiteFilter) {
+    std::vector<Case> cases;
+    for (double a : param0s) {
+        for (double b : param1s) {
+            const double qa = quantize(kind, a);
+            const double qb = quantize(kind, b);
+            const FPInterval iv = distanceScalarIv(qa, qb);
+            if (finiteFilter && !iv.isFinite()) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(CaseValue(scalarInput(kind, qa)));
+            c.inputs.push_back(CaseValue(scalarInput(kind, qb)));
+            c.expected = CaseValue(scalarInput(kind, qa));
+            c.expectedAccept.push_back(intervalToExpected(kind, iv));
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateDistanceVectorCases(FPKind kind,
+                                              const std::vector<std::vector<double>>& v0s,
+                                              const std::vector<std::vector<double>>& v1s,
+                                              bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& a : v0s) {
+        for (const std::vector<double>& b : v1s) {
+            const std::vector<double> qa = quantizeVec(kind, a);
+            const std::vector<double> qb = quantizeVec(kind, b);
+            const FPInterval iv = distanceVecIv(qa, qb);
+            if (finiteFilter && !iv.isFinite()) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(vecInput(kind, qa));
+            c.inputs.push_back(vecInput(kind, qb));
+            c.expected = CaseValue(scalarInput(kind, qa[0]));
+            c.expectedAccept.push_back(intervalToExpected(kind, iv));
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateDotCases(FPKind kind, const std::vector<std::vector<double>>& v0s,
+                                   const std::vector<std::vector<double>>& v1s, bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& a : v0s) {
+        for (const std::vector<double>& b : v1s) {
+            const std::vector<double> qa = quantizeVec(kind, a);
+            const std::vector<double> qb = quantizeVec(kind, b);
+            const FPInterval iv = dotIv(qa, qb);
+            if (finiteFilter && !iv.isFinite()) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(vecInput(kind, qa));
+            c.inputs.push_back(vecInput(kind, qb));
+            c.expected = CaseValue(scalarInput(kind, qa[0]));
+            c.expectedAccept.push_back(intervalToExpected(kind, iv));
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+namespace {
+// Common vector-result encoder: anyOf over a set of candidate result vectors (each width-sized).
+void pushVectorAnyOf(FPKind kind, Case& c, const std::vector<std::vector<FPInterval>>& candidates) {
+    const size_t width = candidates.front().size();
+    for (size_t comp = 0; comp < width; ++comp) {
+        std::vector<FPInterval> ivs;
+        ivs.reserve(candidates.size());
+        for (const std::vector<FPInterval>& cand : candidates) {
+            ivs.push_back(cand[comp]);
+        }
+        c.expectedAccept.push_back(anyOfToExpected(kind, ivs));
+    }
+}
+bool vectorFinite(const std::vector<FPInterval>& v) {
+    for (const FPInterval& iv : v) {
+        if (!iv.isFinite()) {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
+std::vector<Case> generateNormalizeCases(FPKind kind,
+                                         const std::vector<std::vector<double>>& vectors,
+                                         bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& v : vectors) {
+        const std::vector<double> q = quantizeVec(kind, v);
+        const std::vector<FPInterval> res = normalizeIv(q);
+        if (finiteFilter && !vectorFinite(res)) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(vecInput(kind, q));
+        c.expected = vecInput(kind, q);
+        pushVectorAnyOf(kind, c, {res});
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateCrossCases(FPKind kind, const std::vector<std::vector<double>>& v0s,
+                                     const std::vector<std::vector<double>>& v1s, bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& a : v0s) {
+        for (const std::vector<double>& b : v1s) {
+            const std::vector<double> qa = quantizeVec(kind, a);
+            const std::vector<double> qb = quantizeVec(kind, b);
+            const std::vector<FPInterval> res = crossIv(qa, qb);
+            if (finiteFilter && !vectorFinite(res)) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(vecInput(kind, qa));
+            c.inputs.push_back(vecInput(kind, qb));
+            c.expected = vecInput(kind, qa);
+            pushVectorAnyOf(kind, c, {res});
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateReflectCases(FPKind kind, const std::vector<std::vector<double>>& v0s,
+                                       const std::vector<std::vector<double>>& v1s,
+                                       bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& a : v0s) {
+        for (const std::vector<double>& b : v1s) {
+            const std::vector<double> qa = quantizeVec(kind, a);
+            const std::vector<double> qb = quantizeVec(kind, b);
+            const std::vector<FPInterval> res = reflectIv(qa, qb);
+            if (finiteFilter && !vectorFinite(res)) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(vecInput(kind, qa));
+            c.inputs.push_back(vecInput(kind, qb));
+            c.expected = vecInput(kind, qa);
+            pushVectorAnyOf(kind, c, {res});
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateRefractCases(FPKind kind, const std::vector<std::vector<double>>& iVs,
+                                       const std::vector<std::vector<double>>& sVs,
+                                       const std::vector<double>& rs, bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& iv : iVs) {
+        for (const std::vector<double>& sv : sVs) {
+            for (double r : rs) {
+                const std::vector<double> qi = quantizeVec(kind, iv);
+                const std::vector<double> qs = quantizeVec(kind, sv);
+                const double qr = quantize(kind, r);
+                const std::vector<FPInterval> res = refractIv(qi, qs, qr);
+                if (finiteFilter && !vectorFinite(res)) {
+                    continue;
+                }
+                Case c;
+                c.inputs.push_back(vecInput(kind, qi));
+                c.inputs.push_back(vecInput(kind, qs));
+                c.inputs.push_back(CaseValue(scalarInput(kind, qr)));
+                c.expected = vecInput(kind, qi);
+                pushVectorAnyOf(kind, c, {res});
+                cases.push_back(std::move(c));
+            }
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateFaceForwardCases(FPKind kind,
+                                           const std::vector<std::vector<double>>& xs,
+                                           const std::vector<std::vector<double>>& ys,
+                                           const std::vector<std::vector<double>>& zs,
+                                           bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& x : xs) {
+        for (const std::vector<double>& y : ys) {
+            for (const std::vector<double>& z : zs) {
+                const std::vector<double> qx = quantizeVec(kind, x);
+                const std::vector<double> qy = quantizeVec(kind, y);
+                const std::vector<double> qz = quantizeVec(kind, z);
+                FaceForwardResult ff = faceForwardIv(qx, qy, qz);
+                // 'finite' (const) drops the case if any result is undefined (dot OOB).
+                if (finiteFilter && ff.hadUndefined) {
+                    continue;
+                }
+                if (ff.candidates.empty()) {
+                    continue;
+                }
+                Case c;
+                c.inputs.push_back(vecInput(kind, qx));
+                c.inputs.push_back(vecInput(kind, qy));
+                c.inputs.push_back(vecInput(kind, qz));
+                c.expected = vecInput(kind, qx);
+                pushVectorAnyOf(kind, c, ff.candidates);
+                cases.push_back(std::move(c));
+            }
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateDeterminantCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& matrices, bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<std::vector<double>>& m : matrices) {
+        const std::vector<std::vector<double>> q = quantizeMat(kind, m);
+        const FPInterval iv = determinantIv(q);
+        if (finiteFilter && !iv.isFinite()) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(matInput(kind, q));
+        c.expected = CaseValue(scalarInput(kind, q[0][0]));
+        c.expectedAccept.push_back(intervalToExpected(kind, iv));
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateTransposeCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& matrices, bool finiteFilter) {
+    std::vector<Case> cases;
+    for (const std::vector<std::vector<double>>& m : matrices) {
+        const std::vector<std::vector<double>> q = quantizeMat(kind, m);
+        const std::vector<std::vector<FPInterval>> res = transposeIv(q); // result[col][row], RxC
+        bool allFinite = true;
+        for (const std::vector<FPInterval>& col : res) {
+            if (!vectorFinite(col)) {
+                allFinite = false;
+            }
+        }
+        if (finiteFilter && !allFinite) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(matInput(kind, q));
+        // expected payload (unused by comparator) — same flatten shape as the result matrix.
+        std::vector<Scalar> exp;
+        for (const std::vector<FPInterval>& col : res) {
+            for (size_t r = 0; r < col.size(); ++r) {
+                exp.push_back(scalarInput(kind, col[r].begin));
+            }
+        }
+        c.expected = CaseValue::composite(exp);
+        // Per-element acceptance in column-major order matching the result matrix flatten.
+        for (const std::vector<FPInterval>& col : res) {
+            for (const FPInterval& iv : col) {
+                c.expectedAccept.push_back(intervalToExpected(kind, iv));
+            }
+        }
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+namespace {
+// modf(n): fract = correctlyRounded(n % 1.0); whole = correctlyRounded(n - (n % 1.0)).
+FPInterval modfPart(double n, bool whole) {
+    const double rem = std::fmod(n, 1.0);
+    return correctlyRoundedInterval(kF, whole ? (n - rem) : rem);
+}
+} // namespace
+
+std::vector<Case> generateModfScalarCases(FPKind kind, const std::vector<double>& params, bool whole) {
+    std::vector<Case> cases;
+    for (double e : params) {
+        const double q = quantize(kind, e);
+        const FPInterval iv = modfPart(q, whole);
+        Case c;
+        c.inputs.push_back(CaseValue(scalarInput(kind, q)));
+        c.expected = CaseValue(scalarInput(kind, q));
+        c.expectedAccept.push_back(intervalToExpected(kind, iv));
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateModfVectorCases(FPKind kind,
+                                          const std::vector<std::vector<double>>& vectors, bool whole) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& v : vectors) {
+        const std::vector<double> q = quantizeVec(kind, v);
+        Case c;
+        c.inputs.push_back(vecInput(kind, q));
+        c.expected = vecInput(kind, q);
+        for (double e : q) {
+            c.expectedAccept.push_back(intervalToExpected(kind, modfPart(e, whole)));
+        }
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+namespace {
+bool isSubnormalKind(FPKind kind, double n) {
+    return kind == FPKind::F32 ? isSubnormalF32(n) : isSubnormalF64(n);
+}
+// frexp(n).fract via std::frexp (the C library splits a finite normal value into m*2^e, m in
+// [0.5,1)). Non-subnormal finite inputs only (callers skip subnormals).
+double frexpFract(double n) {
+    int e = 0;
+    if (n == 0.0 || !std::isfinite(n)) {
+        return n;
+    }
+    return std::frexp(n, &e);
+}
+int frexpExp(double n) {
+    int e = 0;
+    if (n == 0.0 || !std::isfinite(n)) {
+        return 0;
+    }
+    std::frexp(n, &e);
+    return e;
+}
+} // namespace
+
+std::vector<Case> generateFrexpScalarFractCases(FPKind kind, const std::vector<double>& params) {
+    std::vector<Case> cases;
+    for (double e : params) {
+        const double q = quantize(kind, e);
+        if (q != 0.0 && isSubnormalKind(kind, q)) {
+            continue; // skipUndefined
+        }
+        Case c;
+        c.inputs.push_back(CaseValue(scalarInput(kind, q)));
+        c.expected = CaseValue(scalarInput(kind, q));
+        c.expectedAccept.push_back(intervalToExpected(kind, correctlyRoundedInterval(kF, frexpFract(q))));
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateFrexpScalarExpCases(FPKind kind, const std::vector<double>& params) {
+    std::vector<Case> cases;
+    for (double e : params) {
+        const double q = quantize(kind, e);
+        if (q != 0.0 && isSubnormalKind(kind, q)) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(CaseValue(scalarInput(kind, q)));
+        const int32_t ex = static_cast<int32_t>(frexpExp(q));
+        // exp result type is i32 (concrete) or abstract-int (abstract). Bit-exact comparison.
+        c.expected = CaseValue(kind == FPKind::Abstract ? abstractInt(ex) : i32(ex));
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateFrexpVectorFractCases(FPKind kind,
+                                                const std::vector<std::vector<double>>& vectors) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& v : vectors) {
+        const std::vector<double> q = quantizeVec(kind, v);
+        bool skip = false;
+        for (double e : q) {
+            if (e != 0.0 && isSubnormalKind(kind, e)) {
+                skip = true;
+            }
+        }
+        if (skip) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(vecInput(kind, q));
+        c.expected = vecInput(kind, q);
+        for (double e : q) {
+            c.expectedAccept.push_back(
+                intervalToExpected(kind, correctlyRoundedInterval(kF, frexpFract(e))));
+        }
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateFrexpVectorExpCases(FPKind kind,
+                                              const std::vector<std::vector<double>>& vectors) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& v : vectors) {
+        const std::vector<double> q = quantizeVec(kind, v);
+        bool skip = false;
+        for (double e : q) {
+            if (e != 0.0 && isSubnormalKind(kind, e)) {
+                skip = true;
+            }
+        }
+        if (skip) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(vecInput(kind, q));
+        std::vector<Scalar> exps;
+        for (double e : q) {
+            const int32_t ex = static_cast<int32_t>(frexpExp(e));
+            exps.push_back(kind == FPKind::Abstract ? abstractInt(ex) : i32(ex));
+        }
+        c.expected = CaseValue::vec(exps);
+        cases.push_back(std::move(c));
+    }
+    return cases;
 }
 
 } // namespace fp

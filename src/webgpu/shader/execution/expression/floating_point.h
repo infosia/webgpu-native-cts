@@ -287,6 +287,83 @@ std::vector<Case> generateVectorPairScalarToVectorComponentWiseCase(
     bool finiteFilter,
     const std::vector<ScalarTripleToInterval>& componentWiseOps);
 
+// --- phaseY13 Stage B/3b: geometric / matrix / decomposition Case generators ---
+// All compute acceptance intervals at f32 precision (inherited accuracy). 'kind' selects only the
+// input/output materialization (F32 vs Abstract f64) and the encoded interval result-element width.
+// 'finiteFilter' == true ('finite'/const) drops a case if any of its result intervals is non-finite.
+
+// length(scalar): one scalar in, scalar interval out (= sqrt(n*n)). Uses the scalar range.
+std::vector<Case> generateLengthScalarCases(FPKind kind, const std::vector<double>& params,
+                                            bool finiteFilter);
+// length(vecN): one vector in, scalar interval out (= sqrt(dot(v,v))).
+std::vector<Case> generateLengthVectorCases(FPKind kind,
+                                            const std::vector<std::vector<double>>& vectors,
+                                            bool finiteFilter);
+// distance(scalar, scalar): two scalars in, scalar interval out.
+std::vector<Case> generateDistanceScalarCases(FPKind kind, const std::vector<double>& param0s,
+                                              const std::vector<double>& param1s, bool finiteFilter);
+// distance(vecN, vecN): two vectors in, scalar interval out. Cartesian product.
+std::vector<Case> generateDistanceVectorCases(FPKind kind,
+                                              const std::vector<std::vector<double>>& v0s,
+                                              const std::vector<std::vector<double>>& v1s,
+                                              bool finiteFilter);
+// dot(vecN, vecN): two vectors in, scalar interval out (order-independent sum). Cartesian product.
+std::vector<Case> generateDotCases(FPKind kind, const std::vector<std::vector<double>>& v0s,
+                                   const std::vector<std::vector<double>>& v1s, bool finiteFilter);
+// normalize(vecN): one vector in, vector interval out.
+std::vector<Case> generateNormalizeCases(FPKind kind,
+                                         const std::vector<std::vector<double>>& vectors,
+                                         bool finiteFilter);
+// cross(vec3, vec3): two vec3s in, vec3 interval out. Cartesian product.
+std::vector<Case> generateCrossCases(FPKind kind, const std::vector<std::vector<double>>& v0s,
+                                     const std::vector<std::vector<double>>& v1s, bool finiteFilter);
+// reflect(vecN, vecN): two vectors in, vector interval out. Cartesian product.
+std::vector<Case> generateReflectCases(FPKind kind, const std::vector<std::vector<double>>& v0s,
+                                       const std::vector<std::vector<double>>& v1s,
+                                       bool finiteFilter);
+// refract(vecN, vecN, scalar): two vectors + scalar in, vector interval out (upstream refractInterval).
+std::vector<Case> generateRefractCases(FPKind kind, const std::vector<std::vector<double>>& iVs,
+                                       const std::vector<std::vector<double>>& sVs,
+                                       const std::vector<double>& rs, bool finiteFilter);
+// faceForward(vecN, vecN, vecN): three vectors in, vector interval out via anyOf of the candidates.
+std::vector<Case> generateFaceForwardCases(FPKind kind,
+                                           const std::vector<std::vector<double>>& xs,
+                                           const std::vector<std::vector<double>>& ys,
+                                           const std::vector<std::vector<double>>& zs,
+                                           bool finiteFilter);
+// determinant(matCxC): one square matrix in, scalar interval out.
+std::vector<Case> generateDeterminantCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& matrices, bool finiteFilter);
+// transpose(matCxR): one CxR matrix in, RxC matrix interval out (correctly-rounded element move).
+std::vector<Case> generateTransposeCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& matrices, bool finiteFilter);
+// modf(scalar/vecN): correctly-rounded fract or whole part. 'whole' selects whole vs fract.
+std::vector<Case> generateModfScalarCases(FPKind kind, const std::vector<double>& params, bool whole);
+std::vector<Case> generateModfVectorCases(FPKind kind,
+                                          const std::vector<std::vector<double>>& vectors, bool whole);
+// frexp(scalar/vecN): correctly-rounded fract part, or exact i32/abstract-int exp part. Subnormal
+// (non-zero) inputs are skipped (the result is implementation-defined for them).
+std::vector<Case> generateFrexpScalarFractCases(FPKind kind, const std::vector<double>& params);
+std::vector<Case> generateFrexpScalarExpCases(FPKind kind, const std::vector<double>& params);
+std::vector<Case> generateFrexpVectorFractCases(FPKind kind,
+                                                const std::vector<std::vector<double>>& vectors);
+std::vector<Case> generateFrexpVectorExpCases(FPKind kind,
+                                              const std::vector<std::vector<double>>& vectors);
+
+// Dense vector ranges (math.ts vectorF32Range/vectorF64Range; kVectorF32Values/kVectorF64Values).
+std::vector<std::vector<double>> vectorF32Range(int dim);
+std::vector<std::vector<double>> vectorF64Range(int dim);
+std::vector<std::vector<double>> vectorRange(FPKind kind, int dim);
+// Sparse matrix ranges (math.ts sparseMatrixF32Range/sparseMatrixF64Range). Column-major m[col][row].
+std::vector<std::vector<std::vector<double>>> sparseMatrixF32Range(int cols, int rows);
+std::vector<std::vector<std::vector<double>>> sparseMatrixF64Range(int cols, int rows);
+std::vector<std::vector<std::vector<double>>> sparseMatrixRange(FPKind kind, int cols, int rows);
+// kInterestingF32Values / kInterestingF64Values (math.ts), as the scalar sparse ranges already are.
+const std::vector<double>& interestingF32Values();
+const std::vector<double>& interestingF64Values();
+// Sparse scalar range for the kind (used by refract's r param). f32 -> sparseScalarF32Range.
+// (sparseScalarRange already declared above.)
+
 // selectNCases (case.ts): deterministically select n of the cases by crc32 of the input spelling.
 // 'dis' is the discriminator string ('mix_scalar' / 'mix_vector'). When n >= cases.size() returns
 // all of them. Operates on whatever Case list is passed (the input spelling is reconstructed from

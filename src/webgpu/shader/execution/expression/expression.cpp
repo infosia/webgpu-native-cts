@@ -496,6 +496,12 @@ AISizeAlign abstractIntSizeAlign(const ExprType& ty) {
         const uint32_t n = ty.width == 3 ? 4u : static_cast<uint32_t>(ty.width);
         sa.size = 8u * n;
         sa.alignment = 8u * n;
+    } else if (ty.form == TypeForm::Matrix) {
+        // Abstract-float matrix result: a flat array<AF, cols*rows> of 8-byte {low,high} slots in
+        // column-major order. AF is 8 bytes / align 8; the flat array's size is 8*cols*rows.
+        const uint32_t n = static_cast<uint32_t>(ty.cols * ty.width);
+        sa.size = 8u * n;
+        sa.alignment = 8u;
     }
     return sa;
 }
@@ -514,6 +520,8 @@ std::string wgslAbstractIntOutputs(const ExprType& resultType, size_t count) {
     out << "struct Output {\n  @size(" << stride << ") value: ";
     if (resultType.form == TypeForm::ScalarVec && resultType.width > 1) {
         out << "array<AF, " << resultType.width << ">";
+    } else if (resultType.form == TypeForm::Matrix) {
+        out << "array<AF, " << (resultType.cols * resultType.width) << ">";
     } else {
         out << "AF";
     }
@@ -545,9 +553,11 @@ bool isAbstractFloatResult(const ExprType& ty) {
 // Inlined snippet that splits an abstract-float (f64) expression value into the low/high u32 fields
 // of the output, applying FTZ for subnormals. Mirrors upstream abstractFloatSnippet. 'accessor' is
 // "" for scalars or "[i]" for vectors. The reconstructed f64 is rebuilt host-side from low/high.
-std::string abstractFloatSnippet(const std::string& expr, size_t caseIdx, const std::string& accessor) {
+std::string abstractFloatSnippet(const std::string& expr, size_t caseIdx,
+                                 const std::string& inAccessor, const std::string& outAccessor) {
     const std::string i = std::to_string(caseIdx);
-    const std::string e = "(" + expr + ")" + accessor;
+    const std::string e = "(" + expr + ")" + inAccessor;
+    const std::string& accessor = outAccessor;
     std::ostringstream out;
     out << "  {\n"
         << "    const kExponentBias = 1022;\n"
@@ -718,12 +728,26 @@ std::string buildShader(
                     args.push_back(valueWgslImpl(cases[i].inputs[p], parameterTypes[p]));
                 }
                 const std::string expr = exprBuilder(args);
-                if (isVec) {
+                if (resultType.form == TypeForm::Matrix) {
+                    // Matrix result: column-major flat output slots. Input element m[c][r], output
+                    // slot index (c*rows + r) into the flat array<AF, cols*rows>.
+                    int slot = 0;
+                    for (int c = 0; c < resultType.cols; ++c) {
+                        for (int r = 0; r < resultType.width; ++r) {
+                            const std::string inAcc =
+                                "[" + std::to_string(c) + "][" + std::to_string(r) + "]";
+                            const std::string outAcc = "[" + std::to_string(slot) + "]";
+                            out << abstractFloatSnippet(expr, i, inAcc, outAcc);
+                            ++slot;
+                        }
+                    }
+                } else if (isVec) {
                     for (int e = 0; e < resultType.width; ++e) {
-                        out << abstractFloatSnippet(expr, i, "[" + std::to_string(e) + "]");
+                        const std::string acc = "[" + std::to_string(e) + "]";
+                        out << abstractFloatSnippet(expr, i, acc, acc);
                     }
                 } else {
-                    out << abstractFloatSnippet(expr, i, "");
+                    out << abstractFloatSnippet(expr, i, "", "");
                 }
             }
             out << "}\n";
