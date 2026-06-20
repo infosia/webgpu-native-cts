@@ -1882,4 +1882,48 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-126 — yawgpu: texture-copy GPU out-of-bounds DMA write (whole-machine freeze) — native Vulkan (Intel/VT-d), cross-OS
+
+- **Backend:** yawgpu Vulkan. Surfaced on **Linux / Intel Iris 5100 (Haswell), Mesa ANV, with VT-d
+  (IOMMU) active for gfx**. The same whole-machine freeze is reported on **Windows / NVIDIA (RTX)** →
+  cross-vendor/OS, so the cause is the GPU work yawgpu submits, **not** an i915/Mesa-specific bug.
+- **Symptom:** during texture-copy operations the GPU issues a DMA **write outside the destination
+  allocation**. On Linux+VT-d the IOMMU catches it as
+  `DMAR: [DMA Write NO_PASID] Request device [00:02.0] ... [fault reason 0x05] PTE Write access is not set`
+  (in `journalctl -k`). Individual faults are survivable; they accumulate and eventually hard-freeze the
+  box (no recovery — `--case-timeout-ms` can't catch a hard GPU hang). On NVIDIA (no gfx-IOMMU layer) the
+  same illegal access manifests as a TDR/hang instead of a clean fault.
+- **Triggering tests:** `webgpu:api,operation,command_buffer,copyTextureToTexture:*` (242 cases) and
+  `webgpu:api,operation,command_buffer,image_copy:*` (2604 cases). copyTextureToTexture is the most
+  prolific.
+- **Reproduction recipe (VT-d ON = free OOB-write detector):**
+  1. Keep VT-d/`intel_iommu` enabled (it is by default here; no `intel_iommu=off` on the cmdline).
+  2. Watch the kernel log: `journalctl -k -f | grep 'PTE Write access is not set'`.
+  3. Run the file: `build-yawgpu-release/cts --isolate --workers 1 'webgpu:api,operation,command_buffer,copyTextureToTexture:*'`.
+  - **How many / how reliable:** observed in **3 independent runs** — the 2026-06-20 full sweep (faults at
+    copyTextureToTexture and image_copy), a chunk-wait run (**10+ faults** during copyTextureToTexture),
+    and a GPU-clock-capped run (**10 faults**, copyTextureToTexture alone). **~10 DMAR faults per warm run**
+    of copyTextureToTexture.
+  - **Caveat — heap-layout dependent:** a **cold** (post-reboot) per-case run of copyTextureToTexture
+    (247 cases) produced **0 faults**. The OOB *write* is likely deterministic per buggy case, but it only
+    *faults* when the OOB address lands on an unmapped/RO page — which needs prior GPU/allocation churn
+    ("warm"). So: reliably reproducible warm, not guaranteed cold.
+  - **Not thermal:** capping the GPU to 350 MHz (GPU running cool at ~200 MHz) still produced the 10 faults
+    → OOB is independent of GPU heat/clock. (The separate whole-machine *freeze* is thermal — package hits
+    ~94–98 °C even with the GPU capped, i.e. heat is **CPU-dominated** from per-case process churn + naga;
+    that is a host HW limitation, distinct from this OOB.)
+- **Review outcome (validation-clean; attribution open):** yawgpu emits **valid** Vulkan copy commands
+  (llvmpipe + `VK_LAYER_KHRONOS_validation`: **0 VUID**, **0 sync-hazards** for both files); texture memory
+  is sized from the driver's `get_image_memory_requirements()`; yawgpu-core bounds-checks copies mip-aware.
+  At the CTS level copyTextureToTexture is **pass=242 fail=0** (the OOB corrupts outside the verified copy
+  region, so readback still passes — only the IOMMU sees it). So static + safe-dynamic review found no
+  validation-detectable defect; root cause is a **GPU-execution-time** OOB not visible to validation —
+  either yawgpu HAL or i915/ANV+VT-d. Definitive next step: capture the exact faulting case on HW
+  (Intel/TTY with the DMAR fault as oracle, or NVIDIA with Nsight Aftermath / GPU-AV).
+- **Status:** **OPEN.** Distinct from the F-122 (shift-left const-eval) numbering — this is the copy/DMA
+  finding. Spec: `specs/investigate-copy-dma-oob-freeze.md`. May subsume/re-open F-104 copyTextureToTexture
+  (previously logged as a MoltenVK-only artifact, "native-Vulkan-green" — native Vulkan is **not** green here).
+
+---
+
 _Add new findings as `F-00N` with the same fields._

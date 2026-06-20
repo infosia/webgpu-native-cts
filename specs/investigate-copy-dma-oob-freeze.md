@@ -1,14 +1,16 @@
-# F-122 — texture-copy GPU DMA out-of-bounds write (whole-machine freeze, cross-OS)
+# F-126 — texture-copy GPU DMA out-of-bounds write (whole-machine freeze, cross-OS)
 
 > Investigation + finding-documentation task. The root-cause **fix is in yawgpu's HAL copy
 > path** (the separate yawgpu repo); this CTS-side task pinpoints the exact triggering cases,
 > records the finding, and decides how the suite carries them so a full sweep no longer hard-hangs.
+> (Renumbered F-122 → **F-126**: F-122 was already taken in `docs/FINDINGS.md` by the shift-left
+> const-eval finding; earlier commits 5499821/d7c08ac used the colliding "F-122" label.)
 
 ## Goal
 
 Pinpoint the exact `copyTextureToTexture` / `image_copy` case(s) whose GPU work writes outside the
 destination allocation (caught on Linux/VT-d as an IOMMU DMA-write fault; manifests on Windows/NVIDIA
-as a TDR/whole-machine freeze), document it as finding F-122, and make the full sweep survivable.
+as a TDR/whole-machine freeze), document it as finding F-126, and make the full sweep survivable.
 
 ## Background — evidence gathered 2026-06-20 (Linux, Intel Iris 5100 / Haswell, Mesa ANV, Wayland)
 
@@ -79,7 +81,7 @@ or exonerate yawgpu is to **capture the exact faulting command on hardware** (be
 - Capture the **exact faulting command** on hardware (HW capture is now the only viable oracle —
   validation is clean and cold per-case does not reproduce). Then inspect that specific command's
   Vulkan parameters to convict or exonerate yawgpu.
-- Add a finding **F-122** to `docs/FINDINGS.md` recording the symptom, cross-OS evidence, the
+- Add a finding **F-126** to `docs/FINDINGS.md` recording the symptom, cross-OS evidence, the
   review outcome (copy path validation-clean), and — once captured — the exact triggering case.
 - Address the two latent nitpicks above if confirmed harmful (or at minimum note them).
 - Make a full sweep survivable: quarantine confirmed-hanging case queries the runner can skip (see
@@ -112,7 +114,7 @@ draw/copy and the offending access directly — no IOMMU/heap-layout dependence.
 
 ## Acceptance criteria
 
-- [ ] `docs/FINDINGS.md` has an **F-122** entry: symptom, cross-OS evidence, and the review outcome
+- [ ] `docs/FINDINGS.md` has an **F-126** entry: symptom, cross-OS evidence, and the review outcome
       (copy path validation-clean; allocation/region/mip-validation correct; two latent nitpicks).
 - [ ] The exact faulting case(s) are captured on hardware and recorded (file + `test:params`), with
       the emitted `VkImageCopy`/`VkBufferImageCopy` parameters vs the image subresource size, so the
@@ -122,7 +124,7 @@ draw/copy and the offending access directly — no IOMMU/heap-layout dependence.
       hazard — establishing it is a HW-execution issue, not a malformed command or harness/leak.
 - [ ] A quarantine/known-hang list contains those queries so `sweep.sh` (or the equivalent runner
       path) skips them and a resumed sweep does not re-freeze.
-- [ ] README "Test results" references F-122 (re: F-104 copyTextureToTexture re-evaluation).
+- [ ] README "Test results" references F-126 (re: F-104 copyTextureToTexture re-evaluation).
 
 ## Verification
 
@@ -136,7 +138,7 @@ draw/copy and the offending access directly — no IOMMU/heap-layout dependence.
 ## References
 
 - `docs/06-build-and-run.md` §4 (`--isolate`, `--case-timeout-ms`, `--emit-crash-list`), §8 (Linux).
-- `docs/FINDINGS.md` — F-104 copyTextureToTexture (re-evaluate); add F-122.
+- `docs/FINDINGS.md` — F-104 copyTextureToTexture (re-evaluate); add F-126.
 - `expectations/yawgpu.crash.txt` — known-hang/crash list convention.
 - `build-yawgpu-release/run-linux-vulkan/` (git-ignored) — `sweep.sh`, `narrow-createView.sh`,
   `master.log`, per-file `jsonl/` — the run artifacts this finding is derived from.
