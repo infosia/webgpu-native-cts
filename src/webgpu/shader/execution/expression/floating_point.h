@@ -79,6 +79,31 @@ FPInterval divisionInterval(FPKind kind, double x, double y);
 FPInterval sqrtInterval(FPKind kind, double n); // = 1 / inverseSqrt(n)
 FPInterval cosInterval(FPKind kind, double n);  // absolute-error 2^-11 (f32), domain [-pi, pi]
 FPInterval additionInterval(FPKind kind, double x, double y); // correctly-rounded x + y
+FPInterval subtractionInterval(FPKind kind, double x, double y); // correctly-rounded x - y
+FPInterval multiplicationInterval(FPKind kind, double x, double y); // correctly-rounded x * y
+FPInterval negationInterval(FPKind kind, double n); // correctly-rounded -n
+// remainder(x, y) = x - y*trunc(x/y) at f32 (inherited) accuracy; 'kind' selects materialization.
+FPInterval remainderInterval(FPKind kind, double x, double y);
+
+// --- Matrix acceptance-interval functions (phaseY13 Stage B/4) ---
+// All operate at f32 precision (inherited). Matrices are column-major m[col][row]. The result is a
+// column-major grid of intervals result[col][row]. additionMatrixMatrix/subtractionMatrixMatrix are
+// componentwise; the multiplication variants accumulate dot products (order-independent sums).
+std::vector<std::vector<FPInterval>> additionMatrixMatrixInterval(
+    FPKind kind, const std::vector<std::vector<double>>& x,
+    const std::vector<std::vector<double>>& y);
+std::vector<std::vector<FPInterval>> subtractionMatrixMatrixInterval(
+    FPKind kind, const std::vector<std::vector<double>>& x,
+    const std::vector<std::vector<double>>& y);
+std::vector<std::vector<FPInterval>> multiplicationMatrixScalarInterval(
+    FPKind kind, const std::vector<std::vector<double>>& mat, double scalar);
+std::vector<std::vector<FPInterval>> multiplicationMatrixMatrixInterval(
+    FPKind kind, const std::vector<std::vector<double>>& x,
+    const std::vector<std::vector<double>>& y);
+std::vector<FPInterval> multiplicationMatrixVectorInterval(
+    FPKind kind, const std::vector<std::vector<double>>& mat, const std::vector<double>& v);
+std::vector<FPInterval> multiplicationVectorMatrixInterval(
+    FPKind kind, const std::vector<double>& v, const std::vector<std::vector<double>>& mat);
 
 // --- Transcendental builtin acceptance intervals (phaseY13 Stage B/2) ---
 // These are all defined via the f32 trait (inherited accuracy), so 'kind' selects only the input/
@@ -181,6 +206,10 @@ std::vector<std::vector<double>> sparseVectorRange(FPKind kind, int dim);
 std::vector<double> linearRange(double a, double b, int numSteps);
 std::vector<double> scalarF64Range();
 std::vector<double> scalarF32Range();
+// Count-parameterized scalar ranges (math.ts scalarF32Range/scalarF64Range with explicit counts).
+// E.g. f32/af arithmetic negation uses {neg_norm:250, neg_sub:20, pos_sub:20, pos_norm:250}.
+std::vector<double> scalarF32RangeCounts(int negNorm, int negSub, int posSub, int posNorm);
+std::vector<double> scalarF64RangeCounts(int negNorm, int negSub, int posSub, int posNorm);
 // scalarRange for the kind (f32 -> scalarF32Range, abstract -> scalarF64Range).
 std::vector<double> scalarRangeForKind(FPKind kind);
 // scalarF16Range (math.ts): f16 values spread over the f16 bit space. Used by quantizeToF16.
@@ -363,6 +392,60 @@ const std::vector<double>& interestingF32Values();
 const std::vector<double>& interestingF64Values();
 // Sparse scalar range for the kind (used by refract's r param). f32 -> sparseScalarF32Range.
 // (sparseScalarRange already declared above.)
+
+// --- phaseY13 Stage B/4: binary operator Case generators (matrix / vector results) ---
+// MatrixPair op: two CxR matrices -> CxR (or, for mat*mat, KxR x CxK -> CxR) interval matrix.
+using MatrixPairToMatrix = std::function<std::vector<std::vector<FPInterval>>(
+    const std::vector<std::vector<double>>&, const std::vector<std::vector<double>>&)>;
+using MatrixScalarToMatrix = std::function<std::vector<std::vector<FPInterval>>(
+    const std::vector<std::vector<double>>&, double)>;
+using ScalarMatrixToMatrix = std::function<std::vector<std::vector<FPInterval>>(
+    double, const std::vector<std::vector<double>>&)>;
+using MatrixToMatrix =
+    std::function<std::vector<std::vector<FPInterval>>(const std::vector<std::vector<double>>&)>;
+using MatrixVectorToVector = std::function<std::vector<FPInterval>(
+    const std::vector<std::vector<double>>&, const std::vector<double>&)>;
+using VectorMatrixToVector = std::function<std::vector<FPInterval>(
+    const std::vector<double>&, const std::vector<std::vector<double>>&)>;
+
+// matrix + matrix / matrix * matrix: Cartesian product of the matrix lists. 'finiteFilter' drops a
+// case whose result has any non-finite element.
+std::vector<Case> generateMatrixPairToMatrixCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& xs,
+    const std::vector<std::vector<std::vector<double>>>& ys, bool finiteFilter,
+    const MatrixPairToMatrix& op);
+// matrix * scalar.
+std::vector<Case> generateMatrixScalarToMatrixCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& mats,
+    const std::vector<double>& scalars, bool finiteFilter, const MatrixScalarToMatrix& op);
+// scalar * matrix.
+std::vector<Case> generateScalarMatrixToMatrixCases(
+    FPKind kind, const std::vector<double>& scalars,
+    const std::vector<std::vector<std::vector<double>>>& mats, bool finiteFilter,
+    const ScalarMatrixToMatrix& op);
+// matrix -> matrix (unary conversion, e.g. f32(mat) correctly-rounded). 'resultKind' is the output
+// materialization (e.g. F32 for f32(abstract_mat)); 'kind' is the input materialization.
+std::vector<Case> generateMatrixToMatrixCases(
+    FPKind inputKind, FPKind resultKind, const std::vector<std::vector<std::vector<double>>>& mats,
+    bool finiteFilter, const MatrixToMatrix& op);
+// matrix * vector.
+std::vector<Case> generateMatrixVectorToVectorCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& mats,
+    const std::vector<std::vector<double>>& vecs, bool finiteFilter,
+    const MatrixVectorToVector& op);
+// vector * matrix.
+std::vector<Case> generateVectorMatrixToVectorCases(
+    FPKind kind, const std::vector<std::vector<double>>& vecs,
+    const std::vector<std::vector<std::vector<double>>>& mats, bool finiteFilter,
+    const VectorMatrixToVector& op);
+
+// f32 comparison (bool result, exact). One scalar pair in, a bool out via 'truthFunc', with the
+// subnormal-flush anyOf rule (any of the flushed/unflushed truth values accepted). Mirrors the
+// upstream makeCase. 'pairs' is vectorF32Range(2) / vectorF64Range(2) (each a [lhs, rhs]).
+using TruthFunc = std::function<bool(double, double)>;
+std::vector<Case> generateComparisonCases(FPKind kind,
+                                          const std::vector<std::vector<double>>& pairs,
+                                          const TruthFunc& truthFunc);
 
 // selectNCases (case.ts): deterministically select n of the cases by crc32 of the input spelling.
 // 'dis' is the discriminator string ('mix_scalar' / 'mix_vector'). When n >= cases.size() returns

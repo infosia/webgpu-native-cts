@@ -109,6 +109,30 @@ double nextAfterF32Flush(double val, bool positive) {
     return flushSubnormalF32(static_cast<double>(q));
 }
 
+// nextAfterF64(val, dir, flush): next representable f64 toward +inf (positive) or -inf (negative).
+// Mirrors util/math.ts nextAfterF64 with mode == 'flush'. f64 is the storage type for double, so the
+// representable set is the double set itself; flushing applies the f64 subnormal flush.
+double nextAfterF64Flush(double val, bool positive) {
+    if (std::isnan(val)) {
+        return val;
+    }
+    if (val == kInf) {
+        return kInf;
+    }
+    if (val == -kInf) {
+        return -kInf;
+    }
+    val = flushSubnormalF64(val);
+    if (val == 0.0) {
+        return positive ? kF64PosMin : kF64NegMax;
+    }
+    const double next = std::nextafter(val, positive ? kInf : -kInf);
+    if (std::isinf(next)) {
+        return positive ? kInf : -kInf;
+    }
+    return flushSubnormalF64(next);
+}
+
 // oneULPF32 (flush mode). Mirrors util/math.ts oneULPF32.
 double oneULPF32(double target) {
     if (std::isnan(target)) {
@@ -275,17 +299,21 @@ FPInterval runScalarPairPoint(
 
 // correctlyRoundedIntervalWithUnboundedPrecisionForAddition (addition only).
 FPInterval crUnboundedAddition(FPKind kind, double val, double large, double small) {
+    // nextAfter must match the kind's representable set: f32 for F32, f64 for Abstract.
+    auto nextAfter = [kind](double v, bool positive) {
+        return kind == FPKind::F32 ? nextAfterF32Flush(v, positive) : nextAfterF64Flush(v, positive);
+    };
     if (val == large && small != 0.0) {
         // The interval spans [large, nextAfter(large, dir)] then correctly-rounded.
         if (std::signbit(small) == false) {
-            const double na = nextAfterF32Flush(large, true);
+            const double na = nextAfter(large, true);
             FPInterval span = toInterval(kind, std::min(large, na), std::max(large, na));
             // correctlyRoundedInterval over an interval: span endpoints' correctly-rounded.
             ScalarOp op;
             op.impl = [kind](double n) { return correctlyRoundedInterval(kind, n); };
             return runScalarToIntervalOp(kind, span, op);
         } else {
-            const double na = nextAfterF32Flush(large, false);
+            const double na = nextAfter(large, false);
             FPInterval span = toInterval(kind, std::min(na, large), std::max(na, large));
             ScalarOp op;
             op.impl = [kind](double n) { return correctlyRoundedInterval(kind, n); };
@@ -487,6 +515,37 @@ FPInterval additionInterval(FPKind kind, double x, double y) {
     return r.isFinite() ? r : unboundedInterval(kind);
 }
 
+FPInterval subtractionInterval(FPKind kind, double x, double y) {
+    auto impl = [kind](double a, double b) -> FPInterval {
+        const double diff = a - b;
+        // Symmetric to addition (see upstream SubtractionIntervalOp): reuse the unbounded-precision
+        // addition rule with large/small chosen from x and -y.
+        const double large = std::abs(a) > std::abs(b) ? a : -b;
+        const double small = std::abs(a) > std::abs(b) ? -b : a;
+        return crUnboundedAddition(kind, diff, large, small);
+    };
+    if (std::isnan(x) || std::isnan(y)) {
+        return unboundedInterval(kind);
+    }
+    const FPInterval r = runScalarPairPoint(kind, x, y, impl);
+    return r.isFinite() ? r : unboundedInterval(kind);
+}
+
+FPInterval multiplicationInterval(FPKind kind, double x, double y) {
+    auto impl = [kind](double a, double b) -> FPInterval { return correctlyRoundedInterval(kind, a * b); };
+    if (std::isnan(x) || std::isnan(y)) {
+        return unboundedInterval(kind);
+    }
+    const FPInterval r = runScalarPairPoint(kind, x, y, impl);
+    return r.isFinite() ? r : unboundedInterval(kind);
+}
+
+FPInterval negationInterval(FPKind kind, double n) {
+    ScalarOp op;
+    op.impl = [kind](double m) { return correctlyRoundedInterval(kind, -m); };
+    return runScalarToIntervalOp(kind, toIntervalPoint(kind, n), op);
+}
+
 // ===========================================================================
 // Transcendental builtin acceptance intervals (phaseY13 Stage B/2).
 //
@@ -676,6 +735,22 @@ FPInterval divisionIv(FPInterval x, FPInterval y) {
         }
     };
     return runBinary(x, y, op);
+}
+
+// trunc over an interval (correctly-rounded trunc of each endpoint).
+FPInterval truncIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) { return correctlyRoundedInterval(kF, std::trunc(m)); };
+    return runUnary(n, op);
+}
+
+// remainder(x, y) = x - y * trunc(x / y), all at f32 precision (inherited). Mirrors the upstream
+// RemainderIntervalOp impl composed over interval ops.
+FPInterval remainderIvF32(double x, double y) {
+    const FPInterval div = divisionIv(toIntervalPoint(kF, x), toIntervalPoint(kF, y));
+    const FPInterval tr = truncIv(div);
+    const FPInterval prod = multiplicationIv(toIntervalPoint(kF, y), tr);
+    return subtractionIv(toIntervalPoint(kF, x), prod);
 }
 
 // sqrt over an interval: 1 / inverseSqrt(n).
@@ -1567,9 +1642,7 @@ std::vector<double> biasedRange(double a, double b, int numSteps) {
     return out;
 }
 
-std::vector<double> scalarF32Range() {
-    // counts: neg_norm = pos_norm = 50, neg_sub = pos_sub = 10.
-    const int negNorm = 50, negSub = 10, posSub = 10, posNorm = 50;
+std::vector<double> scalarF32RangeCounts(int negNorm, int negSub, int posSub, int posNorm) {
     // special_pos (pos_norm >= 4): largest float as signed/unsigned integer bit patterns.
     const std::vector<uint32_t> specialPos = {0x4effffffu, 0x4f7fffffu};
     std::vector<double> bitFields;
@@ -1608,6 +1681,11 @@ std::vector<double> scalarF32Range() {
         out.push_back(static_cast<double>(f32FromBits(bits)));
     }
     return out;
+}
+
+std::vector<double> scalarF32Range() {
+    // Default counts: neg_norm = pos_norm = 50, neg_sub = pos_sub = 10.
+    return scalarF32RangeCounts(50, 10, 10, 50);
 }
 
 const std::vector<double>& sparseScalarF32Range() {
@@ -1698,10 +1776,9 @@ int64_t mulDivS64(int64_t a, int64_t idx, int64_t div) {
     return neg ? -static_cast<int64_t>(q) : static_cast<int64_t>(q);
 }
 
-std::vector<double> scalarF64Range() {
-    // counts: neg_norm = pos_norm = 50, neg_sub = pos_sub = 10. Spread over the f64 bit space via
-    // integer (bigint) lerp. Mirrors util/math.ts linearRangeBigInt / lerpBigInt exactly.
-    const int negNorm = 50, negSub = 10, posSub = 10, posNorm = 50;
+std::vector<double> scalarF64RangeCounts(int negNorm, int negSub, int posSub, int posNorm) {
+    // Spread over the f64 bit space via integer (bigint) lerp. Mirrors util/math.ts
+    // linearRangeBigInt / lerpBigInt exactly.
     auto lerpBig = [](uint64_t aBits, uint64_t bBits, int idx, int steps) -> uint64_t {
         if (steps == 1 || idx == 0) {
             return aBits;
@@ -1749,6 +1826,11 @@ std::vector<double> scalarF64Range() {
         out.push_back(f64FromBits(b));
     }
     return out;
+}
+
+std::vector<double> scalarF64Range() {
+    // Default counts: neg_norm = pos_norm = 50, neg_sub = pos_sub = 10.
+    return scalarF64RangeCounts(50, 10, 10, 50);
 }
 
 namespace {
@@ -2075,6 +2157,132 @@ std::vector<std::vector<FPInterval>> transposeIv(const std::vector<std::vector<d
 }
 
 } // namespace
+
+// remainder(x, y) = x - y*trunc(x/y) at f32 (inherited) accuracy. Rounds/flushes the inputs then
+// spans over the combinations (mirrors runScalarPairToIntervalOp(RemainderIntervalOp)).
+FPInterval remainderInterval(FPKind kind, double x, double y) {
+    if (std::isnan(x) || std::isnan(y)) {
+        return unboundedInterval(kind);
+    }
+    const std::vector<double> xs = addFlushedIfNeeded(kF, correctlyRounded(kF, x));
+    const std::vector<double> ys = addFlushedIfNeeded(kF, correctlyRounded(kF, y));
+    std::vector<FPInterval> parts;
+    for (double ix : xs) {
+        for (double iy : ys) {
+            parts.push_back(remainderIvF32(ix, iy));
+        }
+    }
+    const FPInterval r = spanIntervals(parts);
+    // Result materialized at 'kind' (abstract reuses the f32 math). The interval endpoints are f32
+    // values; tag the kind so the encoder picks the right output width.
+    FPInterval out(kind, r.begin, r.end);
+    return out.isFinite() ? out : unboundedInterval(kind);
+}
+
+// --- Matrix interval functions (column-major m[col][row]) ---
+std::vector<std::vector<FPInterval>> additionMatrixMatrixInterval(
+    FPKind kind, const std::vector<std::vector<double>>& x,
+    const std::vector<std::vector<double>>& y) {
+    const size_t cols = x.size();
+    const size_t rows = x[0].size();
+    std::vector<std::vector<FPInterval>> r(cols, std::vector<FPInterval>(rows, FPInterval()));
+    for (size_t c = 0; c < cols; ++c) {
+        for (size_t rr = 0; rr < rows; ++rr) {
+            r[c][rr] = additionInterval(kind, x[c][rr], y[c][rr]);
+        }
+    }
+    return r;
+}
+std::vector<std::vector<FPInterval>> subtractionMatrixMatrixInterval(
+    FPKind kind, const std::vector<std::vector<double>>& x,
+    const std::vector<std::vector<double>>& y) {
+    const size_t cols = x.size();
+    const size_t rows = x[0].size();
+    std::vector<std::vector<FPInterval>> r(cols, std::vector<FPInterval>(rows, FPInterval()));
+    for (size_t c = 0; c < cols; ++c) {
+        for (size_t rr = 0; rr < rows; ++rr) {
+            r[c][rr] = subtractionInterval(kind, x[c][rr], y[c][rr]);
+        }
+    }
+    return r;
+}
+std::vector<std::vector<FPInterval>> multiplicationMatrixScalarInterval(
+    FPKind kind, const std::vector<std::vector<double>>& mat, double scalar) {
+    const size_t cols = mat.size();
+    const size_t rows = mat[0].size();
+    std::vector<std::vector<FPInterval>> r(cols, std::vector<FPInterval>(rows, FPInterval()));
+    for (size_t c = 0; c < cols; ++c) {
+        for (size_t rr = 0; rr < rows; ++rr) {
+            r[c][rr] = multiplicationInterval(kind, mat[c][rr], scalar);
+        }
+    }
+    return r;
+}
+std::vector<std::vector<FPInterval>> multiplicationMatrixMatrixInterval(
+    FPKind /*kind*/, const std::vector<std::vector<double>>& x,
+    const std::vector<std::vector<double>>& y) {
+    // x is mat(x_cols, x_rows) column-major; y is mat(y_cols, y_rows). x_cols == y_rows.
+    const size_t xCols = x.size();
+    const size_t xRows = x[0].size();
+    const size_t yCols = y.size();
+    // Transpose x as raw doubles (xRows x xCols); dotIv applies rounding/flushing — do NOT pre-round
+    // via transposeIv (that would flush subnormals away before the dot, losing the unflushed value).
+    std::vector<std::vector<double>> xTd(xRows, std::vector<double>(xCols, 0.0));
+    for (size_t i = 0; i < xRows; ++i) {
+        for (size_t j = 0; j < xCols; ++j) {
+            xTd[i][j] = x[j][i];
+        }
+    }
+    // result[i][j] = dot(xT_row_j, y_col_i); column-major result is yCols x xRows.
+    std::vector<std::vector<FPInterval>> result(yCols, std::vector<FPInterval>(xRows, FPInterval()));
+    bool oob = false;
+    for (size_t i = 0; i < yCols; ++i) {
+        for (size_t j = 0; j < xRows; ++j) {
+            const FPInterval iv = dotIv(xTd[j], y[i]);
+            result[i][j] = iv;
+            if (!iv.isFinite()) {
+                oob = true;
+            }
+        }
+    }
+    if (oob) {
+        for (auto& col : result) {
+            for (auto& e : col) {
+                e = unboundedInterval(kF);
+            }
+        }
+    }
+    return result;
+}
+std::vector<FPInterval> multiplicationMatrixVectorInterval(
+    FPKind /*kind*/, const std::vector<std::vector<double>>& mat, const std::vector<double>& v) {
+    // mat(cols, rows) column-major; v has 'cols' elements; result has 'rows' elements.
+    const size_t cols = mat.size();
+    const size_t rows = mat[0].size();
+    std::vector<std::vector<double>> matTd(rows, std::vector<double>(cols, 0.0));
+    for (size_t i = 0; i < rows; ++i) {
+        for (size_t j = 0; j < cols; ++j) {
+            matTd[i][j] = mat[j][i];
+        }
+    }
+    std::vector<FPInterval> result;
+    result.reserve(rows);
+    for (size_t i = 0; i < rows; ++i) {
+        result.push_back(dotIv(matTd[i], v));
+    }
+    return result;
+}
+std::vector<FPInterval> multiplicationVectorMatrixInterval(
+    FPKind /*kind*/, const std::vector<double>& v, const std::vector<std::vector<double>>& mat) {
+    // mat(cols, rows) column-major; v has 'rows' elements; result has 'cols' elements.
+    const size_t cols = mat.size();
+    std::vector<FPInterval> result;
+    result.reserve(cols);
+    for (size_t i = 0; i < cols; ++i) {
+        result.push_back(dotIv(v, mat[i]));
+    }
+    return result;
+}
 
 std::vector<int64_t> fullI64Range() {
     const int64_t i64Min = INT64_MIN;
@@ -3016,6 +3224,222 @@ std::vector<Case> generateTransposeCases(
                 c.expectedAccept.push_back(intervalToExpected(kind, iv));
             }
         }
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+namespace {
+// Whether every element of a column-major interval grid is finite.
+bool matrixFinite(const std::vector<std::vector<FPInterval>>& m) {
+    for (const std::vector<FPInterval>& col : m) {
+        if (!vectorFinite(col)) {
+            return false;
+        }
+    }
+    return true;
+}
+// Build a matrix-result Case from input(s) + a column-major interval grid result.
+void fillMatrixExpected(FPKind resultKind, const std::vector<std::vector<FPInterval>>& res, Case& c) {
+    std::vector<Scalar> exp;
+    for (const std::vector<FPInterval>& col : res) {
+        for (const FPInterval& iv : col) {
+            exp.push_back(scalarInput(resultKind, iv.begin));
+        }
+    }
+    c.expected = CaseValue::composite(exp);
+    for (const std::vector<FPInterval>& col : res) {
+        for (const FPInterval& iv : col) {
+            c.expectedAccept.push_back(intervalToExpected(resultKind, iv));
+        }
+    }
+}
+void fillVectorExpected(FPKind resultKind, const std::vector<FPInterval>& res, Case& c) {
+    std::vector<Scalar> exp;
+    exp.reserve(res.size());
+    for (const FPInterval& iv : res) {
+        exp.push_back(scalarInput(resultKind, iv.begin));
+    }
+    c.expected = CaseValue::vec(exp);
+    for (const FPInterval& iv : res) {
+        c.expectedAccept.push_back(intervalToExpected(resultKind, iv));
+    }
+}
+} // namespace
+
+std::vector<Case> generateMatrixPairToMatrixCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& xs,
+    const std::vector<std::vector<std::vector<double>>>& ys, bool finiteFilter,
+    const MatrixPairToMatrix& op) {
+    std::vector<Case> cases;
+    for (const std::vector<std::vector<double>>& x : xs) {
+        for (const std::vector<std::vector<double>>& y : ys) {
+            const std::vector<std::vector<double>> qx = quantizeMat(kind, x);
+            const std::vector<std::vector<double>> qy = quantizeMat(kind, y);
+            const std::vector<std::vector<FPInterval>> res = op(qx, qy);
+            if (finiteFilter && !matrixFinite(res)) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(matInput(kind, qx));
+            c.inputs.push_back(matInput(kind, qy));
+            fillMatrixExpected(kind, res, c);
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateMatrixScalarToMatrixCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& mats,
+    const std::vector<double>& scalars, bool finiteFilter, const MatrixScalarToMatrix& op) {
+    std::vector<Case> cases;
+    for (const std::vector<std::vector<double>>& m : mats) {
+        for (double s : scalars) {
+            const std::vector<std::vector<double>> qm = quantizeMat(kind, m);
+            const double qs = quantize(kind, s);
+            const std::vector<std::vector<FPInterval>> res = op(qm, qs);
+            if (finiteFilter && !matrixFinite(res)) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(matInput(kind, qm));
+            c.inputs.push_back(CaseValue(scalarInput(kind, qs)));
+            fillMatrixExpected(kind, res, c);
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateScalarMatrixToMatrixCases(
+    FPKind kind, const std::vector<double>& scalars,
+    const std::vector<std::vector<std::vector<double>>>& mats, bool finiteFilter,
+    const ScalarMatrixToMatrix& op) {
+    std::vector<Case> cases;
+    for (double s : scalars) {
+        for (const std::vector<std::vector<double>>& m : mats) {
+            const double qs = quantize(kind, s);
+            const std::vector<std::vector<double>> qm = quantizeMat(kind, m);
+            const std::vector<std::vector<FPInterval>> res = op(qs, qm);
+            if (finiteFilter && !matrixFinite(res)) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(CaseValue(scalarInput(kind, qs)));
+            c.inputs.push_back(matInput(kind, qm));
+            fillMatrixExpected(kind, res, c);
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateMatrixToMatrixCases(
+    FPKind inputKind, FPKind resultKind, const std::vector<std::vector<std::vector<double>>>& mats,
+    bool finiteFilter, const MatrixToMatrix& op) {
+    std::vector<Case> cases;
+    for (const std::vector<std::vector<double>>& m : mats) {
+        const std::vector<std::vector<double>> qm = quantizeMat(inputKind, m);
+        const std::vector<std::vector<FPInterval>> res = op(qm);
+        if (finiteFilter && !matrixFinite(res)) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(matInput(inputKind, qm));
+        fillMatrixExpected(resultKind, res, c);
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateMatrixVectorToVectorCases(
+    FPKind kind, const std::vector<std::vector<std::vector<double>>>& mats,
+    const std::vector<std::vector<double>>& vecs, bool finiteFilter,
+    const MatrixVectorToVector& op) {
+    std::vector<Case> cases;
+    for (const std::vector<std::vector<double>>& m : mats) {
+        for (const std::vector<double>& v : vecs) {
+            const std::vector<std::vector<double>> qm = quantizeMat(kind, m);
+            const std::vector<double> qv = quantizeVec(kind, v);
+            const std::vector<FPInterval> res = op(qm, qv);
+            if (finiteFilter && !vectorFinite(res)) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(matInput(kind, qm));
+            c.inputs.push_back(vecInput(kind, qv));
+            fillVectorExpected(kind, res, c);
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateVectorMatrixToVectorCases(
+    FPKind kind, const std::vector<std::vector<double>>& vecs,
+    const std::vector<std::vector<std::vector<double>>>& mats, bool finiteFilter,
+    const VectorMatrixToVector& op) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& v : vecs) {
+        for (const std::vector<std::vector<double>>& m : mats) {
+            const std::vector<double> qv = quantizeVec(kind, v);
+            const std::vector<std::vector<double>> qm = quantizeMat(kind, m);
+            const std::vector<FPInterval> res = op(qv, qm);
+            if (finiteFilter && !vectorFinite(res)) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(vecInput(kind, qv));
+            c.inputs.push_back(matInput(kind, qm));
+            fillVectorExpected(kind, res, c);
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateComparisonCases(FPKind kind,
+                                          const std::vector<std::vector<double>>& pairs,
+                                          const TruthFunc& truthFunc) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& p : pairs) {
+        const double lhs = p[0];
+        const double rhs = p[1];
+        // lhs/rhs options = {value, flushSubnormal(value)} (per kind), de-duplicated.
+        std::vector<double> lOpts = {lhs};
+        const double lf = flushSubnormal(kind, lhs);
+        if (lf != lhs) {
+            lOpts.push_back(lf);
+        }
+        std::vector<double> rOpts = {rhs};
+        const double rf = flushSubnormal(kind, rhs);
+        if (rf != rhs) {
+            rOpts.push_back(rf);
+        }
+        bool sawTrue = false;
+        bool sawFalse = false;
+        for (double l : lOpts) {
+            for (double r : rOpts) {
+                if (truthFunc(l, r)) {
+                    sawTrue = true;
+                } else {
+                    sawFalse = true;
+                }
+            }
+        }
+        std::vector<uint32_t> accept;
+        if (sawFalse) {
+            accept.push_back(0u);
+        }
+        if (sawTrue) {
+            accept.push_back(1u);
+        }
+        Case c;
+        c.inputs.push_back(CaseValue(scalarInput(kind, lhs)));
+        c.inputs.push_back(CaseValue(scalarInput(kind, rhs)));
+        c.expected = CaseValue(boolean(sawTrue && !sawFalse));
+        c.expectedAccept.push_back(acceptBitsSet(accept));
         cases.push_back(std::move(c));
     }
     return cases;
