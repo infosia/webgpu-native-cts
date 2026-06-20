@@ -1896,6 +1896,17 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Triggering tests:** `webgpu:api,operation,command_buffer,copyTextureToTexture:*` (242 cases) and
   `webgpu:api,operation,command_buffer,image_copy:*` (2604 cases). copyTextureToTexture is the most
   prolific.
+- **Pinpointed pattern (2026-06-20, per-case run + microsecond DMAR↔progress-log correlation): the OOB
+  is in MULTI-SLICE / MULTI-LAYER copies (`depth_or_array_layers > 1`).** Across 13 precisely-attributed
+  faults over 3 runs, **12/13 were the `color_textures,non_compressed,array` subtest** (2D-array,
+  multi-layer); the lone `non_array` fault was `dimension="3d"` (a 3D texture = multi-slice), so **all 13
+  are multi-slice/multi-layer**. The cleanest single run was **7/7 `array` + `dimension="3d"`**. It is
+  **format-independent** (r8uint, rg32sint, rgba16{unorm,sint,float}, rgba32{uint,sint,float}, …) and hits
+  both 2d-array and 3d. **Single-slice copies (`non_array` 1d/2d, depth=1) produced 0 faults.** `array`
+  is ~40 % of cases (95/237) but ~92 % of faults → strongly over-represented. ⇒ yawgpu's **per-layer /
+  per-slice destination addressing** overshoots the allocation for `>1` layer/slice. Code suspects:
+  `texture_copy_subresource_layers` (encode.rs:2780, layerCount/baseArrayLayer) and `texture_copy_extent`
+  (encode.rs:2807, extent.depth) in `yawgpu-hal/src/vulkan/encode.rs`.
 - **Reproduction recipe (VT-d ON = free OOB-write detector):**
   1. Keep VT-d/`intel_iommu` enabled (it is by default here; no `intel_iommu=off` on the cmdline).
   2. Watch the kernel log: `journalctl -k -f | grep 'PTE Write access is not set'`.
@@ -1904,10 +1915,14 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
     copyTextureToTexture and image_copy), a chunk-wait run (**10+ faults** during copyTextureToTexture),
     and a GPU-clock-capped run (**10 faults**, copyTextureToTexture alone). **~10 DMAR faults per warm run**
     of copyTextureToTexture.
-  - **Caveat — heap-layout dependent:** a **cold** (post-reboot) per-case run of copyTextureToTexture
-    (247 cases) produced **0 faults**. The OOB *write* is likely deterministic per buggy case, but it only
-    *faults* when the OOB address lands on an unmapped/RO page — which needs prior GPU/allocation churn
-    ("warm"). So: reliably reproducible warm, not guaranteed cold.
+  - **Caveat — heap-layout dependent & self-limiting:** a **cold** (post-reboot) per-case run of
+    copyTextureToTexture (247 cases) produced **0 faults**. The OOB *write* is likely deterministic per
+    buggy case, but it only *faults* when the OOB address lands on an unmapped/RO page — which needs prior
+    GPU/allocation churn ("warm"). Faults also tend to **cluster early in a run then taper** as the heap
+    settles into a layout where the overshoot lands on mapped pages. So: reliably reproducible warm, not
+    guaranteed cold, and the per-run fault count is small (single digits) — collect across passes/runs.
+    To pinpoint, run per-case (ms `RUN`/`OK` timestamps) and correlate against `journalctl -k -o
+    short-precise` fault times (`RUN ≤ fault ≤ OK`).
   - **Not thermal:** capping the GPU to 350 MHz (GPU running cool at ~200 MHz) still produced the 10 faults
     → OOB is independent of GPU heat/clock. (The separate whole-machine *freeze* is thermal — package hits
     ~94–98 °C even with the GPU capped, i.e. heat is **CPU-dominated** from per-case process churn + naga;
