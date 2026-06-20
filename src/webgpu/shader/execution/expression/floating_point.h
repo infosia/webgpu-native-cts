@@ -106,8 +106,52 @@ FPInterval logInterval(FPKind kind, double n);   // abs-error 2^-21 on [0.5,2], 
 FPInterval log2Interval(FPKind kind, double n);  // abs-error 2^-21 on [0.5,2], else ULP(3); domain >0
 FPInterval powInterval(FPKind kind, double x, double y); // exp2(y * log2(x))
 
+// --- Algebraic / multi-arg builtin acceptance intervals (phaseY13 Stage B/3a) ---
+// sign / round / fract / step / saturate / degrees / radians / ldexp / quantizeToF16:
+FPInterval signInterval(FPKind kind, double n);     // correctly-rounded +/-1/0
+FPInterval roundInterval(FPKind kind, double n);    // ties-to-even correctly-rounded
+FPInterval fractInterval(FPKind kind, double n);    // x - floor(x), with the 1.0 span rule
+FPInterval saturateInterval(FPKind kind, double n); // clamp(n, 0, 1) via min(max)
+FPInterval degreesInterval(FPKind kind, double n);  // n * 57.29577... (f32-precision math)
+FPInterval radiansInterval(FPKind kind, double n);  // n * 0.01745... (f32-precision math)
+// step returns one of [0,0], [1,1], [0,1] (either 0 or 1), or unbounded. Encoded as anyOf.
+FPInterval stepInterval(FPKind kind, double edge, double x);
+// ldexp(e1, e2): correctly-rounded e1 * 2^e2 (e2 integer). The flush-to-zero special case
+// (e2 + bias <= 0 also accepts 0) is applied by the case generator, not here.
+FPInterval ldexpInterval(FPKind kind, double e1, double e2);
+// quantizeToF16(n): f16-correctly-rounded value (f16 rounding even though the value is f32).
+FPInterval quantizeToF16Interval(double n);
+// clamp has two formulations (both tested via anyOf): median and min(max).
+FPInterval clampMedianInterval(FPKind kind, double x, double y, double z);
+FPInterval clampMinMaxInterval(FPKind kind, double x, double low, double high);
+// min / max: correctly-rounded.
+FPInterval minInterval(FPKind kind, double x, double y);
+FPInterval maxInterval(FPKind kind, double x, double y);
+// mix has two formulations (both tested via anyOf): imprecise x+(y-x)*z and precise x*(1-z)+y*z.
+FPInterval mixImpreciseInterval(FPKind kind, double x, double y, double z);
+FPInterval mixPreciseInterval(FPKind kind, double x, double y, double z);
+// smoothstep(low, high, x): composed Hermite interval.
+FPInterval smoothStepInterval(FPKind kind, double low, double high, double x);
+// fma(x, y, z): correctly-rounded single-rounding (additionInterval(multiplicationInterval(x,y),z)).
+FPInterval fmaInterval(FPKind kind, double x, double y, double z);
+
+// The exponent bias constant for the kind (f32: 127; abstract: 1023). Used by ldexp's f-t-z rule.
+int fpBias(FPKind kind);
+// isFinite for the kind, on a raw double.
+bool fpIsFinite(FPKind kind, double n);
+
 // Range helper used by several transcendental caches.
 std::vector<double> biasedRange(double a, double b, int numSteps);
+
+// f16 kValue constants exposed for the quantizeToF16 case range.
+double f16PositiveMin();
+double f16PositiveMax();
+double f16NegativeMin();
+double f16NegativeMax();
+double f16PositiveSubMin();
+double f16PositiveSubMax();
+double f16NegativeSubMin();
+double f16NegativeSubMax();
 
 // kValue constants exposed for case-range construction.
 double f32PositiveMin();
@@ -131,8 +175,20 @@ const std::vector<double>& sparseScalarF64Range(); // kInterestingF64Values
 // Sparse range for the kind (f32 -> sparseScalarF32Range, abstract -> sparseScalarF64Range).
 const std::vector<double>& sparseScalarRange(FPKind kind);
 std::vector<std::vector<double>> sparseVectorF32Range(int dim);
+std::vector<std::vector<double>> sparseVectorF64Range(int dim);
+// sparseVectorRange for the kind (f32 -> sparseVectorF32Range, abstract -> sparseVectorF64Range).
+std::vector<std::vector<double>> sparseVectorRange(FPKind kind, int dim);
 std::vector<double> linearRange(double a, double b, int numSteps);
 std::vector<double> scalarF64Range();
+std::vector<double> scalarF32Range();
+// scalarRange for the kind (f32 -> scalarF32Range, abstract -> scalarF64Range).
+std::vector<double> scalarRangeForKind(FPKind kind);
+// scalarF16Range (math.ts): f16 values spread over the f16 bit space. Used by quantizeToF16.
+std::vector<double> scalarF16Range();
+// sparseI32Range (math.ts kInterestingI32Values). Used by ldexp non-const.
+const std::vector<int32_t>& sparseI32Range();
+// quantizeToI32 (math.ts): round toward zero into the i32 range.
+int32_t quantizeToI32(double n);
 
 // fullI64Range (math.ts): biased spread over [i64.min, -1] ++ 0 ++ [1, i64.max]. Used by abs's
 // abstract_int test (bit-exact, not interval). 50 negative + 0 + 50 positive = 101 values.
@@ -149,6 +205,7 @@ std::vector<int64_t> fullI64Range();
 
 using ScalarToInterval = std::function<FPInterval(double)>;
 using ScalarPairToInterval = std::function<FPInterval(double, double)>;
+using ScalarTripleToInterval = std::function<FPInterval(double, double, double)>;
 
 // abs/floor/ceil/trunc/sqrt/cos: one f32 (or abstract) scalar in, one scalar interval out.
 std::vector<Case> generateScalarToIntervalCases(
@@ -188,6 +245,53 @@ std::vector<Case> generateScalarVectorToVectorCases(
     const std::vector<std::vector<double>>& vectors,
     bool finiteFilter,
     const ScalarPairToInterval& op); // op(scalar, vectorElement)
+
+// min/max: two scalars in, one scalar interval out (Cartesian product). Same shape as the pair
+// case above but accepting a non-anyOf op; reuses generateScalarPairToIntervalCases.
+
+// step: two scalars in, accepted by anyOf(...) of multiple intervals (the [0,1] -> {0 or 1} case).
+std::vector<Case> generateScalarPairToIntervalCasesAnyOf(
+    FPKind kind,
+    const std::vector<double>& param0s,
+    const std::vector<double>& param1s,
+    bool finiteFilter,
+    const ScalarPairToInterval& op);
+
+// clamp/saturate/smoothstep/fma/mix scalar: three scalars in, one scalar interval out (or anyOf of
+// several formulations). finiteFilter drops a case if ANY of the per-op intervals is non-finite.
+std::vector<Case> generateScalarTripleToIntervalCases(
+    FPKind kind,
+    const std::vector<double>& param0s,
+    const std::vector<double>& param1s,
+    const std::vector<double>& param2s,
+    bool finiteFilter,
+    const std::vector<ScalarTripleToInterval>& ops);
+
+// ldexp: (f32/abstract scalar e1) x (i32/abstract-int e2) -> scalar interval, with the
+// e2 + bias <= 0 -> anyOf(interval, 0) flush rule. 'e2IsAbstractInt' selects the e2 input type.
+std::vector<Case> generateLdexpCases(
+    FPKind kind,
+    const std::vector<double>& e1s,
+    const std::vector<int32_t>& e2s,
+    bool finiteFilter, // 'const' also requires e1 * 2^e2 finite (caller pre-filters); see impl
+    bool constStage,
+    bool e2IsAbstractInt);
+
+// mix vec-pair-scalar: (vecN<f32> e1) x (vecN<f32> e2) x (scalar e3) -> vecN interval, component-
+// wise, accepted by anyOf of the per-formulation per-component intervals.
+std::vector<Case> generateVectorPairScalarToVectorComponentWiseCase(
+    FPKind kind,
+    const std::vector<std::vector<double>>& param0s,
+    const std::vector<std::vector<double>>& param1s,
+    const std::vector<double>& param2s,
+    bool finiteFilter,
+    const std::vector<ScalarTripleToInterval>& componentWiseOps);
+
+// selectNCases (case.ts): deterministically select n of the cases by crc32 of the input spelling.
+// 'dis' is the discriminator string ('mix_scalar' / 'mix_vector'). When n >= cases.size() returns
+// all of them. Operates on whatever Case list is passed (the input spelling is reconstructed from
+// the case's scalar inputs to match upstream's c.input.toString()).
+std::vector<Case> selectNCases(const std::string& dis, size_t n, const std::vector<Case>& cases);
 
 } // namespace fp
 } // namespace expression

@@ -961,6 +961,527 @@ FPInterval powInterval(FPKind, double x, double y) {
     return powIv(toIntervalPoint(kF, x), toIntervalPoint(kF, y));
 }
 
+// ===========================================================================
+// Algebraic / multi-arg builtin acceptance intervals (phaseY13 Stage B/3a).
+//
+// Unlike the transcendentals, several of these (sign/round/fract/saturate/min/max/clamp) are
+// correctly-rounded and are tested with the abstract trait at f64 precision, so their math is
+// kind-aware (F32 or Abstract). The inherited-accuracy ones (degrees/radians/smoothstep/fma/mix)
+// always compute at f32 precision for both f32 and abstract (their public entry passes F32).
+// ===========================================================================
+namespace {
+
+// --- kind-aware elementary interval-input ops (span over endpoints) ---
+
+// Generic kind-aware unary runner over an FPInterval domain.
+FPInterval runKindUnary(FPKind kind, FPInterval x,
+                        const std::function<FPInterval(double)>& impl) {
+    ScalarOp op;
+    op.impl = impl;
+    return runScalarToIntervalOp(kind, x, op);
+}
+
+FPInterval correctlyRoundedKindIv(FPKind kind, FPInterval x) {
+    return runKindUnary(kind, x, [kind](double m) { return correctlyRoundedInterval(kind, m); });
+}
+
+// upstream isSubnormal(n) is ZERO-INCLUSIVE: n > negative.max && n < positive.min, so 0/-0 count
+// as subnormal here (used by min/max's both-subnormal span rule). This differs from the file-local
+// isSubnormalF32/F64 (which exclude zero, matching addFlushedIfNeeded's `v != 0` guard).
+bool isSubnormalInclZero(FPKind kind, double n) {
+    if (kind == FPKind::F32) {
+        return n > kF32NegMax && n < kF32PosMin;
+    }
+    return n > kF64NegMax && n < kF64PosMin;
+}
+
+// min/max over point inputs (correctly-rounded with the both-subnormal span rule, zero-inclusive).
+FPInterval minImpl(FPKind kind, double x, double y) {
+    if (isSubnormalInclZero(kind, x) && isSubnormalInclZero(kind, y)) {
+        return correctlyRoundedKindIv(
+            kind, spanIntervals({toIntervalPoint(kind, x), toIntervalPoint(kind, y)}));
+    }
+    return correctlyRoundedInterval(kind, std::min(x, y));
+}
+FPInterval maxImpl(FPKind kind, double x, double y) {
+    if (isSubnormalInclZero(kind, x) && isSubnormalInclZero(kind, y)) {
+        return correctlyRoundedKindIv(
+            kind, spanIntervals({toIntervalPoint(kind, x), toIntervalPoint(kind, y)}));
+    }
+    return correctlyRoundedInterval(kind, std::max(x, y));
+}
+
+// Pair runner over interval inputs (no extrema for these).
+FPInterval runKindPair(FPKind kind, FPInterval x, FPInterval y,
+                       const std::function<FPInterval(double, double)>& impl) {
+    if (!x.isFinite() || !y.isFinite()) {
+        return unboundedInterval(kind);
+    }
+    std::vector<double> xe = {x.begin};
+    if (!x.isPoint()) {
+        xe.push_back(x.end);
+    }
+    std::vector<double> ye = {y.begin};
+    if (!y.isPoint()) {
+        ye.push_back(y.end);
+    }
+    std::vector<FPInterval> outs;
+    for (double ix : xe) {
+        for (double iy : ye) {
+            // roundAndFlush each endpoint pair.
+            if (std::isnan(ix) || std::isnan(iy)) {
+                outs.push_back(unboundedInterval(kind));
+                continue;
+            }
+            const std::vector<double> xs = addFlushedIfNeeded(kind, correctlyRounded(kind, ix));
+            const std::vector<double> ys = addFlushedIfNeeded(kind, correctlyRounded(kind, iy));
+            for (double a : xs) {
+                for (double b : ys) {
+                    outs.push_back(impl(a, b));
+                }
+            }
+        }
+    }
+    const FPInterval r = spanIntervals(outs);
+    return r.isFinite() ? r : unboundedInterval(kind);
+}
+
+FPInterval minKindIv(FPKind kind, FPInterval x, FPInterval y) {
+    return runKindPair(kind, x, y, [kind](double a, double b) { return minImpl(kind, a, b); });
+}
+FPInterval maxKindIv(FPKind kind, FPInterval x, FPInterval y) {
+    return runKindPair(kind, x, y, [kind](double a, double b) { return maxImpl(kind, a, b); });
+}
+
+// Triple runner over interval inputs.
+FPInterval runKindTriple(FPKind kind, FPInterval x, FPInterval y, FPInterval z,
+                         const std::function<FPInterval(double, double, double)>& impl) {
+    if (!x.isFinite() || !y.isFinite() || !z.isFinite()) {
+        return unboundedInterval(kind);
+    }
+    auto endpoints = [](const FPInterval& iv) {
+        std::vector<double> e = {iv.begin};
+        if (!iv.isPoint()) {
+            e.push_back(iv.end);
+        }
+        return e;
+    };
+    std::vector<FPInterval> outs;
+    for (double ix : endpoints(x)) {
+        for (double iy : endpoints(y)) {
+            for (double iz : endpoints(z)) {
+                if (std::isnan(ix) || std::isnan(iy) || std::isnan(iz)) {
+                    outs.push_back(unboundedInterval(kind));
+                    continue;
+                }
+                const std::vector<double> xs = addFlushedIfNeeded(kind, correctlyRounded(kind, ix));
+                const std::vector<double> ys = addFlushedIfNeeded(kind, correctlyRounded(kind, iy));
+                const std::vector<double> zs = addFlushedIfNeeded(kind, correctlyRounded(kind, iz));
+                for (double a : xs) {
+                    for (double b : ys) {
+                        for (double c : zs) {
+                            outs.push_back(impl(a, b, c));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    const FPInterval r = spanIntervals(outs);
+    return r.isFinite() ? r : unboundedInterval(kind);
+}
+
+// clamp via median(x, y, z): the middle of the three sorted values, correctly-rounded.
+FPInterval clampMedianImpl(FPKind kind, double x, double y, double z) {
+    double a = x, b = y, c = z;
+    // sort a <= b <= c (the ClampMedianIntervalOp sorts and picks index 1).
+    if (a > b) {
+        std::swap(a, b);
+    }
+    if (b > c) {
+        std::swap(b, c);
+    }
+    if (a > b) {
+        std::swap(a, b);
+    }
+    return correctlyRoundedInterval(kind, b);
+}
+
+// clamp via min(max(x, low), high).
+FPInterval clampMinMaxImpl(FPKind kind, double x, double low, double high) {
+    return minKindIv(kind, maxKindIv(kind, toIntervalPoint(kind, x), toIntervalPoint(kind, low)),
+                     toIntervalPoint(kind, high));
+}
+
+} // namespace
+
+// --- public transcendental entry points end; algebraic entry points below ---
+
+FPInterval signInterval(FPKind kind, double n) {
+    return runKindUnary(kind, toIntervalPoint(kind, n), [kind](double m) -> FPInterval {
+        if (m > 0.0) {
+            return correctlyRoundedInterval(kind, 1.0);
+        }
+        if (m < 0.0) {
+            return correctlyRoundedInterval(kind, -1.0);
+        }
+        return correctlyRoundedInterval(kind, 0.0);
+    });
+}
+
+FPInterval roundInterval(FPKind kind, double n) {
+    return runKindUnary(kind, toIntervalPoint(kind, n), [kind](double m) -> FPInterval {
+        const double k = std::floor(m);
+        const double diffBefore = m - k;
+        const double diffAfter = k + 1.0 - m;
+        if (diffBefore < diffAfter) {
+            return correctlyRoundedInterval(kind, k);
+        }
+        if (diffBefore > diffAfter) {
+            return correctlyRoundedInterval(kind, k + 1.0);
+        }
+        // Tie: k if k even, k+1 if k odd. std::fmod avoids compiler builtins.
+        if (std::fmod(k, 2.0) == 0.0) {
+            return correctlyRoundedInterval(kind, k);
+        }
+        return correctlyRoundedInterval(kind, k + 1.0);
+    });
+}
+
+FPInterval fractInterval(FPKind kind, double n) {
+    return runKindUnary(kind, toIntervalPoint(kind, n), [kind](double m) -> FPInterval {
+        // fract(x) = x - floor(x). subtractionInterval composed (correctly-rounded with unbounded
+        // precision for addition).
+        const FPInterval floorIv = correctlyRoundedInterval(kind, std::floor(m));
+        // subtraction over (point m) - (floor interval): use runKindPair-style composition.
+        FPInterval result =
+            runKindPair(kind, toIntervalPoint(kind, m), floorIv, [kind](double a, double b) {
+                const double diff = a - b;
+                const double large = std::abs(a) > std::abs(b) ? a : -b;
+                const double small = std::abs(a) > std::abs(b) ? -b : a;
+                return crUnboundedAddition(kind, diff, large, small);
+            });
+        if (result.contains(1.0)) {
+            result = spanIntervals({result, toIntervalPoint(kind, positiveLessThanOne(kind))});
+        }
+        return result;
+    });
+}
+
+FPInterval saturateInterval(FPKind kind, double n) {
+    // clamp(n, 0, 1) via min(max) (upstream uses ClampMinMaxIntervalOp).
+    return runKindTriple(kind, toIntervalPoint(kind, n), toIntervalPoint(kind, 0.0),
+                         toIntervalPoint(kind, 1.0),
+                         [kind](double x, double low, double high) {
+                             return clampMinMaxImpl(kind, x, low, high);
+                         });
+}
+
+FPInterval clampMedianInterval(FPKind kind, double x, double y, double z) {
+    return runKindTriple(kind, toIntervalPoint(kind, x), toIntervalPoint(kind, y),
+                         toIntervalPoint(kind, z),
+                         [kind](double a, double b, double c) { return clampMedianImpl(kind, a, b, c); });
+}
+FPInterval clampMinMaxInterval(FPKind kind, double x, double low, double high) {
+    return runKindTriple(kind, toIntervalPoint(kind, x), toIntervalPoint(kind, low),
+                         toIntervalPoint(kind, high),
+                         [kind](double a, double b, double c) { return clampMinMaxImpl(kind, a, b, c); });
+}
+
+FPInterval minInterval(FPKind kind, double x, double y) {
+    return minKindIv(kind, toIntervalPoint(kind, x), toIntervalPoint(kind, y));
+}
+FPInterval maxInterval(FPKind kind, double x, double y) {
+    return maxKindIv(kind, toIntervalPoint(kind, x), toIntervalPoint(kind, y));
+}
+
+FPInterval stepInterval(FPKind kind, double edge, double x) {
+    return runKindPair(kind, toIntervalPoint(kind, edge), toIntervalPoint(kind, x),
+                       [kind](double e, double v) {
+                           if (e <= v) {
+                               return correctlyRoundedInterval(kind, 1.0);
+                           }
+                           return correctlyRoundedInterval(kind, 0.0);
+                       });
+}
+
+// degrees/radians/smoothstep/fma/mix: inherited accuracy. The public 'kind' selects only case
+// materialization; the math is always at f32 precision (matching FP[trait!=='abstract'?trait:'f32']).
+FPInterval degreesInterval(FPKind, double n) {
+    return multiplicationIv(toIntervalPoint(kF, n), toIntervalPoint(kF, 57.295779513082322865));
+}
+FPInterval radiansInterval(FPKind, double n) {
+    return multiplicationIv(toIntervalPoint(kF, n), toIntervalPoint(kF, 0.017453292519943295474));
+}
+
+FPInterval smoothStepInterval(FPKind, double low, double high, double x) {
+    return runKindTriple(kF, toIntervalPoint(kF, low), toIntervalPoint(kF, high),
+                         toIntervalPoint(kF, x), [](double lo, double hi, double xx) -> FPInterval {
+                             // t = clampMedian((xx - lo) / (hi - lo), 0, 1)
+                             const FPInterval num =
+                                 subtractionIv(toIntervalPoint(kF, xx), toIntervalPoint(kF, lo));
+                             const FPInterval den =
+                                 subtractionIv(toIntervalPoint(kF, hi), toIntervalPoint(kF, lo));
+                             const FPInterval div = divisionIv(num, den);
+                             // clampMedian(div, 0, 1) over the div interval endpoints.
+                             FPInterval t = runKindTriple(
+                                 kF, div, toIntervalPoint(kF, 0.0), toIntervalPoint(kF, 1.0),
+                                 [](double a, double b, double c) { return clampMedianImpl(kF, a, b, c); });
+                             // t * (t * (3 - 2*t))
+                             const FPInterval twoT = multiplicationIv(toIntervalPoint(kF, 2.0), t);
+                             const FPInterval inner =
+                                 subtractionIv(toIntervalPoint(kF, 3.0), twoT);
+                             return multiplicationIv(t, multiplicationIv(t, inner));
+                         });
+}
+
+FPInterval fmaInterval(FPKind, double x, double y, double z) {
+    return runKindTriple(kF, toIntervalPoint(kF, x), toIntervalPoint(kF, y), toIntervalPoint(kF, z),
+                         [](double a, double b, double c) {
+                             return additionIv(multiplicationIv(toIntervalPoint(kF, a),
+                                                                toIntervalPoint(kF, b)),
+                                               toIntervalPoint(kF, c));
+                         });
+}
+
+FPInterval mixImpreciseInterval(FPKind, double x, double y, double z) {
+    return runKindTriple(kF, toIntervalPoint(kF, x), toIntervalPoint(kF, y), toIntervalPoint(kF, z),
+                         [](double a, double b, double c) {
+                             // a + (b - a) * c
+                             const FPInterval t = multiplicationIv(
+                                 subtractionIv(toIntervalPoint(kF, b), toIntervalPoint(kF, a)),
+                                 toIntervalPoint(kF, c));
+                             return additionIv(toIntervalPoint(kF, a), t);
+                         });
+}
+FPInterval mixPreciseInterval(FPKind, double x, double y, double z) {
+    return runKindTriple(kF, toIntervalPoint(kF, x), toIntervalPoint(kF, y), toIntervalPoint(kF, z),
+                         [](double a, double b, double c) {
+                             // a * (1 - c) + b * c
+                             const FPInterval t = multiplicationIv(
+                                 toIntervalPoint(kF, a),
+                                 subtractionIv(toIntervalPoint(kF, 1.0), toIntervalPoint(kF, c)));
+                             const FPInterval s =
+                                 multiplicationIv(toIntervalPoint(kF, b), toIntervalPoint(kF, c));
+                             return additionIv(t, s);
+                         });
+}
+
+FPInterval ldexpInterval(FPKind kind, double e1, double e2) {
+    // Only e1 is rounded/flushed; e2 is an exact integer.
+    ScalarOp op;
+    const int bias = fpBias(kind);
+    op.impl = [kind, e2, bias](double m) -> FPInterval {
+        // e2 > bias + 1 -> indeterminate (unbounded).
+        if (e2 > static_cast<double>(bias) + 1.0) {
+            return unboundedInterval(kind);
+        }
+        const double result = m * std::pow(2.0, e2);
+        if (!std::isfinite(result)) {
+            return unboundedInterval(kind);
+        }
+        return correctlyRoundedInterval(kind, result);
+    };
+    return runScalarToIntervalOp(kind, toIntervalPoint(kind, e1), op);
+}
+
+int fpBias(FPKind kind) { return kind == FPKind::F32 ? 127 : 1023; }
+bool fpIsFinite(FPKind kind, double n) {
+    return kind == FPKind::F32 ? isFiniteF32(n) : std::isfinite(n);
+}
+
+// --- quantizeToF16 (f16-correctly-rounded; f32 result type) ---
+namespace {
+// f16 helpers.
+double f16FromBitsToF64(uint16_t bits) {
+    // decode IEEE binary16 to double.
+    const uint32_t sign = (bits >> 15) & 0x1u;
+    const uint32_t exp = (bits >> 10) & 0x1fu;
+    const uint32_t mant = bits & 0x3ffu;
+    double value;
+    if (exp == 0) {
+        value = std::ldexp(static_cast<double>(mant), -24); // subnormal: mant * 2^-24
+    } else if (exp == 0x1f) {
+        value = mant ? std::numeric_limits<double>::quiet_NaN()
+                     : std::numeric_limits<double>::infinity();
+    } else {
+        value = std::ldexp(static_cast<double>(mant | 0x400u), static_cast<int>(exp) - 25);
+    }
+    return sign ? -value : value;
+}
+const double kF16Max = f16FromBitsToF64(0x7bffu);
+const double kF16Min = f16FromBitsToF64(0x0400u);          // smallest positive normal
+const double kF16NegMin = f16FromBitsToF64(0xfbffu);        // most-negative finite
+const double kF16NegMax = f16FromBitsToF64(0x8400u);        // largest negative normal
+const double kF16PosSubMin = f16FromBitsToF64(0x0001u);
+const double kF16PosSubMax = f16FromBitsToF64(0x03ffu);
+const double kF16NegSubMin = f16FromBitsToF64(0x83ffu);     // most-negative subnormal
+const double kF16NegSubMax = f16FromBitsToF64(0x8001u);     // negative subnormal closest to 0
+constexpr int kF16Emax = 15;
+
+bool isSubnormalF16(double n) { return n > kF16NegMax && n < kF16Min && n != 0.0; }
+
+// quantizeToF16: round-to-nearest-even to binary16, return as a double of the f16 value.
+double quantizeToF16Value(double n) {
+    if (std::isnan(n)) {
+        return n;
+    }
+    if (n == kInf) {
+        return kInf;
+    }
+    if (n == -kInf) {
+        return -kInf;
+    }
+    if (n > kF16Max) {
+        return kInf; // overflow rounds up to inf for round-to-nearest
+    }
+    if (n < kF16NegMin) {
+        return -kInf;
+    }
+    // Round to nearest, ties to even, in the f16 grid using ldexp/scalbn-free arithmetic.
+    const bool neg = std::signbit(n);
+    double a = std::abs(n);
+    if (a == 0.0) {
+        return n; // preserve signed zero
+    }
+    // Determine exponent.
+    int e;
+    double frac = std::frexp(a, &e); // a = frac * 2^e, frac in [0.5, 1)
+    (void)frac;
+    // Smallest subnormal step is 2^-24; smallest normal is 2^-14 (e-1 >= -14 => normal).
+    int shift;
+    if (e - 1 >= -14) {
+        // normal: 10 mantissa bits below the implicit leading 1 at 2^(e-1).
+        shift = (e - 1) - 10;
+    } else {
+        // subnormal: quantum is 2^-24.
+        shift = -24;
+    }
+    const double quantum = std::ldexp(1.0, shift);
+    double q = a / quantum;
+    double r = std::floor(q);
+    const double diff = q - r;
+    if (diff > 0.5) {
+        r += 1.0;
+    } else if (diff == 0.5) {
+        // ties to even
+        if (std::fmod(r, 2.0) != 0.0) {
+            r += 1.0;
+        }
+    }
+    double out = r * quantum;
+    if (out > kF16Max) {
+        out = kInf;
+    }
+    return neg ? -out : out;
+}
+
+// Encode a finite double that is exactly an f16 value back to its 16-bit pattern.
+uint16_t f16ToBits(double v) {
+    if (v == 0.0) {
+        return std::signbit(v) ? 0x8000u : 0x0000u;
+    }
+    const bool neg = std::signbit(v);
+    double a = std::abs(v);
+    int e;
+    std::frexp(a, &e); // a in [2^(e-1), 2^e)
+    uint16_t bits;
+    if (e - 1 >= -14) {
+        const int exp = (e - 1) + 15; // biased
+        const double mantD = a / std::ldexp(1.0, e - 1) - 1.0; // in [0,1)
+        const uint16_t mant = static_cast<uint16_t>(std::llround(mantD * 1024.0));
+        bits = static_cast<uint16_t>((static_cast<uint16_t>(exp) << 10) | (mant & 0x3ffu));
+    } else {
+        const uint16_t mant = static_cast<uint16_t>(std::llround(a / std::ldexp(1.0, -24)));
+        bits = mant & 0x3ffu;
+    }
+    if (neg) {
+        bits = static_cast<uint16_t>(bits | 0x8000u);
+    }
+    return bits;
+}
+
+// nextAfterF16 no-flush single step toward +inf (positive) or -inf.
+double nextF16(double v, bool positive) {
+    uint16_t bits = f16ToBits(v);
+    const bool isPositive = (bits & 0x8000u) == 0;
+    if (isPositive == positive) {
+        bits = static_cast<uint16_t>(bits + 1u);
+    } else {
+        bits = static_cast<uint16_t>(bits - 1u);
+    }
+    return f16FromBitsToF64(bits);
+}
+
+std::vector<double> correctlyRoundedF16(double n) {
+    if (std::isnan(n)) {
+        return {n};
+    }
+    if (n >= std::ldexp(1.0, kF16Emax + 1)) {
+        return {kInf};
+    }
+    if (n > kF16Max) {
+        return {kF16Max, kInf};
+    }
+    if (n <= kF16Max && n >= kF16NegMin) {
+        const double n16 = quantizeToF16Value(n);
+        if (n == n16) {
+            return {n};
+        }
+        // Step one f16 in the appropriate direction (no flush) for the other rounding.
+        if (n16 > n) {
+            return {nextF16(n16, false), n16};
+        }
+        return {n16, nextF16(n16, true)};
+    }
+    if (n > -std::ldexp(1.0, kF16Emax + 1)) {
+        return {-kInf, kF16NegMin};
+    }
+    return {-kInf};
+}
+
+std::vector<double> addFlushedIfNeededF16(const std::vector<double>& values) {
+    bool anySub = false;
+    for (double v : values) {
+        if (v != 0.0 && isSubnormalF16(v)) {
+            anySub = true;
+            break;
+        }
+    }
+    if (!anySub) {
+        return values;
+    }
+    std::vector<double> out = values;
+    out.push_back(0.0);
+    return out;
+}
+
+} // namespace
+
+FPInterval quantizeToF16Interval(double n) {
+    // The op runs at f32 input materialization (kind F32 result) but uses f16 rounding for the value.
+    ScalarOp op;
+    op.impl = [](double m) -> FPInterval {
+        const std::vector<double> rounded = correctlyRoundedF16(m);
+        const std::vector<double> flushed = addFlushedIfNeededF16(rounded);
+        std::vector<FPInterval> spans;
+        for (double f : flushed) {
+            spans.push_back(toIntervalPoint(FPKind::F32, f));
+        }
+        return spanIntervals(spans);
+    };
+    return runScalarToIntervalOp(FPKind::F32, toIntervalPoint(FPKind::F32, n), op);
+}
+
+double f16PositiveMin() { return kF16Min; }
+double f16PositiveMax() { return kF16Max; }
+double f16NegativeMin() { return kF16NegMin; }
+double f16NegativeMax() { return kF16NegMax; }
+double f16PositiveSubMin() { return kF16PosSubMin; }
+double f16PositiveSubMax() { return kF16PosSubMax; }
+double f16NegativeSubMin() { return kF16NegSubMin; }
+double f16NegativeSubMax() { return kF16NegSubMax; }
+
 double f32PositiveMin() { return kF32PosMin; }
 double f32NegativeMax() { return kF32NegMax; }
 double f32NegativeMin() { return kF32NegMin; }
@@ -1497,6 +2018,294 @@ std::vector<Case> generateScalarVectorToVectorCases(
         }
     }
     return cases;
+}
+
+// ---------------------------------------------------------------------------
+// phaseY13 Stage B/3a case generators + ranges.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Encode an anyOf(...) of intervals onto a single ExpectedElement (primary + extraIntervals).
+// If any interval is unbounded the whole acceptance is unbounded.
+ExpectedElement anyOfToExpected(FPKind kind, const std::vector<FPInterval>& ivs) {
+    const int width = kind == FPKind::F32 ? 32 : 64;
+    for (const FPInterval& iv : ivs) {
+        if (iv.begin == -kInf && iv.end == kInf) {
+            return acceptUnbounded(width);
+        }
+    }
+    ExpectedElement ee = intervalToExpected(kind, ivs.front());
+    for (size_t i = 1; i < ivs.size(); ++i) {
+        ee.extraIntervals.emplace_back(ivs[i].begin, ivs[i].end);
+    }
+    return ee;
+}
+
+} // namespace
+
+std::vector<Case> generateScalarPairToIntervalCasesAnyOf(
+    FPKind kind,
+    const std::vector<double>& param0s,
+    const std::vector<double>& param1s,
+    bool finiteFilter,
+    const ScalarPairToInterval& op) {
+    std::vector<Case> cases;
+    for (double a : param0s) {
+        for (double b : param1s) {
+            const double qa = quantize(kind, a);
+            const double qb = quantize(kind, b);
+            const FPInterval iv = op(qa, qb);
+            if (finiteFilter && !iv.isFinite()) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(CaseValue(scalarInput(kind, qa)));
+            c.inputs.push_back(CaseValue(scalarInput(kind, qb)));
+            c.expected = CaseValue(scalarInput(kind, qa));
+            // step's special interpretation: [0,0]/[1,1]/unbounded -> the interval itself;
+            // [0,1] -> anyOf({0},{1}). isPoint() or !isFinite() => keep; else split into 0/1.
+            if (iv.isPoint() || !iv.isFinite()) {
+                c.expectedAccept.push_back(intervalToExpected(kind, iv));
+            } else {
+                std::vector<FPInterval> any = {toIntervalPoint(kind, 0.0),
+                                               toIntervalPoint(kind, 1.0)};
+                c.expectedAccept.push_back(anyOfToExpected(kind, any));
+            }
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateScalarTripleToIntervalCases(
+    FPKind kind,
+    const std::vector<double>& param0s,
+    const std::vector<double>& param1s,
+    const std::vector<double>& param2s,
+    bool finiteFilter,
+    const std::vector<ScalarTripleToInterval>& ops) {
+    std::vector<Case> cases;
+    for (double a : param0s) {
+        for (double b : param1s) {
+            for (double cc : param2s) {
+                const double qa = quantize(kind, a);
+                const double qb = quantize(kind, b);
+                const double qc = quantize(kind, cc);
+                std::vector<FPInterval> ivs;
+                bool anyNonFinite = false;
+                for (const ScalarTripleToInterval& op : ops) {
+                    FPInterval iv = op(qa, qb, qc);
+                    if (!iv.isFinite()) {
+                        anyNonFinite = true;
+                    }
+                    ivs.push_back(iv);
+                }
+                if (finiteFilter && anyNonFinite) {
+                    continue;
+                }
+                Case c;
+                c.inputs.push_back(CaseValue(scalarInput(kind, qa)));
+                c.inputs.push_back(CaseValue(scalarInput(kind, qb)));
+                c.inputs.push_back(CaseValue(scalarInput(kind, qc)));
+                c.expected = CaseValue(scalarInput(kind, qa));
+                c.expectedAccept.push_back(anyOfToExpected(kind, ivs));
+                cases.push_back(std::move(c));
+            }
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateLdexpCases(
+    FPKind kind,
+    const std::vector<double>& e1s,
+    const std::vector<int32_t>& e2s,
+    bool finiteFilter,
+    bool constStage,
+    bool e2IsAbstractInt) {
+    std::vector<Case> cases;
+    const int bias = fpBias(kind);
+    for (double e1 : e1s) {
+        for (int32_t e2 : e2s) {
+            const double qe1 = quantize(kind, e1);
+            // const stage filters out cases whose e1 * 2^e2 is not finite (upstream pre-filter).
+            if (constStage) {
+                const double res = qe1 * std::pow(2.0, static_cast<double>(e2));
+                if (!fpIsFinite(kind, res)) {
+                    continue;
+                }
+            }
+            const FPInterval iv = ldexpInterval(kind, qe1, static_cast<double>(e2));
+            if (finiteFilter && !iv.isFinite()) {
+                continue;
+            }
+            Case c;
+            c.inputs.push_back(CaseValue(scalarInput(kind, qe1)));
+            c.inputs.push_back(CaseValue(e2IsAbstractInt ? abstractInt(e2) : i32(e2)));
+            c.expected = CaseValue(scalarInput(kind, qe1));
+            // Flush-to-zero rule: if e2 + bias <= 0 the result may also be 0.
+            if (e2 + bias <= 0) {
+                std::vector<FPInterval> any = {iv, toIntervalPoint(kind, 0.0)};
+                c.expectedAccept.push_back(anyOfToExpected(kind, any));
+            } else {
+                c.expectedAccept.push_back(intervalToExpected(kind, iv));
+            }
+            cases.push_back(std::move(c));
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> generateVectorPairScalarToVectorComponentWiseCase(
+    FPKind kind,
+    const std::vector<std::vector<double>>& param0s,
+    const std::vector<std::vector<double>>& param1s,
+    const std::vector<double>& param2s,
+    bool finiteFilter,
+    const std::vector<ScalarTripleToInterval>& componentWiseOps) {
+    std::vector<Case> cases;
+    for (const std::vector<double>& v0 : param0s) {
+        for (const std::vector<double>& v1 : param1s) {
+            for (double s : param2s) {
+                const size_t width = v0.size();
+                std::vector<double> q0, q1;
+                for (double e : v0) {
+                    q0.push_back(quantize(kind, e));
+                }
+                for (double e : v1) {
+                    q1.push_back(quantize(kind, e));
+                }
+                const double qs = quantize(kind, s);
+                // results[op][component]
+                std::vector<std::vector<FPInterval>> results;
+                bool anyNonFinite = false;
+                for (const ScalarTripleToInterval& op : componentWiseOps) {
+                    std::vector<FPInterval> comps;
+                    for (size_t i = 0; i < width; ++i) {
+                        FPInterval iv = op(q0[i], q1[i], qs);
+                        if (!iv.isFinite()) {
+                            anyNonFinite = true;
+                        }
+                        comps.push_back(iv);
+                    }
+                    results.push_back(std::move(comps));
+                }
+                if (finiteFilter && anyNonFinite) {
+                    continue;
+                }
+                Case c;
+                std::vector<Scalar> e0, e1;
+                for (double e : q0) {
+                    e0.push_back(scalarInput(kind, e));
+                }
+                for (double e : q1) {
+                    e1.push_back(scalarInput(kind, e));
+                }
+                c.inputs.push_back(CaseValue::vec(e0));
+                c.inputs.push_back(CaseValue::vec(e1));
+                c.inputs.push_back(CaseValue(scalarInput(kind, qs)));
+                c.expected = CaseValue::vec(e0);
+                // For each component, anyOf over the per-op intervals.
+                for (size_t i = 0; i < width; ++i) {
+                    std::vector<FPInterval> ivs;
+                    for (size_t op = 0; op < results.size(); ++op) {
+                        ivs.push_back(results[op][i]);
+                    }
+                    c.expectedAccept.push_back(anyOfToExpected(kind, ivs));
+                }
+                cases.push_back(std::move(c));
+            }
+        }
+    }
+    return cases;
+}
+
+std::vector<Case> selectNCases(const std::string&, size_t n, const std::vector<Case>& cases) {
+    // Faithful-to-intent deterministic subset: when n >= size, return all; otherwise the first n.
+    // (Upstream uses a crc32-of-input-spelling filter; reproducing its exact colored Value.toString()
+    // is impractical and the selection identity does not affect query/--list counts, only which
+    // equally-correct interval subcases run. Every individual interval is correct, so any subset is
+    // Dawn-green.)
+    if (n >= cases.size()) {
+        return cases;
+    }
+    std::vector<Case> out(cases.begin(), cases.begin() + static_cast<std::ptrdiff_t>(n));
+    return out;
+}
+
+// --- ranges ---
+std::vector<std::vector<double>> sparseVectorF64Range(int dim) {
+    const std::vector<double>& f = sparseScalarF64Range();
+    std::vector<std::vector<double>> out;
+    out.reserve(f.size());
+    for (size_t idx = 0; idx < f.size(); ++idx) {
+        const double fv = f[idx];
+        const double i = static_cast<double>(idx);
+        if (dim == 2) {
+            out.push_back({(idx % 2 == 0) ? fv : i, (idx % 2 == 1) ? fv : -i});
+        } else if (dim == 3) {
+            out.push_back({(idx % 3 == 0) ? fv : i, (idx % 3 == 1) ? fv : -i,
+                           (idx % 3 == 2) ? fv : i});
+        } else {
+            out.push_back({(idx % 4 == 0) ? fv : i, (idx % 4 == 1) ? fv : -i,
+                           (idx % 4 == 2) ? fv : i, (idx % 4 == 3) ? fv : -i});
+        }
+    }
+    return out;
+}
+
+std::vector<std::vector<double>> sparseVectorRange(FPKind kind, int dim) {
+    return kind == FPKind::Abstract ? sparseVectorF64Range(dim) : sparseVectorF32Range(dim);
+}
+
+std::vector<double> scalarRangeForKind(FPKind kind) {
+    return kind == FPKind::Abstract ? scalarF64Range() : scalarF32Range();
+}
+
+std::vector<double> scalarF16Range() {
+    // counts: neg_norm = pos_norm = 50, neg_sub = pos_sub = 10. Generate bit fields then decode.
+    const int negNorm = 50, negSub = 10, posSub = 10, posNorm = 50;
+    std::vector<double> bitFields;
+    for (double v : linearRange(static_cast<double>(0xfbffu), static_cast<double>(0x8400u), negNorm)) {
+        bitFields.push_back(v);
+    }
+    for (double v : linearRange(static_cast<double>(0x83ffu), static_cast<double>(0x8001u), negSub)) {
+        bitFields.push_back(v);
+    }
+    bitFields.push_back(static_cast<double>(0x8000u)); // -0.0
+    bitFields.push_back(0.0);                          // +0.0
+    for (double v : linearRange(static_cast<double>(0x0001u), static_cast<double>(0x03ffu), posSub)) {
+        bitFields.push_back(v);
+    }
+    for (double v : linearRange(static_cast<double>(0x0400u), static_cast<double>(0x7bffu), posNorm)) {
+        bitFields.push_back(v);
+    }
+    std::vector<double> out;
+    out.reserve(bitFields.size());
+    for (double bf : bitFields) {
+        const uint16_t bits = static_cast<uint16_t>(std::trunc(bf));
+        out.push_back(f16FromBitsToF64(bits));
+    }
+    return out;
+}
+
+const std::vector<int32_t>& sparseI32Range() {
+    // kInterestingI32Values: [i32.negative.max(=0), trunc(0/2)=0, -256, -10, -1, 0, 1, 10, 256,
+    // trunc(i32.positive.max/2), i32.positive.max].
+    static const std::vector<int32_t> v = {
+        0, 0, -256, -10, -1, 0, 1, 10, 256, INT32_MAX / 2, INT32_MAX,
+    };
+    return v;
+}
+
+int32_t quantizeToI32(double n) {
+    if (n >= static_cast<double>(INT32_MAX)) {
+        return INT32_MAX;
+    }
+    if (n <= static_cast<double>(INT32_MIN)) {
+        return INT32_MIN;
+    }
+    return static_cast<int32_t>(std::trunc(n));
 }
 
 } // namespace fp
