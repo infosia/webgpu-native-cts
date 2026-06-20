@@ -1829,4 +1829,26 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-124 — upstream-naga: abstract-float const-eval readback snippet fails/panics (Metal; blocks all `abstract_float` math)
+
+- **Backend:** yawgpu (Metal) → `uncaptured error: queue submit cannot use an error command buffer`;
+  wgpu-native (Metal) → **panic/crash (signal 6)**. Same 24 cases. Deterministic.
+- **Found by:** `shader,execution,expression,call,builtin,{abs,floor,ceil,trunc,sqrt,cos}:abstract_float:inputSource="const";*`
+  (phaseY13 Stage B/1) — every `abstract_float` const case of every math builtin fails. The **f32 paths all
+  pass** on yawgpu. The failure is in the upstream **abstract-float readback snippet** (`abstractFloatSnippet`:
+  splits the f64 abstract-float result into low/high u32 via const-eval `frexp`/`ldexp`/`select`/`floor`),
+  NOT in the builtin itself (even trivial `floor`/`abs` fail) — i.e. naga cannot const-evaluate that snippet.
+- **Cross-check:** **Dawn passes all 24** (oracle — Tint const-evals the snippet). **Both naga backends fail
+  the SAME 24** (yawgpu errors the pipeline; wgpu-native panics) → **upstream-naga** (shared abstract-float
+  const-eval gap), **not yawgpu-only**. Faithful port (Dawn-green; the f64 interval acceptance is correct).
+- **Impact:** blocks the `abstract_float` variant of **every** math builtin in the Stage-B fan-out (~52
+  builtins) and the abstract-float operators. The f32 (and later f16) variants are unaffected.
+- **Status:** **OPEN — yawgpu to fix in its naga fork** (shared-naga, per F-120 policy; wgpu-native panic is
+  a naga robustness bug too). Re-verify the `abstract_float` cases when naga's abstract-float const-eval
+  (frexp/ldexp/select on abstract-float) lands. cts port correct throughout. (Separately, wgpu-native also
+  panics 7 `f32_addition:{scalar,vector_scalar}_compound:const` cases that yawgpu passes — wgpu-native-only,
+  bring-up reference.)
+
+---
+
 _Add new findings as `F-00N` with the same fields._

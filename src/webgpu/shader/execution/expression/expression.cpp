@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -396,7 +397,15 @@ std::string scalarWgsl(const Scalar& s) {
             }
             return std::to_string(s.bits64);
         case ScalarKind::AbstractFloat:
-            // AbstractFloat literal: emit an exact decimal of the finite f32 value (no suffix).
+            // AbstractFloat literal. When carrying an exact f64 value (FP-interval framework),
+            // emit it as an exact hex-float literal (%a) so no precision is lost; WGSL accepts
+            // hex-float literals for abstract-float. Otherwise emit an exact decimal of the f32
+            // value reinterpreted from the 32-bit pattern (no suffix).
+            if (s.hasF64) {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%a", s.f64);
+                return std::string(buf);
+            }
             return floatLiteral(static_cast<double>(f32FromBits(s.bits)), "");
     }
     std::abort();
@@ -525,6 +534,37 @@ std::string abstractIntSnippet(const std::string& expr, size_t caseIdx, const st
         << "    const low_sign = ((" << expr << ")" << accessor << " & (1 << 31));\n"
         << "    outputs[" << i << "].value" << accessor << ".low = bitcast<u32>(((" << expr << ")"
         << accessor << " & 0x7FFFFFFF)) | low_sign;\n"
+        << "  }\n";
+    return out.str();
+}
+
+bool isAbstractFloatResult(const ExprType& ty) {
+    return ty.scalarKind() == ScalarKind::AbstractFloat;
+}
+
+// Inlined snippet that splits an abstract-float (f64) expression value into the low/high u32 fields
+// of the output, applying FTZ for subnormals. Mirrors upstream abstractFloatSnippet. 'accessor' is
+// "" for scalars or "[i]" for vectors. The reconstructed f64 is rebuilt host-side from low/high.
+std::string abstractFloatSnippet(const std::string& expr, size_t caseIdx, const std::string& accessor) {
+    const std::string i = std::to_string(caseIdx);
+    const std::string e = "(" + expr + ")" + accessor;
+    std::ostringstream out;
+    out << "  {\n"
+        << "    const kExponentBias = 1022;\n"
+        << "    const subnormal_or_zero : bool = (" << e
+        << " <= 0x0.fffffffffffffp-1022) && (" << e << " >= -0x0.fffffffffffffp-1022);\n"
+        << "    const sign_bit : u32 = select(0, 0x80000000, " << e << " < 0);\n"
+        << "    const f = frexp(abs(" << e << "));\n"
+        << "    const f_fract = select(f.fract, 0, subnormal_or_zero);\n"
+        << "    const f_exp = select(f.exp, -kExponentBias, subnormal_or_zero);\n"
+        << "    const exponent_bits : u32 = u32(f_exp + kExponentBias) << 20;\n"
+        << "    const high_mantissa = ldexp(f_fract, 21);\n"
+        << "    const high_mantissa_bits : u32 = u32(ldexp(f_fract, 21)) & 0x000fffff;\n"
+        << "    const low_mantissa = f_fract - ldexp(floor(high_mantissa), -21);\n"
+        << "    const low_mantissa_bits = u32(ldexp(low_mantissa, 53));\n"
+        << "    outputs[" << i << "].value" << accessor
+        << ".high = sign_bit | exponent_bits | high_mantissa_bits;\n"
+        << "    outputs[" << i << "].value" << accessor << ".low = low_mantissa_bits;\n"
         << "  }\n";
     return out.str();
 }
@@ -661,6 +701,29 @@ std::string buildShader(
                     }
                 } else {
                     out << abstractIntSnippet(expr, i, "");
+                }
+            }
+            out << "}\n";
+            return out.str();
+        }
+        if (isAbstractFloatResult(resultType)) {
+            // Abstract-float result: materialize each value via the f64 low/high split protocol.
+            out << wgslAbstractIntOutputs(resultType, cases.size()) << "\n";
+            out << "@compute @workgroup_size(1)\nfn main() {\n";
+            const bool isVec = resultType.form == TypeForm::ScalarVec && resultType.width > 1;
+            for (size_t i = 0; i < cases.size(); ++i) {
+                std::vector<std::string> args;
+                args.reserve(parameterTypes.size());
+                for (size_t p = 0; p < parameterTypes.size(); ++p) {
+                    args.push_back(valueWgslImpl(cases[i].inputs[p], parameterTypes[p]));
+                }
+                const std::string expr = exprBuilder(args);
+                if (isVec) {
+                    for (int e = 0; e < resultType.width; ++e) {
+                        out << abstractFloatSnippet(expr, i, "[" + std::to_string(e) + "]");
+                    }
+                } else {
+                    out << abstractFloatSnippet(expr, i, "");
                 }
             }
             out << "}\n";
@@ -814,10 +877,11 @@ void submitBatch(
             : buildCompoundShader(compoundOp, parameterTypes, resultType, inputSource, cases);
     WGPUComputePipeline pipeline = createComputePipelineAuto(t, source);
 
-    // Output buffer: one Output (stride-padded) per case. Abstract-int results use the 2x u32
+    // Output buffer: one Output (stride-padded) per case. Abstract-int/float results use the 2x u32
     // (low/high) struct encoding and have their own stride.
     const bool abstractIntResult = isAbstractIntResult(resultType);
-    const uint32_t outputStride = abstractIntResult
+    const bool abstractFloatResult = isAbstractFloatResult(resultType);
+    const uint32_t outputStride = (abstractIntResult || abstractFloatResult)
                                       ? abstractIntStride(resultType)
                                       : structStrideImpl({resultType}, InputSource::StorageRW);
     const uint64_t outputBufferSize = alignUp(static_cast<uint32_t>(cases.size()) * outputStride, 4);
@@ -951,6 +1015,65 @@ void submitBatch(
         return;
     }
 
+    if (abstractFloatResult) {
+        // Abstract-float result: each element occupies an 8-byte {low:u32, high:u32} slot at offset
+        // e*8 within the case's output value, packing the f64 bits (high = upper 32 bits, low =
+        // lower 32 bits). Reconstruct the f64 and accept iff it lies in the per-element acceptance
+        // interval (carried in expectedAccept, floatWidth==64). The unbounded interval accepts any
+        // value (NaN/inf included). The snippet applies FTZ, so subnormal results read back as 0.
+        const int afSlots = resSlots;
+        t.expectGPUBufferValuesPassCheck(
+            outputBuffer,
+            [stride, afSlots, casesCopy](const uint8_t* data,
+                                         size_t len) -> std::optional<std::string> {
+                std::ostringstream errs;
+                int failures = 0;
+                for (size_t caseIdx = 0; caseIdx < casesCopy.size(); ++caseIdx) {
+                    const uint32_t off = static_cast<uint32_t>(caseIdx) * stride;
+                    const std::vector<ExpectedElement>& acc = casesCopy[caseIdx].expectedAccept;
+                    if (static_cast<int>(acc.size()) != afSlots) {
+                        return std::string("abstract-float result width mismatch");
+                    }
+                    bool matched = true;
+                    for (int e = 0; matched && e < afSlots; ++e) {
+                        const uint32_t elemOff = off + static_cast<uint32_t>(e) * 8u;
+                        if (static_cast<size_t>(elemOff) + 8u > len) {
+                            return std::string("readback buffer too small");
+                        }
+                        uint32_t low = 0;
+                        uint32_t high = 0;
+                        std::memcpy(&low, data + elemOff, 4);
+                        std::memcpy(&high, data + elemOff + 4, 4);
+                        const uint64_t bits =
+                            (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low);
+                        double got;
+                        std::memcpy(&got, &bits, 8);
+                        const ExpectedElement& ee = acc[static_cast<size_t>(e)];
+                        if (ee.unbounded) {
+                            continue;
+                        }
+                        if (std::isnan(got) || !(got >= ee.lo && got <= ee.hi)) {
+                            matched = false;
+                        }
+                    }
+                    if (!matched) {
+                        if (failures < 8) {
+                            errs << "\ncase " << caseIdx << " abstract-float interval mismatch";
+                        }
+                        ++failures;
+                    }
+                }
+                if (failures > 0) {
+                    return "expression mismatch (" + std::to_string(failures) + " failures):" +
+                           errs.str();
+                }
+                return std::nullopt;
+            },
+            0,
+            outputBufferSize);
+        return;
+    }
+
     t.expectGPUBufferValuesPassCheck(
         outputBuffer,
         [result, stride, resElemBytes, resSlots, casesCopy](
@@ -994,6 +1117,10 @@ void submitBatch(
                             continue;
                         }
                         if (ee.interval) {
+                            if (ee.unbounded) {
+                                // The unbounded interval accepts any bit pattern (NaN/inf included).
+                                continue;
+                            }
                             // Decode the read-back element as a float and accept iff it lies
                             // within the inclusive acceptance interval. NaN never matches.
                             double v;

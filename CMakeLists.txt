@@ -169,6 +169,7 @@ add_library(cts_harness
     src/webgpu/shader/execution/expression/call/builtin/texture_sampling/texture_utils.cpp
     src/webgpu/shader/execution/expression/call/builtin/derivatives.cpp
     src/webgpu/shader/execution/expression/expression.cpp
+    src/webgpu/shader/execution/expression/floating_point.cpp
 )
 target_include_directories(cts_harness
     PUBLIC

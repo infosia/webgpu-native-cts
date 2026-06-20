@@ -130,6 +130,11 @@ struct Scalar {
     // vector-access tests use elements of (i+1)*2^32). 'bits' still carries the low 32 bits / i32
     // bit-pattern used by the bit-exact comparator; 'bits64' carries the literal to emit.
     int64_t bits64 = 0;
+    // For AbstractFloat carrying an exact f64 value (the FP-interval framework emits abstract-float
+    // inputs at full f64 precision). When 'hasF64' is set, the value is emitted as an exact
+    // AbstractFloat literal of 'f64' rather than from the 32-bit 'bits'.
+    double f64 = 0.0;
+    bool hasF64 = false;
 };
 
 inline Scalar u32(uint32_t v) {
@@ -176,6 +181,14 @@ inline Scalar abstractInt64(int64_t v) {
 // AbstractFloat carrying an f32 bit pattern.
 inline Scalar abstractFloatBits(uint32_t v) {
     return Scalar{ScalarKind::AbstractFloat, v};
+}
+// AbstractFloat carrying an exact f64 value (emitted as an exact AbstractFloat decimal literal).
+inline Scalar abstractFloatValue(double v) {
+    Scalar s;
+    s.kind = ScalarKind::AbstractFloat;
+    s.f64 = v;
+    s.hasF64 = true;
+    return s;
 }
 
 // A value. For a scalar (width 1) or vecN (width 2/3/4) it holds 'width' elements. For a composite
@@ -229,7 +242,13 @@ struct ExpectedElement {
     // acceptance interval; the interval endpoints already incorporate any subnormal flush,
     // so no extra flushing of the read-back value is performed). NaN is never accepted by an
     // interval (use 'any' for the unbounded case).
+    //
+    // When 'unbounded' is set the interval is the upstream unbounded interval [-inf, +inf]: ANY
+    // bit pattern is accepted, including NaN and infinities (mirrors upstream
+    // FPInterval.contains(NaN) returning true only for the unbounded interval). This is how the
+    // FP-interval framework expresses "accuracy not defined here". 'lo'/'hi' are ignored when set.
     bool interval = false;
+    bool unbounded = false;
     double lo = 0.0;
     double hi = 0.0;
 };
@@ -243,6 +262,16 @@ inline ExpectedElement acceptInterval(int floatWidth, double lo, double hi) {
     ee.interval = true;
     ee.lo = lo;
     ee.hi = hi;
+    return ee;
+}
+
+// Builds an ExpectedElement for the upstream unbounded interval: accepts any bit pattern at the
+// given IEEE width (32 or 16), including NaN/inf.
+inline ExpectedElement acceptUnbounded(int floatWidth) {
+    ExpectedElement ee;
+    ee.floatWidth = floatWidth;
+    ee.interval = true;
+    ee.unbounded = true;
     return ee;
 }
 
