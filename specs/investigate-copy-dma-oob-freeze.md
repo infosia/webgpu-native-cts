@@ -1,7 +1,7 @@
 # F-122 — texture-copy GPU DMA out-of-bounds write (whole-machine freeze, cross-OS)
 
 > Investigation + finding-documentation task. The root-cause **fix is in yawgpu's HAL copy
-> path** (separate repo `../yawgpu`); this CTS-side task pinpoints the exact triggering cases,
+> path** (the separate yawgpu repo); this CTS-side task pinpoints the exact triggering cases,
 > records the finding, and decides how the suite carries them so a full sweep no longer hard-hangs.
 
 ## Goal
@@ -39,53 +39,90 @@ and identified the culprit operation family:
    **not** catch this (a hard GPU hang ignores SIGKILL); only the per-file `master.log` START/END +
    reboot pinpoints the file.
 
-**Suspected defect (in yawgpu HAL copy, fixed-function — NOT naga/shader):** destination
-addressing/size math for certain param combos — `bytesPerRow` / `rowsPerImage`, array-layer or
-3D-slice offset+extent, block-compressed or depth/stencil copy sizing. May re-open / subsume
-README's **F-104 copyTextureToTexture** (previously logged as a MoltenVK-only artifact,
-"native-Vulkan-green"); native-Vulkan is **not** green here.
+## Code review outcome (2026-06-20) — yawgpu copy path is validation-clean; NOT yet convicted
+
+A static review of the yawgpu repo (`yawgpu-hal/src/vulkan/encode.rs`, `vulkan/texture.rs`;
+`yawgpu-core/src/command_encoder.rs`, `copy.rs`) plus safe dynamic validation found **no
+validation-detectable defect** in the copy path:
+
+- **Allocation is correct.** Texture memory is sized from the driver's
+  `get_image_memory_requirements().size` (full mips/layers/depth) — `texture.rs:182-208`. Not
+  undersized, so a valid copy cannot write past the image's real backing on that account.
+- **Core bounds-checks are mip-aware.** `validate_texture_copy_subresource`
+  (`command_encoder.rs:1961`) validates origin+extent against `texture.subresource_size(mip_level)`;
+  `validate_texture_to_texture_copy` (`:1862`) checks `copy_size` against each side's
+  `subresource_size(mip)`. Valid copies are correctly bounded before reaching the HAL.
+- **Emitted Vulkan commands are valid.** llvmpipe + `VK_LAYER_KHRONOS_validation`: **0 VUID** for
+  both `copyTextureToTexture` and `image_copy`.
+- **No synchronization hazards.** Same files under sync validation
+  (`VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT`): **0 sync-hazards**.
+- **The large llvmpipe correctness fails (~21k / ~20k) are lavapipe artifacts**, not yawgpu bugs —
+  these files pass on native Intel.
+
+**Two latent code nitpicks (NOT proven causes; worth fixing regardless):**
+1. `encode_texture_to_texture` builds the copy extent from `source.dimension` only
+   (`encode.rs` ~824) — asymmetric; safe only under the src==dst dimension rule.
+2. HAL `validate_origin_extent` (`texture.rs:55-76`) is **mip-ignorant** (checks base dims); core
+   already guards this, so it is a defense-in-depth gap only.
+
+**Conclusion:** attribution is still **open** — either a real-HW-execution-only issue that
+validation cannot see, or an i915/ANV-Haswell + VT-d driver bug (the cross-OS NVIDIA freeze leans
+toward the former, but the Windows fault location is unconfirmed). The VT-d DMAR fault does **not**
+reproduce in cold per-case isolation (`copyTextureToTexture` 247 cases + `createView` 1367 cases ran
+clean cold), so it is load/heap-layout dependent. May still relate to README's **F-104
+copyTextureToTexture** (logged as a MoltenVK-only artifact) — re-evaluate. The only way to convict
+or exonerate yawgpu is to **capture the exact faulting command on hardware** (below).
 
 ## Scope
 
 **In:**
-- Pinpoint the minimal set of triggering cases in `command_buffer,copyTextureToTexture` and
-  `command_buffer,image_copy` (and check the `copyBufferToBuffer` / `api,validation,image_copy,*`
-  neighbours) using VT-d as the OOB oracle.
-- Add a finding **F-122** to `docs/FINDINGS.md` with the evidence above, the minimal repro
-  query/queries, and the suspected addressing math.
-- Make a full sweep survivable: add the confirmed-hanging case queries to a quarantine/known-hang
-  list the runner can skip (see `expectations/yawgpu.crash.txt` convention / `quarantine.txt`), and
-  cross-reference from the README "Test results" notes.
+- Capture the **exact faulting command** on hardware (HW capture is now the only viable oracle —
+  validation is clean and cold per-case does not reproduce). Then inspect that specific command's
+  Vulkan parameters to convict or exonerate yawgpu.
+- Add a finding **F-122** to `docs/FINDINGS.md` recording the symptom, cross-OS evidence, the
+  review outcome (copy path validation-clean), and — once captured — the exact triggering case.
+- Address the two latent nitpicks above if confirmed harmful (or at minimum note them).
+- Make a full sweep survivable: quarantine confirmed-hanging case queries the runner can skip (see
+  `expectations/yawgpu.crash.txt` convention / `quarantine.txt`), cross-referenced from the README.
 
 **Out (non-goals):**
-- The yawgpu HAL copy fix itself (lands in `../yawgpu`; this spec produces the repro that drives it).
+- The yawgpu HAL copy fix itself (lands in the yawgpu repo; this spec produces the repro that drives it).
 - Re-running the whole 345-file Intel sweep to green (blocked until the yawgpu fix lands).
 - Any change to `--case-timeout-ms` semantics (it cannot catch a hard GPU hang by design).
 
-## Pinpoint methodology (VT-d as a free OOB-write detector — keep VT-d ON)
+## HW-capture methodology (validation is clean; cold per-case does not reproduce)
 
-Run from a **TTY (Ctrl+Alt+F3) or SSH** so an eventual freeze does not lock out the desktop.
+The fault is load/heap-layout dependent, so it must be caught **in context on real hardware**.
 
-1. For each suspect file, run per-case isolation writing each case query to a progress file **with
-   `sync` before launch** (pattern: `build-yawgpu-release/run-linux-vulkan/narrow-createView.sh`):
-   `cts --isolate --workers 1 'webgpu:api,operation,command_buffer,image_copy:*'` driven case-by-case.
-2. Concurrently `journalctl -k -f | grep -E 'DMAR.*DMA Write|PTE Write access is not set'`. Each
-   fault's timestamp maps to the most-recently-STARTed case = a triggering case. Faults are
-   survivable, so collect several per pass; on freeze, reboot and resume (skip cases already OK,
-   quarantine the dangling RUN).
-3. Reduce each triggering case to its distinguishing params (format, dimension, size, mip/layer,
-   bytesPerRow/rowsPerImage) for the FINDINGS repro.
+**Option A — Intel/Linux, VT-d as the oracle (keep VT-d ON), from a TTY (Ctrl+Alt+F3) or SSH:**
+1. Reproduce the original *in-context* condition (cold per-case did NOT fault): run the sweep prefix
+   up to and through the copy files, or run `copyTextureToTexture` + `image_copy` back-to-back
+   in-process (one device, sustained), each case pre-written to a progress file **with `sync` before
+   launch** (pattern `build-yawgpu-release/run-linux-vulkan/narrow-copy.sh`).
+2. Concurrently `journalctl -k -f | grep -E 'DMA Write|PTE Write access is not set'`. Map each
+   fault's timestamp to the most-recently-STARTed case. Faults are survivable; on freeze, reboot and
+   resume.
+3. Reduce each triggering case to its params and dump the exact `VkImageCopy`/`VkBufferImageCopy`
+   yawgpu emits for it (extent, offset, subresource, bufferRowLength/bufferImageHeight) vs the image
+   subresource size — that comparison convicts or clears yawgpu.
+
+**Option B — NVIDIA/Windows (best for a real-HW-execution OOB):** run the suspect cases under
+**Nsight Aftermath** or Vulkan **GPU-Assisted Validation (GPU-AV)**, which name the faulting
+draw/copy and the offending access directly — no IOMMU/heap-layout dependence.
 
 ## Acceptance criteria
 
-- [ ] `docs/FINDINGS.md` has an **F-122** entry: symptom, cross-OS evidence, exact triggering case
-      query/queries, and the suspected yawgpu HAL addressing math.
-- [ ] The exact triggering case queries are listed (file + `test:params`), each confirmed to emit a
-      `DMAR ... DMA Write ... PTE Write access is not set` for `device [00:02.0]` in `journalctl -k`
-      when run alone, and confirmed clean on llvmpipe (`VK_ICD_FILENAMES=.../lvp_icd...`).
+- [ ] `docs/FINDINGS.md` has an **F-122** entry: symptom, cross-OS evidence, and the review outcome
+      (copy path validation-clean; allocation/region/mip-validation correct; two latent nitpicks).
+- [ ] The exact faulting case(s) are captured on hardware and recorded (file + `test:params`), with
+      the emitted `VkImageCopy`/`VkBufferImageCopy` parameters vs the image subresource size, so the
+      entry states whether yawgpu is convicted or exonerated.
+- [ ] Each captured case is confirmed clean on llvmpipe
+      (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) and emits no VUID / sync
+      hazard — establishing it is a HW-execution issue, not a malformed command or harness/leak.
 - [ ] A quarantine/known-hang list contains those queries so `sweep.sh` (or the equivalent runner
       path) skips them and a resumed sweep does not re-freeze.
-- [ ] README "Test results" references F-122 and notes native-Vulkan copy is not green (re: F-104).
+- [ ] README "Test results" references F-122 (re: F-104 copyTextureToTexture re-evaluation).
 
 ## Verification
 
