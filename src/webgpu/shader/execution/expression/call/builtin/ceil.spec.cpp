@@ -40,8 +40,7 @@ int cfgVectorize(const Fixture& t) {
 std::vector<double> ceilScalarRange(fp::FPKind kind) {
     std::vector<double> v = {0.1, 0.9, 1.0, 1.1, 1.9, -0.1, -0.9, -1.0, -1.1, -1.9};
     v.push_back(-0.0); // kIssue2766Value
-    const std::vector<double>& base =
-        kind == fp::FPKind::F32 ? fp::scalarF32Range() : fp::scalarF64Range();
+    const std::vector<double> base = fp::scalarRangeForKind(kind);
     v.insert(v.end(), base.begin(), base.end());
     return v;
 }
@@ -65,5 +64,12 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = fp::generateScalarToIntervalCases(
+        fp::FPKind::F16, ceilScalarRange(fp::FPKind::F16), /*finite=*/false,
+        [](double n) { return fp::ceilInterval(fp::FPKind::F16, n); });
+    run(t, builtin("ceil"), {scalarType(ScalarKind::F16)}, scalarType(ScalarKind::F16),
+        cfgInputSource(t), cfgVectorize(t), cases);
 });

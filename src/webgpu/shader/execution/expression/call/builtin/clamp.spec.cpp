@@ -53,8 +53,7 @@ std::vector<fp::ScalarTripleToInterval> clampIntervals(fp::FPKind kind) {
 }
 
 std::vector<Case> floatCases(fp::FPKind kind, bool constStage) {
-    const std::vector<double>& r = kind == fp::FPKind::Abstract ? fp::sparseScalarF64Range()
-                                                                : fp::sparseScalarF32Range();
+    const std::vector<double>& r = fp::sparseScalarRange(kind);
     // Cartesian over low, high, e, with const dropping low > high; non-const keeps all.
     std::vector<Case> cases;
     for (double low : r) {
@@ -153,5 +152,11 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = floatCases(fp::FPKind::F16, isConst(t));
+    run(t, builtin("clamp"),
+        {scalarType(ScalarKind::F16), scalarType(ScalarKind::F16), scalarType(ScalarKind::F16)},
+        scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });

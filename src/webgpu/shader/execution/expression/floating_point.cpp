@@ -133,6 +133,227 @@ double nextAfterF64Flush(double val, bool positive) {
     return flushSubnormalF64(next);
 }
 
+// =====================================================================================
+// f16 (IEEE-754 binary16) helpers (kValue.f16 / kBit.f16). Defined here, before the kind-dispatch
+// functions (correctlyRounded/flushSubnormal/etc.), so FPKind::F16 can be wired into them.
+// =====================================================================================
+double f16FromBitsToF64(uint16_t bits) {
+    // decode IEEE binary16 to double.
+    const uint32_t sign = (bits >> 15) & 0x1u;
+    const uint32_t exp = (bits >> 10) & 0x1fu;
+    const uint32_t mant = bits & 0x3ffu;
+    double value;
+    if (exp == 0) {
+        value = std::ldexp(static_cast<double>(mant), -24); // subnormal: mant * 2^-24
+    } else if (exp == 0x1f) {
+        value = mant ? std::numeric_limits<double>::quiet_NaN()
+                     : std::numeric_limits<double>::infinity();
+    } else {
+        value = std::ldexp(static_cast<double>(mant | 0x400u), static_cast<int>(exp) - 25);
+    }
+    return sign ? -value : value;
+}
+const double kF16Max = f16FromBitsToF64(0x7bffu);
+const double kF16Min = f16FromBitsToF64(0x0400u);          // smallest positive normal
+const double kF16NegMin = f16FromBitsToF64(0xfbffu);        // most-negative finite
+const double kF16NegMax = f16FromBitsToF64(0x8400u);        // largest negative normal
+const double kF16PosSubMin = f16FromBitsToF64(0x0001u);
+const double kF16PosSubMax = f16FromBitsToF64(0x03ffu);
+const double kF16NegSubMin = f16FromBitsToF64(0x83ffu);     // most-negative subnormal
+const double kF16NegSubMax = f16FromBitsToF64(0x8001u);     // negative subnormal closest to 0
+const double kF16PosPiWhole = f16FromBitsToF64(0x4248u);
+const double kF16NegPiWhole = f16FromBitsToF64(0xc248u);
+const double kF16MaxULP = f16FromBitsToF64(0x5000u);        // kBit.f16.max_ulp
+constexpr int kF16Emax = 15;
+
+bool isSubnormalF16(double n) { return n > kF16NegMax && n < kF16Min && n != 0.0; }
+bool isFiniteF16(double n) { return n >= kF16NegMin && n <= kF16Max; }
+double flushSubnormalF16(double n) { return isSubnormalF16(n) ? 0.0 : n; }
+
+// quantizeToF16: round-to-nearest-even to binary16, return as a double of the f16 value.
+double quantizeToF16Value(double n) {
+    if (std::isnan(n)) {
+        return n;
+    }
+    if (n == kInf) {
+        return kInf;
+    }
+    if (n == -kInf) {
+        return -kInf;
+    }
+    if (n > kF16Max) {
+        return kInf; // overflow rounds up to inf for round-to-nearest
+    }
+    if (n < kF16NegMin) {
+        return -kInf;
+    }
+    // Round to nearest, ties to even, in the f16 grid using ldexp/scalbn-free arithmetic.
+    const bool neg = std::signbit(n);
+    double a = std::abs(n);
+    if (a == 0.0) {
+        return n; // preserve signed zero
+    }
+    // Determine exponent.
+    int e;
+    double frac = std::frexp(a, &e); // a = frac * 2^e, frac in [0.5, 1)
+    (void)frac;
+    // Smallest subnormal step is 2^-24; smallest normal is 2^-14 (e-1 >= -14 => normal).
+    int shift;
+    if (e - 1 >= -14) {
+        // normal: 10 mantissa bits below the implicit leading 1 at 2^(e-1).
+        shift = (e - 1) - 10;
+    } else {
+        // subnormal: quantum is 2^-24.
+        shift = -24;
+    }
+    const double quantum = std::ldexp(1.0, shift);
+    double q = a / quantum;
+    double r = std::floor(q);
+    const double diff = q - r;
+    if (diff > 0.5) {
+        r += 1.0;
+    } else if (diff == 0.5) {
+        // ties to even
+        if (std::fmod(r, 2.0) != 0.0) {
+            r += 1.0;
+        }
+    }
+    double out = r * quantum;
+    if (out > kF16Max) {
+        out = kInf;
+    }
+    return neg ? -out : out;
+}
+
+// Encode a finite double that is exactly an f16 value back to its 16-bit pattern.
+uint16_t f16ToBits(double v) {
+    if (v == 0.0) {
+        return std::signbit(v) ? 0x8000u : 0x0000u;
+    }
+    const bool neg = std::signbit(v);
+    double a = std::abs(v);
+    int e;
+    std::frexp(a, &e); // a in [2^(e-1), 2^e)
+    uint16_t bits;
+    if (e - 1 >= -14) {
+        const int exp = (e - 1) + 15; // biased
+        const double mantD = a / std::ldexp(1.0, e - 1) - 1.0; // in [0,1)
+        const uint16_t mant = static_cast<uint16_t>(std::llround(mantD * 1024.0));
+        bits = static_cast<uint16_t>((static_cast<uint16_t>(exp) << 10) | (mant & 0x3ffu));
+    } else {
+        const uint16_t mant = static_cast<uint16_t>(std::llround(a / std::ldexp(1.0, -24)));
+        bits = mant & 0x3ffu;
+    }
+    if (neg) {
+        bits = static_cast<uint16_t>(bits | 0x8000u);
+    }
+    return bits;
+}
+
+// nextAfterF16 no-flush single step toward +inf (positive) or -inf.
+double nextF16(double v, bool positive) {
+    uint16_t bits = f16ToBits(v);
+    const bool isPositive = (bits & 0x8000u) == 0;
+    if (isPositive == positive) {
+        bits = static_cast<uint16_t>(bits + 1u);
+    } else {
+        bits = static_cast<uint16_t>(bits - 1u);
+    }
+    return f16FromBitsToF64(bits);
+}
+
+// nextAfterF16 (flush mode): mirrors util/math.ts nextAfterF16 with mode == 'flush'.
+double nextAfterF16Flush(double val, bool positive) {
+    if (std::isnan(val)) {
+        return val;
+    }
+    if (val == kInf) {
+        return kInf;
+    }
+    if (val == -kInf) {
+        return -kInf;
+    }
+    val = flushSubnormalF16(val);
+    if (val == 0.0) {
+        return positive ? kF16Min : kF16NegMax;
+    }
+    const double q = quantizeToF16Value(val);
+    uint16_t bits = f16ToBits(q);
+    if ((positive && q <= val) || (!positive && q >= val)) {
+        const bool isPositive = (bits & 0x8000u) == 0;
+        if (isPositive == positive) {
+            bits = static_cast<uint16_t>(bits + 1u);
+        } else {
+            bits = static_cast<uint16_t>(bits - 1u);
+        }
+    }
+    if ((bits & 0x7c00u) == 0x7c00u) {
+        return positive ? kInf : -kInf;
+    }
+    return flushSubnormalF16(f16FromBitsToF64(bits));
+}
+
+// oneULPF16 (flush mode). Mirrors util/math.ts oneULPF16.
+double oneULPF16(double target) {
+    if (std::isnan(target)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    target = flushSubnormalF16(target);
+    if (target == kInf || target >= kF16Max || target == -kInf || target <= kF16NegMin) {
+        return kF16MaxULP;
+    }
+    const double before = nextAfterF16Flush(target, false);
+    const double after = nextAfterF16Flush(target, true);
+    const double converted = quantizeToF16Value(target);
+    if (converted == target) {
+        return std::min(target - before, after - target);
+    }
+    return after - before;
+}
+
+std::vector<double> correctlyRoundedF16(double n) {
+    if (std::isnan(n)) {
+        return {n};
+    }
+    if (n >= std::ldexp(1.0, kF16Emax + 1)) {
+        return {kInf};
+    }
+    if (n > kF16Max) {
+        return {kF16Max, kInf};
+    }
+    if (n <= kF16Max && n >= kF16NegMin) {
+        const double n16 = quantizeToF16Value(n);
+        if (n == n16) {
+            return {n};
+        }
+        // Step one f16 in the appropriate direction (no flush) for the other rounding.
+        if (n16 > n) {
+            return {nextF16(n16, false), n16};
+        }
+        return {n16, nextF16(n16, true)};
+    }
+    if (n > -std::ldexp(1.0, kF16Emax + 1)) {
+        return {-kInf, kF16NegMin};
+    }
+    return {-kInf};
+}
+
+std::vector<double> addFlushedIfNeededF16(const std::vector<double>& values) {
+    bool anySub = false;
+    for (double v : values) {
+        if (v != 0.0 && isSubnormalF16(v)) {
+            anySub = true;
+            break;
+        }
+    }
+    if (!anySub) {
+        return values;
+    }
+    std::vector<double> out = values;
+    out.push_back(0.0);
+    return out;
+}
+
 // oneULPF32 (flush mode). Mirrors util/math.ts oneULPF32.
 double oneULPF32(double target) {
     if (std::isnan(target)) {
@@ -217,7 +438,10 @@ std::vector<double> correctlyRoundedF64(double n) {
 std::vector<double> addFlushedIfNeeded(FPKind kind, const std::vector<double>& values) {
     bool anySub = false;
     for (double v : values) {
-        if (kind == FPKind::F32 ? isSubnormalF32(v) : isSubnormalF64(v)) {
+        const bool sub = kind == FPKind::F32   ? isSubnormalF32(v)
+                         : kind == FPKind::F16 ? isSubnormalF16(v)
+                                               : isSubnormalF64(v);
+        if (sub) {
             anySub = true;
             break;
         }
@@ -231,10 +455,14 @@ std::vector<double> addFlushedIfNeeded(FPKind kind, const std::vector<double>& v
 }
 
 std::vector<double> correctlyRounded(FPKind kind, double n) {
-    return kind == FPKind::F32 ? correctlyRoundedF32(n) : correctlyRoundedF64(n);
+    return kind == FPKind::F32   ? correctlyRoundedF32(n)
+           : kind == FPKind::F16 ? correctlyRoundedF16(n)
+                                 : correctlyRoundedF64(n);
 }
 double flushSubnormal(FPKind kind, double n) {
-    return kind == FPKind::F32 ? flushSubnormalF32(n) : flushSubnormalF64(n);
+    return kind == FPKind::F32   ? flushSubnormalF32(n)
+           : kind == FPKind::F16 ? flushSubnormalF16(n)
+                                 : flushSubnormalF64(n);
 }
 
 // A ScalarToIntervalOp: impl plus optional domain (rejects -> unbounded) for the kind.
@@ -301,7 +529,9 @@ FPInterval runScalarPairPoint(
 FPInterval crUnboundedAddition(FPKind kind, double val, double large, double small) {
     // nextAfter must match the kind's representable set: f32 for F32, f64 for Abstract.
     auto nextAfter = [kind](double v, bool positive) {
-        return kind == FPKind::F32 ? nextAfterF32Flush(v, positive) : nextAfterF64Flush(v, positive);
+        return kind == FPKind::F32   ? nextAfterF32Flush(v, positive)
+               : kind == FPKind::F16 ? nextAfterF16Flush(v, positive)
+                                     : nextAfterF64Flush(v, positive);
     };
     if (val == large && small != 0.0) {
         // The interval spans [large, nextAfter(large, dir)] then correctly-rounded.
@@ -329,6 +559,9 @@ FPInterval crUnboundedAddition(FPKind kind, double val, double large, double sma
 bool FPInterval::isFinite() const {
     if (kind == FPKind::F32) {
         return isFiniteF32(begin) && isFiniteF32(end);
+    }
+    if (kind == FPKind::F16) {
+        return isFiniteF16(begin) && isFiniteF16(end);
     }
     return std::isfinite(begin) && std::isfinite(end);
 }
@@ -371,7 +604,9 @@ FPInterval absoluteErrorInterval(FPKind kind, double n, double errorRange) {
     errorRange = std::abs(errorRange);
     ScalarOp op;
     op.impl = [kind, errorRange](double m) -> FPInterval {
-        const bool finite = kind == FPKind::F32 ? isFiniteF32(m) : std::isfinite(m);
+        const bool finite = kind == FPKind::F32   ? isFiniteF32(m)
+                            : kind == FPKind::F16 ? isFiniteF16(m)
+                                                  : std::isfinite(m);
         if (!finite) {
             return unboundedInterval(kind);
         }
@@ -384,8 +619,8 @@ FPInterval ulpInterval(FPKind kind, double n, double numULP) {
     numULP = std::abs(numULP);
     ScalarOp op;
     op.impl = [kind, numULP](double m) -> FPInterval {
-        // f32 ULP only (abstract never calls ulpInterval directly; sqrt/cos abstract use f32).
-        const double ulp = oneULPF32(m);
+        // f16 uses oneULPF16; f32 + abstract use oneULPF32 (abstract sqrt/cos inherit f32 accuracy).
+        const double ulp = kind == FPKind::F16 ? oneULPF16(m) : oneULPF32(m);
         const double begin = m - numULP * ulp;
         const double end = m + numULP * ulp;
         return toInterval(kind, std::min(begin, flushSubnormal(kind, begin)),
@@ -420,18 +655,27 @@ FPInterval inverseSqrtInterval(FPKind kind, double n) {
     op.impl = [kind](double m) { return ulpInterval(kind, 1.0 / std::sqrt(m), 2.0); };
     op.hasDomain = true;
     // greaterThanZeroInterval: [smallest positive subnormal, max].
-    const double lo = kind == FPKind::F32 ? kF32PosSubMin : f64FromBits(0x0000000000000001ull);
-    const double hi = kind == FPKind::F32 ? kF32PosMax : std::numeric_limits<double>::max();
+    const double lo = kind == FPKind::F32   ? kF32PosSubMin
+                      : kind == FPKind::F16 ? kF16PosSubMin
+                                            : f64FromBits(0x0000000000000001ull);
+    const double hi = kind == FPKind::F32   ? kF32PosMax
+                      : kind == FPKind::F16 ? kF16Max
+                                            : std::numeric_limits<double>::max();
     op.inDomain = [lo, hi](double m) { return m >= lo && m <= hi; };
     return runScalarToIntervalOp(kind, toIntervalPoint(kind, n), op);
 }
 
 FPInterval divisionInterval(FPKind kind, double x, double y) {
-    // domain: x in [neg.min, pos.max]; y in [-2^126,-2^-126] U [2^-126, 2^126] (f32/abstract).
-    const double xLo = kind == FPKind::F32 ? kF32NegMin : std::numeric_limits<double>::lowest();
-    const double xHi = kind == FPKind::F32 ? kF32PosMax : std::numeric_limits<double>::max();
-    const double yMag1 = std::ldexp(1.0, -126); // 2^-126
-    const double yMag2 = std::ldexp(1.0, 126);  // 2^126
+    // domain: x in [neg.min, pos.max]; y in [-2^126,-2^-126] U [2^-126, 2^126] (f32/abstract), or
+    // [-2^14,-2^-14] U [2^-14, 2^14] for f16.
+    const double xLo = kind == FPKind::F32   ? kF32NegMin
+                       : kind == FPKind::F16 ? kF16NegMin
+                                             : std::numeric_limits<double>::lowest();
+    const double xHi = kind == FPKind::F32   ? kF32PosMax
+                       : kind == FPKind::F16 ? kF16Max
+                                             : std::numeric_limits<double>::max();
+    const double yMag1 = kind == FPKind::F16 ? std::ldexp(1.0, -14) : std::ldexp(1.0, -126);
+    const double yMag2 = kind == FPKind::F16 ? std::ldexp(1.0, 14) : std::ldexp(1.0, 126);
     auto inXDomain = [xLo, xHi](double v) { return v >= xLo && v <= xHi; };
     auto inYDomain = [yMag1, yMag2](double v) {
         return (v >= -yMag2 && v <= -yMag1) || (v >= yMag1 && v <= yMag2);
@@ -489,14 +733,15 @@ FPInterval sqrtInterval(FPKind kind, double n) {
 
 FPInterval cosInterval(FPKind kind, double n) {
     ScalarOp op;
-    // cos: f32 absolute error 2^-11 (abstract uses the f32 op per the cache).
-    const double absError = std::ldexp(1.0, -11);
+    // cos: absolute error 2^-11 (f32/abstract), 2^-7 (f16). The domain is [-pi_whole, pi_whole]
+    // at the kind's precision (f16 uses the f16 pi-whole constant; f32/abstract use f32's).
+    const double absError = kind == FPKind::F16 ? std::ldexp(1.0, -7) : std::ldexp(1.0, -11);
     op.impl = [kind, absError](double m) {
         return absoluteErrorInterval(kind, std::cos(m), absError);
     };
     op.hasDomain = true;
-    const double piLo = kind == FPKind::F32 ? kF32NegPiWhole : kF32NegPiWhole;
-    const double piHi = kind == FPKind::F32 ? kF32PosPiWhole : kF32PosPiWhole;
+    const double piLo = kind == FPKind::F16 ? kF16NegPiWhole : kF32NegPiWhole;
+    const double piHi = kind == FPKind::F16 ? kF16PosPiWhole : kF32PosPiWhole;
     op.inDomain = [piLo, piHi](double m) { return m >= piLo && m <= piHi; };
     return runScalarToIntervalOp(kind, toIntervalPoint(kind, n), op);
 }
@@ -1360,178 +1605,14 @@ FPInterval ldexpInterval(FPKind kind, double e1, double e2) {
     return runScalarToIntervalOp(kind, toIntervalPoint(kind, e1), op);
 }
 
-int fpBias(FPKind kind) { return kind == FPKind::F32 ? 127 : 1023; }
+int fpBias(FPKind kind) {
+    return kind == FPKind::F32 ? 127 : kind == FPKind::F16 ? 15 : 1023;
+}
 bool fpIsFinite(FPKind kind, double n) {
-    return kind == FPKind::F32 ? isFiniteF32(n) : std::isfinite(n);
+    return kind == FPKind::F32   ? isFiniteF32(n)
+           : kind == FPKind::F16 ? isFiniteF16(n)
+                                 : std::isfinite(n);
 }
-
-// --- quantizeToF16 (f16-correctly-rounded; f32 result type) ---
-namespace {
-// f16 helpers.
-double f16FromBitsToF64(uint16_t bits) {
-    // decode IEEE binary16 to double.
-    const uint32_t sign = (bits >> 15) & 0x1u;
-    const uint32_t exp = (bits >> 10) & 0x1fu;
-    const uint32_t mant = bits & 0x3ffu;
-    double value;
-    if (exp == 0) {
-        value = std::ldexp(static_cast<double>(mant), -24); // subnormal: mant * 2^-24
-    } else if (exp == 0x1f) {
-        value = mant ? std::numeric_limits<double>::quiet_NaN()
-                     : std::numeric_limits<double>::infinity();
-    } else {
-        value = std::ldexp(static_cast<double>(mant | 0x400u), static_cast<int>(exp) - 25);
-    }
-    return sign ? -value : value;
-}
-const double kF16Max = f16FromBitsToF64(0x7bffu);
-const double kF16Min = f16FromBitsToF64(0x0400u);          // smallest positive normal
-const double kF16NegMin = f16FromBitsToF64(0xfbffu);        // most-negative finite
-const double kF16NegMax = f16FromBitsToF64(0x8400u);        // largest negative normal
-const double kF16PosSubMin = f16FromBitsToF64(0x0001u);
-const double kF16PosSubMax = f16FromBitsToF64(0x03ffu);
-const double kF16NegSubMin = f16FromBitsToF64(0x83ffu);     // most-negative subnormal
-const double kF16NegSubMax = f16FromBitsToF64(0x8001u);     // negative subnormal closest to 0
-constexpr int kF16Emax = 15;
-
-bool isSubnormalF16(double n) { return n > kF16NegMax && n < kF16Min && n != 0.0; }
-
-// quantizeToF16: round-to-nearest-even to binary16, return as a double of the f16 value.
-double quantizeToF16Value(double n) {
-    if (std::isnan(n)) {
-        return n;
-    }
-    if (n == kInf) {
-        return kInf;
-    }
-    if (n == -kInf) {
-        return -kInf;
-    }
-    if (n > kF16Max) {
-        return kInf; // overflow rounds up to inf for round-to-nearest
-    }
-    if (n < kF16NegMin) {
-        return -kInf;
-    }
-    // Round to nearest, ties to even, in the f16 grid using ldexp/scalbn-free arithmetic.
-    const bool neg = std::signbit(n);
-    double a = std::abs(n);
-    if (a == 0.0) {
-        return n; // preserve signed zero
-    }
-    // Determine exponent.
-    int e;
-    double frac = std::frexp(a, &e); // a = frac * 2^e, frac in [0.5, 1)
-    (void)frac;
-    // Smallest subnormal step is 2^-24; smallest normal is 2^-14 (e-1 >= -14 => normal).
-    int shift;
-    if (e - 1 >= -14) {
-        // normal: 10 mantissa bits below the implicit leading 1 at 2^(e-1).
-        shift = (e - 1) - 10;
-    } else {
-        // subnormal: quantum is 2^-24.
-        shift = -24;
-    }
-    const double quantum = std::ldexp(1.0, shift);
-    double q = a / quantum;
-    double r = std::floor(q);
-    const double diff = q - r;
-    if (diff > 0.5) {
-        r += 1.0;
-    } else if (diff == 0.5) {
-        // ties to even
-        if (std::fmod(r, 2.0) != 0.0) {
-            r += 1.0;
-        }
-    }
-    double out = r * quantum;
-    if (out > kF16Max) {
-        out = kInf;
-    }
-    return neg ? -out : out;
-}
-
-// Encode a finite double that is exactly an f16 value back to its 16-bit pattern.
-uint16_t f16ToBits(double v) {
-    if (v == 0.0) {
-        return std::signbit(v) ? 0x8000u : 0x0000u;
-    }
-    const bool neg = std::signbit(v);
-    double a = std::abs(v);
-    int e;
-    std::frexp(a, &e); // a in [2^(e-1), 2^e)
-    uint16_t bits;
-    if (e - 1 >= -14) {
-        const int exp = (e - 1) + 15; // biased
-        const double mantD = a / std::ldexp(1.0, e - 1) - 1.0; // in [0,1)
-        const uint16_t mant = static_cast<uint16_t>(std::llround(mantD * 1024.0));
-        bits = static_cast<uint16_t>((static_cast<uint16_t>(exp) << 10) | (mant & 0x3ffu));
-    } else {
-        const uint16_t mant = static_cast<uint16_t>(std::llround(a / std::ldexp(1.0, -24)));
-        bits = mant & 0x3ffu;
-    }
-    if (neg) {
-        bits = static_cast<uint16_t>(bits | 0x8000u);
-    }
-    return bits;
-}
-
-// nextAfterF16 no-flush single step toward +inf (positive) or -inf.
-double nextF16(double v, bool positive) {
-    uint16_t bits = f16ToBits(v);
-    const bool isPositive = (bits & 0x8000u) == 0;
-    if (isPositive == positive) {
-        bits = static_cast<uint16_t>(bits + 1u);
-    } else {
-        bits = static_cast<uint16_t>(bits - 1u);
-    }
-    return f16FromBitsToF64(bits);
-}
-
-std::vector<double> correctlyRoundedF16(double n) {
-    if (std::isnan(n)) {
-        return {n};
-    }
-    if (n >= std::ldexp(1.0, kF16Emax + 1)) {
-        return {kInf};
-    }
-    if (n > kF16Max) {
-        return {kF16Max, kInf};
-    }
-    if (n <= kF16Max && n >= kF16NegMin) {
-        const double n16 = quantizeToF16Value(n);
-        if (n == n16) {
-            return {n};
-        }
-        // Step one f16 in the appropriate direction (no flush) for the other rounding.
-        if (n16 > n) {
-            return {nextF16(n16, false), n16};
-        }
-        return {n16, nextF16(n16, true)};
-    }
-    if (n > -std::ldexp(1.0, kF16Emax + 1)) {
-        return {-kInf, kF16NegMin};
-    }
-    return {-kInf};
-}
-
-std::vector<double> addFlushedIfNeededF16(const std::vector<double>& values) {
-    bool anySub = false;
-    for (double v : values) {
-        if (v != 0.0 && isSubnormalF16(v)) {
-            anySub = true;
-            break;
-        }
-    }
-    if (!anySub) {
-        return values;
-    }
-    std::vector<double> out = values;
-    out.push_back(0.0);
-    return out;
-}
-
-} // namespace
 
 FPInterval quantizeToF16Interval(double n) {
     // The op runs at f32 input materialization (kind F32 result) but uses f16 rounding for the value.
@@ -1564,16 +1645,20 @@ double f64PositiveMin() { return kF64PosMin; }
 double f64NegativeMax() { return kF64NegMax; }
 double f64NegativeMin() { return f64FromBits(0xffefffffffffffffull); }
 double positiveLessThanOne(FPKind kind) {
-    return kind == FPKind::F32 ? static_cast<double>(f32FromBits(0x3f7fffffu))
-                               : f64FromBits(0x3fefffffffffffffull);
+    return kind == FPKind::F32   ? static_cast<double>(f32FromBits(0x3f7fffffu))
+           : kind == FPKind::F16 ? f16FromBitsToF64(0x3bffu)
+                                 : f64FromBits(0x3fefffffffffffffull);
 }
 double negativeLessThanOne(FPKind kind) {
-    return kind == FPKind::F32 ? static_cast<double>(f32FromBits(0xbf7fffffu))
-                               : f64FromBits(0xbfefffffffffffffull);
+    return kind == FPKind::F32   ? static_cast<double>(f32FromBits(0xbf7fffffu))
+           : kind == FPKind::F16 ? f16FromBitsToF64(0xbbffu)
+                                 : f64FromBits(0xbfefffffffffffffull);
 }
 
 double quantize(FPKind kind, double n) {
-    return kind == FPKind::F32 ? quantizeToF32(n) : n;
+    return kind == FPKind::F32   ? quantizeToF32(n)
+           : kind == FPKind::F16 ? quantizeToF16Value(n)
+                                 : n;
 }
 
 // --- Range generators (math.ts) ---
@@ -1718,7 +1803,9 @@ const std::vector<double>& sparseScalarF64Range() {
 }
 
 const std::vector<double>& sparseScalarRange(FPKind kind) {
-    return kind == FPKind::Abstract ? sparseScalarF64Range() : sparseScalarF32Range();
+    return kind == FPKind::Abstract ? sparseScalarF64Range()
+           : kind == FPKind::F16    ? sparseScalarF16Range()
+                                    : sparseScalarF32Range();
 }
 
 std::vector<std::vector<double>> sparseVectorF32Range(int dim) {
@@ -2300,9 +2387,14 @@ std::vector<int64_t> fullI64Range() {
 
 namespace {
 
+// Result-element float width for the kind (f32 -> 32, f16 -> 16, abstract -> 64).
+int floatWidthForKind(FPKind kind) {
+    return kind == FPKind::F32 ? 32 : kind == FPKind::F16 ? 16 : 64;
+}
+
 // Encode one scalar interval onto an ExpectedElement of the result kind.
 ExpectedElement intervalToExpected(FPKind kind, const FPInterval& iv) {
-    const int width = kind == FPKind::F32 ? 32 : 64;
+    const int width = floatWidthForKind(kind);
     const bool unbounded = (iv.begin == -kInf && iv.end == kInf);
     if (unbounded) {
         return acceptUnbounded(width);
@@ -2321,6 +2413,11 @@ Scalar scalarInput(FPKind kind, double v) {
         uint32_t bits;
         std::memcpy(&bits, &f, 4);
         return f32Bits(bits);
+    }
+    if (kind == FPKind::F16) {
+        // The input value is already f16-representable (quantized by the case generator). Emit its
+        // exact 16-bit pattern.
+        return f16Bits(f16ToBits(quantizeToF16Value(v)));
     }
     // Abstract-float input: carry the exact f64 value (emitted as a decimal AbstractFloat literal).
     return abstractFloatValue(v);
@@ -2384,7 +2481,7 @@ std::vector<Case> generateScalarToIntervalCasesAnyOf(
             }
         }
         if (anyUnbounded) {
-            c.expectedAccept.push_back(acceptUnbounded(kind == FPKind::F32 ? 32 : 64));
+            c.expectedAccept.push_back(acceptUnbounded(floatWidthForKind(kind)));
         } else {
             ExpectedElement ee = intervalToExpected(kind, ivs.front());
             for (size_t i = 1; i < ivs.size(); ++i) {
@@ -2519,7 +2616,7 @@ namespace {
 // Encode an anyOf(...) of intervals onto a single ExpectedElement (primary + extraIntervals).
 // If any interval is unbounded the whole acceptance is unbounded.
 ExpectedElement anyOfToExpected(FPKind kind, const std::vector<FPInterval>& ivs) {
-    const int width = kind == FPKind::F32 ? 32 : 64;
+    const int width = kind == FPKind::F32 ? 32 : kind == FPKind::F16 ? 16 : 64;
     for (const FPInterval& iv : ivs) {
         if (iv.begin == -kInf && iv.end == kInf) {
             return acceptUnbounded(width);
@@ -2746,11 +2843,15 @@ std::vector<std::vector<double>> sparseVectorF64Range(int dim) {
 }
 
 std::vector<std::vector<double>> sparseVectorRange(FPKind kind, int dim) {
-    return kind == FPKind::Abstract ? sparseVectorF64Range(dim) : sparseVectorF32Range(dim);
+    return kind == FPKind::Abstract ? sparseVectorF64Range(dim)
+           : kind == FPKind::F16    ? sparseVectorF16Range(dim)
+                                    : sparseVectorF32Range(dim);
 }
 
 std::vector<double> scalarRangeForKind(FPKind kind) {
-    return kind == FPKind::Abstract ? scalarF64Range() : scalarF32Range();
+    return kind == FPKind::Abstract ? scalarF64Range()
+           : kind == FPKind::F16    ? scalarF16Range()
+                                    : scalarF32Range();
 }
 
 std::vector<double> scalarF16Range() {
@@ -2867,8 +2968,13 @@ std::vector<std::vector<double>> vectorF32Range(int dim) {
 std::vector<std::vector<double>> vectorF64Range(int dim) {
     return denseVectorRange(sparseScalarF64Range(), dim);
 }
+std::vector<std::vector<double>> vectorF16Range(int dim) {
+    return denseVectorRange(sparseScalarF16Range(), dim);
+}
 std::vector<std::vector<double>> vectorRange(FPKind kind, int dim) {
-    return kind == FPKind::Abstract ? vectorF64Range(dim) : vectorF32Range(dim);
+    return kind == FPKind::Abstract ? vectorF64Range(dim)
+           : kind == FPKind::F16    ? vectorF16Range(dim)
+                                    : vectorF32Range(dim);
 }
 std::vector<std::vector<std::vector<double>>> sparseMatrixF32Range(int cols, int rows) {
     return sparseMatrixRangeImpl(sparseScalarF32Range(), cols, rows);
@@ -2876,9 +2982,43 @@ std::vector<std::vector<std::vector<double>>> sparseMatrixF32Range(int cols, int
 std::vector<std::vector<std::vector<double>>> sparseMatrixF64Range(int cols, int rows) {
     return sparseMatrixRangeImpl(sparseScalarF64Range(), cols, rows);
 }
+std::vector<std::vector<std::vector<double>>> sparseMatrixF16Range(int cols, int rows) {
+    return sparseMatrixRangeImpl(sparseScalarF16Range(), cols, rows);
+}
 std::vector<std::vector<std::vector<double>>> sparseMatrixRange(FPKind kind, int cols, int rows) {
     return kind == FPKind::Abstract ? sparseMatrixF64Range(cols, rows)
-                                     : sparseMatrixF32Range(cols, rows);
+           : kind == FPKind::F16    ? sparseMatrixF16Range(cols, rows)
+                                    : sparseMatrixF32Range(cols, rows);
+}
+
+// kInterestingF16Values (math.ts). Order matters for kSparseVector/Matrix index selection.
+const std::vector<double>& sparseScalarF16Range() {
+    static const std::vector<double> v = {
+        kF16NegMin,    -10.0,        -1.0,          -0.125,       kF16NegMax,
+        kF16NegSubMin, kF16NegSubMax, -0.0,         0.0,          kF16PosSubMin,
+        kF16PosSubMax, kF16Min,       0.125,        1.0,          10.0,
+        kF16Max,
+    };
+    return v;
+}
+std::vector<std::vector<double>> sparseVectorF16Range(int dim) {
+    const std::vector<double>& f = sparseScalarF16Range();
+    std::vector<std::vector<double>> out;
+    out.reserve(f.size());
+    for (size_t idx = 0; idx < f.size(); ++idx) {
+        const double fv = f[idx];
+        const double i = static_cast<double>(idx);
+        if (dim == 2) {
+            out.push_back({(idx % 2 == 0) ? fv : i, (idx % 2 == 1) ? fv : -i});
+        } else if (dim == 3) {
+            out.push_back({(idx % 3 == 0) ? fv : i, (idx % 3 == 1) ? fv : -i,
+                           (idx % 3 == 2) ? fv : i});
+        } else {
+            out.push_back({(idx % 4 == 0) ? fv : i, (idx % 4 == 1) ? fv : -i,
+                           (idx % 4 == 2) ? fv : i, (idx % 4 == 3) ? fv : -i});
+        }
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------

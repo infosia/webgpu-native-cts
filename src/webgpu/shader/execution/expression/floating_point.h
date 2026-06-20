@@ -30,6 +30,7 @@ namespace fp {
 // The floating-point kind the interval / traits operate on.
 enum class FPKind {
     F32,
+    F16,      // IEEE-754 binary16 (half)
     Abstract, // abstract-float (f64 under the hood)
 };
 
@@ -212,8 +213,16 @@ std::vector<double> scalarF32RangeCounts(int negNorm, int negSub, int posSub, in
 std::vector<double> scalarF64RangeCounts(int negNorm, int negSub, int posSub, int posNorm);
 // scalarRange for the kind (f32 -> scalarF32Range, abstract -> scalarF64Range).
 std::vector<double> scalarRangeForKind(FPKind kind);
-// scalarF16Range (math.ts): f16 values spread over the f16 bit space. Used by quantizeToF16.
+// scalarF16Range (math.ts): f16 values spread over the f16 bit space. Used by quantizeToF16 and the
+// f16 builtin variants. Default counts {pos_sub:10, pos_norm:50, neg_*=pos_*}.
 std::vector<double> scalarF16Range();
+// sparseScalarF16Range (math.ts kInterestingF16Values): minimal f16 coverage set.
+const std::vector<double>& sparseScalarF16Range();
+// Dense / sparse vector + sparse matrix f16 ranges (kVectorF16Values / kSparseVectorF16Values /
+// kSparseMatrixF16Values). Same template shape as the f32/f64 variants.
+std::vector<std::vector<double>> vectorF16Range(int dim);
+std::vector<std::vector<double>> sparseVectorF16Range(int dim);
+std::vector<std::vector<std::vector<double>>> sparseMatrixF16Range(int cols, int rows);
 // sparseI32Range (math.ts kInterestingI32Values). Used by ldexp non-const.
 const std::vector<int32_t>& sparseI32Range();
 // quantizeToI32 (math.ts): round toward zero into the i32 range.

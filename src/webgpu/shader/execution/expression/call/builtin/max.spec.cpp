@@ -40,8 +40,7 @@ int cfgVectorize(const Fixture& t) {
 }
 
 std::vector<Case> floatCases(fp::FPKind kind) {
-    const std::vector<double>& r = kind == fp::FPKind::Abstract ? fp::sparseScalarF64Range()
-                                                                : fp::sparseScalarF32Range();
+    const std::vector<double>& r = fp::sparseScalarRange(kind);
     return fp::generateScalarPairToIntervalCases(
         kind, r, r, /*finite=*/false,
         [kind](double x, double y) { return fp::maxInterval(kind, x, y); });
@@ -99,5 +98,10 @@ CTS_TEST(g, "f32").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t)
 });
 
 CTS_TEST(g, "f16").params(vectorizeParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
-    t.skip("f16 deferred: shader-f16 has no Metal oracle (phaseY13 Stage B follow-up)");
+    if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+        t.skip("shader-f16 feature not available");
+    }
+    auto cases = floatCases(fp::FPKind::F16);
+    run(t, builtin("max"), {scalarType(ScalarKind::F16), scalarType(ScalarKind::F16)},
+        scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });
