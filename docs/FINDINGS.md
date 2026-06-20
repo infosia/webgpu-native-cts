@@ -1720,7 +1720,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
-## F-120 — upstream-naga: shader/validation under/over-validation (structural slices FIXED; uniformity-analysis ~22467 OPEN)
+## F-120 — shader/validation under/over-validation (structural slices FIXED; uniformity 22467→13 via yawgpu graph-uniformity analysis)
 
 - **Backend:** yawgpu (Metal) AND wgpu-native — **identical**. Deterministic.
 - **Found by:** `shader,validation,shader_io,*` (phaseSV1 batch). 34 cases where
@@ -1755,10 +1755,16 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   unrestricted_pointer_parameters). Re-verified yawgpu/Metal: **`extension`/`shader_io`/`decl`/`functions`/
   `types`/`const_assert` all `fail=0`** (was shader_io 34, decl 13, functions/types 267 = ~314 — all now
   pass; `functions` also went skip 19056→0 as `unrestricted_pointer_parameters` now runs+passes).
-  **STILL OPEN: `uniformity` ~22467** (basics 21473, binary_expressions 768, function_variables 130,
-  pointers 37, …) — the WGSL **uniformity-analysis** diagnostics, a separate/larger naga area not covered
-  by these fixes; still shared with wgpu-native (yawgpu-only=0), Dawn-green. cts ports correct throughout.
-  Re-verify uniformity when a naga uniformity-analysis fix lands.
+  **uniformity — NEARLY RESOLVED 2026-06-20** (yawgpu `0320944`: WGSL-standard **graph uniformity
+  analysis**, naga fork bumped to `783ced3bf`). Re-verified yawgpu/Metal per-g.test: ~22467 → **13**
+  remaining — `basics` 21473→**0** (pass 24697→46170), binary_expressions/function_variables/pointers/
+  short_circuit/unary/fragment/compute all → **0**. **STILL OPEN: 13 edge cases** — `uniformity:functions`
+  (12) `*_nonuniform_result` (a derivative/`textureSample*` non-uniform value flowing OUT of a function
+  return into a derivative context — not yet caught) + `uniformity:function_pointer_parameters:pointer_codependent3`
+  (1). These are gaps in yawgpu's NEW uniformity implementation (Dawn rejects, yawgpu still accepts);
+  wgpu-native fails them too but for a different root (upstream naga implements no uniformity analysis at
+  all). cts ports correct (Dawn-green). Re-verify the 13 when yawgpu's uniformity analysis covers
+  function-return non-uniformity + pointer codependency.
 - **Spec basis (verified 2026-06-20, [WGSL §uniformity](https://www.w3.org/TR/WGSL/#uniformity)):** this is
   **spec-mandated, not implementation discretion** — Dawn/Tint is correct, naga is non-conformant. Uniformity
   analysis is required; non-uniform control flow use of: derivatives/`textureSample*` → triggering rule
