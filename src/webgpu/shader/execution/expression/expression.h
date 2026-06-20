@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cts/gpu.h"
@@ -251,6 +252,10 @@ struct ExpectedElement {
     bool unbounded = false;
     double lo = 0.0;
     double hi = 0.0;
+    // Additional acceptance intervals for the upstream anyOf(...) disjunction (e.g. acosh's two
+    // formulations). The read-back value is accepted iff it lies in [lo,hi] OR in any of these
+    // extra [lo,hi] pairs. Ignored when 'unbounded' is set.
+    std::vector<std::pair<double, double>> extraIntervals;
 };
 
 // Builds an ExpectedElement that accepts any float value in the inclusive interval [lo, hi]

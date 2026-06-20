@@ -80,6 +80,46 @@ FPInterval sqrtInterval(FPKind kind, double n); // = 1 / inverseSqrt(n)
 FPInterval cosInterval(FPKind kind, double n);  // absolute-error 2^-11 (f32), domain [-pi, pi]
 FPInterval additionInterval(FPKind kind, double x, double y); // correctly-rounded x + y
 
+// --- Transcendental builtin acceptance intervals (phaseY13 Stage B/2) ---
+// These are all defined via the f32 trait (inherited accuracy), so 'kind' selects only the input/
+// output materialization and the domain constants. The math is computed at f32 precision.
+// Trig:
+FPInterval sinInterval(FPKind kind, double n);   // absolute-error 2^-11, domain [-pi, pi]
+FPInterval tanInterval(FPKind kind, double n);   // sin(n) / cos(n)
+FPInterval asinInterval(FPKind kind, double n);  // atan2 + abs-error, domain [-1, 1]
+FPInterval acosInterval(FPKind kind, double n);  // atan2 + abs-error, domain [-1, 1]
+FPInterval atanInterval(FPKind kind, double n);  // ULP(4096)
+FPInterval atan2Interval(FPKind kind, double y, double x); // ULP(4096), domain-split + extrema
+// Hyperbolic:
+FPInterval sinhInterval(FPKind kind, double n);  // (exp(n) - exp(-n)) * 0.5
+FPInterval coshInterval(FPKind kind, double n);  // (exp(n) + exp(-n)) * 0.5
+FPInterval tanhInterval(FPKind kind, double n);  // sinh/cosh + abs-error
+FPInterval asinhInterval(FPKind kind, double n); // log(x + sqrt(x*x + 1))
+FPInterval atanhInterval(FPKind kind, double n); // log((1+x)/(1-x)) * 0.5
+// acosh has two formulations; both are tested (acosh_alt and acosh_primary).
+FPInterval acoshAlternativeInterval(FPKind kind, double n); // log(x + sqrt((x+1)*(x-1)))
+FPInterval acoshPrimaryInterval(FPKind kind, double n);     // log(x + sqrt(x*x - 1))
+// Exp/log/pow:
+FPInterval expInterval(FPKind kind, double n);   // ULP(3 + 2*|n|)
+FPInterval exp2Interval(FPKind kind, double n);  // ULP(3 + 2*|n|)
+FPInterval logInterval(FPKind kind, double n);   // abs-error 2^-21 on [0.5,2], else ULP(3); domain >0
+FPInterval log2Interval(FPKind kind, double n);  // abs-error 2^-21 on [0.5,2], else ULP(3); domain >0
+FPInterval powInterval(FPKind kind, double x, double y); // exp2(y * log2(x))
+
+// Range helper used by several transcendental caches.
+std::vector<double> biasedRange(double a, double b, int numSteps);
+
+// kValue constants exposed for case-range construction.
+double f32PositiveMin();
+double f32NegativeMax();
+double f32NegativeMin();
+double f64PositiveMin();
+double f64NegativeMax();
+double f64NegativeMin();
+// positive/negative.less_than_one: the value closest to +/-1 with magnitude < 1, per kind.
+double positiveLessThanOne(FPKind kind);
+double negativeLessThanOne(FPKind kind);
+
 // Quantize a double to the kind's representable set (f32: round-to-nearest; abstract: identity).
 double quantize(FPKind kind, double n);
 
@@ -87,6 +127,9 @@ double quantize(FPKind kind, double n);
 // a spread over the f64 bit space.
 std::vector<double> scalarF32Range();
 const std::vector<double>& sparseScalarF32Range(); // kInterestingF32Values
+const std::vector<double>& sparseScalarF64Range(); // kInterestingF64Values
+// Sparse range for the kind (f32 -> sparseScalarF32Range, abstract -> sparseScalarF64Range).
+const std::vector<double>& sparseScalarRange(FPKind kind);
 std::vector<std::vector<double>> sparseVectorF32Range(int dim);
 std::vector<double> linearRange(double a, double b, int numSteps);
 std::vector<double> scalarF64Range();
@@ -113,6 +156,14 @@ std::vector<Case> generateScalarToIntervalCases(
     const std::vector<double>& params,
     bool finiteFilter,
     const ScalarToInterval& op);
+
+// acosh: one scalar in, accepted by anyOf(...) of multiple intervals (two formulations). The
+// 'finite' filter drops a case if ANY interval is non-finite.
+std::vector<Case> generateScalarToIntervalCasesAnyOf(
+    FPKind kind,
+    const std::vector<double>& params,
+    bool finiteFilter,
+    const std::vector<ScalarToInterval>& ops);
 
 // f32 binary addition (scalar): two scalars in, one scalar interval out. Cartesian product.
 std::vector<Case> generateScalarPairToIntervalCases(

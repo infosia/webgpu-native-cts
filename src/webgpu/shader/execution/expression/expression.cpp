@@ -1052,7 +1052,14 @@ void submitBatch(
                         if (ee.unbounded) {
                             continue;
                         }
-                        if (std::isnan(got) || !(got >= ee.lo && got <= ee.hi)) {
+                        bool inAny = !std::isnan(got) && got >= ee.lo && got <= ee.hi;
+                        for (const auto& iv : ee.extraIntervals) {
+                            if (!std::isnan(got) && got >= iv.first && got <= iv.second) {
+                                inAny = true;
+                                break;
+                            }
+                        }
+                        if (!inAny) {
                             matched = false;
                         }
                     }
@@ -1131,7 +1138,14 @@ void submitBatch(
                                 std::memcpy(&f, &gb, 4);
                                 v = static_cast<double>(f);
                             }
-                            if (std::isnan(v) || !(v >= ee.lo && v <= ee.hi)) {
+                            bool inAny = !std::isnan(v) && v >= ee.lo && v <= ee.hi;
+                            for (const auto& iv : ee.extraIntervals) {
+                                if (!std::isnan(v) && v >= iv.first && v <= iv.second) {
+                                    inAny = true;
+                                    break;
+                                }
+                            }
+                            if (!inAny) {
                                 matched = false;
                             }
                             continue;

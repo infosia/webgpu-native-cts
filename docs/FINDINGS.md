@@ -1851,4 +1851,22 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-125 — yawgpu: `atanh` f32 const-eval returns out-of-interval values (Metal)
+
+- **Backend:** yawgpu (Metal). Deterministic.
+- **Found by:** `shader,execution,expression,call,builtin,atanh:f32:inputSource="const";*` (phaseY13 Stage
+  B/2) — all 4 vectorize variants fail as an **expression mismatch** (wrong value, not a pipeline error):
+  the const-evaluated `atanh(x)` lands outside the spec acceptance interval for inputs near the domain
+  edges (±1, where `atanh → ±∞`). The **runtime** input sources (`uniform`/`storage_r`/`storage_rw`) all
+  **pass** — only the **`const` (const-eval)** path is wrong.
+- **Cross-check:** **Dawn passes** (oracle) and **wgpu-native passes** the same cases (isolation-confirmed)
+  → **yawgpu-only** (yawgpu-fork naga const-eval of `atanh`), **not** upstream-naga. Same const-eval-only
+  shape as F-118/F-122 but a value error (vs pipeline error). Likely a less-accurate `atanh` const-eval
+  formula / edge handling near ±1.
+- **Status:** **OPEN (yawgpu).** cts port correct (Dawn-green; f32 acceptance interval faithful, runtime
+  passes). Reproduce: `build-yawgpu/cts "…,atanh:f32:inputSource=\"const\";vectorize=0"`. Surfaced/unmasked.
+  (The 72 `abstract_float:const` fails in this batch are the known shared-naga **F-124**, not yawgpu-only.)
+
+---
+
 _Add new findings as `F-00N` with the same fields._

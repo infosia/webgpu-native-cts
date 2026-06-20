@@ -487,6 +487,495 @@ FPInterval additionInterval(FPKind kind, double x, double y) {
     return r.isFinite() ? r : unboundedInterval(kind);
 }
 
+// ===========================================================================
+// Transcendental builtin acceptance intervals (phaseY13 Stage B/2).
+//
+// All of these are defined (per upstream .cache.ts) via the f32 trait, even for the abstract
+// variants ("inherited accuracy, only as accurate as f32"). So the math here is always computed at
+// f32 precision (FPKind::F32 internally); the public 'kind' parameter only affects case
+// materialization, which is handled at the case-generation layer, not here. We therefore ignore the
+// public 'kind' for the math and use F32 everywhere below.
+//
+// Many ops are composed (e.g. tan = sin / cos, sinh = (exp - exp) * 0.5), so the elementary
+// interval ops must accept FPInterval inputs and span over their endpoints. We mirror upstream's
+// runScalarToIntervalOp / runScalarPairToIntervalOp (including the extrema + domain hooks) operating
+// over FPInterval inputs.
+// ===========================================================================
+// pi whole at f64 precision (used by atan2). Defined below; forward-declared for the anon block.
+double kF32PosPiWholeF64();
+
+namespace {
+
+constexpr FPKind kF = FPKind::F32;
+
+// --- elementary interval ops accepting FPInterval inputs (span over endpoints) ---
+
+// Generic unary runner over an FPInterval domain, with optional domain + extrema hooks.
+struct UnaryOp {
+    std::function<FPInterval(double)> impl;
+    bool hasDomain = false;
+    double domainLo = 0.0;
+    double domainHi = 0.0;
+    // extrema: optionally widen x to include a turning point of impl over x.
+    std::function<FPInterval(FPInterval)> extrema;
+};
+
+FPInterval roundAndFlushUnary(double n, const UnaryOp& op) {
+    const std::vector<double> inputs = addFlushedIfNeeded(kF, correctlyRounded(kF, n));
+    if (op.hasDomain) {
+        for (double i : inputs) {
+            if (!(i >= op.domainLo && i <= op.domainHi)) {
+                return unboundedInterval(kF);
+            }
+        }
+    }
+    std::vector<FPInterval> results;
+    results.reserve(inputs.size());
+    for (double i : inputs) {
+        results.push_back(op.impl(i));
+    }
+    return spanIntervals(results);
+}
+
+FPInterval runUnary(FPInterval x, const UnaryOp& op) {
+    if (!x.isFinite()) {
+        return unboundedInterval(kF);
+    }
+    if (op.extrema) {
+        x = op.extrema(x);
+    }
+    std::vector<FPInterval> spans;
+    spans.push_back(roundAndFlushUnary(x.begin, op));
+    if (!x.isPoint()) {
+        spans.push_back(roundAndFlushUnary(x.end, op));
+    }
+    const FPInterval r = spanIntervals(spans);
+    return r.isFinite() ? r : unboundedInterval(kF);
+}
+
+struct BinaryOp {
+    std::function<FPInterval(double, double)> impl;
+    bool hasDomain = false;
+    std::function<bool(double)> inXDomain;
+    std::function<bool(double)> inYDomain;
+    std::function<void(FPInterval&, FPInterval&)> extrema;
+};
+
+FPInterval roundAndFlushBinary(double x, double y, const BinaryOp& op) {
+    const std::vector<double> xs = addFlushedIfNeeded(kF, correctlyRounded(kF, x));
+    const std::vector<double> ys = addFlushedIfNeeded(kF, correctlyRounded(kF, y));
+    if (op.hasDomain) {
+        for (double i : xs) {
+            if (!op.inXDomain(i)) {
+                return unboundedInterval(kF);
+            }
+        }
+        for (double j : ys) {
+            if (!op.inYDomain(j)) {
+                return unboundedInterval(kF);
+            }
+        }
+    }
+    std::vector<FPInterval> intervals;
+    for (double ix : xs) {
+        for (double iy : ys) {
+            intervals.push_back(op.impl(ix, iy));
+        }
+    }
+    return spanIntervals(intervals);
+}
+
+FPInterval runBinary(FPInterval x, FPInterval y, const BinaryOp& op) {
+    if (!x.isFinite() || !y.isFinite()) {
+        return unboundedInterval(kF);
+    }
+    if (op.extrema) {
+        op.extrema(x, y);
+    }
+    std::vector<FPInterval> outputs;
+    std::vector<double> xe = {x.begin};
+    if (!x.isPoint()) {
+        xe.push_back(x.end);
+    }
+    std::vector<double> ye = {y.begin};
+    if (!y.isPoint()) {
+        ye.push_back(y.end);
+    }
+    for (double ix : xe) {
+        for (double iy : ye) {
+            outputs.push_back(roundAndFlushBinary(ix, iy, op));
+        }
+    }
+    const FPInterval r = spanIntervals(outputs);
+    return r.isFinite() ? r : unboundedInterval(kF);
+}
+
+// Elementary interval ops taking FPInterval inputs (used by the composed builtins).
+FPInterval absoluteErrorIv(double n, double errorRange) {
+    return absoluteErrorInterval(kF, n, errorRange);
+}
+FPInterval ulpIv(double n, double numULP) {
+    return ulpInterval(kF, n, numULP);
+}
+
+// correctlyRoundedIntervalWithUnboundedPrecisionForAddition over a (point) val.
+FPInterval crUnbounded(double val, double large, double small) {
+    return crUnboundedAddition(kF, val, large, small);
+}
+
+FPInterval additionIv(FPInterval x, FPInterval y) {
+    BinaryOp op;
+    op.impl = [](double a, double b) -> FPInterval {
+        const double sum = a + b;
+        const double large = std::abs(a) > std::abs(b) ? a : b;
+        const double small = std::abs(a) > std::abs(b) ? b : a;
+        return crUnbounded(sum, large, small);
+    };
+    return runBinary(x, y, op);
+}
+FPInterval subtractionIv(FPInterval x, FPInterval y) {
+    BinaryOp op;
+    op.impl = [](double a, double b) -> FPInterval {
+        const double diff = a - b;
+        const double large = std::abs(a) > std::abs(b) ? a : -b;
+        const double small = std::abs(a) > std::abs(b) ? -b : a;
+        return crUnbounded(diff, large, small);
+    };
+    return runBinary(x, y, op);
+}
+FPInterval multiplicationIv(FPInterval x, FPInterval y) {
+    BinaryOp op;
+    op.impl = [](double a, double b) { return correctlyRoundedInterval(kF, a * b); };
+    return runBinary(x, y, op);
+}
+FPInterval negationIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) { return correctlyRoundedInterval(kF, -m); };
+    return runUnary(n, op);
+}
+
+// division over intervals (ULP 2.5), domain-restricted with extrema at y=0.
+FPInterval divisionIv(FPInterval x, FPInterval y) {
+    BinaryOp op;
+    const double yMag1 = std::ldexp(1.0, -126);
+    const double yMag2 = std::ldexp(1.0, 126);
+    op.impl = [](double a, double b) -> FPInterval {
+        if (b == 0.0) {
+            return unboundedInterval(kF);
+        }
+        return ulpIv(a / b, 2.5);
+    };
+    op.hasDomain = true;
+    op.inXDomain = [](double v) { return v >= kF32NegMin && v <= kF32PosMax; };
+    op.inYDomain = [yMag1, yMag2](double v) {
+        return (v >= -yMag2 && v <= -yMag1) || (v >= yMag1 && v <= yMag2);
+    };
+    op.extrema = [](FPInterval& /*xx*/, FPInterval& yy) {
+        if (yy.contains(0.0)) {
+            yy = toIntervalPoint(kF, 0.0);
+        }
+    };
+    return runBinary(x, y, op);
+}
+
+// sqrt over an interval: 1 / inverseSqrt(n).
+FPInterval sqrtIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        const FPInterval inv = inverseSqrtInterval(kF, m);
+        if (!inv.isFinite()) {
+            return unboundedInterval(kF);
+        }
+        return divisionIv(toIntervalPoint(kF, 1.0), inv);
+    };
+    return runUnary(n, op);
+}
+
+// exp / exp2 over an interval: ULP(3 + 2*|n|).
+FPInterval expIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) { return ulpIv(std::exp(m), 3.0 + 2.0 * std::abs(m)); };
+    return runUnary(n, op);
+}
+FPInterval exp2Iv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) { return ulpIv(std::pow(2.0, m), 3.0 + 2.0 * std::abs(m)); };
+    return runUnary(n, op);
+}
+
+// log / log2 over an interval: abs-error 2^-21 on [0.5, 2], else ULP(3); domain > 0.
+FPInterval logIv(FPInterval n) {
+    UnaryOp op;
+    const double absError = std::ldexp(1.0, -21);
+    op.impl = [absError](double m) -> FPInterval {
+        if (m >= 0.5 && m <= 2.0) {
+            return absoluteErrorIv(std::log(m), absError);
+        }
+        return ulpIv(std::log(m), 3.0);
+    };
+    op.hasDomain = true;
+    op.domainLo = kF32PosSubMin;
+    op.domainHi = kF32PosMax;
+    return runUnary(n, op);
+}
+FPInterval log2Iv(FPInterval n) {
+    UnaryOp op;
+    const double absError = std::ldexp(1.0, -21);
+    op.impl = [absError](double m) -> FPInterval {
+        if (m >= 0.5 && m <= 2.0) {
+            return absoluteErrorIv(std::log2(m), absError);
+        }
+        return ulpIv(std::log2(m), 3.0);
+    };
+    op.hasDomain = true;
+    op.domainLo = kF32PosSubMin;
+    op.domainHi = kF32PosMax;
+    return runUnary(n, op);
+}
+
+// sin / cos over an interval: absolute error 2^-11, domain [-pi, pi].
+FPInterval sinIv(FPInterval n) {
+    UnaryOp op;
+    const double absError = std::ldexp(1.0, -11);
+    op.impl = [absError](double m) { return absoluteErrorIv(std::sin(m), absError); };
+    op.hasDomain = true;
+    op.domainLo = kF32NegPiWhole;
+    op.domainHi = kF32PosPiWhole;
+    return runUnary(n, op);
+}
+FPInterval cosIv(FPInterval n) {
+    UnaryOp op;
+    const double absError = std::ldexp(1.0, -11);
+    op.impl = [absError](double m) { return absoluteErrorIv(std::cos(m), absError); };
+    op.hasDomain = true;
+    op.domainLo = kF32NegPiWhole;
+    op.domainHi = kF32PosPiWhole;
+    return runUnary(n, op);
+}
+
+// atan over an interval: ULP(4096).
+FPInterval atanIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) { return ulpIv(std::atan(m), 4096.0); };
+    return runUnary(n, op);
+}
+
+// atan2(y, x): ULP(4096), domain-split, extrema at y/x = 0. (params labelled y, x.)
+FPInterval atan2Iv(FPInterval y, FPInterval x) {
+    BinaryOp op;
+    op.impl = [](double yy, double xx) -> FPInterval {
+        double atanyx = std::atan(yy / xx);
+        if (xx < 0) {
+            if (yy > 0) {
+                atanyx = atanyx + kF32PosPiWholeF64();
+            } else {
+                atanyx = atanyx - kF32PosPiWholeF64();
+            }
+        }
+        return ulpIv(atanyx, 4096.0);
+    };
+    op.hasDomain = true;
+    // domain.x (first param, y): finite normal.
+    op.inXDomain = [](double v) {
+        return (v >= kF32NegMin && v <= kF32NegMax) || (v >= kF32PosMin && v <= kF32PosMax);
+    };
+    // domain.y (second param, x): inherited from division.
+    const double m1 = std::ldexp(1.0, -126);
+    const double m2 = std::ldexp(1.0, 126);
+    op.inYDomain = [m1, m2](double v) {
+        return (v >= -m2 && v <= -m1) || (v >= m1 && v <= m2);
+    };
+    op.extrema = [](FPInterval& yy, FPInterval& xx) {
+        if (yy.contains(0.0)) {
+            if (xx.contains(0.0)) {
+                yy = toIntervalPoint(kF, 0.0);
+                xx = toIntervalPoint(kF, 0.0);
+            } else {
+                yy = toIntervalPoint(kF, 0.0);
+            }
+        }
+    };
+    return runBinary(y, x, op);
+}
+
+} // namespace
+
+// pi whole at f64 precision (used by atan2). Defined out-of-anon so atan2Iv can call it.
+double kF32PosPiWholeF64() {
+    return f64FromBits(0x400921fb54442d18ull); // closest f64 to pi
+}
+
+namespace {
+
+// --- composed builtin ops over intervals ---
+
+FPInterval tanIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) { return divisionIv(sinIv(toIntervalPoint(kF, m)),
+                                               cosIv(toIntervalPoint(kF, m))); };
+    return runUnary(n, op);
+}
+FPInterval sinhIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        const FPInterval minusN = negationIv(toIntervalPoint(kF, m));
+        return multiplicationIv(
+            subtractionIv(expIv(toIntervalPoint(kF, m)), expIv(minusN)),
+            toIntervalPoint(kF, 0.5));
+    };
+    return runUnary(n, op);
+}
+FPInterval coshIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        const FPInterval minusN = negationIv(toIntervalPoint(kF, m));
+        return multiplicationIv(
+            additionIv(expIv(toIntervalPoint(kF, m)), expIv(minusN)),
+            toIntervalPoint(kF, 0.5));
+    };
+    return runUnary(n, op);
+}
+FPInterval tanhIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        const double approxAbsError = 1.0e-5;
+        const FPInterval a = divisionIv(sinhIv(toIntervalPoint(kF, m)), coshIv(toIntervalPoint(kF, m)));
+        const FPInterval b = absoluteErrorIv(std::tanh(m), approxAbsError);
+        return spanIntervals({a, b});
+    };
+    return runUnary(n, op);
+}
+FPInterval asinIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        // asin(n) = atan2(n, sqrt(1 - n*n)) spanned with abs-error polynomial.
+        const FPInterval x =
+            sqrtIv(subtractionIv(toIntervalPoint(kF, 1.0),
+                                 multiplicationIv(toIntervalPoint(kF, m), toIntervalPoint(kF, m))));
+        const FPInterval a = atan2Iv(toIntervalPoint(kF, m), x);
+        const FPInterval b = absoluteErrorIv(std::asin(m), 6.81e-5);
+        return spanIntervals({a, b});
+    };
+    op.hasDomain = true;
+    op.domainLo = -1.0;
+    op.domainHi = 1.0;
+    return runUnary(n, op);
+}
+FPInterval acosIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        // acos(n) = atan2(sqrt(1 - n*n), n) spanned with abs-error polynomial.
+        const FPInterval y =
+            sqrtIv(subtractionIv(toIntervalPoint(kF, 1.0),
+                                 multiplicationIv(toIntervalPoint(kF, m), toIntervalPoint(kF, m))));
+        const FPInterval a = atan2Iv(y, toIntervalPoint(kF, m));
+        const FPInterval b = absoluteErrorIv(std::acos(m), 6.77e-5);
+        return spanIntervals({a, b});
+    };
+    op.hasDomain = true;
+    op.domainLo = -1.0;
+    op.domainHi = 1.0;
+    return runUnary(n, op);
+}
+FPInterval asinhIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        // asinh(x) = log(x + sqrt(x*x + 1))
+        const FPInterval inner =
+            additionIv(multiplicationIv(toIntervalPoint(kF, m), toIntervalPoint(kF, m)),
+                       toIntervalPoint(kF, 1.0));
+        const FPInterval s = sqrtIv(inner);
+        return logIv(additionIv(toIntervalPoint(kF, m), s));
+    };
+    return runUnary(n, op);
+}
+FPInterval atanhIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        // atanh(x) = log((1+x)/(1-x)) * 0.5
+        const FPInterval num = additionIv(toIntervalPoint(kF, 1.0), toIntervalPoint(kF, m));
+        const FPInterval den = subtractionIv(toIntervalPoint(kF, 1.0), toIntervalPoint(kF, m));
+        const FPInterval logIv0 = logIv(divisionIv(num, den));
+        return multiplicationIv(logIv0, toIntervalPoint(kF, 0.5));
+    };
+    return runUnary(n, op);
+}
+FPInterval acoshAltIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        // acosh(x) = log(x + sqrt((x+1)*(x-1)))
+        const FPInterval inner =
+            multiplicationIv(additionIv(toIntervalPoint(kF, m), toIntervalPoint(kF, 1.0)),
+                             subtractionIv(toIntervalPoint(kF, m), toIntervalPoint(kF, 1.0)));
+        const FPInterval s = sqrtIv(inner);
+        return logIv(additionIv(toIntervalPoint(kF, m), s));
+    };
+    return runUnary(n, op);
+}
+FPInterval acoshPrimaryIv(FPInterval n) {
+    UnaryOp op;
+    op.impl = [](double m) -> FPInterval {
+        // acosh(x) = log(x + sqrt(x*x - 1))
+        const FPInterval inner =
+            subtractionIv(multiplicationIv(toIntervalPoint(kF, m), toIntervalPoint(kF, m)),
+                          toIntervalPoint(kF, 1.0));
+        const FPInterval s = sqrtIv(inner);
+        return logIv(additionIv(toIntervalPoint(kF, m), s));
+    };
+    return runUnary(n, op);
+}
+FPInterval powIv(FPInterval x, FPInterval y) {
+    // pow(x, y) = exp2(y * log2(x)). log2 enforces the x>0 domain.
+    BinaryOp op;
+    op.impl = [](double a, double b) -> FPInterval {
+        const FPInterval l2 = log2Iv(toIntervalPoint(kF, a));
+        const FPInterval prod = multiplicationIv(toIntervalPoint(kF, b), l2);
+        return exp2Iv(prod);
+    };
+    return runBinary(x, y, op);
+}
+
+} // namespace
+
+// --- public transcendental entry points (kind ignored for math; F32 precision) ---
+FPInterval sinInterval(FPKind, double n) { return sinIv(toIntervalPoint(kF, n)); }
+FPInterval tanInterval(FPKind, double n) { return tanIv(toIntervalPoint(kF, n)); }
+FPInterval asinInterval(FPKind, double n) { return asinIv(toIntervalPoint(kF, n)); }
+FPInterval acosInterval(FPKind, double n) { return acosIv(toIntervalPoint(kF, n)); }
+FPInterval atanInterval(FPKind, double n) { return atanIv(toIntervalPoint(kF, n)); }
+FPInterval atan2Interval(FPKind, double y, double x) {
+    return atan2Iv(toIntervalPoint(kF, y), toIntervalPoint(kF, x));
+}
+FPInterval sinhInterval(FPKind, double n) { return sinhIv(toIntervalPoint(kF, n)); }
+FPInterval coshInterval(FPKind, double n) { return coshIv(toIntervalPoint(kF, n)); }
+FPInterval tanhInterval(FPKind, double n) { return tanhIv(toIntervalPoint(kF, n)); }
+FPInterval asinhInterval(FPKind, double n) { return asinhIv(toIntervalPoint(kF, n)); }
+FPInterval atanhInterval(FPKind, double n) { return atanhIv(toIntervalPoint(kF, n)); }
+FPInterval acoshAlternativeInterval(FPKind, double n) { return acoshAltIv(toIntervalPoint(kF, n)); }
+FPInterval acoshPrimaryInterval(FPKind, double n) { return acoshPrimaryIv(toIntervalPoint(kF, n)); }
+FPInterval expInterval(FPKind, double n) { return expIv(toIntervalPoint(kF, n)); }
+FPInterval exp2Interval(FPKind, double n) { return exp2Iv(toIntervalPoint(kF, n)); }
+FPInterval logInterval(FPKind, double n) { return logIv(toIntervalPoint(kF, n)); }
+FPInterval log2Interval(FPKind, double n) { return log2Iv(toIntervalPoint(kF, n)); }
+FPInterval powInterval(FPKind, double x, double y) {
+    return powIv(toIntervalPoint(kF, x), toIntervalPoint(kF, y));
+}
+
+double f32PositiveMin() { return kF32PosMin; }
+double f32NegativeMax() { return kF32NegMax; }
+double f32NegativeMin() { return kF32NegMin; }
+double f64PositiveMin() { return kF64PosMin; }
+double f64NegativeMax() { return kF64NegMax; }
+double f64NegativeMin() { return f64FromBits(0xffefffffffffffffull); }
+double positiveLessThanOne(FPKind kind) {
+    return kind == FPKind::F32 ? static_cast<double>(f32FromBits(0x3f7fffffu))
+                               : f64FromBits(0x3fefffffffffffffull);
+}
+double negativeLessThanOne(FPKind kind) {
+    return kind == FPKind::F32 ? static_cast<double>(f32FromBits(0xbf7fffffu))
+                               : f64FromBits(0xbfefffffffffffffull);
+}
+
 double quantize(FPKind kind, double n) {
     return kind == FPKind::F32 ? quantizeToF32(n) : n;
 }
@@ -536,6 +1025,23 @@ std::vector<double> linearRange(double a, double b, int numSteps) {
     }
     for (int i = 0; i < numSteps; ++i) {
         out.push_back(lerp(a, b, static_cast<double>(i) / (numSteps - 1)));
+    }
+    return out;
+}
+
+std::vector<double> biasedRange(double a, double b, int numSteps) {
+    // math.ts biasedRange: lerp with the index biased by pow(i/(n-1), 2).
+    std::vector<double> out;
+    if (numSteps <= 0) {
+        return out;
+    }
+    if (numSteps == 1) {
+        out.push_back(a);
+        return out;
+    }
+    const double c = 2.0;
+    for (int i = 0; i < numSteps; ++i) {
+        out.push_back(lerp(a, b, std::pow(static_cast<double>(i) / (numSteps - 1), c)));
     }
     return out;
 }
@@ -596,6 +1102,24 @@ const std::vector<double>& sparseScalarF32Range() {
         1.0,           10.0,           kF32PosMax,
     };
     return v;
+}
+
+const std::vector<double>& sparseScalarF64Range() {
+    // kInterestingF64Values: [neg.min, -10, -1, -0.125, neg.max, neg.subnormal.min,
+    //   neg.subnormal.max, -0, 0, pos.subnormal.min, pos.subnormal.max, pos.min, 0.125, 1, 10,
+    //   pos.max].
+    static const std::vector<double> v = {
+        f64FromBits(0xffefffffffffffffull), -10.0,        -1.0,        -0.125,
+        kF64NegMax,                         kF64NegSubMin, -f64FromBits(0x0000000000000001ull),
+        -0.0,                               0.0,
+        f64FromBits(0x0000000000000001ull), kF64PosSubMax, kF64PosMin, 0.125,
+        1.0,                                10.0,          f64FromBits(0x7fefffffffffffffull),
+    };
+    return v;
+}
+
+const std::vector<double>& sparseScalarRange(FPKind kind) {
+    return kind == FPKind::Abstract ? sparseScalarF64Range() : sparseScalarF32Range();
 }
 
 std::vector<std::vector<double>> sparseVectorF32Range(int dim) {
@@ -809,6 +1333,53 @@ std::vector<Case> generateScalarToIntervalCases(
         // Placeholder expected (unused by the interval comparator) — width 1.
         c.expected = CaseValue(scalarInput(kind, q));
         c.expectedAccept.push_back(intervalToExpected(kind, iv));
+        cases.push_back(std::move(c));
+    }
+    return cases;
+}
+
+std::vector<Case> generateScalarToIntervalCasesAnyOf(
+    FPKind kind,
+    const std::vector<double>& params,
+    bool finiteFilter,
+    const std::vector<ScalarToInterval>& ops) {
+    std::vector<Case> cases;
+    for (double e : params) {
+        const double q = quantize(kind, e);
+        std::vector<FPInterval> ivs;
+        ivs.reserve(ops.size());
+        bool anyNonFinite = false;
+        for (const ScalarToInterval& op : ops) {
+            FPInterval iv = op(q);
+            if (!iv.isFinite()) {
+                anyNonFinite = true;
+            }
+            ivs.push_back(iv);
+        }
+        if (finiteFilter && anyNonFinite) {
+            continue;
+        }
+        Case c;
+        c.inputs.push_back(CaseValue(scalarInput(kind, q)));
+        c.expected = CaseValue(scalarInput(kind, q));
+        // Primary interval plus extras for the anyOf disjunction. If any is unbounded the whole
+        // acceptance is unbounded (anyOf with the unbounded interval accepts everything).
+        bool anyUnbounded = false;
+        for (const FPInterval& iv : ivs) {
+            if (iv.begin == -std::numeric_limits<double>::infinity() &&
+                iv.end == std::numeric_limits<double>::infinity()) {
+                anyUnbounded = true;
+            }
+        }
+        if (anyUnbounded) {
+            c.expectedAccept.push_back(acceptUnbounded(kind == FPKind::F32 ? 32 : 64));
+        } else {
+            ExpectedElement ee = intervalToExpected(kind, ivs.front());
+            for (size_t i = 1; i < ivs.size(); ++i) {
+                ee.extraIntervals.emplace_back(ivs[i].begin, ivs[i].end);
+            }
+            c.expectedAccept.push_back(ee);
+        }
         cases.push_back(std::move(c));
     }
     return cases;
