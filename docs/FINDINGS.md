@@ -1935,9 +1935,34 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   validation-detectable defect; root cause is a **GPU-execution-time** OOB not visible to validation —
   either yawgpu HAL or i915/ANV+VT-d. Definitive next step: capture the exact faulting case on HW
   (Intel/TTY with the DMAR fault as oracle, or NVIDIA with Nsight Aftermath / GPU-AV).
-- **Status:** **OPEN.** Distinct from the F-122 (shift-left const-eval) numbering — this is the copy/DMA
-  finding. Spec: `specs/investigate-copy-dma-oob-freeze.md`. May subsume/re-open F-104 copyTextureToTexture
-  (previously logged as a MoltenVK-only artifact, "native-Vulkan-green" — native Vulkan is **not** green here).
+- **HW capture + emitted-command verification (2026-06-20, session 2) — yawgpu EXONERATED:**
+  1. **Caught the faulting cases deterministically, no freeze/reboot.** A warm, >1.2 s-spaced per-case
+     loop over the 94 `copyTextureToTexture` `array` cases with a self-stop after 3 new DMAR faults,
+     correlated 1:1 against ms-precision `RUN`/`OK` progress vs `journalctl -k` second-precision faults.
+     10 faults across runs, **100 % `color_textures,non_compressed,array` (multi-layer), 2d + 3d,
+     format-independent** (bgra8unorm-srgb, rgb10a2unorm, rgba16{unorm,snorm,sint,float},
+     rgba32{uint,sint,float}, rg32sint). Single-slice `non_array`: 0.
+  2. **Every emitted `VkImageCopy` is in-bounds.** A temporary `YAWGPU_DUMP_COPY` dump in
+     `encode_texture_to_texture` (reverted after) printed the emitted region for 3 caught cases; a parser
+     machine-checked **567 regions**: for all of them `offset+extent ≤ mip-extent` (mip 3 = 8×4 etc.),
+     `mipLevel < mipLevelCount`, `baseArrayLayer+layerCount ≤ arrayLayers`, D2 `extent.depth==1`,
+     D3 `layerCount==1`. **0 out-of-bounds / invalid emissions.**
+  3. **A faithful standalone Vulkan reproducer cannot reproduce the fault.** `f126_repro.c` (no yawgpu /
+     no CTS, mirrors the HAL path: per-image `VkDeviceMemory` from `get_image_memory_requirements`,
+     `UNDEFINED→TRANSFER_*_OPTIMAL` barriers, single multi-layer `VkImageCopy`) ran the full CTS `array`
+     geometry/format/size matrix (3 formats × 4 sizes incl. 31×32×**33**, full + offset baseArrayLayer,
+     ± CCS fast-clear aux, ~50 configs × 8–20k warm iterations) with **0 DMAR faults** — matching this
+     finding's own caveat that the OOB *write* only *faults* when it lands on an unmapped page, which
+     needs the full-CTS heap layout. So the IOMMU oracle is heap-unreliable for an isolated repro.
+  ⇒ yawgpu's copy path emits valid, in-bounds Vulkan and is **not** the defect. The OOB is a
+  **GPU-execution-time** miscompute by **Mesa ANV on Haswell (Gen7.5)** — which prints
+  `MESA-INTEL: warning: Haswell Vulkan support is incomplete` — surfaced by VT-d only on a warm heap.
+- **Status:** **RESOLVED for yawgpu (exonerated); root cause attributed to ANV-Haswell execution.**
+  The cross-OS **Windows/NVIDIA** freeze is **still unconfirmed as the same cause** (could be a distinct
+  bug) — confirm separately with Nsight Aftermath / GPU-AV before claiming one root cause. Spec:
+  `specs/investigate-copy-dma-oob-freeze.md`. **Re-opens F-104 `copyTextureToTexture`'s "native-Vulkan-green"
+  claim**: native Vulkan is **not** green on ANV-Haswell (the OOB is present there), though yawgpu is not at
+  fault. Quarantined in `build-yawgpu-release/run-linux-vulkan/quarantine.txt` so a warm sweep does not freeze.
 
 ---
 

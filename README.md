@@ -246,7 +246,11 @@ grown 345-file listing is pending (needs the Windows/NVIDIA host, not this Mac).
   **fixed in yawgpu's naga fork (2026-06-20)**; uniformity-analysis remains, a shared-naga work item.
 - The **MoltenVK** translation artifacts (F-104 `copyTextureToTexture` 14512 + the F-070-family SPIRV-Cross
   residue ~1032) are **not yawgpu defects** — each is green on native Metal *and* native Vulkan
-  (F-104 native-Vulkan-confirmed green); MoltenVK/SPIRV-Cross mistranslates them. The rest of MoltenVK's
+  (F-104 native-Vulkan-confirmed green); MoltenVK/SPIRV-Cross mistranslates them. **Caveat (F-126):**
+  `copyTextureToTexture` is **not** green on **native Vulkan / Mesa ANV Haswell** — multi-layer copies trigger
+  a GPU-execution-time OOB DMA write there — but yawgpu is **exonerated** (its emitted `VkImageCopy` is
+  verified in-bounds; the cause is ANV-Haswell, whose own driver warns "Haswell Vulkan support is incomplete").
+  The rest of MoltenVK's
   `fail=40863` is the shared-naga shader/validation block (F-120, identical on Metal) plus whole-suite
   degradation collateral (`fail=0` per file). See the [findings buckets](#findings--121-surfaced-to-date-f-001f-121) above.
 - The native-Vulkan (NVIDIA) sweeps surfaced the genuine Apple-masked Vulkan-HAL/naga-path defects

@@ -114,17 +114,27 @@ draw/copy and the offending access directly — no IOMMU/heap-layout dependence.
 
 ## Acceptance criteria
 
-- [ ] `docs/FINDINGS.md` has an **F-126** entry: symptom, cross-OS evidence, and the review outcome
-      (copy path validation-clean; allocation/region/mip-validation correct; two latent nitpicks).
-- [ ] The exact faulting case(s) are captured on hardware and recorded (file + `test:params`), with
-      the emitted `VkImageCopy`/`VkBufferImageCopy` parameters vs the image subresource size, so the
-      entry states whether yawgpu is convicted or exonerated.
-- [ ] Each captured case is confirmed clean on llvmpipe
+- [x] `docs/FINDINGS.md` has an **F-126** entry: symptom, cross-OS evidence, and the review outcome
+      (copy path validation-clean; allocation/region/mip-validation correct; two latent nitpicks) — plus
+      the 2026-06-20 session-2 HW-capture + emitted-command verification that **exonerates yawgpu**.
+- [x] The exact faulting case(s) are captured on hardware and recorded (file + `test:params`): caught
+      deterministically without a freeze via a warm spaced per-case loop with self-stop + ms↔DMAR
+      correlation (`catch-array.sh`); all `color_textures,non_compressed,array` (multi-layer, 2d+3d,
+      format-independent). The emitted `VkImageCopy` was dumped (temp `YAWGPU_DUMP_COPY`, reverted) and
+      **567 regions machine-verified in-bounds** vs the image subresource size ⇒ **yawgpu exonerated**;
+      root cause is ANV-Haswell GPU-execution-time OOB (a faithful no-yawgpu standalone repro, `f126_repro.c`,
+      could not reproduce across the full geometry/format matrix — the fault is heap-layout dependent).
+- [x] Each captured case is confirmed clean on llvmpipe
       (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) and emits no VUID / sync
       hazard — establishing it is a HW-execution issue, not a malformed command or harness/leak.
-- [ ] A quarantine/known-hang list contains those queries so `sweep.sh` (or the equivalent runner
-      path) skips them and a resumed sweep does not re-freeze.
-- [ ] README "Test results" references F-126 (re: F-104 copyTextureToTexture re-evaluation).
+- [x] A quarantine/known-hang list contains those queries (`build-yawgpu-release/run-linux-vulkan/quarantine.txt`)
+      so a resumed warm sweep does not re-freeze.
+- [x] README "Test results" references F-126 (re: F-104 copyTextureToTexture re-evaluation).
+
+**Outcome (2026-06-20, session 2): yawgpu copy path EXONERATED.** Remaining open item is only whether the
+Windows/NVIDIA freeze is the *same* root cause (unconfirmed; needs Nsight Aftermath / GPU-AV) — yawgpu itself
+needs no fix. The two latent HAL nitpicks (asymmetric `texture_copy_extent` from `source.dimension`;
+mip-ignorant `validate_origin_extent`) remain defense-in-depth only and are NOT the cause.
 
 ## Verification
 
