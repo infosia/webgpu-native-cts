@@ -1720,7 +1720,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
-## F-120 — shader/validation under/over-validation (structural slices FIXED; uniformity 22467→13 via yawgpu graph-uniformity analysis)
+## F-120 — shader/validation under/over-validation — **RESOLVED** (yawgpu naga-fork: structural validation + full graph uniformity analysis)
 
 - **Backend:** yawgpu (Metal) AND wgpu-native — **identical**. Deterministic.
 - **Found by:** `shader,validation,shader_io,*` (phaseSV1 batch). 34 cases where
@@ -1765,6 +1765,13 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   wgpu-native fails them too but for a different root (upstream naga implements no uniformity analysis at
   all). cts ports correct (Dawn-green). Re-verify the 13 when yawgpu's uniformity analysis covers
   function-return non-uniformity + pointer codependency.
+- **Status: RESOLVED 2026-06-20** (yawgpu `66bee46`: uniformity edge cases — naga bumped to `4065fd824`,
+  after `0320944` graph uniformity analysis). Re-verified yawgpu/Metal: `uniformity:functions` 12→**0**,
+  `function_pointer_parameters` 1→**0**, **full `uniformity,*` sweep `fail=0`** (pass=47578, skip=133481 =
+  subgroups feature-gated). Combined with the structural fixes, **the ENTIRE `shader/validation` area is
+  now yawgpu-clean on Metal (fail=0)** — from 22781 down to 0. cts ports were correct (Dawn-green)
+  throughout; never masked. (wgpu-native still fails — upstream naga has no uniformity analysis — bring-up
+  reference.)
 - **Spec basis (verified 2026-06-20, [WGSL §uniformity](https://www.w3.org/TR/WGSL/#uniformity)):** this is
   **spec-mandated, not implementation discretion** — Dawn/Tint is correct, naga is non-conformant. Uniformity
   analysis is required; non-uniform control flow use of: derivatives/`textureSample*` → triggering rule
