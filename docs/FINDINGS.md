@@ -1797,4 +1797,36 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-122 — yawgpu: `<<` (shift left) abstract-int const-eval errors the pipeline (Metal)
+
+- **Backend:** yawgpu (Metal). Deterministic.
+- **Found by:** `shader,execution,expression,binary,bitwise_shift:shift_left_abstract:inputSource="const";*`
+  (phaseY13 Stage A) — all 4 vectorize variants (0/2/3/4) of abstract-int `<<` in the **const-eval** path
+  fail with `uncaptured error: queue submit cannot use an error command buffer` (the shader module /
+  compute pipeline becomes an error object). The `i32`/`u32` shift variants and the runtime input sources
+  pass — **only the abstract-int `const` path** errors.
+- **Cross-check:** **Dawn passes** (oracle). **wgpu-native passes** the same cases (isolation-confirmed) →
+  **yawgpu-only** (yawgpu-fork naga const-eval / yawgpu-core), **not** upstream-naga. Same error class and
+  const-eval-only shape as F-118 (`insertBits` const-eval) and F-117 (`firstLeadingBit`).
+- **Status:** **OPEN (yawgpu).** cts port correct (Dawn-green, value-EXACT). Reproduce:
+  `build-yawgpu/cts "…,binary,bitwise_shift:shift_left_abstract:inputSource=\"const\";*"`. Surfaced/unmasked.
+
+---
+
+## F-123 — yawgpu: `sub_neg` operator-precedence const-eval errors the pipeline (Metal)
+
+- **Backend:** yawgpu (Metal). Deterministic.
+- **Found by:** `shader,execution,expression,precedence:precedence:expr="sub_neg";*` (phaseY13 Stage A) —
+  the subtraction-vs-unary-negation precedence case (`a - -b`, incl. `strip_spaces=true` → `a--b`) fails on
+  all 4 `decl` variants (`const`/`literal`/`override`/`var<private>`) with `uncaptured error: queue submit
+  cannot use an error command buffer`. Other precedence expressions pass.
+- **Cross-check:** **Dawn passes** (oracle). **wgpu-native passes** (isolation-confirmed) → **yawgpu-only**
+  (yawgpu-fork naga parse/const-eval), **not** upstream-naga.
+- **Status:** **OPEN (yawgpu).** cts port correct (Dawn-green). Reproduce: `build-yawgpu/cts
+  "…,precedence:precedence:expr=\"sub_neg\";decl=\"const\";strip_spaces=true"`. Surfaced/unmasked.
+  (Separately, `constructor,non_zero:concrete_vector_mix:type="bool"` const-eval **crashes** on BOTH yawgpu
+  and wgpu-native, 16 cases — shared **upstream-naga** crash, a yawgpu work item per F-120, not yawgpu-only.)
+
+---
+
 _Add new findings as `F-00N` with the same fields._

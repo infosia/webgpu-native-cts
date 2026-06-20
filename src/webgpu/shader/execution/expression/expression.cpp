@@ -296,7 +296,7 @@ std::string fromStorage(ExprType ty, const std::string& expr, TypeConversionHelp
 }
 
 // WGSL expression converting a value to the storage type (bool: select(0,1,e)). Result types in
-// these tests are scalar/vector/matrix only; array-of-bool results are not exercised.
+// these tests are scalar/vector/matrix, or array-of-bool (constructor tests).
 std::string toStorage(ExprType ty, const std::string& expr) {
     if (ty.form == TypeForm::ScalarVec && ty.kind == ScalarKind::Bool) {
         if (ty.width == 1) {
@@ -305,6 +305,22 @@ std::string toStorage(ExprType ty, const std::string& expr) {
         const std::string z = "vec" + std::to_string(ty.width) + "<u32>(0u)";
         const std::string o = "vec" + std::to_string(ty.width) + "<u32>(1u)";
         return "select(" + z + ", " + o + ", " + expr + ")";
+    }
+    if (ty.form == TypeForm::Array && ty.element && ty.element->form == TypeForm::ScalarVec &&
+        ty.element->kind == ScalarKind::Bool && ty.element->width == 1) {
+        // array<bool, N> -> array<u32, N>, converting each element with select(). The result
+        // expression is evaluated once per element; the constructor cases use const expressions, so
+        // this is well-defined.
+        std::ostringstream out;
+        out << "array<u32, " << ty.count << ">(";
+        for (int i = 0; i < ty.count; ++i) {
+            if (i > 0) {
+                out << ", ";
+            }
+            out << "select(0u, 1u, (" << expr << ")[" << i << "])";
+        }
+        out << ")";
+        return out.str();
     }
     return expr;
 }
@@ -372,7 +388,12 @@ std::string scalarWgsl(const Scalar& s) {
         case ScalarKind::AbstractInt:
             // AbstractInt literal: emit the signed 64-bit decimal value (no suffix). AbstractInt
             // is 64-bit in WGSL, so 'bits64' carries the full literal (set from the i32 pattern
-            // by abstractInt(), or directly by abstractInt64()).
+            // by abstractInt(), or directly by abstractInt64()). WGSL parses negative numbers as a
+            // negated positive, so INT64_MIN ('-9223372036854775808') is invalid because
+            // '9223372036854775808' is not a valid AbstractInt; emit it as '(-max - 1)'.
+            if (s.bits64 == INT64_MIN) {
+                return "(-9223372036854775807 - 1)";
+            }
             return std::to_string(s.bits64);
         case ScalarKind::AbstractFloat:
             // AbstractFloat literal: emit an exact decimal of the finite f32 value (no suffix).
@@ -449,6 +470,65 @@ std::string valueWgslImpl(const CaseValue& v, const ExprType& ty) {
     return valueWgslRec(ty, v.elements, next);
 }
 
+bool isAbstractIntResult(const ExprType& ty) {
+    return ty.scalarKind() == ScalarKind::AbstractInt;
+}
+
+// size/alignment of a result type for the abstract-int output encoding (each abstract-int scalar is
+// a struct of 2x u32, i.e. 8 bytes / 8-byte aligned). Mirrors upstream sizeAndAlignmentOf for
+// abstract numerics. Only scalar / vecN result types are exercised here.
+struct AISizeAlign {
+    uint32_t size;
+    uint32_t alignment;
+};
+AISizeAlign abstractIntSizeAlign(const ExprType& ty) {
+    AISizeAlign sa{8u, 8u};
+    if (ty.form == TypeForm::ScalarVec && ty.width > 1) {
+        const uint32_t n = ty.width == 3 ? 4u : static_cast<uint32_t>(ty.width);
+        sa.size = 8u * n;
+        sa.alignment = 8u * n;
+    }
+    return sa;
+}
+
+uint32_t abstractIntStride(const ExprType& ty) {
+    const AISizeAlign sa = abstractIntSizeAlign(ty);
+    return alignUp(sa.size, sa.alignment);
+}
+
+// WGSL output struct + bound output array declaration for an abstract-int result. The result is
+// materialized as a per-element struct AF { low: u32, high: u32 }.
+std::string wgslAbstractIntOutputs(const ExprType& resultType, size_t count) {
+    std::ostringstream out;
+    const uint32_t stride = abstractIntStride(resultType);
+    out << "struct AF {\n  low: u32,\n  high: u32,\n};\n\n";
+    out << "struct Output {\n  @size(" << stride << ") value: ";
+    if (resultType.form == TypeForm::ScalarVec && resultType.width > 1) {
+        out << "array<AF, " << resultType.width << ">";
+    } else {
+        out << "AF";
+    }
+    out << ",\n};\n";
+    out << "@group(0) @binding(0) var<storage, read_write> outputs : array<Output, " << count
+        << ">;\n";
+    return out.str();
+}
+
+// Inlined snippet that splits an abstract-int expression value into the low/high u32 fields of the
+// output. Mirrors upstream abstractIntSnippet. 'accessor' is "" for scalars or "[i]" for vectors.
+std::string abstractIntSnippet(const std::string& expr, size_t caseIdx, const std::string& accessor) {
+    const std::string i = std::to_string(caseIdx);
+    std::ostringstream out;
+    out << "  {\n"
+        << "    outputs[" << i << "].value" << accessor << ".high = bitcast<u32>(i32((" << expr << ")"
+        << accessor << " >> 32)) & 0xFFFFFFFF;\n"
+        << "    const low_sign = ((" << expr << ")" << accessor << " & (1 << 31));\n"
+        << "    outputs[" << i << "].value" << accessor << ".low = bitcast<u32>(((" << expr << ")"
+        << accessor << " & 0x7FFFFFFF)) | low_sign;\n"
+        << "  }\n";
+    return out.str();
+}
+
 // WGSL output struct + bound output array declaration.
 std::string wgslOutputs(ExprType resultType, size_t count) {
     std::ostringstream out;
@@ -477,6 +557,73 @@ std::string wgslInputVar(InputSource source, size_t count) {
     std::abort();
 }
 
+// Builds the WGSL shader for a compound-assignment batch (e.g. 'lhs op= rhs'). Mirrors upstream
+// compoundAssignmentBuilder. parameterTypes are [lhsType, rhsType]; resultType == lhsType
+// (concrete only). 'op' is the compound operator spelling (e.g. "+=", "<<=").
+std::string buildCompoundShader(
+    const std::string& op,
+    const std::vector<ExprType>& parameterTypes,
+    ExprType resultType,
+    InputSource inputSource,
+    const std::vector<Case>& cases) {
+    std::ostringstream out;
+
+    bool usesF16 = resultType.kind == ScalarKind::F16;
+    for (ExprType ty : parameterTypes) {
+        usesF16 = usesF16 || ty.kind == ScalarKind::F16;
+    }
+    if (usesF16) {
+        out << "enable f16;\n";
+    }
+
+    const ExprType lhsType = parameterTypes[0];
+    const ExprType rhsType = parameterTypes[1];
+
+    if (inputSource == InputSource::Const) {
+        out << wgslOutputs(resultType, cases.size()) << "\n";
+        // lhs/rhs const arrays.
+        out << "const lhs = array(\n";
+        for (size_t i = 0; i < cases.size(); ++i) {
+            out << "  " << valueWgslImpl(cases[i].inputs[0], lhsType)
+                << (i + 1 < cases.size() ? "," : "") << "\n";
+        }
+        out << ");\n";
+        out << "const rhs = array(\n";
+        for (size_t i = 0; i < cases.size(); ++i) {
+            out << "  " << valueWgslImpl(cases[i].inputs[1], rhsType)
+                << (i + 1 < cases.size() ? "," : "") << "\n";
+        }
+        out << ");\n\n";
+        out << "@compute @workgroup_size(1)\nfn main() {\n";
+        for (size_t i = 0; i < cases.size(); ++i) {
+            out << "  var ret_" << i << " = lhs[" << i << "];\n"
+                << "  ret_" << i << " " << op << " rhs[" << i << "];\n"
+                << "  outputs[" << i << "].value = " << toStorage(resultType, "ret_" + std::to_string(i))
+                << ";\n";
+        }
+        out << "}\n";
+        return out.str();
+    }
+
+    // Runtime eval.
+    std::vector<ExprType> storageParams = {storageType(lhsType), storageType(rhsType)};
+    out << "struct Input {\n"
+        << wgslMembers(storageParams, inputSource,
+                       [](int i) { return std::string(i == 0 ? "lhs" : "rhs"); })
+        << "}\n\n";
+    out << wgslOutputs(resultType, cases.size()) << "\n";
+    out << wgslInputVar(inputSource, cases.size()) << "\n\n";
+
+    out << "@compute @workgroup_size(1)\nfn main() {\n"
+        << "  for (var i = 0; i < " << cases.size() << "; i++) {\n"
+        << "    var ret = " << wgslTypeName(lhsType) << "(inputs[i].lhs);\n"
+        << "    ret " << op << " " << wgslTypeName(rhsType) << "(inputs[i].rhs);\n"
+        << "    outputs[i].value = " << toStorage(resultType, "ret") << ";\n"
+        << "  }\n"
+        << "}\n";
+    return out.str();
+}
+
 // Builds the WGSL shader for a batch of cases.
 std::string buildShader(
     const ExpressionBuilder& exprBuilder,
@@ -496,6 +643,29 @@ std::string buildShader(
     }
 
     if (inputSource == InputSource::Const) {
+        if (isAbstractIntResult(resultType)) {
+            // Abstract-int result: materialize each value via the low/high u32 split protocol.
+            out << wgslAbstractIntOutputs(resultType, cases.size()) << "\n";
+            out << "@compute @workgroup_size(1)\nfn main() {\n";
+            const bool isVec = resultType.form == TypeForm::ScalarVec && resultType.width > 1;
+            for (size_t i = 0; i < cases.size(); ++i) {
+                std::vector<std::string> args;
+                args.reserve(parameterTypes.size());
+                for (size_t p = 0; p < parameterTypes.size(); ++p) {
+                    args.push_back(valueWgslImpl(cases[i].inputs[p], parameterTypes[p]));
+                }
+                const std::string expr = exprBuilder(args);
+                if (isVec) {
+                    for (int e = 0; e < resultType.width; ++e) {
+                        out << abstractIntSnippet(expr, i, "[" + std::to_string(e) + "]");
+                    }
+                } else {
+                    out << abstractIntSnippet(expr, i, "");
+                }
+            }
+            out << "}\n";
+            return out.str();
+        }
         // Constant eval, 'direct' mode: assign each case's evaluated expression to the output.
         out << wgslOutputs(resultType, cases.size()) << "\n";
         out << "@compute @workgroup_size(1)\nfn main() {\n";
@@ -628,20 +798,28 @@ std::string formatValue(const CaseValue& v) {
     return out.str();
 }
 
-// Runs one batch of cases (all of which fit within the binding limits).
+// Runs one batch of cases (all of which fit within the binding limits). When 'compoundOp' is
+// non-empty the batch evaluates a compound assignment ('lhs op= rhs') instead of exprBuilder.
 void submitBatch(
     GpuTest& t,
     const ExpressionBuilder& exprBuilder,
     const std::vector<ExprType>& parameterTypes,
     ExprType resultType,
     InputSource inputSource,
-    const std::vector<Case>& cases) {
+    const std::vector<Case>& cases,
+    const std::string& compoundOp = "") {
     const std::string source =
-        buildShader(exprBuilder, parameterTypes, resultType, inputSource, cases);
+        compoundOp.empty()
+            ? buildShader(exprBuilder, parameterTypes, resultType, inputSource, cases)
+            : buildCompoundShader(compoundOp, parameterTypes, resultType, inputSource, cases);
     WGPUComputePipeline pipeline = createComputePipelineAuto(t, source);
 
-    // Output buffer: one Output (stride-padded) per case.
-    const uint32_t outputStride = structStrideImpl({resultType}, InputSource::StorageRW);
+    // Output buffer: one Output (stride-padded) per case. Abstract-int results use the 2x u32
+    // (low/high) struct encoding and have their own stride.
+    const bool abstractIntResult = isAbstractIntResult(resultType);
+    const uint32_t outputStride = abstractIntResult
+                                      ? abstractIntStride(resultType)
+                                      : structStrideImpl({resultType}, InputSource::StorageRW);
     const uint64_t outputBufferSize = alignUp(static_cast<uint32_t>(cases.size()) * outputStride, 4);
     WGPUBufferDescriptor obDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
     obDesc.size = outputBufferSize;
@@ -721,6 +899,58 @@ void submitBatch(
     const uint32_t resElemBytes = elementBytes(storageKind(resultType.scalarKind()));
     const int resSlots = scalarSlotCount(resultType);
     std::vector<Case> casesCopy = cases;
+
+    if (abstractIntResult) {
+        // Abstract-int result: each element occupies an 8-byte {low:u32, high:u32} slot at offset
+        // e*8 within the case's output value. Reconstruct the signed 64-bit value (low ++ high in
+        // little-endian order) and compare against the expected scalar's full 64-bit 'bits64'.
+        const int aiSlots = resSlots;
+        t.expectGPUBufferValuesPassCheck(
+            outputBuffer,
+            [stride, aiSlots, casesCopy](const uint8_t* data,
+                                         size_t len) -> std::optional<std::string> {
+                std::ostringstream errs;
+                int failures = 0;
+                for (size_t caseIdx = 0; caseIdx < casesCopy.size(); ++caseIdx) {
+                    const uint32_t off = static_cast<uint32_t>(caseIdx) * stride;
+                    const CaseValue& exp = casesCopy[caseIdx].expected;
+                    if (exp.width != aiSlots) {
+                        return std::string("abstract-int result width mismatch");
+                    }
+                    bool matched = true;
+                    for (int e = 0; matched && e < aiSlots; ++e) {
+                        const uint32_t elemOff = off + static_cast<uint32_t>(e) * 8u;
+                        if (static_cast<size_t>(elemOff) + 8u > len) {
+                            return std::string("readback buffer too small");
+                        }
+                        uint32_t low = 0;
+                        uint32_t high = 0;
+                        std::memcpy(&low, data + elemOff, 4);
+                        std::memcpy(&high, data + elemOff + 4, 4);
+                        const int64_t got = static_cast<int64_t>(
+                            (static_cast<uint64_t>(high) << 32) | static_cast<uint64_t>(low));
+                        if (got != exp.elements[static_cast<size_t>(e)].bits64) {
+                            matched = false;
+                        }
+                    }
+                    if (!matched) {
+                        if (failures < 8) {
+                            errs << "\ncase " << caseIdx << " abstract-int mismatch";
+                        }
+                        ++failures;
+                    }
+                }
+                if (failures > 0) {
+                    return "expression mismatch (" + std::to_string(failures) + " failures):" +
+                           errs.str();
+                }
+                return std::nullopt;
+            },
+            0,
+            outputBufferSize);
+        return;
+    }
+
     t.expectGPUBufferValuesPassCheck(
         outputBuffer,
         [result, stride, resElemBytes, resSlots, casesCopy](
@@ -962,9 +1192,41 @@ ExpressionBuilder builtin(const std::string& name) {
     };
 }
 
-void run(
+ExpressionBuilder binaryOp(const std::string& op) {
+    return [op](const std::vector<std::string>& values) {
+        std::ostringstream out;
+        out << "(";
+        for (size_t i = 0; i < values.size(); ++i) {
+            if (i > 0) {
+                out << op;
+            }
+            out << "(" << values[i] << ")";
+        }
+        out << ")";
+        return out.str();
+    };
+}
+
+ExpressionBuilder prefixOp(const std::string& op) {
+    return [op](const std::vector<std::string>& values) {
+        return op + "(" + values[0] + ")";
+    };
+}
+
+ExpressionBuilder conversion(const std::string& typeName) {
+    return [typeName](const std::vector<std::string>& values) {
+        return typeName + "(" + values[0] + ")";
+    };
+}
+
+namespace {
+
+// Shared batching/dispatch core for run() and runCompound(). When 'compoundOp' is empty a plain
+// expression is evaluated via 'exprBuilder'; otherwise a compound assignment is evaluated.
+void runImpl(
     GpuTest& t,
     const ExpressionBuilder& exprBuilder,
+    const std::string& compoundOp,
     const std::vector<ExprType>& parameterTypes,
     ExprType resultType,
     InputSource inputSource,
@@ -1013,8 +1275,33 @@ void run(
         const size_t end = std::min(i + casesPerBatch, work.size());
         std::vector<Case> batch(work.begin() + static_cast<std::ptrdiff_t>(i),
                                 work.begin() + static_cast<std::ptrdiff_t>(end));
-        submitBatch(t, exprBuilder, params, result, inputSource, batch);
+        submitBatch(t, exprBuilder, params, result, inputSource, batch, compoundOp);
     }
+}
+
+} // namespace
+
+void run(
+    GpuTest& t,
+    const ExpressionBuilder& exprBuilder,
+    const std::vector<ExprType>& parameterTypes,
+    ExprType resultType,
+    InputSource inputSource,
+    int vectorize,
+    const std::vector<Case>& cases) {
+    runImpl(t, exprBuilder, "", parameterTypes, resultType, inputSource, vectorize, cases);
+}
+
+void runCompound(
+    GpuTest& t,
+    const std::string& compoundOp,
+    const std::vector<ExprType>& parameterTypes,
+    ExprType resultType,
+    InputSource inputSource,
+    int vectorize,
+    const std::vector<Case>& cases) {
+    runImpl(t, builtin("unused"), compoundOp, parameterTypes, resultType, inputSource, vectorize,
+            cases);
 }
 
 } // namespace expression

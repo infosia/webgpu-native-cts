@@ -283,6 +283,19 @@ using ExpressionBuilder = std::function<std::string(const std::vector<std::strin
 // Returns a basic builtin-call expression builder, i.e. `name(v0, v1, ...)`.
 ExpressionBuilder builtin(const std::string& name);
 
+// Returns a binary-operator expression builder that joins its operands with 'op', each operand
+// wrapped in parentheses, e.g. binaryOp("+") evaluates to "((v0)+(v1))". Mirrors upstream binary().
+ExpressionBuilder binaryOp(const std::string& op);
+
+// Returns a prefix unary-operator expression builder, e.g. prefixOp("-") evaluates to "-(v0)".
+// Mirrors upstream unary().
+ExpressionBuilder prefixOp(const std::string& op);
+
+// Returns a conversion expression builder that constructs the given concrete WGSL type from its
+// single operand, e.g. conversion("i32") evaluates to "i32(v0)". Mirrors upstream the unary
+// conversion ShaderBuilders.
+ExpressionBuilder conversion(const std::string& typeName);
+
 // ---------------------------------------------------------------------------
 // Layout helpers (shared with the structure-access port's custom run()).
 // These mirror upstream expression.ts's structLayout / structStride / align /
@@ -360,6 +373,10 @@ bool readValueFrom(
 
 // Runs the list of expression tests, batching as needed and packing scalar cases into
 // vectors when 'vectorize' is non-zero (2/3/4). Bit-exact comparison.
+//
+// When resultType's scalar kind is AbstractInt the result is materialized via the upstream
+// abstract-int output protocol (a per-element struct of {low:u32, high:u32}) and compared against
+// the full 64-bit 'bits64' of each expected scalar. AbstractInt results are const-only.
 void run(
     GpuTest& t,
     const ExpressionBuilder& exprBuilder,
@@ -367,6 +384,19 @@ void run(
     ExprType resultType,
     InputSource inputSource,
     int vectorize, // 0 == scalar (undefined), else 2/3/4
+    const std::vector<Case>& cases);
+
+// Like run(), but evaluates a compound-assignment operator (e.g. "+=", "<<=") instead of a plain
+// expression. Mirrors upstream compoundAssignmentBuilder: for each case it computes
+// 'lhs op= rhs' via a mutable temporary. resultType must equal the LHS (parameterTypes[0]) type.
+// Concrete (non-abstract) result types only.
+void runCompound(
+    GpuTest& t,
+    const std::string& compoundOp,
+    const std::vector<ExprType>& parameterTypes,
+    ExprType resultType,
+    InputSource inputSource,
+    int vectorize,
     const std::vector<Case>& cases);
 
 } // namespace expression
