@@ -304,6 +304,8 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             name = WGPUWGSLLanguageFeatureName_SubgroupId;
         } else if (feature == "subgroup_uniformity") {
             name = WGPUWGSLLanguageFeatureName_SubgroupUniformity;
+        } else if (feature == "linear_indexing") {
+            name = WGPUWGSLLanguageFeatureName_LinearIndexing;
         } else {
             fail("hasLanguageFeature: unknown feature name '" + key + "'");
             featureCache[key] = false;
