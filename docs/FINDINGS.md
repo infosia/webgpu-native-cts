@@ -85,11 +85,11 @@ copy OOB).
 | `shader/validation` (`uniformity` 409 + `shader_io,interpolate` 13, `decl,var` 10, `workgroup_size` 7, `pipeline_stage` 6, `functions,alias_analysis` 6, `types,pointer` 5, `functions,restrictions` 5, `types,atomics` 4, `shader_io,locations` 4, `decl,override` 3, `shader_io,size` 2, `id`/`align` 1+1) | **476** | **F-120** — `expected a validation error, got none` + `unexpected validation error for valid shader` (incl. 120× `Entry point main at Fragment is invalid`). RESOLVED post-Jun-19; expected on this build |
 | f16 (`bitcast` 12, `access,vector,components` 2) | **14** | **F-121** — f16 path; RESOLVED post-Jun-19 |
 | `shader_io,fragment_builtins` 8, `render_pipeline,misc` 2 | **10** | **F-085** (per-sample, spec-in-flux) + **F-111** (external-texture) — carried `xfail` |
-| `shader,execution,robust_access` | **24** | **candidate** — `GPU buffer mismatch: expected 0, got 3` (out-of-bounds access not clamped). Re-check post-rebuild |
-| `textureStore` (`rgb10a2unorm`, 3d / 2d-array) | **20** | **candidate** — `mismatch ... expected 0, got 240` (format pack). Re-check post-rebuild |
-| `textureLoad` (`*-srgb`) | **24** | **candidate** (minor) — green-channel sRGB-decode rounding (~1 ULP), e.g. `expected 1064469166, got 1064435712` |
-| `fwidth` / `fwidthFine` / `fwidthCoarse` (`f32`) | **24** | **candidate** — derivative builtins |
-| `api,validation` (`encoding,cmds,render,draw` 1, `compute_pass` 1) | **2** | `compute_pass:indirect_dispatch_buffer,usage` = `HAL queue submission failed: vulkan`; re-check |
+| `shader,execution,robust_access` | **24** | → **F-127** (CONFIRMED post-rebuild 2026-06-21) — uniform-buffer OOB reads not zeroed (`expected 0, got 3`); F-112 interaction |
+| `textureStore` (`rgb10a2unorm`, 3d / 2d-array) | **20** | → **F-128** (CONFIRMED post-rebuild 2026-06-21) — `expected 0, got 240` (rgb10a2unorm pack) |
+| `textureLoad` (`*-srgb`) | **24** | **candidate** (minor) — green-channel sRGB-decode rounding (~1 ULP), e.g. `expected 1064469166, got 1064435712`. **Still un-re-swept** |
+| `fwidth` / `fwidthFine` / `fwidthCoarse` (`f32`) | **24** | → **F-129** (CONFIRMED post-rebuild 2026-06-21) — derivative builtins: `discard`+derivative + denormal interval |
+| `api,validation` (`encoding,cmds,render,draw` 1, `compute_pass` 1) | **2** | `compute_pass:indirect_dispatch_buffer,usage` = `HAL queue submission failed: vulkan`. **Still un-re-swept** |
 
 **Takeaway:** on the pre-fix build, **~500 of the 594 fails are already-resolved (F-120/F-121) or
 known-`xfail` (F-085/F-111)**; the genuinely-new native-Vulkan candidates are **~92** execution/api cases
@@ -2016,6 +2016,84 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   `specs/investigate-copy-dma-oob-freeze.md`. **Re-opens F-104 `copyTextureToTexture`'s "native-Vulkan-green"
   claim**: native Vulkan is **not** green on ANV-Haswell (the OOB is present there), though yawgpu is not at
   fault. Quarantined in `build-yawgpu-release/run-linux-vulkan/quarantine.txt` so a warm sweep does not freeze.
+
+---
+
+## F-127 — yawgpu Vulkan: uniform-buffer OOB reads not zeroed (`robust_access`) — native Vulkan
+
+- **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Windows). Deterministic. **Metal-green.**
+- **Found by:** `shader,execution,robust_access:linear_memory:addressSpace="uniform";access="read";*` — **24
+  fail** (every `uniform`/`read` case: `containerType=vector|matrix` × `baseType=i32|u32|f16` × both
+  `dynamicOffset` × all `shadowingMode`). `GPU buffer mismatch at byte 0: expected 0, got 3`. All
+  `storage`/`workgroup`/`private`/`function` reads and all writes pass (`pass=462 fail=24`). Confirmed on
+  the current lib (yawgpu `97b4827`, naga `01e4e710`), post-rebuild re-sweep 2026-06-21.
+- **Observed:** an out-of-bounds **read of a uniform buffer** returns adjacent in-buffer data (`3`) instead
+  of the robust `0`.
+- **Root cause (Metal-vs-Vulkan classifier → SPIR-V bounds policy):** naga's `buffer` `BoundsCheckPolicy`
+  is a **single knob governing both the storage AND uniform address spaces** (naga `proc/index.rs`:
+  *"applies only to accesses to storage and uniform globals"*). **F-112** set `buffer = Unchecked` on
+  devices exposing `VK_EXT_robustness2`/`robustBufferAccess2` (to fix the NVIDIA workgroup-atomic coherence
+  violation). That is correct for **storage** (robustBufferAccess2 zeroes storage OOB at byte granularity —
+  the `storage` robust_access cases pass), but **wrong for uniform**: robustBufferAccess2 only bounds-checks
+  uniform buffers at `robustUniformBufferAccessSizeAlignment` granularity (up to 256 B on NVIDIA), so a
+  sub-granularity OOB uniform read returns real adjacent data, not 0. **Metal stays `buffer = Restrict`
+  (software clamp → in-bounds 0) and passes** — and these uniform cases were green natively under the
+  pre-F-112 `Restrict` policy, so F-112 traded uniform robustness for storage coherence.
+- **Cross-check:** wgpu-native (Vulkan) crashes the whole file (366, its known panic-heavy `robust_access`
+  state, F-071/F-078) — no usable oracle; Dawn + yawgpu/Metal green is the spec reference.
+- **Fix direction:** keep `buffer = Unchecked` for **storage** (F-112) but **`Restrict` for uniform** — needs
+  a per-address-space split of the `buffer` bounds policy in the naga fork (naga cannot express it today).
+  yawgpu work item. **Definitive confirm:** rebuild with `buffer` forced back to `Restrict` and check the 24
+  uniform cases pass *and* F-112 (`coherence:corr`) re-breaks — proves the single-knob tension.
+- **Status:** OPEN (2026-06-21).
+
+---
+
+## F-128 — yawgpu Vulkan: `textureStore` to `rgb10a2unorm` packs wrong — native Vulkan
+
+- **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Windows). Deterministic. **Metal-green.**
+- **Found by:** `shader,execution,expression,call,builtin,textureStore:*` — **20 fail, all
+  `format="rgb10a2unorm"`** (every `viewDimension` ∈ {1d, 2d, 2d-array, 3d} × stage {compute, fragment} ×
+  mipLevel 0–2; `access=write`). `mismatch at byte 2: expected 0, got 240`. The other 1173 textureStore
+  cases (all other formats) pass. Confirmed post-rebuild 2026-06-21 (yawgpu `97b4827`).
+- **Observed:** storing into an `rgb10a2unorm` storage texture and reading the raw bytes back yields a wrong
+  byte 2 (`0xF0` where `0` is expected) — the 10/10/10/2 packing is off by a channel-order / bit-shift.
+- **Classification:** Metal passes the full textureStore suite, so this is **not** yawgpu-core or the shared
+  frontend — it is the **SPIR-V path** (naga SPIR-V backend or the Vulkan HAL). naga's SPIR-V image-format
+  mapping is correct (`StorageFormat::Rgb10a2Unorm → SpvImageFormat::Rgb10A2`, `back/spv/instructions.rs`),
+  so the leading suspect is the **Vulkan HAL format mapping** for `rgb10a2unorm` storage views (Vulkan's
+  canonical layout is `VK_FORMAT_A2B10G10R10_UNORM_PACK32`; a B↔R or A-position mismatch would shift byte 2)
+  — to be confirmed against the HAL's `wgpu→vk` format table.
+- **Cross-check:** wgpu-native (Vulkan) produced no verdicts for this file on this host (0/0/0/0) — no oracle;
+  Dawn + yawgpu/Metal green is the reference.
+- **Status:** OPEN (2026-06-21). yawgpu work item; root-cause the HAL `rgb10a2unorm` storage view mapping.
+
+---
+
+## F-129 — yawgpu Vulkan: `fwidth`/`fwidthFine`/`fwidthCoarse` — `discard`+derivative errors + denormal interval — native Vulkan
+
+- **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Windows). Deterministic. **Metal-green.**
+- **Found by:** `shader,execution,expression,call,builtin,{fwidth,fwidthFine,fwidthCoarse}:f32:*` — **8 fail
+  each, 24 total, 0 pass** (every `vectorize` ∈ {0,2,3,4} × `non_uniform_discard` ∈ {false,true}). Confirmed
+  post-rebuild 2026-06-21 (yawgpu `97b4827`).
+- **Two distinct sub-causes (each is half the cases):**
+  1. **`non_uniform_discard=true` (12 cases) → `uncaptured error: queue submit cannot use an error command
+     buffer`** (the pipeline becomes an error object). **Root cause:** naga lowers WGSL `discard` to SPIR-V
+     **`OpKill`** (`back/spv/block.rs:3964`), which *terminates* the invocation; computing a derivative
+     (`fwidth`) after a non-uniform discard then fails on Vulkan. WGSL `discard` is **demote-to-helper**
+     semantics (the invocation must stay alive so neighbours' derivatives are well-defined) — i.e. naga
+     should emit **`OpDemoteToHelperInvocation`** (SPIR-V 1.6 / `SPV_EXT_demote_to_helper_invocation`).
+     Metal's `discard_fragment()` already keeps the invocation alive, which is why Metal passes. **naga
+     SPIR-V backend conformance gap.**
+  2. **`non_uniform_discard=false` (12 cases) → value mismatch** near the denormal boundary, e.g.
+     `inputs=(-10, -1.17549e-38, …)` (±`FLT_MIN`), `expected[3]=[3.52648e-38, 4.70198e-38]; got
+     4.70198e-38`. Likely NVIDIA flushing denormals in derivative computation (FTZ); needs confirmation
+     whether the divergence is yawgpu/naga-emitted or a driver derivative-precision artifact (candidate for
+     a driver-artifact classification like F-104/F-090-class, **not** necessarily a yawgpu defect).
+- **Cross-check:** wgpu-native (Vulkan) produced no verdicts for `fwidth` on this host (0/0/0/0) — no oracle;
+  Dawn + yawgpu/Metal green is the reference.
+- **Status:** OPEN (2026-06-21). Sub-cause (1) is a clear yawgpu/naga-fork SPIR-V fix; sub-cause (2) needs a
+  denormal/driver classification before deciding if it is a defect.
 
 ---
 
