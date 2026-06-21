@@ -1821,8 +1821,9 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Cross-check:** **Dawn passes** (oracle). **wgpu-native passes** the same cases (isolation-confirmed) →
   **yawgpu-only** (yawgpu-fork naga const-eval / yawgpu-core), **not** upstream-naga. Same error class and
   const-eval-only shape as F-118 (`insertBits` const-eval) and F-117 (`firstLeadingBit`).
-- **Status:** **OPEN (yawgpu).** cts port correct (Dawn-green, value-EXACT). Reproduce:
-  `build-yawgpu/cts "…,binary,bitwise_shift:shift_left_abstract:inputSource=\"const\";*"`. Surfaced/unmasked.
+- **Status:** **RESOLVED 2026-06-21** (yawgpu `653ca12`, naga bump 719570be9 — const-eval/parse edge
+  cases). Re-verified yawgpu/Metal: `shift_left_abstract:*` 4 pass / 0 fail. cts port was correct
+  (Dawn-green) throughout.
 
 ---
 
@@ -1835,8 +1836,8 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   cannot use an error command buffer`. Other precedence expressions pass.
 - **Cross-check:** **Dawn passes** (oracle). **wgpu-native passes** (isolation-confirmed) → **yawgpu-only**
   (yawgpu-fork naga parse/const-eval), **not** upstream-naga.
-- **Status:** **OPEN (yawgpu).** cts port correct (Dawn-green). Reproduce: `build-yawgpu/cts
-  "…,precedence:precedence:expr=\"sub_neg\";decl=\"const\";strip_spaces=true"`. Surfaced/unmasked.
+- **Status:** **RESOLVED 2026-06-21** (yawgpu `653ca12`, naga bump 719570be9). Re-verified yawgpu/Metal:
+  `precedence:*` 152 pass / 0 fail (0 `sub_neg` fails). cts port was correct (Dawn-green) throughout.
   (Separately, `constructor,non_zero:concrete_vector_mix:type="bool"` const-eval **crashes** on BOTH yawgpu
   and wgpu-native, 16 cases — shared **upstream-naga** crash, a yawgpu work item per F-120, not yawgpu-only.)
 
@@ -1856,11 +1857,21 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   const-eval gap), **not yawgpu-only**. Faithful port (Dawn-green; the f64 interval acceptance is correct).
 - **Impact:** blocks the `abstract_float` variant of **every** math builtin in the Stage-B fan-out (~52
   builtins) and the abstract-float operators. The f32 (and later f16) variants are unaffected.
-- **Status:** **OPEN — yawgpu to fix in its naga fork** (shared-naga, per F-120 policy; wgpu-native panic is
-  a naga robustness bug too). Re-verify the `abstract_float` cases when naga's abstract-float const-eval
-  (frexp/ldexp/select on abstract-float) lands. cts port correct throughout. (Separately, wgpu-native also
-  panics 7 `f32_addition:{scalar,vector_scalar}_compound:const` cases that yawgpu passes — wgpu-native-only,
-  bring-up reference.)
+- **Status:** **PARTIALLY RESOLVED 2026-06-21** (yawgpu `97b4827`, naga bump 01e4e710 — const-eval
+  frexp/ldexp on abstract-float). Re-verified yawgpu/Metal: the **scalar + vector** abstract-float readback
+  now works — `abstract_float:const` across access + bitcast + scalar/vector math + scalar/vector & matrix
+  operators **3014 pass / 0 fail**. **STILL OPEN (~88 cases, all `error command buffer`, Dawn-green,
+  yawgpu):** the **composite-result** abstract-float / f16 readback paths the fix didn't cover —
+  `transpose:abstract_float` (9) + `determinant:abstract_float` (3) (matrix-result abstract-float),
+  `smoothstep:abstract_float` (4), and the **struct-returning** `modf`/`frexp` for **both f16 and
+  abstract** (`modf` 40 = 8 abstract + 32 f16; `frexp` 32). The matrix-result + struct-result + f16-struct
+  readback snippets need the same const-eval treatment as the scalar/vector path. Re-verify these when the
+  next naga bump lands. cts ports correct (Dawn-green) throughout. (wgpu-native also panics 7
+  `f32_addition:*_compound:const` — wgpu-native-only, bring-up reference.)
+  **Possible regression flag:** the `modf`/`frexp` **f16** struct-result cases (32 of the above) were
+  green on yawgpu at the F-120-fix lib (`66bee46`) in the Stage-B/7 f16 combined run, but error the
+  pipeline at the F-124 lib (`97b4827`, naga `01e4e710`) — the abstract-float const-eval bump may have
+  regressed f16 struct-result readback. Worth checking on the yawgpu side.
 
 ---
 
@@ -1876,9 +1887,8 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   → **yawgpu-only** (yawgpu-fork naga const-eval of `atanh`), **not** upstream-naga. Same const-eval-only
   shape as F-118/F-122 but a value error (vs pipeline error). Likely a less-accurate `atanh` const-eval
   formula / edge handling near ±1.
-- **Status:** **OPEN (yawgpu).** cts port correct (Dawn-green; f32 acceptance interval faithful, runtime
-  passes). Reproduce: `build-yawgpu/cts "…,atanh:f32:inputSource=\"const\";vectorize=0"`. Surfaced/unmasked.
-  (The 72 `abstract_float:const` fails in this batch are the known shared-naga **F-124**, not yawgpu-only.)
+- **Status:** **RESOLVED 2026-06-21** (yawgpu `653ca12`, naga bump 719570be9). Re-verified yawgpu/Metal:
+  `atanh:f32` 16 pass / 0 fail. cts port was correct (Dawn-green) throughout.
 
 ---
 

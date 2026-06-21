@@ -174,15 +174,15 @@ added: [COVERAGE](docs/COVERAGE.md).
 commit hashes) lives in [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced —
 never masked to make a test pass. The headline: **yawgpu's implementation (`api/*` + `shader/execution`
 runtime + the entire `shader/validation` frontend) is conformance-clean on native Metal**; the only open
-yawgpu items are **3 small const-eval bugs** (F-122/F-123/F-125, ~20 cases) plus the **shared-naga
-abstract-float const-eval** gap (F-124). The big naga-frontend block **F-120** (shader/validation
-under-validation + full WGSL uniformity analysis, ~22781 cases) is **now RESOLVED in yawgpu's naga fork**.
+yawgpu item is **F-124** — the **composite-result** (matrix / struct / f16-struct) abstract-float
+const-eval readback (~88 cases; the scalar/vector path is fixed). The const-eval bugs **F-122/F-123/F-125**
+and the big naga-frontend block **F-120** (shader/validation + full WGSL uniformity analysis, ~22781 cases)
+are **now RESOLVED in yawgpu's naga fork**.
 
 | Bucket | # | Detail |
 |--------|--:|--------|
-| **yawgpu — open implementation defects** | **3** | **F-122** `<<` abstract-int const-eval, **F-123** `sub_neg` precedence const-eval, **F-125** `atanh` f32 const-eval — all **const-eval-only** (runtime passes), ~20 cases, yawgpu-only (Dawn + wgpu-native pass). Plus the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` + F-111 external-texture, carried as `xfail` |
-| **shared-naga — open** (yawgpu == wgpu-native) | **1** | **F-124** abstract-float const-eval readback (`frexp`/`ldexp`/`select` on abstract-float) — blocks the `abstract_float:const` variant of every FP builtin; yawgpu errors the pipeline, wgpu-native panics; Dawn passes. To be fixed in yawgpu's naga fork |
-| yawgpu — fixed & hardware-re-verified | 94 | F-005…F-121 incl. **F-120** (shader/validation + graph uniformity analysis, 22781→0) and **F-121** (shader-f16); full list + commits in [FINDINGS](docs/FINDINGS.md) |
+| **yawgpu — open implementation defects** | **1 (partial)** | **F-124** abstract-float const-eval readback — the **scalar/vector** path is **fixed** (`97b4827`); ~88 **composite-result** cases remain (`transpose`/`determinant`/`smoothstep` abstract_float + struct-returning `modf`/`frexp` for abstract & f16), all const-eval `error command buffer`, Dawn-green. (F-122/F-123/F-125 — the other const-eval bugs — now **fixed**.) Plus the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` + F-111, carried as `xfail` |
+| yawgpu — fixed & hardware-re-verified | 97 | F-005…F-123 + F-125 incl. **F-120** (shader/validation + graph uniformity analysis, 22781→0), **F-121** (shader-f16), **F-122** (`<<` abstract-int const-eval), **F-123** (`sub_neg` precedence), **F-125** (`atanh` f32 const-eval); full list + commits in [FINDINGS](docs/FINDINGS.md) |
 | Spec in flux / feature gap — **not a defect** | 2 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb#5457, cts#4510 pending); F-111 `GPUExternalTexture` on the Vulkan backend — both `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 23+ | panics F-001–F-021 (contained via `--isolate`); F-015/F-027/F-028/F-036/F-045/F-048/F-052/F-056/F-084/F-088/F-097/F-113; plus upstream-naga shader/validation (no uniformity analysis) + shader-f16 unsupported (bring-up reference) |
 | MoltenVK-only translation artifacts — green on native Metal + native Vulkan | 9 | F-104 `copyTextureToTexture` (14512, native-Vulkan-green), F-070 SPIRV-Cross residue, F-033, F-045, F-053/F-068 residuals, F-083, F-086, maxComputeWorkgroupStorageSize |
@@ -203,14 +203,14 @@ per-file-reproducible** count — whole-suite `adapter is "consumed"` / GPU-stat
 | Backend | Platform | pass | skip | fail (real) | crash | Verdict |
 |---------|----------|-----:|-----:|-----:|------:|---------|
 | **Dawn** (oracle) | Metal | 1522679 | 81880 | **0** | 0 | green (oracle). Raw whole-suite 2562 `fail` is all adapter-consumed collateral, excluded |
-| **yawgpu** | Metal | 1264728 | 339376 | **558** | 0 | `api/*` **fail=0**, `shader/validation` **fail=0** (F-120 fixed). The 558 are all `shader/execution` const-eval — see area split. ~2443 api degradation collateral excluded |
+| **yawgpu** | Metal | 1264728 | 339376 | **558 → ~88** | 0 | `api/*` **fail=0**, `shader/validation` **fail=0** (F-120 fixed). The 558 shader/execution const-eval fails dropped to **~88** after the 2026-06-21 fixes (F-122/F-123/F-125 + F-124 scalar/vector); the ~88 residual = F-124 composite-result abstract-float/f16 (transpose/determinant/smoothstep abstract + modf/frexp). ~2443 api degradation collateral excluded |
 | **wgpu-native** | Metal | 1003747 | 398626 | 37567 | 38550 | bring-up reference (panic-heavy, **not** triaged) — see area split. Contained via crash-resume |
 
 **Fails by area** — where each backend's non-passes actually live:
 
 | Backend | `api/*` | `shader/execution` | `shader/validation` |
 |---------|---------|--------------------|---------------------|
-| **yawgpu** | fail 0 (≈2443 degradation collateral, `fail=0` per-file) | **fail 558** — the **`abstract_float:const`** variant of FP builtins/operators (**F-124**, shared-naga abstract-float const-eval) + the 3 yawgpu-only const-eval bugs **F-122/F-123/F-125** (~18). f32/f16/abstract runtime math all green | **fail 0** — F-120 **RESOLVED** (structural validation + full graph uniformity analysis, 22781→0, yawgpu naga fork) |
+| **yawgpu** | fail 0 (≈2443 degradation collateral, `fail=0` per-file) | **fail 558 → ~88** — after the 2026-06-21 fixes only **F-124** composite-result abstract-float/f16 const-eval remains (transpose/determinant/smoothstep abstract + struct-returning modf/frexp abstract & f16); the scalar/vector abstract-float path + F-122/F-123/F-125 are fixed. f32/f16/abstract runtime math all green | **fail 0** — F-120 **RESOLVED** (structural validation + full graph uniformity analysis, 22781→0, yawgpu naga fork) |
 | **wgpu-native** | degradation collateral | **crash ~31k + fail ~4k** — no `shader-f16` + unimplemented/abstract-float paths panic | **fail 23467** — upstream naga (no uniformity analysis) + broader under-validation; yawgpu's fork fixed this, upstream naga has not |
 
 > **The split is the point:** yawgpu's `api/*` and `shader/validation` are now **fully green**; its only
