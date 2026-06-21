@@ -58,6 +58,46 @@ real-hardware path** (native Metal + native Vulkan both pass the ported suite, b
 cases). The Metal-run `expectations/yawgpu.txt` stays clean; the MoltenVK artifacts (incl. F-104, F-085)
 belong in `expectations/yawgpu-vulkan.txt` for Vulkan-backend runs.
 
+## Native-Vulkan Windows / NVIDIA full sweep — 2026-06-21 (Jun-19 build, pre-fix snapshot)
+
+The first whole-suite **native-Vulkan** sweep at the grown **462-file** listing on **Windows 11 / NVIDIA
+RTX 5060 Ti** (`cts.exe --isolate`, per-case process pool). **Important — pre-fix build:** it ran on the
+**Jun-19 `yawgpu.dll`**, which **predates** the 2026-06-20/21 naga-fork fixes (**F-120** uniformity +
+shader/validation, **F-121** f16, **F-122/F-123/F-125**, **F-124** scalar/vector). So the large
+shader/validation + f16 fail blocks below are the **expected pre-fix residuals of already-resolved
+findings**, not new defects. A post-rebuild re-sweep is deferred (a full native-Vulkan sweep is multi-hour
+and thermally constrained — see F-126).
+
+**Counts are per-CASE** (`--isolate` granularity = one subprocess per case), so the pass/skip totals are
+**not comparable** to the Metal/MoltenVK whole-suite per-**subcase** rows. Fails are reported per-subcase.
+**crash=0, no hard freeze** — but only because the sweep was run in thermal-safe chunks with cooldowns; a
+raw long sweep freezes the whole machine (F-126: a CPU-thermal host limit on this box, separate from the
+copy OOB).
+
+| metric (per-case) | pass | skip | fail (subcase) | crash | xfail |
+|---|---:|---:|---:|---:|---:|
+| yawgpu — Vulkan (native, NVIDIA RTX 5060 Ti), Jun-19 build | 89794 | 59058 | **594** | 0 | 11 |
+
+**Fail decomposition (594) — already-resolved findings vs. new candidates:**
+
+| area | fail | attribution |
+|---|---:|---|
+| `shader/validation` (`uniformity` 409 + `shader_io,interpolate` 13, `decl,var` 10, `workgroup_size` 7, `pipeline_stage` 6, `functions,alias_analysis` 6, `types,pointer` 5, `functions,restrictions` 5, `types,atomics` 4, `shader_io,locations` 4, `decl,override` 3, `shader_io,size` 2, `id`/`align` 1+1) | **476** | **F-120** — `expected a validation error, got none` + `unexpected validation error for valid shader` (incl. 120× `Entry point main at Fragment is invalid`). RESOLVED post-Jun-19; expected on this build |
+| f16 (`bitcast` 12, `access,vector,components` 2) | **14** | **F-121** — f16 path; RESOLVED post-Jun-19 |
+| `shader_io,fragment_builtins` 8, `render_pipeline,misc` 2 | **10** | **F-085** (per-sample, spec-in-flux) + **F-111** (external-texture) — carried `xfail` |
+| `shader,execution,robust_access` | **24** | **candidate** — `GPU buffer mismatch: expected 0, got 3` (out-of-bounds access not clamped). Re-check post-rebuild |
+| `textureStore` (`rgb10a2unorm`, 3d / 2d-array) | **20** | **candidate** — `mismatch ... expected 0, got 240` (format pack). Re-check post-rebuild |
+| `textureLoad` (`*-srgb`) | **24** | **candidate** (minor) — green-channel sRGB-decode rounding (~1 ULP), e.g. `expected 1064469166, got 1064435712` |
+| `fwidth` / `fwidthFine` / `fwidthCoarse` (`f32`) | **24** | **candidate** — derivative builtins |
+| `api,validation` (`encoding,cmds,render,draw` 1, `compute_pass` 1) | **2** | `compute_pass:indirect_dispatch_buffer,usage` = `HAL queue submission failed: vulkan`; re-check |
+
+**Takeaway:** on the pre-fix build, **~500 of the 594 fails are already-resolved (F-120/F-121) or
+known-`xfail` (F-085/F-111)**; the genuinely-new native-Vulkan candidates are **~92** execution/api cases
+(`robust_access`, `textureStore` `rgb10a2unorm`, `textureLoad` sRGB, `fwidth*`, one compute
+indirect-dispatch). These need a post-rebuild re-sweep (latest naga) before being filed as findings —
+recorded here so the data is not lost. Sweep artifacts: `sweep-out/` (git-ignored), runner
+`chunked-sweep.sh` / `resume-sweep.sh`.
+
 ## Re-test summary
 
 Every defect this suite surfaced against **yawgpu** (the primary conformance subject) was fixed in yawgpu

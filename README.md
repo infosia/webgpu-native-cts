@@ -232,8 +232,10 @@ runs them. yawgpu's **`shader-f16` runs fully** (all f16 math/operators green, D
 
 #### Native Vulkan / wgpu-native — **2026-06-14** (234-file snapshot, re-sweep pending)
 
-These rows predate the phaseY7–Y13 + shader/validation work; a native-Vulkan (NVIDIA) re-sweep at the
-grown 462-file listing is pending (needs the Windows/NVIDIA host, not this Mac).
+These rows predate the phaseY7–Y13 + shader/validation work. A native-Vulkan (NVIDIA) re-sweep at the
+grown 462-file listing has since been run on Windows/NVIDIA — but on a **pre-fix (Jun-19) build**; see
+[the Jun-19 sweep below](#native-vulkan-windows--nvidia-rtx-5060-ti--2026-06-21-full-sweep-jun-19-build-pre-fix-snapshot).
+A re-sweep on the current naga build is still pending.
 
 | Backend | Platform | pass | skip | fail | crash | xfail | Verdict |
 |---------|----------|-----:|-----:|-----:|------:|------:|---------|
@@ -265,6 +267,33 @@ grown 462-file listing is pending (needs the Windows/NVIDIA host, not this Mac).
 - The native-Vulkan (NVIDIA) sweeps surfaced the genuine Apple-masked Vulkan-HAL/naga-path defects
   F-105/F-106, the F-107…F-110 batch, and F-112 (all fixed; per-finding detail in
   [FINDINGS](docs/FINDINGS.md)). Being Apple-masked, they never appeared in the Metal/MoltenVK rows.
+
+#### Native Vulkan (Windows / NVIDIA RTX 5060 Ti) — **2026-06-21** full sweep, **Jun-19 build (pre-fix snapshot)**
+
+First whole-suite native-Vulkan sweep at the grown **462-file** listing on **Windows 11 / NVIDIA RTX 5060
+Ti** (`cts.exe --isolate`). **Pre-fix caveat:** it ran on the **Jun-19 `yawgpu.dll`**, which predates the
+2026-06-20/21 naga fixes (F-120 uniformity/shader-validation, F-121 f16, F-122/F-123/F-125, F-124
+scalar/vector) — so the shader/validation + f16 fails are **expected residuals of already-resolved
+findings**, not new defects. A post-rebuild re-sweep is deferred (a full native-Vulkan sweep is multi-hour;
+on this box raw long sweeps **hard-freeze the machine** — a CPU-thermal limit, see **F-126** — so it was run
+in thermal-safe chunks with cooldowns, which reached completion at **crash=0, no freeze**).
+
+**Counts are per-case** (`--isolate` = one process per case) — **not comparable** to the per-subcase
+Metal/MoltenVK rows above. Fails are per-subcase.
+
+| Backend | Platform | pass (case) | skip (case) | fail (subcase) | crash | xfail |
+|---------|----------|-----:|-----:|-----:|------:|------:|
+| **yawgpu** | Vulkan (native, NVIDIA RTX 5060 Ti) — **Jun-19 build** | 89794 | 59058 | **594** | 0 | 11 |
+
+- **~500 of the 594 are already-resolved or known-`xfail` on this pre-fix build:** `shader/validation`
+  **476** (**F-120** — `uniformity` 409 + shader_io/decl/etc; RESOLVED post-Jun-19), f16 **14** (**F-121**),
+  `fragment_builtins`/`render_pipeline,misc` **10** (**F-085**/**F-111** `xfail`).
+- **Genuinely-new native-Vulkan candidates (~92, need a post-rebuild re-sweep before filing):**
+  `shader,execution,robust_access` **24** (OOB write not clamped — `expected 0, got 3`), `textureStore`
+  `rgb10a2unorm` 3d/2d-array **20** (format pack), `textureLoad` `*-srgb` **24** (green-channel sRGB-decode
+  rounding, minor), `fwidth`/`fwidthFine`/`fwidthCoarse` f32 **24** (derivatives), and 1 `compute_pass`
+  `indirect_dispatch_buffer,usage` (`HAL queue submission failed`). Full decomposition in
+  [FINDINGS](docs/FINDINGS.md).
 
 #### wgpu-native — full suite, current scale (2026-06-14, native Vulkan)
 
