@@ -1900,18 +1900,21 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Status:** **PARTIALLY RESOLVED 2026-06-21** (yawgpu `97b4827`, naga bump 01e4e710 — const-eval
   frexp/ldexp on abstract-float). Re-verified yawgpu/Metal: the **scalar + vector** abstract-float readback
   now works — `abstract_float:const` across access + bitcast + scalar/vector math + scalar/vector & matrix
-  operators **3014 pass / 0 fail**. **STILL OPEN (~88 cases, all `error command buffer`, Dawn-green,
-  yawgpu):** the **composite-result** abstract-float / f16 readback paths the fix didn't cover —
-  `transpose:abstract_float` (9) + `determinant:abstract_float` (3) (matrix-result abstract-float),
-  `smoothstep:abstract_float` (4), and the **struct-returning** `modf`/`frexp` for **both f16 and
-  abstract** (`modf` 40 = 8 abstract + 32 f16; `frexp` 32). The matrix-result + struct-result + f16-struct
-  readback snippets need the same const-eval treatment as the scalar/vector path. Re-verify these when the
-  next naga bump lands. cts ports correct (Dawn-green) throughout. (wgpu-native also panics 7
-  `f32_addition:*_compound:const` — wgpu-native-only, bring-up reference.)
-  **Possible regression flag:** the `modf`/`frexp` **f16** struct-result cases (32 of the above) were
-  green on yawgpu at the F-120-fix lib (`66bee46`) in the Stage-B/7 f16 combined run, but error the
-  pipeline at the F-124 lib (`97b4827`, naga `01e4e710`) — the abstract-float const-eval bump may have
-  regressed f16 struct-result readback. Worth checking on the yawgpu side.
+  operators **3014 pass / 0 fail**. **STILL OPEN (~88 cases, all `error command buffer`, Dawn-green),
+  in two distinct groups:**
+  - **(a) composite-result abstract-float const-eval** — `transpose:abstract_float` (9) +
+    `determinant:abstract_float` (3) (matrix-result), `smoothstep:abstract_float` (4), `modf:abstract_*`
+    (8). The matrix-result + struct-result readback snippets need the same abstract-float const-eval
+    treatment the fix gave the scalar/vector path. (This is the genuine F-124-family remainder.)
+  - **(b) f16 struct-returning `frexp`/`modf`** (~56: `frexp` f16 + `modf` f16) — a **separate
+    upstream-naga issue, NOT abstract-float const-eval and NOT a regression** (yawgpu investigation
+    2026-06-21, confirmed via `naga-cli` against the baseline naga `4065fd824` — these were 40-fail there
+    too; F-124's bump actually *improved* `frexp` by +8 abstract cases, `modf` unchanged). Root cause:
+    naga's front-end `FrexpResult.exp` is `Sint` width 2 (i16) which the validator rejects ("Sint scalar
+    width 2 is not supported") — per WGSL it should be `i32`; plus a back/MSL f16 `frexp`/`modf` lowering
+    gap on the runtime path. Independent naga work (i32-exp `FrexpResult` + f16 frexp/modf lowering).
+  Re-verify both groups on the next naga bump. cts ports correct (Dawn-green) throughout. (wgpu-native
+  also panics 7 `f32_addition:*_compound:const` — wgpu-native-only, bring-up reference.)
 
 ---
 
