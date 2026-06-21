@@ -83,43 +83,18 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 
 ## Status
 
-**Active.** The harness is complete; tests are being ported in parallel batches. All three
-backends build link-agnostically and run on real GPUs — verified on **macOS / Apple Metal** and
-**Windows 11 / Vulkan** (NVIDIA GeForce RTX 5060 Ti). Last full sweep: **2026-06-14** — Dawn `534184/0`,
-yawgpu Metal green (`460730`, 2 Dawn-leniency now `xfail`), yawgpu MoltenVK Vulkan-path residuals,
-wgpu-native bring-up. All eight Apple-masked native-Vulkan findings (F-105…F-112) resolved — seven
-fixed & re-verified on NVIDIA Vulkan (2026-06-15/16), F-111 a documented external-texture `xfail`.
-**Since (2026-06-18/19):** the `shader/execution` `expression/call/builtin` family advanced through five
-batches — `atomics` (phaseY7), the **entire texture built-in family** (phaseY8–Y9, 15 files on a ported
-`texture_utils` software-reference sampler), the P2 **synchronization + derivatives** built-ins (phaseY10:
-`workgroupBarrier`/`storageBarrier`/`workgroupUniformLoad`/`arrayLength` + `dpdx`/`dpdy`/`fwidth`×coarse/fine),
-the P3 **integer/bit/pack** built-ins (phaseY11: a generic `run()` expression harness + 16 integer/bit
-builtins, `bitcast`, and 11 float pack/unpack), and the P3 **`expression/access/*`** tree (phaseY12:
-vector/array/matrix/structure indexing, swizzle & member access via a composite-value layout extension to
-`run()` — 5 files, Dawn + yawgpu Metal green, no new finding) — each verified green on Dawn + yawgpu Metal.
-This surfaced
-and resolved F-114 (naga `textureSampleGrad` 3D/cube gradient lowering), F-115 (yawgpu textureLoad combined
-depth-stencil), F-116 (yawgpu `arrayLength` off-by-one on non-stride-multiple bindings), F-117
-(`firstLeadingBit(u32)` all-ones), F-118 (`insertBits` const-eval), and F-119 (`pack2x16float`/
-`unpack2x16float`), plus a yawgpu resource-retention leak fixed on the yawgpu side. The F-117/F-118 defects
-are **confirmed upstream-naga** (wgpu-native fails them too, 2026-06-19 cross-check); F-119 was yawgpu-local.
-**Then (2026-06-19) the `shader/validation` area opened** (phaseSV1, 40 files: extension/shader_io/decl/
-functions/types/const_assert/uniformity) on a ported `ShaderValidationTest` enabler, run as a **3-backend
-cross-check** (Dawn + yawgpu + wgpu-native) since yawgpu uses a naga fork. Result: **zero yawgpu-only
-findings** — every yawgpu divergence is shared with wgpu-native (upstream-naga, F-120, which yawgpu will
-fix in its naga fork). Separately, yawgpu **landed `shader-f16`**, which converted ~640 previously-skipped
-f16 cases into runs and exposed **F-121** (f16 in access-indexing/swizzle + bitcast errored the pipeline —
-const-eval dominant); **now fixed** (yawgpu `c937a32`/`a900cf8`) and re-verified green (`access,*` +
-`bitcast` 0 fail; full `call,builtin,*` 702903 pass / 0 fail).
-**Then (2026-06-20) phaseY13 completed the `shader/execution` P4 area** — a ported **FP-interval
-acceptance framework** (f32 / f16 / abstract-float, faithful ULP/absolute/correctly-rounded intervals)
-under all the math/trig builtins, plus every binary/unary operator, conversions, and constructors —
-taking `shader/execution` to **226 / 239** (remaining 13 = optional `subgroups`, no Metal oracle). The
-f32/f16/abstract **runtime** math is Dawn-equal on yawgpu; the only yawgpu non-passes are **const-eval**
-(F-124 shared-naga abstract-float readback + the small yawgpu-only F-122/F-123/F-125). In parallel,
-**F-120 was RESOLVED** in yawgpu's naga fork — structural WGSL validation **plus full graph uniformity
-analysis** — taking `shader/validation` from 22781 yawgpu fails to **0** (a 462-file whole-suite Metal
-sweep confirms: yawgpu `api/*` + `shader/validation` `fail=0`).
+**Active.** The harness is complete; tests are ported in parallel batches. All three backends build
+link-agnostically and run on real GPUs — verified on **macOS / Apple Metal** and **Windows 11 / Vulkan**
+(NVIDIA RTX 5060 Ti). Coverage so far: the entire **`api`** surface, all of **`shader/execution`** except
+the optional `subgroups` builtins (P4 math/trig run on a ported FP-interval acceptance framework —
+f32/f16/abstract), and the opened **`shader/validation`** subdirs (extension/shader_io/decl/functions/
+types/const_assert/uniformity). See [coverage](#port-coverage) below and [COVERAGE](docs/COVERAGE.md).
+
+**Current conformance (Metal whole-suite, 2026-06-20):** yawgpu's `api/*` and `shader/validation` are
+`fail=0`, and its f32/f16/abstract **runtime** math is Dawn-equal. The one open yawgpu item is **F-124**
+— the composite-result (matrix / struct / f16-struct) abstract-float **const-eval** readback (~88 cases).
+Per-finding history (what/which-backend/root-cause/fix-commit) lives in [FINDINGS](docs/FINDINGS.md);
+per-backend numbers are in [Test results](#test-results) below.
 
 ### Port coverage
 
