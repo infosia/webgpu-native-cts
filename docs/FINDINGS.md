@@ -2097,4 +2097,34 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-130 — Dawn: override shift-amount range check skipped when `lhs` const-folds to 0 (Metal)
+
+- **Backend:** Dawn (Metal, macOS — local `out/Release` build). Deterministic. Surfaced while porting
+  `shader,validation,expression,binary,bitwise_shift` (phaseSV2).
+- **Found by:** `shader,validation,expression,binary,bitwise_shift:partial_eval_errors` — **48 fail**
+  (`pass=208`). Every failing subcase is `lhs="const"; stage="pipeline"; value ∈ {32,33,64}` (i.e. shift
+  amount ≥ bit width), across `op ∈ {<<,>>}`, `type ∈ {i32,u32}`, `vectorize ∈ {_undef_,2,3,4}`. The
+  `value=31` pipeline subcases and all `stage="shader"` subcases pass.
+- **Shader (upstream, verbatim):** `override o = 0u; fn foo() -> T { const v : T = 0; return v << o; }`
+  with `o` supplied as a pipeline-override constant = `value`. Per WGSL §8.7, `e1 << e2` is a
+  **pipeline-creation error** when `e2` is an override-expression and `e2 ≥ bitwidth(e1)`, independent of
+  `e1`. Dawn const-folds `0 << o → 0` and **skips the override range check**, so no error is raised.
+- **Port is faithful (proven, not a port bug):**
+  - The `stage="shader"` siblings — `const v = 0; v << 32u` (const-expression shift) — **do** error on
+    Dawn and pass our test, so Dawn correctly range-checks const-expression shifts; only the *override*
+    (partial-evaluation) path is lenient.
+  - The `lhs="var"` siblings — `var v = 0; v << o` — **do** error at pipeline creation and pass, so our
+    `expectPipelineResult` plumbing (override constant application, error-scope capture) is correct.
+  - Therefore the divergence is specifically: Dawn drops the override shift-range diagnostic when the LHS
+    folds to the additive identity. A genuine Dawn spec-conformance gap.
+- **Cross-check:** Dawn's own `webgpu-cts/expectations.txt` skips this test only on `android-pixel-10`
+  (compat), not on desktop Metal — so upstream expects desktop Dawn to pass it; our local Dawn build
+  diverges. yawgpu/wgpu-native not cross-checked (campaign is Dawn-only per current directive).
+- **Status:** OPEN (2026-06-22). The port is left **unmasked** (48 documented subcase divergences) rather
+  than added to `expectations/dawn.txt`: the failing case queries also contain passing subcases
+  (`stage="shader"`, `value=31`), so a case-level expectation would create xpass noise
+  (see [[expectations-are-case-level]]). Re-check on a newer Dawn build.
+
+---
+
 _Add new findings as `F-00N` with the same fields._
