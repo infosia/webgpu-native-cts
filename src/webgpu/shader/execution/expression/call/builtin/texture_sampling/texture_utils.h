@@ -160,4 +160,14 @@ void executeTextureStoreBgra8unormSwizzle(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureStoreOutOfBounds(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureStoreOutOfBoundsArray(AllFeaturesMaxLimitsGpuTest& t);
 
+// --- texture_utils.spec.ts meta-test entry points (phaseY14 Stage C) ---
+std::vector<Value> textureUtilsDepthStencilFormats();
+std::vector<Value> textureUtilsGeneratorViewDimensions();
+std::vector<ParamRecord> readTextureToTexelViewsParams();
+std::vector<Value> textureUtilsShaderStages();
+
+void executeCreateTextureWithRandomDataAndGetTexelsWithGenerator(AllFeaturesMaxLimitsGpuTest& t);
+void executeReadTextureToTexelViews(AllFeaturesMaxLimitsGpuTest& t);
+void executeWeights(AllFeaturesMaxLimitsGpuTest& t);
+
 } // namespace cts::texture_utils

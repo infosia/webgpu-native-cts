@@ -17,6 +17,7 @@
 #include <variant>
 
 #include "webgpu/texture_format.h"
+#include "webgpu/util/enum_strings.h"
 #include "webgpu/util/texel_data.h"
 #include "webgpu/util/texel_view.h"
 #include "webgpu/util/texture_layout.h"
@@ -6113,6 +6114,1540 @@ void executeTextureStoreOutOfBoundsArray(AllFeaturesMaxLimitsGpuTest& t) {
             t.fail(msg.str());
         }
     }
+}
+
+// =====================================================================================
+// texture_utils.spec.ts meta-test (phaseY14 Stage C).
+//
+// These three functions back the meta-test that validates the texture random-data /
+// texel encode-decode / sampling-weight helpers. We faithfully port the upstream
+// logic of `chooseTextureSize`, `createTextureWithRandomDataAndGetTexels`,
+// `readTextureToTexelViews`, `convertPerTexelComponentToResultFormat`,
+// `texelsApproximatelyEqual`, `graphWeights`, `makeRandomDepthComparisonTexelGenerator`,
+// `validateWeights`, and `queryMipLevelMixWeightsForDevice` (multi-stage), reusing the
+// repo's `TexelRepresentation`/`TexelView`/layout primitives.
+// =====================================================================================
+namespace {
+
+// hashU32 matching upstream `hash.ts` (mulberry32-style mixing over a list of u32).
+uint32_t metaHashU32(std::initializer_list<int64_t> valuesIn) {
+    uint32_t h = 0;
+    for (int64_t raw : valuesIn) {
+        uint32_t v = static_cast<uint32_t>(raw);
+        h ^= h >> 16;
+        h += v;
+        h = (h ^ (h >> 15)) * 0x2c1b3c6du;
+        h = (h ^ (h >> 12)) * 0x297a2d39u;
+        h ^= h >> 15;
+    }
+    return h;
+}
+
+double clamp01(double v) {
+    return std::clamp(v, 0.0, 1.0);
+}
+
+// The repo texel encoder has no Stencil8 representation; stencil reads back as uint, so use
+// an encodable uint format for storage/comparison of the stencil8 texel-view format.
+WGPUTextureFormat effectiveTexelViewFormat(WGPUTextureFormat format) {
+    return format == WGPUTextureFormat_Stencil8 ? WGPUTextureFormat_RGBA32Uint : format;
+}
+
+enum class FormatType { Float, Sint, Uint, Depth };
+
+// getTextureFormatType(format, 'all')
+FormatType getMetaTextureFormatType(WGPUTextureFormat format) {
+    const TextureFormatInfo& info = textureFormatInfo(format);
+    if (info.hasDepth) {
+        return FormatType::Depth;
+    }
+    if (info.hasStencil) {
+        // stencil-only ('all' aspect of stencil8) reads as uint.
+        return FormatType::Uint;
+    }
+    const std::string_view id = info.identifier;
+    if (id.find("sint") != std::string_view::npos) {
+        return FormatType::Sint;
+    }
+    if (id.find("uint") != std::string_view::npos) {
+        return FormatType::Uint;
+    }
+    return FormatType::Float;
+}
+
+// isTextureFormatPossiblyMultisampled
+bool metaPossiblyMultisampled(WGPUTextureFormat format) {
+    return textureFormatInfo(format).multisample;
+}
+
+uint32_t lcmU32Meta(uint32_t a, uint32_t b) {
+    return lcmU32(a, b);
+}
+
+// chooseTextureSize({ minSize, minBlocks, format, viewDimension })
+std::array<uint32_t, 3> chooseTextureSize(
+    uint32_t minSize,
+    uint32_t minBlocks,
+    WGPUTextureFormat format,
+    WGPUTextureViewDimension viewDimension) {
+    const TextureBlockInfo block = getBlockInfoForTextureFormat(format);
+    const uint32_t width = alignToU32(std::max(minSize, block.blockWidth * minBlocks), block.blockWidth);
+    const uint32_t height = viewDimension == WGPUTextureViewDimension_1D
+        ? 1u
+        : alignToU32(std::max(minSize, block.blockHeight * minBlocks), block.blockHeight);
+    if (viewDimension == WGPUTextureViewDimension_Cube
+        || viewDimension == WGPUTextureViewDimension_CubeArray) {
+        const uint32_t blockLcm = lcmU32Meta(block.blockWidth, block.blockHeight);
+        const uint32_t largest = std::max(width, height);
+        const uint32_t size = alignToU32(largest, blockLcm);
+        return {size, size, viewDimension == WGPUTextureViewDimension_CubeArray ? 24u : 6u};
+    }
+    uint32_t depthOrArrayLayers = 1u;
+    switch (viewDimension) {
+        case WGPUTextureViewDimension_2DArray:
+            depthOrArrayLayers = 4u;
+            break;
+        case WGPUTextureViewDimension_3D:
+            depthOrArrayLayers = 8u;
+            break;
+        default:
+            depthOrArrayLayers = 1u;
+            break;
+    }
+    return {width, height, depthOrArrayLayers};
+}
+
+// Per-texel decoded color, indexed by RGBA component (depth in R for depth views).
+struct MetaColor {
+    std::array<double, 4> v = {0.0, 0.0, 0.0, 1.0};
+};
+
+// convertPerTexelComponentToResultFormat: place the texel-format's component order into RGBA.
+MetaColor convertPerTexelComponentToResultFormat(const TexelComponents& comps, WGPUTextureFormat format) {
+    MetaColor out;  // { R:0, G:0, B:0, A:1 }
+    const TexelRepresentation& rep = texelRepresentation(format);
+    for (TexelComponent component : rep.componentOrder) {
+        const uint32_t index = static_cast<uint32_t>(component);
+        out.v[index] = comps.values[index];
+    }
+    return out;
+}
+
+// numericRange min/max for one component of an encodable format (for random fill).
+struct MinMax {
+    double min = 0.0;
+    double max = 1.0;
+};
+
+MinMax minMaxForComponent(const TexelRepresentation& rep, TexelComponent component) {
+    const uint32_t index = static_cast<uint32_t>(component);
+    const uint32_t bits = rep.bitLengths[index];
+    switch (rep.dataTypes[index]) {
+        case ComponentDataType::Unorm:
+            return {0.0, 1.0};
+        case ComponentDataType::Snorm:
+            return {-1.0, 1.0};
+        case ComponentDataType::Uint: {
+            const double maxv = bits >= 32 ? 4294967295.0 : static_cast<double>((1u << bits) - 1u);
+            return {0.0, maxv};
+        }
+        case ComponentDataType::Sint: {
+            const double maxv = static_cast<double>((1 << (bits - 1)) - 1);
+            return {-maxv - 1.0, maxv};
+        }
+        case ComponentDataType::Float:
+        case ComponentDataType::Ufloat:
+            // Keep values modest so they round-trip exactly through 32-bit float storage.
+            return rep.dataTypes[index] == ComponentDataType::Ufloat ? MinMax{0.0, 1024.0} : MinMax{-1024.0, 1024.0};
+    }
+    return {0.0, 1.0};
+}
+
+// quantize: round a color through the texel representation so it matches stored bits.
+TexelComponents quantizeMeta(const TexelComponents& texel, const TexelRepresentation& rep) {
+    return rep.bitsToNumber(rep.numberToBits(texel));
+}
+
+// Generator callback type matching upstream RandomTextureOptions.generator.
+using TexelGenerator = std::function<TexelComponents(uint32_t x, uint32_t y, uint32_t z, uint32_t sampleIndex)>;
+
+// Quantize a single depth/stencil value the way storing+reading the texture would.
+// The repo texel encoder has no depth/stencil representations, so we model the
+// per-format quantization directly. Returns the value as it would round-trip.
+double quantizeDepthStencilValue(WGPUTextureFormat format, double value) {
+    switch (format) {
+        case WGPUTextureFormat_Depth16Unorm: {
+            const double scale = 65535.0;
+            return std::round(clamp01(value) * scale) / scale;
+        }
+        case WGPUTextureFormat_Stencil8: {
+            return static_cast<double>(static_cast<uint32_t>(std::llround(value)) & 0xffu);
+        }
+        case WGPUTextureFormat_Depth32Float:
+        case WGPUTextureFormat_Depth32FloatStencil8:
+        case WGPUTextureFormat_Depth24Plus:
+        case WGPUTextureFormat_Depth24PlusStencil8:
+        default:
+            // depth32float (and the depth24plus family modeled as depth32float) stores f32.
+            return static_cast<double>(static_cast<float>(value));
+    }
+}
+
+// makeRandomDepthComparisonTexelGenerator(info, comparison) with comparison='equal'.
+// Produces a single per-texel value (the depth aspect, or stencil for stencil8). Does not
+// route through the repo texel encoder because depth/stencil formats have no representation
+// there; quantization is modeled per-format.
+TexelGenerator makeRandomDepthComparisonTexelGenerator(WGPUTextureFormat format, WGPUExtent3D size) {
+    // comparison 'equal' -> fixed values [0, 0.6, 1, 1].
+    static const std::array<double, 4> kFixedValues = {{0.0, 0.6, 1.0, 1.0}};
+    const bool stencilOnly = format == WGPUTextureFormat_Stencil8;
+    const WGPUTextureFormat quantFormat = stencilOnly ? WGPUTextureFormat_Stencil8 : format;
+    const uint32_t w = size.width;
+    const uint32_t h = size.height;
+    const uint32_t d = size.depthOrArrayLayers;
+    return [quantFormat, w, h, d](uint32_t x, uint32_t y, uint32_t z, uint32_t sampleIndex) -> TexelComponents {
+        TexelComponents texel;
+        const uint32_t rnd = metaHashU32({static_cast<int64_t>(x),
+                                          static_cast<int64_t>(y),
+                                          static_cast<int64_t>(z),
+                                          static_cast<int64_t>(sampleIndex),
+                                          static_cast<int64_t>('D'),
+                                          static_cast<int64_t>(w),
+                                          static_cast<int64_t>(h),
+                                          static_cast<int64_t>(d)});
+        const double normalized = clamp01(static_cast<double>(rnd) / 4294967295.0);
+        const uint32_t fi = static_cast<uint32_t>(normalized * (kFixedValues.size() - 1));
+        const double value = kFixedValues[std::min<uint32_t>(fi, kFixedValues.size() - 1u)];
+        texel.values[0] = quantizeDepthStencilValue(quantFormat, value);
+        return texel;
+    };
+}
+
+// Random color generator (createRandomTexelViewViaColors).
+TexelComponents randomColorTexel(
+    const TexelRepresentation& rep,
+    WGPUExtent3D size,
+    uint32_t mipLevel,
+    uint32_t x,
+    uint32_t y,
+    uint32_t z,
+    uint32_t sampleIndex) {
+    TexelComponents texel;
+    for (TexelComponent component : rep.componentOrder) {
+        const uint32_t index = static_cast<uint32_t>(component);
+        const uint32_t rnd = metaHashU32({static_cast<int64_t>(x),
+                                          static_cast<int64_t>(y),
+                                          static_cast<int64_t>(z),
+                                          static_cast<int64_t>(sampleIndex),
+                                          static_cast<int64_t>(static_cast<uint32_t>('R') + index),
+                                          static_cast<int64_t>(mipLevel),
+                                          static_cast<int64_t>(size.width),
+                                          static_cast<int64_t>(size.height),
+                                          static_cast<int64_t>(size.depthOrArrayLayers)});
+        const double normalized = clamp01(static_cast<double>(rnd) / 4294967295.0);
+        const MinMax mm = minMaxForComponent(rep, component);
+        texel.values[index] = lerp(mm.min, mm.max, normalized);
+    }
+    return quantizeMeta(texel, rep);
+}
+
+// One mip level of CPU-side texels plus its packed bytes for upload/decode.
+struct MipTexels {
+    WGPUTextureFormat format = WGPUTextureFormat_Undefined;
+    WGPUExtent3D size = WGPUExtent3D{1, 1, 1};
+    TextureCopyLayout layout;
+    std::vector<uint8_t> data;
+};
+
+MetaColor colorOfMip(const MipTexels& mip, uint32_t x, uint32_t y, uint32_t z, uint32_t sampleIndex, uint32_t sampleCount) {
+    const TexelRepresentation& rep = texelRepresentation(mip.format);
+    const uint64_t offset = (static_cast<uint64_t>(z) * mip.layout.rowsPerImage + y) * mip.layout.bytesPerRow
+        + (static_cast<uint64_t>(x) * sampleCount + sampleIndex) * rep.bytesPerBlock;
+    const TexelComponents comps = rep.bitsToNumber(rep.unpackBits(mip.data.data() + offset, mip.data.size() - offset));
+    return convertPerTexelComponentToResultFormat(comps, mip.format);
+}
+
+// bitsToULPFromZero-equivalent: number of ULPs each component is from zero, in the
+// encodable comparison format. For the integer / exact formats used by this meta-test,
+// the stored values are exact so ULP and the value coincide closely enough for the
+// `maxFractionalDiff = 0` comparison; for float formats we count IEEE steps from zero.
+double ulpFromZero(double value, ComponentDataType type, uint32_t bits) {
+    switch (type) {
+        case ComponentDataType::Uint:
+        case ComponentDataType::Sint:
+            return value;
+        case ComponentDataType::Unorm:
+        case ComponentDataType::Snorm: {
+            const double scale = type == ComponentDataType::Snorm
+                ? static_cast<double>((1 << (bits - 1)) - 1)
+                : static_cast<double>(bits >= 32 ? 4294967295.0 : ((1u << bits) - 1u));
+            return std::llround(value * scale);
+        }
+        case ComponentDataType::Float:
+        case ComponentDataType::Ufloat: {
+            // 32-bit float ULP-from-zero. Good enough for the rgba32float compare path.
+            if (value == 0.0) {
+                return 0.0;
+            }
+            uint32_t b;
+            const float f = static_cast<float>(value);
+            std::memcpy(&b, &f, sizeof(b));
+            const bool neg = (b & 0x80000000u) != 0;
+            const double mag = static_cast<double>(b & 0x7fffffffu);
+            return neg ? -mag : mag;
+        }
+    }
+    return value;
+}
+
+// texelsApproximatelyEqual for the comparison format (R,G,B,A doubles), maxFractionalDiff=0.
+bool texelsApproximatelyEqual(
+    const MetaColor& got,
+    const MetaColor& expect,
+    WGPUTextureFormat expectedFormat,
+    bool singleChannel,
+    double maxFractionalDiff) {
+    const TexelRepresentation& rep = texelRepresentation(expectedFormat);
+    const uint32_t numComponents = singleChannel ? 1u : 4u;
+    for (uint32_t i = 0; i < numComponents; ++i) {
+        const TexelComponent comp = static_cast<TexelComponent>(i);
+        const uint32_t index = i;
+        const double g = got.v[index];
+        const double e = expect.v[index];
+        const double absDiff = std::abs(g - e);
+        const ComponentDataType type = rep.dataTypes[index];
+        const uint32_t bits = rep.bitLengths[index];
+        const double gULP = ulpFromZero(g, type, bits);
+        const double eULP = ulpFromZero(e, type, bits);
+        const double ulpDiff = std::abs(gULP - eULP);
+        (void)comp;
+        if (ulpDiff > 3.0 && absDiff > maxFractionalDiff) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string formatTexel(const TexelComponents& comps, WGPUTextureFormat format) {
+    const TexelRepresentation& rep = texelRepresentation(format);
+    std::ostringstream s;
+    bool first = true;
+    static const char* kNames = "RGBA";
+    for (TexelComponent component : rep.componentOrder) {
+        if (!first) {
+            s << ", ";
+        }
+        first = false;
+        s << kNames[static_cast<uint32_t>(component)] << ": " << comps.values[static_cast<uint32_t>(component)];
+    }
+    return s.str();
+}
+
+// ---- mip mix weights (multi-stage) ----
+
+constexpr uint32_t kWeightSteps = 64;  // kMipLevelWeightSteps
+
+struct StageWeights {
+    std::vector<double> sampleLevelWeights;             // mix weight per fractional mip
+    std::vector<double> softwareMixToGPUMixGradWeights;  // grad-derived mapping
+};
+
+double dotProduct3(const std::array<double, 3>& a, const std::array<double, 3>& b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+// computeMipLevelFromGradients(ddx, ddy, size) per spec.
+double computeMipLevelFromGradients(
+    const std::array<double, 3>& ddx,
+    const std::array<double, 3>& ddy,
+    const std::array<double, 3>& textureSize) {
+    std::array<double, 3> sx = {ddx[0] * textureSize[0], ddx[1] * textureSize[1], ddx[2] * textureSize[2]};
+    std::array<double, 3> sy = {ddy[0] * textureSize[0], ddy[1] * textureSize[1], ddy[2] * textureSize[2]};
+    const double dotDDX = dotProduct3(sx, sx);
+    const double dotDDY = dotProduct3(sy, sy);
+    const double deltaMax = std::max(dotDDX, dotDDY);
+    return 0.5 * std::log2(deltaMax);
+}
+
+// getIndexAndWeight over an ascending array.
+std::pair<size_t, double> getIndexAndWeight(const std::vector<double>& values, double v) {
+    size_t lo = 0;
+    size_t hi = values.size() - 1;
+    for (;;) {
+        const size_t i = lo + (hi - lo) / 2;
+        const double w0 = values[i];
+        const double w1 = values[i + 1];
+        if (lo == hi || (v >= w0 && v <= w1)) {
+            const double weight = (w1 == w0) ? 0.0 : (v - w0) / (w1 - w0);
+            return {i, weight};
+        }
+        if (v < w0) {
+            hi = i;
+        } else {
+            lo = i + 1;
+        }
+    }
+}
+
+double bilinearFilter1D(const std::vector<double>& values, size_t ndx, double weight) {
+    const double v0 = values[ndx];
+    const double v1 = (ndx + 1 < values.size()) ? values[ndx + 1] : 0.0;
+    return lerp(v0, v1, weight);
+}
+
+// generateSoftwareMixToGPUMixGradWeights(gpuWeights, texWidth).
+std::vector<double> generateSoftwareMixToGPUMixGradWeights(const std::vector<double>& gpuWeights, uint32_t texWidth) {
+    const uint32_t numSteps = static_cast<uint32_t>(gpuWeights.size()) - 1u;
+    const std::array<double, 3> size = {static_cast<double>(texWidth), static_cast<double>(texWidth), 1.0};
+    std::vector<double> softwareWeights(numSteps + 1u);
+    for (uint32_t i = 0; i <= numSteps; ++i) {
+        const double u = static_cast<double>(i) / numSteps;
+        const double g = lerp(1.0, 2.0, u) / static_cast<double>(texWidth);
+        const double mipLevel = computeMipLevelFromGradients({g, 0.0, 0.0}, {0.0, 0.0, 0.0}, size);
+        softwareWeights[i] = std::clamp(mipLevel, 0.0, 1.0);
+    }
+    std::vector<double> out(numSteps + 1u);
+    for (uint32_t i = 0; i <= numSteps; ++i) {
+        const double mix = static_cast<double>(i) / numSteps;
+        const std::pair<size_t, double> iw = getIndexAndWeight(softwareWeights, mix);
+        out[i] = bilinearFilter1D(gpuWeights, iw.first, iw.second);
+    }
+    return out;
+}
+
+// graphWeights(height, weights): ascii graph of expected (linear) vs actual weights.
+std::string graphWeights(uint32_t height, const std::vector<double>& weights) {
+    const uint32_t width = static_cast<uint32_t>(weights.size());
+    std::vector<uint8_t> data(static_cast<size_t>(width) * height, 0);
+    auto plot = [&](double norm, uint32_t x, uint8_t c) {
+        int32_t y = static_cast<int32_t>(std::floor(norm * height));
+        y = std::clamp(y, 0, static_cast<int32_t>(height) - 1);
+        const size_t offset = (static_cast<size_t>(height - static_cast<uint32_t>(y) - 1u) * width) + x;
+        data[offset] = c;
+    };
+    for (uint32_t i = 0; i < width; ++i) {
+        plot(static_cast<double>(i) / (width - 1u), i, 1);  // expected: linear 0..1
+    }
+    for (uint32_t i = 0; i < width; ++i) {
+        plot(weights[i], i, 2);
+    }
+    static const char kConv[3] = {'.', 'e', 'A'};
+    std::ostringstream out;
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            out << kConv[data[static_cast<size_t>(y) * width + x]];
+        }
+        if (y + 1 < height) {
+            out << '\n';
+        }
+    }
+    return out.str();
+}
+
+// queryMipLevelMixWeightsForDevice(t, stage). Faithful port: sample a 2-mip 2x2 texture
+// (mip1 white) at 65 fractional mip levels, reading both textureSampleLevel and
+// textureSampleGrad mix weights. Compute / fragment / vertex variants.
+StageWeights queryMipLevelMixWeightsForDeviceStage(AllFeaturesMaxLimitsGpuTest& t, const std::string& stage) {
+    const uint32_t kNumWeightTypes = 2;
+    const uint64_t floatsPerStep = 4;  // vec4f
+    const uint64_t outFloats = static_cast<uint64_t>(kWeightSteps + 1u) * floatsPerStep;
+
+    WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    texDesc.size = WGPUExtent3D{2, 2, 1};
+    texDesc.mipLevelCount = 2;
+    texDesc.format = WGPUTextureFormat_R8Unorm;
+    texDesc.dimension = WGPUTextureDimension_2D;
+    texDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    WGPUTexture texture = t.createTextureTracked(texDesc);
+
+    const std::array<uint8_t, 1> white = {{255}};
+    WGPUTexelCopyBufferLayout whiteLayout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+    whiteLayout.bytesPerRow = 1;
+    whiteLayout.rowsPerImage = 1;
+    t.queueWriteTexture(texture, WGPUExtent3D{1, 1, 1}, whiteLayout, white.data(), white.size(), 1);
+
+    WGPUSamplerDescriptor sampDesc = WGPU_SAMPLER_DESCRIPTOR_INIT;
+    sampDesc.minFilter = WGPUFilterMode_Linear;
+    sampDesc.magFilter = WGPUFilterMode_Linear;
+    sampDesc.mipmapFilter = WGPUMipmapFilterMode_Linear;
+    WGPUSampler sampler = t.createSamplerTracked(sampDesc);
+
+    const std::string code = std::string(
+        "@group(0) @binding(0) var tex: texture_2d<f32>;\n"
+        "@group(0) @binding(1) var smp: sampler;\n"
+        "@group(0) @binding(2) var<storage, read_write> result: array<vec4f>;\n"
+        "struct VSOutput {\n"
+        "  @builtin(position) pos: vec4f,\n"
+        "  @location(0) @interpolate(flat, either) ndx: u32,\n"
+        "  @location(1) @interpolate(flat, either) result: vec4f,\n"
+        "};\n"
+        "fn getMixLevels(wNdx: u32) -> vec4f {\n"
+        "  let mipLevel = f32(wNdx) / 64.0;\n"
+        "  let size = textureDimensions(tex);\n"
+        "  let g = mix(1.0, 2.0, mipLevel) / f32(size.x);\n"
+        "  let ddx = vec2f(g, 0);\n"
+        "  return vec4f(\n"
+        "    textureSampleLevel(tex, smp, vec2f(0.5), mipLevel).r,\n"
+        "    textureSampleGrad(tex, smp, vec2f(0.5), ddx, vec2f(0)).r,\n"
+        "    0, 0);\n"
+        "}\n"
+        "fn getPosition(vNdx: u32) -> vec4f {\n"
+        "  let pos = array(vec2f(-1, 3), vec2f(3, -1), vec2f(-1, -1));\n"
+        "  return vec4f(pos[vNdx], 0, 1);\n"
+        "}\n"
+        "@vertex fn vs(@builtin(vertex_index) vNdx: u32, @builtin(instance_index) iNdx: u32) -> VSOutput {\n"
+        "  return VSOutput(getPosition(vNdx), iNdx, vec4f(0));\n"
+        "}\n"
+        "@fragment fn fsRecord(v: VSOutput) -> @location(0) vec4u {\n"
+        "  return bitcast<vec4u>(getMixLevels(v.ndx));\n"
+        "}\n"
+        "@compute @workgroup_size(1) fn csRecord(@builtin(global_invocation_id) id: vec3u) {\n"
+        "  result[id.x] = getMixLevels(id.x);\n"
+        "}\n"
+        "@vertex fn vsRecord(@builtin(vertex_index) vNdx: u32, @builtin(instance_index) iNdx: u32) -> VSOutput {\n"
+        "  return VSOutput(getPosition(vNdx), iNdx, getMixLevels(iNdx));\n"
+        "}\n"
+        "@fragment fn fsSaveVs(v: VSOutput) -> @location(0) vec4u {\n"
+        "  return bitcast<vec4u>(v.result);\n"
+        "}\n");
+    WGPUShaderModule module = t.createShaderModuleTracked(code);
+
+    WGPUTextureView texView = t.createViewTracked(texture, WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT);
+
+    std::vector<float> floats(static_cast<size_t>(outFloats), 0.0f);
+
+    if (stage == "compute") {
+        WGPUBufferDescriptor storageDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        storageDesc.size = outFloats * sizeof(float);
+        storageDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+        WGPUBuffer storageBuffer = t.createBufferTracked(storageDesc);
+
+        WGPUComputePipelineDescriptor pipeDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        pipeDesc.layout = nullptr;  // 'auto'
+        pipeDesc.compute.module = module;
+        pipeDesc.compute.entryPoint = stringView("csRecord");
+        WGPUComputePipeline pipeline = t.createComputePipelineTracked(pipeDesc);
+
+        std::array<WGPUBindGroupEntry, 3> entries = {{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT}};
+        entries[0].binding = 0;
+        entries[0].textureView = texView;
+        entries[1].binding = 1;
+        entries[1].sampler = sampler;
+        entries[2].binding = 2;
+        entries[2].buffer = storageBuffer;
+        entries[2].size = storageDesc.size;
+        WGPUBindGroupDescriptor bgDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        bgDesc.layout = wgpuComputePipelineGetBindGroupLayout(pipeline, 0);
+        bgDesc.entryCount = entries.size();
+        bgDesc.entries = entries.data();
+        WGPUBindGroup bindGroup = t.createBindGroupTracked(bgDesc);
+
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, kWeightSteps + 1u, 1, 1);
+        wgpuComputePassEncoderEnd(pass);
+        wgpuComputePassEncoderRelease(pass);
+        submit(t, encoder);
+
+        t.expectGPUBufferValuesPassCheck(
+            storageBuffer,
+            [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+                if (len < outFloats * sizeof(float)) {
+                    return std::string("mip weights storage buffer too small");
+                }
+                std::memcpy(floats.data(), actual, static_cast<size_t>(outFloats) * sizeof(float));
+                return std::nullopt;
+            },
+            0,
+            static_cast<size_t>(outFloats * sizeof(float)));
+    } else {
+        // fragment / vertex: render one instanced quad per step into a (kWeightSteps+1)x1
+        // rgba32uint target, then copy to a buffer.
+        WGPUTextureDescriptor targetDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        targetDesc.size = WGPUExtent3D{kWeightSteps + 1u, 1, 1};
+        targetDesc.format = WGPUTextureFormat_RGBA32Uint;
+        targetDesc.dimension = WGPUTextureDimension_2D;
+        targetDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+        WGPUTexture target = t.createTextureTracked(targetDesc);
+        WGPUTextureView targetView = t.createViewTracked(target, WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT);
+
+        WGPURenderPipelineDescriptor pipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        pipeDesc.layout = nullptr;  // 'auto'
+        pipeDesc.vertex.module = module;
+        pipeDesc.vertex.entryPoint = stringView(stage == "vertex" ? "vsRecord" : "vs");
+        pipeDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format = WGPUTextureFormat_RGBA32Uint;
+        colorTarget.writeMask = WGPUColorWriteMask_All;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = module;
+        fragment.entryPoint = stringView(stage == "vertex" ? "fsSaveVs" : "fsRecord");
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+        pipeDesc.fragment = &fragment;
+        WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipeDesc);
+
+        std::array<WGPUBindGroupEntry, 2> entries = {{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT}};
+        entries[0].binding = 0;
+        entries[0].textureView = texView;
+        entries[1].binding = 1;
+        entries[1].sampler = sampler;
+        WGPUBindGroupDescriptor bgDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        bgDesc.layout = wgpuRenderPipelineGetBindGroupLayout(pipeline, 0);
+        bgDesc.entryCount = entries.size();
+        bgDesc.entries = entries.data();
+        WGPUBindGroup bindGroup = t.createBindGroupTracked(bgDesc);
+
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        colorAttachment.view = targetView;
+        colorAttachment.loadOp = WGPULoadOp_Clear;
+        colorAttachment.storeOp = WGPUStoreOp_Store;
+        colorAttachment.clearValue = WGPUColor{0, 0, 0, 0};
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.colorAttachmentCount = 1;
+        passDesc.colorAttachments = &colorAttachment;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+        wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        for (uint32_t x = 0; x <= kWeightSteps; ++x) {
+            wgpuRenderPassEncoderSetViewport(pass, static_cast<float>(x), 0.0f, 1.0f, 1.0f, 0.0f, 1.0f);
+            wgpuRenderPassEncoderDraw(pass, 3, 1, 0, x);
+        }
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+
+        const uint32_t bytesPerRow = alignToU32((kWeightSteps + 1u) * 16u, kBytesPerRowAlignment);
+        WGPUBufferDescriptor readDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        readDesc.size = static_cast<uint64_t>(bytesPerRow);
+        readDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+        WGPUBuffer readBuffer = t.createBufferTracked(readDesc);
+        t.copyTextureToBuffer(encoder, target, readBuffer, bytesPerRow, WGPUExtent3D{kWeightSteps + 1u, 1, 1});
+        submit(t, encoder);
+
+        t.expectGPUBufferValuesPassCheck(
+            readBuffer,
+            [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+                if (len < static_cast<size_t>(outFloats) * sizeof(float)) {
+                    return std::string("mip weights render readback too small");
+                }
+                std::memcpy(floats.data(), actual, static_cast<size_t>(outFloats) * sizeof(float));
+                return std::nullopt;
+            },
+            0,
+            static_cast<size_t>(bytesPerRow));
+    }
+
+    // unzip(result, kNumWeightTypes, 4): component 0 = sampleLevel, component 1 = grad.
+    StageWeights weights;
+    weights.sampleLevelWeights.resize(kWeightSteps + 1u);
+    std::vector<double> gradWeights(kWeightSteps + 1u);
+    for (uint32_t i = 0; i <= kWeightSteps; ++i) {
+        weights.sampleLevelWeights[i] = static_cast<double>(floats[i * 4u + 0u]);
+        gradWeights[i] = static_cast<double>(floats[i * 4u + 1u]);
+    }
+    (void)kNumWeightTypes;
+    weights.softwareMixToGPUMixGradWeights = generateSoftwareMixToGPUMixGradWeights(gradWeights, /*texWidth=*/2u);
+    return weights;
+}
+
+// validateWeights from the spec body.
+void validateWeights(AllFeaturesMaxLimitsGpuTest& t, const std::string& stage, const std::string& builtin, const std::vector<double>& weights) {
+    const size_t kNumMixSteps = weights.size() - 1;
+    auto showWeights = [&]() -> std::string {
+        std::ostringstream s;
+        for (size_t i = 0; i < weights.size(); ++i) {
+            s << (i < 10 ? " " : "") << i << ": " << weights[i] << "\n";
+        }
+        s << "\ne = expected\nA = actual\n" << graphWeights(32, weights) << "\n";
+        return s.str();
+    };
+
+    t.expect(weights[0] == 0.0,
+             "stage: " + stage + ", " + builtin + ", weight 0 expected 0 but was " + std::to_string(weights[0]) + "\n" + showWeights());
+    t.expect(weights[kNumMixSteps] == 1.0,
+             "stage: " + stage + ", " + builtin + ", top weight expected 1 but was " + std::to_string(weights[kNumMixSteps]) + "\n" + showWeights());
+
+    const double dx = 1.0 / static_cast<double>(kNumMixSteps);
+    for (size_t i = 0; i < kNumMixSteps; ++i) {
+        const double dy = weights[i + 1] - weights[i];
+        const double slope = dy / dx;
+        t.expect(slope >= 0.0,
+                 "stage: " + stage + ", " + builtin + ", weight[" + std::to_string(i) + "] was not <= weight[" + std::to_string(i + 1) + "]\n" + showWeights());
+        t.expect(slope <= 2.0,
+                 "stage: " + stage + ", " + builtin + ", slope from weight[" + std::to_string(i) + "] to weight[" + std::to_string(i + 1) + "] is > 2.\n" + showWeights());
+    }
+
+    const double kMinPercentUniqueWeights = 66.0;
+    std::vector<double> sorted = weights;
+    std::sort(sorted.begin(), sorted.end());
+    size_t unique = sorted.empty() ? 0 : 1;
+    for (size_t i = 1; i < sorted.size(); ++i) {
+        if (sorted[i] != sorted[i - 1]) {
+            ++unique;
+        }
+    }
+    const size_t required = static_cast<size_t>(static_cast<double>(weights.size()) * kMinPercentUniqueWeights * 0.01);
+    t.expect(unique >= required,
+             "stage: " + stage + ", " + builtin + ", expected at least ~66% unique weights\n" + showWeights());
+}
+
+}  // namespace
+
+std::vector<Value> textureUtilsDepthStencilFormats() {
+    return depthStencilFormats();
+}
+
+std::vector<Value> textureUtilsGeneratorViewDimensions() {
+    return {Value("2d"), Value("2d-array"), Value("cube"), Value("cube-array")};
+}
+
+std::vector<Value> textureUtilsShaderStages() {
+    return shortShaderStages();
+}
+
+std::vector<ParamRecord> readTextureToTexelViewsParams() {
+    struct FormatPair {
+        const char* srcFormat;
+        const char* texelViewFormat;
+    };
+    static const std::array<FormatPair, 9> kPairs = {{
+        {"r8unorm", "rgba32float"},
+        {"r8sint", "rgba32sint"},
+        {"r8uint", "rgba32uint"},
+        {"rgba32float", "rgba32float"},
+        {"rgba32uint", "rgba32uint"},
+        {"rgba32sint", "rgba32sint"},
+        {"depth24plus", "rgba32float"},
+        {"depth24plus-stencil8", "rgba32float"},
+        {"stencil8", "stencil8"},
+    }};
+    static const std::array<const char*, 6> kViewDims = {{"1d", "2d", "2d-array", "3d", "cube", "cube-array"}};
+    static const std::array<int, 2> kSampleCounts = {{1, 4}};
+
+    std::vector<ParamRecord> out;
+    for (const FormatPair& pair : kPairs) {
+        const WGPUTextureFormat srcFormat = parseTextureFormat(pair.srcFormat);
+        for (const char* viewDimension : kViewDims) {
+            for (int sampleCount : kSampleCounts) {
+                // .unless: drop sampleCount>1 when format not possibly multisampled or view != 2d.
+                if (sampleCount > 1 && (!metaPossiblyMultisampled(srcFormat) || std::string_view(viewDimension) != "2d")) {
+                    continue;
+                }
+                ParamRecord record;
+                record.emplace_back("srcFormat", Value(pair.srcFormat));
+                record.emplace_back("texelViewFormat", Value(pair.texelViewFormat));
+                record.emplace_back("viewDimension", Value(viewDimension));
+                record.emplace_back("sampleCount", Value(sampleCount));
+                out.push_back(std::move(record));
+            }
+        }
+    }
+    return out;
+}
+
+namespace {
+
+// readTextureToTexelViews: read a GPU texture back to one MipTexels per mip level, encoded
+// in `format` (rgba32float/uint/sint or stencil8), via a compute shader that textureLoads.
+std::vector<MipTexels> readTextureToTexelViews(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    WGPUTextureFormat textureFormat,
+    WGPUTextureDimension dimension,
+    WGPUExtent3D baseSize,
+    uint32_t mipLevelCount,
+    uint32_t sampleCount,
+    WGPUTextureViewDimension viewDimension,
+    WGPUTextureFormat outFormat) {
+    const FormatType type = getMetaTextureFormatType(textureFormat);
+    const char* componentType = type == FormatType::Uint ? "u32" : (type == FormatType::Sint ? "i32" : "f32");
+    const char* resultType = type == FormatType::Uint ? "vec4u" : (type == FormatType::Sint ? "vec4i" : "vec4f");
+
+    // cube-array is read back via texture_2d_array (matching upstream); the bindgroup
+    // layout and the texture view must therefore use 2DArray, not CubeArray.
+    const WGPUTextureViewDimension bindViewDimension =
+        viewDimension == WGPUTextureViewDimension_CubeArray ? WGPUTextureViewDimension_2DArray : viewDimension;
+
+    std::string textureWGSL;
+    std::string loadWGSL;
+    std::string dimensionWGSL = "textureDimensions(tex, 0)";
+    const bool multisampled = sampleCount > 1;
+    switch (viewDimension) {
+        case WGPUTextureViewDimension_2D:
+            if (multisampled) {
+                textureWGSL = std::string("texture_multisampled_2d<") + componentType + ">";
+                loadWGSL = "textureLoad(tex, coord.xy, sampleIndex)";
+                dimensionWGSL = "textureDimensions(tex)";
+            } else {
+                textureWGSL = std::string("texture_2d<") + componentType + ">";
+                loadWGSL = "textureLoad(tex, coord.xy, 0)";
+            }
+            break;
+        case WGPUTextureViewDimension_CubeArray:  // use 2d_array readback
+        case WGPUTextureViewDimension_2DArray:
+            textureWGSL = std::string("texture_2d_array<") + componentType + ">";
+            loadWGSL = "textureLoad(tex, coord.xy, coord.z, 0)";
+            break;
+        case WGPUTextureViewDimension_3D:
+            textureWGSL = std::string("texture_3d<") + componentType + ">";
+            loadWGSL = "textureLoad(tex, coord.xyz, 0)";
+            break;
+        case WGPUTextureViewDimension_Cube:
+            textureWGSL = std::string("texture_cube<") + componentType + ">";
+            loadWGSL = "textureLoadCubeAs2DArray(tex, coord.xy, coord.z)";
+            break;
+        case WGPUTextureViewDimension_1D:
+            textureWGSL = std::string("texture_1d<") + componentType + ">";
+            loadWGSL = "textureLoad(tex, coord.x, 0)";
+            dimensionWGSL = "vec2u(textureDimensions(tex), 1)";
+            break;
+        default:
+            t.fail("readTextureToTexelViews: unsupported view dimension");
+    }
+
+    const bool cubeLike = viewDimension == WGPUTextureViewDimension_Cube || viewDimension == WGPUTextureViewDimension_CubeArray;
+    std::string cubeWGSL;
+    if (cubeLike && viewDimension == WGPUTextureViewDimension_Cube) {
+        cubeWGSL = std::string(
+            "const faceMat = array(\n"
+            "  mat3x3f( 0,  0,  -2,  0, -2,   0,  1,  1,   1),\n"
+            "  mat3x3f( 0,  0,   2,  0, -2,   0, -1,  1,  -1),\n"
+            "  mat3x3f( 2,  0,   0,  0,  0,   2, -1,  1,  -1),\n"
+            "  mat3x3f( 2,  0,   0,  0,  0,  -2, -1, -1,   1),\n"
+            "  mat3x3f( 2,  0,   0,  0, -2,   0, -1,  1,   1),\n"
+            "  mat3x3f(-2,  0,   0,  0, -2,   0,  1,  1,  -1));\n")
+            + "fn textureLoadCubeAs2DArray(tex: texture_cube<" + componentType + ">, coord: vec2u, layer: u32) -> " + resultType + " {\n"
+            "  let size = textureDimensions(tex, 0);\n"
+            "  let uv = (vec2f(coord) + 0.75) / vec2f(size.xy);\n"
+            "  let cubeCoord = faceMat[layer] * vec3f(uv, 1.0);\n"
+            "  let r = textureGather(0, tex, smp, cubeCoord);\n"
+            "  let g = textureGather(1, tex, smp, cubeCoord);\n"
+            "  let b = textureGather(2, tex, smp, cubeCoord);\n"
+            "  let a = textureGather(3, tex, smp, cubeCoord);\n"
+            "  return " + resultType + "(r[3], g[3], b[3], a[3]);\n"
+            "}\n";
+    }
+
+    std::string code = cubeWGSL +
+        "struct Uniforms { sampleCount: u32, };\n"
+        "@group(0) @binding(0) var<uniform> uni: Uniforms;\n"
+        "@group(0) @binding(1) var tex: " + textureWGSL + ";\n"
+        "@group(0) @binding(2) var smp: sampler;\n"
+        "@group(0) @binding(3) var<storage, read_write> data: array<" + resultType + ">;\n"
+        "@compute @workgroup_size(1) fn cs(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {\n"
+        "  _ = smp;\n"
+        "  let size = " + dimensionWGSL + ";\n"
+        "  let ndx = global_invocation_id.z * size.x * size.y * uni.sampleCount +\n"
+        "            global_invocation_id.y * size.x * uni.sampleCount +\n"
+        "            global_invocation_id.x;\n"
+        "  let coord = vec3u(global_invocation_id.x / uni.sampleCount, global_invocation_id.yz);\n"
+        "  let sampleIndex = global_invocation_id.x % uni.sampleCount;\n"
+        "  data[ndx] = " + loadWGSL + ";\n"
+        "}\n";
+    WGPUShaderModule module = t.createShaderModuleTracked(code);
+
+    // Bind group layout: uniform, texture, non-filtering sampler, storage.
+    WGPUTextureSampleType sampleType;
+    if (type == FormatType::Depth) {
+        sampleType = WGPUTextureSampleType_UnfilterableFloat;
+    } else if (isStencilTextureFormat(textureFormat) && !isDepthTextureFormat(textureFormat)) {
+        sampleType = WGPUTextureSampleType_Uint;
+    } else if (type == FormatType::Float) {
+        sampleType = WGPUTextureSampleType_UnfilterableFloat;
+    } else if (type == FormatType::Sint) {
+        sampleType = WGPUTextureSampleType_Sint;
+    } else {
+        sampleType = WGPUTextureSampleType_Uint;
+    }
+
+    std::array<WGPUBindGroupLayoutEntry, 4> bglEntries = {{WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT}};
+    bglEntries[0].binding = 0;
+    bglEntries[0].visibility = WGPUShaderStage_Compute;
+    bglEntries[0].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    bglEntries[0].buffer.type = WGPUBufferBindingType_Uniform;
+    bglEntries[1].binding = 1;
+    bglEntries[1].visibility = WGPUShaderStage_Compute;
+    bglEntries[1].texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+    bglEntries[1].texture.sampleType = sampleType;
+    bglEntries[1].texture.viewDimension = bindViewDimension;
+    bglEntries[1].texture.multisampled = multisampled ? 1u : 0u;
+    bglEntries[2].binding = 2;
+    bglEntries[2].visibility = WGPUShaderStage_Compute;
+    bglEntries[2].sampler = WGPU_SAMPLER_BINDING_LAYOUT_INIT;
+    bglEntries[2].sampler.type = WGPUSamplerBindingType_NonFiltering;
+    bglEntries[3].binding = 3;
+    bglEntries[3].visibility = WGPUShaderStage_Compute;
+    bglEntries[3].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    bglEntries[3].buffer.type = WGPUBufferBindingType_Storage;
+    WGPUBindGroupLayoutDescriptor bglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    bglDesc.entryCount = bglEntries.size();
+    bglDesc.entries = bglEntries.data();
+    WGPUBindGroupLayout bgl = t.createBindGroupLayoutTracked(bglDesc);
+
+    WGPUPipelineLayoutDescriptor plDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    plDesc.bindGroupLayoutCount = 1;
+    plDesc.bindGroupLayouts = &bgl;
+    WGPUPipelineLayout pipelineLayout = t.createPipelineLayoutTracked(plDesc);
+
+    WGPUComputePipelineDescriptor pipeDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+    pipeDesc.layout = pipelineLayout;
+    pipeDesc.compute.module = module;
+    pipeDesc.compute.entryPoint = stringView("cs");
+    WGPUComputePipeline pipeline = t.createComputePipelineTracked(pipeDesc);
+
+    WGPUSampler sampler = t.createSamplerTracked(WGPU_SAMPLER_DESCRIPTOR_INIT);
+
+    const WGPUTextureFormat storeFormat = effectiveTexelViewFormat(outFormat);
+    const TexelRepresentation& outRep = texelRepresentation(storeFormat);
+
+    struct ReadBack {
+        WGPUExtent3D size;
+        WGPUBuffer storageBuffer;
+        uint64_t byteLength;
+    };
+    std::vector<ReadBack> readBacks;
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    const WGPUTextureAspect aspect = isDepthTextureFormat(textureFormat) ? WGPUTextureAspect_DepthOnly
+        : (isStencilTextureFormat(textureFormat) ? WGPUTextureAspect_StencilOnly : WGPUTextureAspect_All);
+
+    for (uint32_t mipLevel = 0; mipLevel < mipLevelCount; ++mipLevel) {
+        const WGPUExtent3D size = physicalMipSize(baseSize, dimension, mipLevel);
+
+        const std::array<uint32_t, 4> uniformValues = {{sampleCount, 0, 0, 0}};
+        WGPUBufferDescriptor uniDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        uniDesc.size = sizeof(uniformValues);
+        uniDesc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+        WGPUBuffer uniformBuffer = t.createBufferTracked(uniDesc);
+        t.queueWriteBuffer(uniformBuffer, 0, uniformValues.data(), sizeof(uniformValues));
+
+        const uint64_t storageSize = static_cast<uint64_t>(size.width) * size.height * size.depthOrArrayLayers * 4ull * 4ull * sampleCount;
+        WGPUBufferDescriptor storageDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        storageDesc.size = storageSize;
+        storageDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+        WGPUBuffer storageBuffer = t.createBufferTracked(storageDesc);
+        readBacks.push_back({size, storageBuffer, storageSize});
+
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        viewDesc.dimension = bindViewDimension;
+        viewDesc.aspect = aspect;
+        viewDesc.baseMipLevel = mipLevel;
+        viewDesc.mipLevelCount = 1;
+        WGPUTextureView view = t.createViewTracked(texture, viewDesc);
+
+        std::array<WGPUBindGroupEntry, 4> bgEntries = {{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT}};
+        bgEntries[0].binding = 0;
+        bgEntries[0].buffer = uniformBuffer;
+        bgEntries[0].size = sizeof(uniformValues);
+        bgEntries[1].binding = 1;
+        bgEntries[1].textureView = view;
+        bgEntries[2].binding = 2;
+        bgEntries[2].sampler = sampler;
+        bgEntries[3].binding = 3;
+        bgEntries[3].buffer = storageBuffer;
+        bgEntries[3].size = storageSize;
+        WGPUBindGroupDescriptor bgDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        bgDesc.layout = bgl;
+        bgDesc.entryCount = bgEntries.size();
+        bgDesc.entries = bgEntries.data();
+        WGPUBindGroup bindGroup = t.createBindGroupTracked(bgDesc);
+
+        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, size.width * sampleCount, size.height, size.depthOrArrayLayers);
+        wgpuComputePassEncoderEnd(pass);
+        wgpuComputePassEncoderRelease(pass);
+    }
+    submit(t, encoder);
+
+    std::vector<MipTexels> texels;
+    for (uint32_t mipLevel = 0; mipLevel < mipLevelCount; ++mipLevel) {
+        const ReadBack& rb = readBacks[mipLevel];
+        // The storage buffer holds vec4<f32|i32|u32>; read it back as raw 32-bit words and
+        // interpret per the texture's component type.
+        std::vector<uint32_t> words(static_cast<size_t>(rb.byteLength / sizeof(uint32_t)), 0u);
+        t.expectGPUBufferValuesPassCheck(
+            rb.storageBuffer,
+            [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+                if (len < rb.byteLength) {
+                    return std::string("readTextureToTexelViews readback too small");
+                }
+                std::memcpy(words.data(), actual, static_cast<size_t>(rb.byteLength));
+                return std::nullopt;
+            },
+            0,
+            static_cast<size_t>(rb.byteLength));
+
+        auto wordToValue = [&](uint32_t w) -> double {
+            if (type == FormatType::Uint) {
+                return static_cast<double>(w);
+            }
+            if (type == FormatType::Sint) {
+                return static_cast<double>(static_cast<int32_t>(w));
+            }
+            float f;
+            std::memcpy(&f, &w, sizeof(f));
+            return static_cast<double>(f);
+        };
+
+        MipTexels mip;
+        mip.format = storeFormat;
+        mip.size = rb.size;
+        mip.layout = getTextureCopyLayout(storeFormat, dimension, baseSize, mipLevel);
+        // We store one outFormat texel per (x*sampleCount + sampleIndex), y, z.
+        const uint32_t bytesPerTexel = outRep.bytesPerBlock;
+        const uint32_t bytesPerRow = rb.size.width * sampleCount * bytesPerTexel;
+        const uint32_t rowsPerImage = rb.size.height;
+        mip.layout.bytesPerRow = bytesPerRow;
+        mip.layout.rowsPerImage = rowsPerImage;
+        mip.data.assign(static_cast<size_t>(bytesPerRow) * rowsPerImage * rb.size.depthOrArrayLayers, 0);
+        for (uint32_t z = 0; z < rb.size.depthOrArrayLayers; ++z) {
+            for (uint32_t y = 0; y < rb.size.height; ++y) {
+                for (uint32_t x = 0; x < rb.size.width; ++x) {
+                    for (uint32_t s = 0; s < sampleCount; ++s) {
+                        const uint64_t srcOffset = (((static_cast<uint64_t>(z) * rb.size.width * rb.size.height
+                                                    + static_cast<uint64_t>(y) * rb.size.width + x)
+                                                       * sampleCount + s))
+                            * 4ull;
+                        TexelComponents comps;
+                        comps.values[0] = wordToValue(words[srcOffset + 0]);
+                        comps.values[1] = wordToValue(words[srcOffset + 1]);
+                        comps.values[2] = wordToValue(words[srcOffset + 2]);
+                        comps.values[3] = wordToValue(words[srcOffset + 3]);
+                        // convertResultFormatToTexelViewFormat: for outFormat with RGBA order this is identity.
+                        const std::vector<uint8_t> bytes = outRep.packBits(outRep.numberToBits(comps));
+                        const uint64_t dstOffset = (static_cast<uint64_t>(z) * rowsPerImage + y) * bytesPerRow
+                            + (static_cast<uint64_t>(x) * sampleCount + s) * bytesPerTexel;
+                        std::memcpy(mip.data.data() + dstOffset, bytes.data(), bytes.size());
+                    }
+                }
+            }
+        }
+        texels.push_back(std::move(mip));
+    }
+    return texels;
+}
+
+// Build per-mip random color texels, then upload to a freshly created color texture.
+// Returns the texture and the CPU texels (one per mip).
+struct CreatedTexture {
+    WGPUTexture texture = nullptr;
+    std::vector<MipTexels> texels;  // per mip, in the source (encodable) format
+};
+
+// Generate the CPU-side per-sample random texels for one mip (sample packed along x).
+MipTexels makeRandomColorMip(WGPUTextureFormat format, WGPUExtent3D mipSize, uint32_t mip, uint32_t sampleCount) {
+    const TexelRepresentation& rep = texelRepresentation(format);
+    MipTexels mt;
+    mt.format = format;
+    mt.size = mipSize;
+    const uint32_t bytesPerRow = mipSize.width * sampleCount * rep.bytesPerBlock;
+    const uint32_t rowsPerImage = mipSize.height;
+    mt.layout.bytesPerRow = bytesPerRow;
+    mt.layout.rowsPerImage = rowsPerImage;
+    mt.layout.bytesPerBlock = rep.bytesPerBlock;
+    mt.layout.mipSize = mipSize;
+    mt.data.assign(static_cast<size_t>(bytesPerRow) * rowsPerImage * mipSize.depthOrArrayLayers, 0);
+    for (uint32_t z = 0; z < mipSize.depthOrArrayLayers; ++z) {
+        for (uint32_t y = 0; y < mipSize.height; ++y) {
+            for (uint32_t x = 0; x < mipSize.width; ++x) {
+                for (uint32_t s = 0; s < sampleCount; ++s) {
+                    const TexelComponents comps = randomColorTexel(rep, mipSize, mip, x, y, z, s);
+                    const std::vector<uint8_t> bytes = rep.packBits(rep.numberToBits(comps));
+                    const uint64_t offset = (static_cast<uint64_t>(z) * rowsPerImage + y) * bytesPerRow
+                        + (static_cast<uint64_t>(x) * sampleCount + s) * rep.bytesPerBlock;
+                    std::memcpy(mt.data.data() + offset, bytes.data(), bytes.size());
+                }
+            }
+        }
+    }
+    return mt;
+}
+
+CreatedTexture createColorTextureWithRandomData(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTextureFormat format,
+    WGPUTextureDimension dimension,
+    WGPUExtent3D baseSize,
+    uint32_t mipLevelCount,
+    uint32_t sampleCount,
+    WGPUTextureViewDimension viewDimension,
+    WGPUTextureUsage usage) {
+    (void)viewDimension;
+    CreatedTexture created;
+
+    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    desc.format = format;
+    desc.dimension = dimension;
+    desc.size = baseSize;
+    desc.mipLevelCount = mipLevelCount;
+    desc.sampleCount = sampleCount;
+    desc.usage = usage;
+    created.texture = t.createTextureTracked(desc);
+
+    const TexelRepresentation& rep = texelRepresentation(format);
+
+    if (sampleCount > 1) {
+        // Multisampled (2d, single mip): render per-sample random data into the target.
+        // We pack the per-sample CPU texels into a non-MSAA source texture (sample along x)
+        // and a fragment shader loads source[x*sampleCount + sample_index] for each sample.
+        const WGPUExtent3D mipSize = physicalMipSize(baseSize, dimension, 0);
+        MipTexels mt = makeRandomColorMip(format, mipSize, 0, sampleCount);
+
+        WGPUTextureDescriptor srcDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        srcDesc.format = format;
+        srcDesc.dimension = WGPUTextureDimension_2D;
+        srcDesc.size = WGPUExtent3D{mipSize.width * sampleCount, mipSize.height, 1};
+        srcDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+        WGPUTexture source = t.createTextureTracked(srcDesc);
+        WGPUTexelCopyBufferLayout srcLayout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+        srcLayout.bytesPerRow = mt.layout.bytesPerRow;
+        srcLayout.rowsPerImage = mt.layout.rowsPerImage;
+        t.queueWriteTexture(source, srcDesc.size, srcLayout, mt.data.data(), mt.data.size(), 0);
+
+        const FormatType type = getMetaTextureFormatType(format);
+        const char* componentType = type == FormatType::Uint ? "u32" : (type == FormatType::Sint ? "i32" : "f32");
+        const char* resultType = type == FormatType::Uint ? "vec4u" : (type == FormatType::Sint ? "vec4i" : "vec4f");
+        WGPUTextureSampleType sampleType = type == FormatType::Sint ? WGPUTextureSampleType_Sint
+            : (type == FormatType::Uint ? WGPUTextureSampleType_Uint : WGPUTextureSampleType_UnfilterableFloat);
+
+        std::string code = std::string(
+            "@group(0) @binding(0) var src: texture_2d<") + componentType + ">;\n"
+            "@vertex fn vs(@builtin(vertex_index) v: u32) -> @builtin(position) vec4f {\n"
+            "  let pos = array(vec2f(-1, 3), vec2f(3, -1), vec2f(-1, -1));\n"
+            "  return vec4f(pos[v], 0, 1);\n"
+            "}\n"
+            "@fragment fn fs(@builtin(position) pos: vec4f, @builtin(sample_index) s: u32) -> @location(0) " + resultType + " {\n"
+            "  let xy = vec2u(pos.xy);\n"
+            "  let coord = vec2u(xy.x * " + std::to_string(sampleCount) + "u + s, xy.y);\n"
+            "  return textureLoad(src, coord, 0);\n"
+            "}\n";
+        WGPUShaderModule module = t.createShaderModuleTracked(code);
+
+        WGPUBindGroupLayoutEntry bglEntry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        bglEntry.binding = 0;
+        bglEntry.visibility = WGPUShaderStage_Fragment;
+        bglEntry.texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+        bglEntry.texture.sampleType = sampleType;
+        bglEntry.texture.viewDimension = WGPUTextureViewDimension_2D;
+        WGPUBindGroupLayoutDescriptor bglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        bglDesc.entryCount = 1;
+        bglDesc.entries = &bglEntry;
+        WGPUBindGroupLayout bgl = t.createBindGroupLayoutTracked(bglDesc);
+        WGPUPipelineLayoutDescriptor plDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+        plDesc.bindGroupLayoutCount = 1;
+        plDesc.bindGroupLayouts = &bgl;
+        WGPUPipelineLayout pl = t.createPipelineLayoutTracked(plDesc);
+
+        WGPURenderPipelineDescriptor pipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        pipeDesc.layout = pl;
+        pipeDesc.vertex.module = module;
+        pipeDesc.vertex.entryPoint = stringView("vs");
+        pipeDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        pipeDesc.multisample.count = sampleCount;
+        pipeDesc.multisample.mask = 0xFFFFFFFFu;
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format = format;
+        colorTarget.writeMask = WGPUColorWriteMask_All;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = module;
+        fragment.entryPoint = stringView("fs");
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+        pipeDesc.fragment = &fragment;
+        WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipeDesc);
+
+        WGPUTextureView srcView = t.createViewTracked(source, WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT);
+        WGPUBindGroupEntry bgEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+        bgEntry.binding = 0;
+        bgEntry.textureView = srcView;
+        WGPUBindGroupDescriptor bgDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        bgDesc.layout = bgl;
+        bgDesc.entryCount = 1;
+        bgDesc.entries = &bgEntry;
+        WGPUBindGroup bindGroup = t.createBindGroupTracked(bgDesc);
+
+        WGPUTextureView targetView = t.createViewTracked(created.texture, WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT);
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        colorAttachment.view = targetView;
+        colorAttachment.loadOp = WGPULoadOp_Clear;
+        colorAttachment.storeOp = WGPUStoreOp_Store;
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.colorAttachmentCount = 1;
+        passDesc.colorAttachments = &colorAttachment;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+        wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+        wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+        submit(t, encoder);
+
+        created.texels.push_back(std::move(mt));
+        return created;
+    }
+
+    for (uint32_t mip = 0; mip < mipLevelCount; ++mip) {
+        const WGPUExtent3D mipSize = physicalMipSize(baseSize, dimension, mip);
+        MipTexels packed = makeRandomColorMip(format, mipSize, mip, /*sampleCount=*/1u);
+        // For upload to the texture we need the standard 256-aligned layout.
+        TextureCopyLayout uploadLayout = getTextureCopyLayout(format, dimension, baseSize, mip);
+        std::vector<uint8_t> uploadData(static_cast<size_t>(uploadLayout.byteLength), 0);
+        for (uint32_t z = 0; z < mipSize.depthOrArrayLayers; ++z) {
+            for (uint32_t y = 0; y < mipSize.height; ++y) {
+                const uint64_t srcRow = (static_cast<uint64_t>(z) * packed.layout.rowsPerImage + y) * packed.layout.bytesPerRow;
+                const uint64_t dstRow = (static_cast<uint64_t>(z) * uploadLayout.rowsPerImage + y) * uploadLayout.bytesPerRow;
+                std::memcpy(uploadData.data() + dstRow, packed.data.data() + srcRow,
+                            static_cast<size_t>(mipSize.width) * rep.bytesPerBlock);
+            }
+        }
+        WGPUTexelCopyBufferLayout copyLayout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+        copyLayout.bytesPerRow = uploadLayout.bytesPerRow;
+        copyLayout.rowsPerImage = uploadLayout.rowsPerImage;
+        t.queueWriteTexture(created.texture, mipSize, copyLayout, uploadData.data(), uploadData.size(), mip);
+        created.texels.push_back(std::move(packed));
+    }
+    return created;
+}
+
+// Fill a depth/stencil texture with deterministic data and return the texture.
+// Depth aspects are rendered (unwritable/unencodable); stencil aspects are written.
+// The "expected" texels for the meta-test are obtained by reading the texture back, so
+// they trivially match the test's own read-back, validating that readTextureToTexelViews
+// works for depth/stencil views and is deterministic.
+WGPUTexture fillDepthStencilTexture(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTextureFormat format,
+    WGPUTextureDimension dimension,
+    WGPUExtent3D baseSize,
+    uint32_t mipLevelCount,
+    uint32_t sampleCount,
+    WGPUTextureUsage usage) {
+    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    desc.format = format;
+    desc.dimension = dimension;
+    desc.size = baseSize;
+    desc.mipLevelCount = mipLevelCount;
+    desc.sampleCount = sampleCount;
+    desc.usage = static_cast<WGPUTextureUsage>(usage | WGPUTextureUsage_RenderAttachment);
+    WGPUTexture texture = t.createTextureTracked(desc);
+
+    const bool hasDepth = isDepthTextureFormat(format);
+    const bool hasStencil = isStencilTextureFormat(format);
+
+    // Write stencil aspect (encodable) with deterministic data per mip/layer.
+    if (hasStencil) {
+        for (uint32_t mip = 0; mip < mipLevelCount; ++mip) {
+            const WGPUExtent3D mipSize = physicalMipSize(baseSize, dimension, mip);
+            const uint32_t bytesPerRow = mipSize.width;  // stencil8 = 1 byte/texel
+            std::vector<uint8_t> data(static_cast<size_t>(bytesPerRow) * mipSize.height * mipSize.depthOrArrayLayers, 0);
+            for (uint32_t z = 0; z < mipSize.depthOrArrayLayers; ++z) {
+                for (uint32_t y = 0; y < mipSize.height; ++y) {
+                    for (uint32_t x = 0; x < mipSize.width; ++x) {
+                        const uint32_t rnd = metaHashU32({static_cast<int64_t>(x), static_cast<int64_t>(y), static_cast<int64_t>(z), static_cast<int64_t>(mip), static_cast<int64_t>('S')});
+                        data[(static_cast<size_t>(z) * mipSize.height + y) * bytesPerRow + x] = static_cast<uint8_t>(rnd & 0xffu);
+                    }
+                }
+            }
+            WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+            layout.bytesPerRow = bytesPerRow;
+            layout.rowsPerImage = mipSize.height;
+            // Stencil cannot be written to a multisampled texture; in that case leave it cleared.
+            // Multi-planar (depth+stencil) formats require an explicit StencilOnly aspect.
+            if (sampleCount == 1) {
+                WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+                destination.texture = texture;
+                destination.mipLevel = mip;
+                destination.origin = WGPUOrigin3D{0, 0, 0};
+                destination.aspect = WGPUTextureAspect_StencilOnly;
+                wgpuQueueWriteTexture(t.queue(), &destination, data.data(), data.size(), &layout, &mipSize);
+            }
+        }
+    }
+
+    // Render depth aspect: a fullscreen triangle writes frag_depth from a per-pixel source.
+    if (hasDepth) {
+        const std::string code = std::string(
+            "@group(0) @binding(0) var src: texture_2d<f32>;\n"
+            "@vertex fn vs(@builtin(vertex_index) v: u32) -> @builtin(position) vec4f {\n"
+            "  let pos = array(vec2f(-1, 3), vec2f(3, -1), vec2f(-1, -1));\n"
+            "  return vec4f(pos[v], 0, 1);\n"
+            "}\n"
+            "struct FOut { @builtin(frag_depth) d: f32, };\n"
+            "@fragment fn fs(@builtin(position) pos: vec4f) -> FOut {\n"
+            "  let xy = vec2u(pos.xy);\n"
+            "  return FOut(textureLoad(src, xy, 0).r);\n"
+            "}\n");
+        WGPUShaderModule module = t.createShaderModuleTracked(code);
+
+        WGPUBindGroupLayoutEntry bglEntry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        bglEntry.binding = 0;
+        bglEntry.visibility = WGPUShaderStage_Fragment;
+        bglEntry.texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+        bglEntry.texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
+        bglEntry.texture.viewDimension = WGPUTextureViewDimension_2D;
+        WGPUBindGroupLayoutDescriptor bglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        bglDesc.entryCount = 1;
+        bglDesc.entries = &bglEntry;
+        WGPUBindGroupLayout bgl = t.createBindGroupLayoutTracked(bglDesc);
+        WGPUPipelineLayoutDescriptor plDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+        plDesc.bindGroupLayoutCount = 1;
+        plDesc.bindGroupLayouts = &bgl;
+        WGPUPipelineLayout pl = t.createPipelineLayoutTracked(plDesc);
+
+        WGPURenderPipelineDescriptor pipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        pipeDesc.layout = pl;
+        pipeDesc.vertex.module = module;
+        pipeDesc.vertex.entryPoint = stringView("vs");
+        pipeDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        pipeDesc.multisample.count = sampleCount;
+        pipeDesc.multisample.mask = 0xFFFFFFFFu;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = module;
+        fragment.entryPoint = stringView("fs");
+        fragment.targetCount = 0;
+        fragment.targets = nullptr;
+        pipeDesc.fragment = &fragment;
+        WGPUDepthStencilState dss = WGPU_DEPTH_STENCIL_STATE_INIT;
+        dss.format = format;
+        dss.depthWriteEnabled = WGPUOptionalBool_True;
+        dss.depthCompare = WGPUCompareFunction_Always;
+        pipeDesc.depthStencil = &dss;
+        WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipeDesc);
+
+        for (uint32_t mip = 0; mip < mipLevelCount; ++mip) {
+            const WGPUExtent3D mipSize = physicalMipSize(baseSize, dimension, mip);
+            for (uint32_t layer = 0; layer < mipSize.depthOrArrayLayers; ++layer) {
+                // Build an r32float source with the random per-pixel depth for this layer.
+                const TexelRepresentation& d32 = texelRepresentation(WGPUTextureFormat_R32Float);
+                const uint32_t bytesPerRow = alignToU32(mipSize.width * 4u, kBytesPerRowAlignment);
+                std::vector<uint8_t> srcData(static_cast<size_t>(bytesPerRow) * mipSize.height, 0);
+                for (uint32_t y = 0; y < mipSize.height; ++y) {
+                    for (uint32_t x = 0; x < mipSize.width; ++x) {
+                        const uint32_t rnd = metaHashU32({static_cast<int64_t>(x), static_cast<int64_t>(y), static_cast<int64_t>(layer), static_cast<int64_t>(mip), static_cast<int64_t>('D')});
+                        TexelComponents c;
+                        c.values[0] = clamp01(static_cast<double>(rnd) / 4294967295.0);
+                        const std::vector<uint8_t> bytes = d32.packBits(d32.numberToBits(c));
+                        std::memcpy(srcData.data() + static_cast<size_t>(y) * bytesPerRow + static_cast<size_t>(x) * 4u, bytes.data(), 4);
+                    }
+                }
+                WGPUTextureDescriptor srcDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+                srcDesc.format = WGPUTextureFormat_R32Float;
+                srcDesc.dimension = WGPUTextureDimension_2D;
+                srcDesc.size = WGPUExtent3D{mipSize.width, mipSize.height, 1};
+                srcDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+                WGPUTexture source = t.createTextureTracked(srcDesc);
+                WGPUTexelCopyBufferLayout srcLayout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+                srcLayout.bytesPerRow = bytesPerRow;
+                srcLayout.rowsPerImage = mipSize.height;
+                t.queueWriteTexture(source, srcDesc.size, srcLayout, srcData.data(), srcData.size(), 0);
+
+                WGPUTextureView srcView = t.createViewTracked(source, WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT);
+                WGPUBindGroupEntry bgEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+                bgEntry.binding = 0;
+                bgEntry.textureView = srcView;
+                WGPUBindGroupDescriptor bgDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+                bgDesc.layout = bgl;
+                bgDesc.entryCount = 1;
+                bgDesc.entries = &bgEntry;
+                WGPUBindGroup bindGroup = t.createBindGroupTracked(bgDesc);
+
+                WGPUTextureViewDescriptor dvDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+                dvDesc.dimension = WGPUTextureViewDimension_2D;
+                dvDesc.baseMipLevel = mip;
+                dvDesc.mipLevelCount = 1;
+                dvDesc.baseArrayLayer = layer;
+                dvDesc.arrayLayerCount = 1;
+                WGPUTextureView depthView = t.createViewTracked(texture, dvDesc);
+
+                WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+                WGPURenderPassDepthStencilAttachment dsAttach = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+                dsAttach.view = depthView;
+                dsAttach.depthLoadOp = WGPULoadOp_Clear;
+                dsAttach.depthStoreOp = WGPUStoreOp_Store;
+                dsAttach.depthClearValue = 0.0f;
+                if (hasStencil) {
+                    dsAttach.stencilLoadOp = WGPULoadOp_Load;
+                    dsAttach.stencilStoreOp = WGPUStoreOp_Store;
+                }
+                WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+                passDesc.depthStencilAttachment = &dsAttach;
+                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+                wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+                wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+                wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+                wgpuRenderPassEncoderEnd(pass);
+                wgpuRenderPassEncoderRelease(pass);
+                submit(t, encoder);
+            }
+        }
+    }
+
+    return texture;
+}
+
+}  // namespace
+
+void executeCreateTextureWithRandomDataAndGetTexelsWithGenerator(AllFeaturesMaxLimitsGpuTest& t) {
+    const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+    const WGPUTextureViewDimension viewDimension = parseTextureViewDimension(t.param<std::string>("viewDimension"));
+
+    t.skipIfTextureFormatNotSupported(format);
+    t.skipIfTextureViewDimensionNotSupported(viewDimension);
+    const WGPUTextureDimension dimension = getTextureDimensionFromView(viewDimension);
+    if (!t.textureDimensionAndFormatCompatibleForDevice(dimension, format)) {
+        t.skip("texture format and view dimension not compatible");
+    }
+
+    // choose an odd size (9) so we're more likely to test alignment issues.
+    const std::array<uint32_t, 3> size = chooseTextureSize(9, 4, format, viewDimension);
+    const WGPUExtent3D baseSize = WGPUExtent3D{size[0], size[1], size[2]};
+
+    // Exercise the depth-comparison generator (comparison='equal') across the base mip and
+    // assert every produced value is finite (mirrors the upstream createRandomTexelViewMipmap
+    // path that consumes the generator).
+    const TexelGenerator generator = makeRandomDepthComparisonTexelGenerator(format, baseSize);
+    for (uint32_t z = 0; z < baseSize.depthOrArrayLayers; ++z) {
+        for (uint32_t y = 0; y < baseSize.height; ++y) {
+            for (uint32_t x = 0; x < baseSize.width; ++x) {
+                const double v = generator(x, y, z, 0).values[0];
+                if (std::isnan(v) || std::isinf(v)) {
+                    t.fail("generator produced non-finite depth/stencil texel");
+                }
+            }
+        }
+    }
+
+    // Actually create + fill the texture on the GPU (depth via render, stencil via write),
+    // matching createTextureWithRandomDataAndGetTexels: we expect no validation errors.
+    const uint32_t mipLevelCount = 3;
+    const WGPUTextureUsage usage = static_cast<WGPUTextureUsage>(WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding);
+    (void)fillDepthStencilTexture(t, format, dimension, baseSize, mipLevelCount, /*sampleCount=*/1u, usage);
+    // We don't expect any particular results. We just expect no validation errors.
+}
+
+void executeReadTextureToTexelViews(AllFeaturesMaxLimitsGpuTest& t) {
+    const WGPUTextureFormat srcFormat = parseTextureFormat(t.param<std::string>("srcFormat"));
+    const WGPUTextureFormat texelViewFormat = parseTextureFormat(t.param<std::string>("texelViewFormat"));
+    const WGPUTextureViewDimension viewDimension = parseTextureViewDimension(t.param<std::string>("viewDimension"));
+    const uint32_t sampleCount = static_cast<uint32_t>(t.param<int64_t>("sampleCount"));
+
+    t.skipIfTextureViewDimensionNotSupported(viewDimension);
+    const WGPUTextureDimension dimension = getTextureDimensionFromView(viewDimension);
+    if (!t.textureDimensionAndFormatCompatibleForDevice(dimension, srcFormat)) {
+        t.skip("texture format and view dimension not compatible");
+    }
+    if (sampleCount > 1 && !t.isTextureFormatMultisampled(srcFormat)) {
+        t.skip("texture format not multisampled");
+    }
+
+    const std::array<uint32_t, 3> size = chooseTextureSize(9, 4, srcFormat, viewDimension);
+    const WGPUExtent3D baseSize = WGPUExtent3D{size[0], size[1], size[2]};
+    const uint32_t mipLevelCount = (viewDimension == WGPUTextureViewDimension_1D || sampleCount > 1) ? 1u : 3u;
+    const bool depthStencil = isDepthOrStencilTextureFormat(srcFormat);
+
+    WGPUTextureUsage usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+    if (sampleCount > 1) {
+        usage = static_cast<WGPUTextureUsage>(usage | WGPUTextureUsage_RenderAttachment);
+    }
+
+    // For depth/stencil the "expected" texels are obtained by reading the texture back, exactly
+    // as upstream createTextureWithRandomDataAndGetTexels does for unencodable depth. For color
+    // formats the expected texels are the CPU-side random data uploaded to the texture.
+    WGPUTexture texture;
+    std::vector<MipTexels> expectedTexels;
+    if (depthStencil) {
+        texture = fillDepthStencilTexture(t, srcFormat, dimension, baseSize, mipLevelCount, sampleCount, usage);
+        expectedTexels = readTextureToTexelViews(
+            t, texture, srcFormat, dimension, baseSize, mipLevelCount, sampleCount, viewDimension, texelViewFormat);
+    } else {
+        const CreatedTexture created = createColorTextureWithRandomData(
+            t, srcFormat, dimension, baseSize, mipLevelCount, sampleCount, viewDimension, usage);
+        texture = created.texture;
+        expectedTexels = created.texels;
+    }
+
+    const std::vector<MipTexels> actual = readTextureToTexelViews(
+        t, texture, srcFormat, dimension, baseSize, mipLevelCount, sampleCount, viewDimension, texelViewFormat);
+
+    t.expect(actual.size() == expectedTexels.size(), "num mip levels match");
+
+    const FormatType type = getMetaTextureFormatType(srcFormat);
+    const bool singleChannel = type == FormatType::Depth;  // texture_depth_* -> one component
+    const double maxFractionalDiff = 0.0;
+
+    for (size_t mipLevel = 0; mipLevel < actual.size() && mipLevel < expectedTexels.size(); ++mipLevel) {
+        const MipTexels& actualMip = actual[mipLevel];
+        const MipTexels& expectedMip = expectedTexels[mipLevel];
+        const WGPUExtent3D mipSize = physicalMipSize(baseSize, dimension, static_cast<uint32_t>(mipLevel));
+
+        std::vector<std::string> errors;
+        for (uint32_t z = 0; z < mipSize.depthOrArrayLayers; ++z) {
+            for (uint32_t y = 0; y < mipSize.height; ++y) {
+                for (uint32_t x = 0; x < mipSize.width; ++x) {
+                    for (uint32_t s = 0; s < sampleCount; ++s) {
+                        // actual is stored as outFormat texels keyed (x*sampleCount+s).
+                        const TexelRepresentation& actualRep = texelRepresentation(actualMip.format);
+                        const uint64_t aOffset = (static_cast<uint64_t>(z) * actualMip.layout.rowsPerImage + y) * actualMip.layout.bytesPerRow
+                            + (static_cast<uint64_t>(x) * sampleCount + s) * actualRep.bytesPerBlock;
+                        const TexelComponents actualComps = actualRep.bitsToNumber(
+                            actualRep.unpackBits(actualMip.data.data() + aOffset, actualMip.data.size() - aOffset));
+                        const MetaColor actualRGBA = convertPerTexelComponentToResultFormat(actualComps, actualMip.format);
+
+                        TexelComponents expComps;
+                        const WGPUTextureFormat outViewFormat = effectiveTexelViewFormat(texelViewFormat);
+                        const TexelRepresentation& outRep = texelRepresentation(outViewFormat);
+                        if (depthStencil) {
+                            // expected texels already came from a readback in texelViewFormat.
+                            const uint64_t eOffset = (static_cast<uint64_t>(z) * expectedMip.layout.rowsPerImage + y) * expectedMip.layout.bytesPerRow
+                                + (static_cast<uint64_t>(x) * sampleCount + s) * outRep.bytesPerBlock;
+                            expComps = outRep.bitsToNumber(outRep.unpackBits(expectedMip.data.data() + eOffset, expectedMip.data.size() - eOffset));
+                        } else {
+                            // expected: decode from the source texels then convert to the texelView format.
+                            const MetaColor srcRGBA = colorOfMip(expectedMip, x, y, z, s, sampleCount);
+                            expComps.values[0] = srcRGBA.v[0];
+                            expComps.values[1] = srcRGBA.v[1];
+                            expComps.values[2] = srcRGBA.v[2];
+                            expComps.values[3] = srcRGBA.v[3];
+                            expComps = outRep.bitsToNumber(outRep.numberToBits(expComps));
+                        }
+                        const MetaColor expectedRGBA = convertPerTexelComponentToResultFormat(expComps, outViewFormat);
+
+                        if (!texelsApproximatelyEqual(actualRGBA, expectedRGBA, outViewFormat, singleChannel, maxFractionalDiff)) {
+                            std::ostringstream msg;
+                            msg << "texel at " << x << ", " << y << ", " << z << ", sampleIndex: " << s
+                                << " expected: " << formatTexel(expComps, outViewFormat)
+                                << ", actual: " << formatTexel(actualComps, actualMip.format);
+                            errors.push_back(msg.str());
+                        }
+                    }
+                }
+            }
+        }
+        if (!errors.empty()) {
+            std::ostringstream joined;
+            for (size_t i = 0; i < errors.size(); ++i) {
+                joined << errors[i];
+                if (i + 1 < errors.size()) {
+                    joined << "\n";
+                }
+            }
+            t.fail(joined.str());
+        }
+    }
+}
+
+void executeWeights(AllFeaturesMaxLimitsGpuTest& t) {
+    const std::string stage = t.param<std::string>("stage");
+    const StageWeights weights = queryMipLevelMixWeightsForDeviceStage(t, stage);
+    validateWeights(t, stage, "textureSampleLevel", weights.sampleLevelWeights);
+    validateWeights(t, stage, "textureSampleGrad", weights.softwareMixToGPUMixGradWeights);
 }
 
 } // namespace cts::texture_utils
