@@ -1,0 +1,382 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Ported from gpuweb/cts src/webgpu/shader/validation/expression/call/builtin/textureSampleLevel.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Upstream CTS: Copyright (c) 2022 The WebGPU CTS Contributors, BSD-3-Clause.
+// Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
+//
+// Validation tests for the textureSampleLevel() builtin: coords / array_index /
+// level / offset parameter types, the const-expression and [-8,7] range
+// requirements on offset, the return type (vec4f for color textures, f32 for
+// depth textures), and incompatible texture types. The level parameter is f32
+// for color/sampled textures and an integer (i32/u32) for depth textures, as
+// recorded by levelIsF32 in the local kValidTextureSampleLevelParameterTypes
+// table (object key order preserved). .specURL is dropped (unsupported).
+
+#include <string>
+#include <vector>
+
+#include "cts/test.h"
+#include "webgpu/shader/validation/expression/binary/binary_types.h"
+#include "webgpu/shader/validation/expression/call/builtin/shader_builtin_utils.h"
+#include "webgpu/shader/validation/shader_validation_test.h"
+
+using namespace cts;
+using cts::shader_validation::ShaderValidationTest;
+namespace b = cts::shader_validation::builtin;
+namespace bt = cts::shader_validation::binary;
+
+namespace {
+
+TestGroup<ShaderValidationTest> g = MakeTestGroup<ShaderValidationTest>(
+    "shader,validation,expression,call,builtin,textureSampleLevel",
+    "Validation tests for the textureSampleLevel() builtin.");
+
+// kValidTextureSampleLevelParameterTypes (object key order preserved).
+struct SampleArgs {
+    std::string textureType;
+    bt::Type coordsArgType;
+    bool hasArrayIndexArg;
+    bool levelIsF32;
+    bt::Type offsetArgType;
+    bool hasOffset;
+};
+const std::vector<SampleArgs>& kValidTextureSampleLevelParameterTypes() {
+    using bt::ScalarKind;
+    static const bt::Type none{};  // placeholder when hasOffset == false
+    static const std::vector<SampleArgs> v = {
+        {"texture_1d<f32>", bt::scalar(ScalarKind::F32), false, true, none, false},
+        {"texture_2d<f32>", bt::vec(2, ScalarKind::F32), false, true, bt::vec(2, ScalarKind::I32),
+         true},
+        {"texture_2d_array<f32>", bt::vec(2, ScalarKind::F32), true, true,
+         bt::vec(2, ScalarKind::I32), true},
+        {"texture_3d<f32>", bt::vec(3, ScalarKind::F32), false, true, bt::vec(3, ScalarKind::I32),
+         true},
+        {"texture_cube<f32>", bt::vec(3, ScalarKind::F32), false, true, none, false},
+        {"texture_cube_array<f32>", bt::vec(3, ScalarKind::F32), true, true, none, false},
+        {"texture_depth_2d", bt::vec(2, ScalarKind::F32), false, false, bt::vec(2, ScalarKind::I32),
+         true},
+        {"texture_depth_2d_array", bt::vec(2, ScalarKind::F32), true, false,
+         bt::vec(2, ScalarKind::I32), true},
+        {"texture_depth_cube", bt::vec(3, ScalarKind::F32), false, false, none, false},
+        {"texture_depth_cube_array", bt::vec(3, ScalarKind::F32), true, false, none, false},
+    };
+    return v;
+}
+const SampleArgs* sampleArgsByName(const std::string& name) {
+    for (const SampleArgs& s : kValidTextureSampleLevelParameterTypes()) {
+        if (s.textureType == name) {
+            return &s;
+        }
+    }
+    return nullptr;
+}
+std::vector<Value> sampleTextureTypeKeys() {
+    std::vector<Value> out;
+    for (const SampleArgs& s : kValidTextureSampleLevelParameterTypes()) {
+        out.emplace_back(s.textureType);
+    }
+    return out;
+}
+
+CTS_TEST(g, "return_type")
+    .desc("Validates the return type of textureSampleLevel is the expected type.")
+    .params([](ParamsBuilder u) {
+        return u.combine("returnType", bt::typeNames(bt::kAllScalarsAndVectors()))
+            .combine("textureType", sampleTextureTypeKeys())
+            .beginSubcases()
+            .expand("offset", [](const ParamRecord& p) {
+                const SampleArgs* s =
+                    sampleArgsByName(valueAs<std::string>(*findParam(p, "textureType")));
+                if (s != nullptr && s->hasOffset) {
+                    return std::vector<Value>{Value(false), Value(true)};
+                }
+                return std::vector<Value>{Value(false)};
+            });
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string returnType = t.param<std::string>("returnType");
+        const std::string textureType = t.param<std::string>("textureType");
+        const bool offset = t.param<bool>("offset");
+        const bt::Type returnVarType = bt::typeByName(returnType);
+        const SampleArgs* s = sampleArgsByName(textureType);
+        const bt::Type returnExpectedType = textureType.find("depth") != std::string::npos
+                                                ? bt::scalar(bt::ScalarKind::F32)
+                                                : bt::vec(4, bt::ScalarKind::F32);
+
+        const std::string varWGSL = returnVarType.toString();
+        const std::string coordWGSL = bt::createWgsl(s->coordsArgType, 0);
+        const std::string arrayWGSL = s->hasArrayIndexArg ? ", 0" : "";
+        const std::string offsetWGSL = offset ? (", " + bt::createWgsl(s->offsetArgType, 0)) : "";
+
+        const std::string code =
+            "\n@group(0) @binding(0) var s: sampler;\n@group(0) @binding(1) var t: " + textureType +
+            ";\n@fragment fn fs() -> @location(0) vec4f {\n  let v: " + varWGSL +
+            " = textureSampleLevel(t, s, " + coordWGSL + arrayWGSL + ", 0" + offsetWGSL +
+            ");\n  return vec4f(0);\n}\n";
+        const bool expectSuccess = bt::isConvertible(returnExpectedType, returnVarType);
+        t.expectCompileResult(expectSuccess, code);
+    });
+
+CTS_TEST(g, "coords_argument")
+    .desc("Validates that only incorrect coords arguments are rejected by textureSampleLevel")
+    .params([](ParamsBuilder u) {
+        return u.combine("textureType", sampleTextureTypeKeys())
+            .combine("coordType", bt::typeNames(bt::kAllScalarsAndVectors()))
+            .beginSubcases()
+            .combine("value", {Value(-1), Value(0), Value(1)})
+            .filter([](const ParamRecord& p) {
+                return !b::isUnsignedType(
+                           bt::typeByName(valueAs<std::string>(*findParam(p, "coordType")))) ||
+                       valueAs<int64_t>(*findParam(p, "value")) >= 0;
+            })
+            .expand("offset", [](const ParamRecord& p) {
+                const SampleArgs* s =
+                    sampleArgsByName(valueAs<std::string>(*findParam(p, "textureType")));
+                if (s != nullptr && s->hasOffset) {
+                    return std::vector<Value>{Value(false), Value(true)};
+                }
+                return std::vector<Value>{Value(false)};
+            });
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string textureType = t.param<std::string>("textureType");
+        const std::string coordType = t.param<std::string>("coordType");
+        const bool offset = t.param<bool>("offset");
+        const int64_t value = t.param<int64_t>("value");
+        const bt::Type coordArgType = bt::typeByName(coordType);
+        const SampleArgs* s = sampleArgsByName(textureType);
+
+        const std::string coordWGSL = bt::createWgsl(coordArgType, static_cast<long long>(value));
+        const std::string arrayWGSL = s->hasArrayIndexArg ? ", 0" : "";
+        const std::string offsetWGSL = offset ? (", " + bt::createWgsl(s->offsetArgType, 0)) : "";
+
+        const std::string code =
+            "\n@group(0) @binding(0) var s: sampler;\n@group(0) @binding(1) var t: " + textureType +
+            ";\n@fragment fn fs() -> @location(0) vec4f {\n  let v = textureSampleLevel(t, s, " +
+            coordWGSL + arrayWGSL + ", 0" + offsetWGSL + ");\n  return vec4f(0);\n}\n";
+        const bool expectSuccess = bt::isConvertible(coordArgType, s->coordsArgType);
+        t.expectCompileResult(expectSuccess, code);
+    });
+
+CTS_TEST(g, "array_index_argument")
+    .desc("Validates that only incorrect array_index arguments are rejected by textureSampleLevel")
+    .params([](ParamsBuilder u) {
+        return u.combine("textureType", sampleTextureTypeKeys())
+            .filter([](const ParamRecord& p) {
+                const SampleArgs* s =
+                    sampleArgsByName(valueAs<std::string>(*findParam(p, "textureType")));
+                return s != nullptr && s->hasArrayIndexArg;
+            })
+            .combine("arrayIndexType", bt::typeNames(bt::kAllScalarsAndVectors()))
+            .beginSubcases()
+            .combine("value", {Value(-9), Value(-8), Value(0), Value(7), Value(8)})
+            .filter([](const ParamRecord& p) {
+                return !b::isUnsignedType(
+                           bt::typeByName(valueAs<std::string>(*findParam(p, "arrayIndexType")))) ||
+                       valueAs<int64_t>(*findParam(p, "value")) >= 0;
+            })
+            .expand("offset", [](const ParamRecord& p) {
+                const SampleArgs* s =
+                    sampleArgsByName(valueAs<std::string>(*findParam(p, "textureType")));
+                if (s != nullptr && s->hasOffset) {
+                    return std::vector<Value>{Value(false), Value(true)};
+                }
+                return std::vector<Value>{Value(false)};
+            });
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string textureType = t.param<std::string>("textureType");
+        const std::string arrayIndexType = t.param<std::string>("arrayIndexType");
+        const int64_t value = t.param<int64_t>("value");
+        const bool offset = t.param<bool>("offset");
+        const bt::Type arrayIndexArgType = bt::typeByName(arrayIndexType);
+        const SampleArgs* s = sampleArgsByName(textureType);
+
+        const std::string coordWGSL = bt::createWgsl(s->coordsArgType, 0);
+        const std::string arrayWGSL =
+            bt::createWgsl(arrayIndexArgType, static_cast<long long>(value));
+        const std::string offsetWGSL = offset ? (", " + bt::createWgsl(s->offsetArgType, 0)) : "";
+
+        const std::string code =
+            "\n@group(0) @binding(0) var s: sampler;\n@group(0) @binding(1) var t: " + textureType +
+            ";\n@fragment fn fs() -> @location(0) vec4f {\n  let v = textureSampleLevel(t, s, " +
+            coordWGSL + ", " + arrayWGSL + ", 0" + offsetWGSL + ");\n  return vec4f(0);\n}\n";
+        const bool expectSuccess =
+            bt::isConvertible(arrayIndexArgType, bt::scalar(bt::ScalarKind::I32)) ||
+            bt::isConvertible(arrayIndexArgType, bt::scalar(bt::ScalarKind::U32));
+        t.expectCompileResult(expectSuccess, code);
+    });
+
+CTS_TEST(g, "level_argument")
+    .desc("Validates that only incorrect level arguments are rejected by textureSampleLevel")
+    .params([](ParamsBuilder u) {
+        return u.combine("textureType", sampleTextureTypeKeys())
+            .combine("levelType", bt::typeNames(bt::kAllScalarsAndVectors()))
+            .beginSubcases()
+            .combine("value", {Value(-1), Value(0), Value(1)})
+            .filter([](const ParamRecord& p) {
+                return !b::isUnsignedType(
+                           bt::typeByName(valueAs<std::string>(*findParam(p, "levelType")))) ||
+                       valueAs<int64_t>(*findParam(p, "value")) >= 0;
+            })
+            .expand("offset", [](const ParamRecord& p) {
+                const SampleArgs* s =
+                    sampleArgsByName(valueAs<std::string>(*findParam(p, "textureType")));
+                if (s != nullptr && s->hasOffset) {
+                    return std::vector<Value>{Value(false), Value(true)};
+                }
+                return std::vector<Value>{Value(false)};
+            });
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string textureType = t.param<std::string>("textureType");
+        const std::string levelType = t.param<std::string>("levelType");
+        const int64_t value = t.param<int64_t>("value");
+        const bool offset = t.param<bool>("offset");
+        const bt::Type levelArgType = bt::typeByName(levelType);
+        const SampleArgs* s = sampleArgsByName(textureType);
+
+        const std::string coordWGSL = bt::createWgsl(s->coordsArgType, 0);
+        const std::string arrayWGSL = s->hasArrayIndexArg ? ", 0" : "";
+        const std::string levelWGSL = bt::createWgsl(levelArgType, static_cast<long long>(value));
+        const std::string offsetWGSL = offset ? (", " + bt::createWgsl(s->offsetArgType, 0)) : "";
+
+        const std::string code =
+            "\n@group(0) @binding(0) var s: sampler;\n@group(0) @binding(1) var t: " + textureType +
+            ";\n@fragment fn fs() -> @location(0) vec4f {\n  let v = textureSampleLevel(t, s, " +
+            coordWGSL + arrayWGSL + ", " + levelWGSL + offsetWGSL +
+            ");\n  return vec4f(0);\n}\n";
+        const bool expectSuccess =
+            s->levelIsF32 ? bt::isConvertible(levelArgType, bt::scalar(bt::ScalarKind::F32))
+                          : (bt::isConvertible(levelArgType, bt::scalar(bt::ScalarKind::I32)) ||
+                             bt::isConvertible(levelArgType, bt::scalar(bt::ScalarKind::U32)));
+        t.expectCompileResult(expectSuccess, code);
+    });
+
+CTS_TEST(g, "offset_argument")
+    .desc("Validates that only incorrect offset arguments are rejected by textureSampleLevel")
+    .params([](ParamsBuilder u) {
+        return u.combine("textureType", sampleTextureTypeKeys())
+            .filter([](const ParamRecord& p) {
+                const SampleArgs* s =
+                    sampleArgsByName(valueAs<std::string>(*findParam(p, "textureType")));
+                return s != nullptr && s->hasOffset;
+            })
+            .combine("offsetType", bt::typeNames(bt::kAllScalarsAndVectors()))
+            .beginSubcases()
+            .combine("value", {Value(-9), Value(-8), Value(0), Value(7), Value(8)})
+            .filter([](const ParamRecord& p) {
+                return !b::isUnsignedType(
+                           bt::typeByName(valueAs<std::string>(*findParam(p, "offsetType")))) ||
+                       valueAs<int64_t>(*findParam(p, "value")) >= 0;
+            });
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string textureType = t.param<std::string>("textureType");
+        const std::string offsetType = t.param<std::string>("offsetType");
+        const int64_t value = t.param<int64_t>("value");
+        const bt::Type offsetArgType = bt::typeByName(offsetType);
+        const SampleArgs* s = sampleArgsByName(textureType);
+
+        const std::string coordWGSL = bt::createWgsl(s->coordsArgType, 0);
+        const std::string arrayWGSL = s->hasArrayIndexArg ? ", 0" : "";
+        const std::string offsetWGSL =
+            bt::createWgsl(offsetArgType, static_cast<long long>(value));
+
+        const std::string code =
+            "\n@group(0) @binding(0) var s: sampler;\n@group(0) @binding(1) var t: " + textureType +
+            ";\n@fragment fn fs() -> @location(0) vec4f {\n  let v = textureSampleLevel(t, s, " +
+            coordWGSL + arrayWGSL + ", 0, " + offsetWGSL + ");\n  return vec4f(0);\n}\n";
+        const bool expectSuccess =
+            bt::isConvertible(offsetArgType, s->offsetArgType) && value >= -8 && value <= 7;
+        t.expectCompileResult(expectSuccess, code);
+    });
+
+CTS_TEST(g, "offset_argument,non_const")
+    .desc("Validates that only non-const offset arguments are rejected by textureSampleLevel")
+    .params([](ParamsBuilder u) {
+        return u.combine("textureType", sampleTextureTypeKeys())
+            .combine("varType", {Value(std::string("c")), Value(std::string("u")),
+                                 Value(std::string("l"))})
+            .filter([](const ParamRecord& p) {
+                const SampleArgs* s =
+                    sampleArgsByName(valueAs<std::string>(*findParam(p, "textureType")));
+                return s != nullptr && s->hasOffset;
+            });
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string textureType = t.param<std::string>("textureType");
+        const std::string varType = t.param<std::string>("varType");
+        const SampleArgs* s = sampleArgsByName(textureType);
+
+        const std::string coordWGSL = bt::createWgsl(s->coordsArgType, 0);
+        const std::string arrayWGSL = s->hasArrayIndexArg ? ", 0" : "";
+        const std::string offsetTypeStr = s->offsetArgType.toString();
+        const std::string offsetWGSL = offsetTypeStr + "(" + varType + ")";
+
+        const std::string code =
+            "\n@group(0) @binding(0) var s: sampler;\n@group(0) @binding(1) var t: " + textureType +
+            ";\n@group(0) @binding(2) var<uniform> u: " + offsetTypeStr +
+            ";\n@fragment fn fs() -> @location(0) vec4f {\n  const c = 1;\n  let l = " +
+            bt::createWgsl(s->offsetArgType, 0) + ";\n  let v = textureSampleLevel(t, s, " +
+            coordWGSL + arrayWGSL + ", 0, " + offsetWGSL + ");\n  return vec4f(0);\n}\n";
+        const bool expectSuccess = varType == "c";
+        t.expectCompileResult(expectSuccess, code);
+    });
+
+CTS_TEST(g, "texture_type")
+    .desc("Validates that incompatible texture types don't work with textureSampleLevel")
+    .params([](ParamsBuilder u) {
+        return u.combine("testTextureType", b::kTestTextureTypes())
+            .beginSubcases()
+            .combine("textureType", sampleTextureTypeKeys())
+            .expand("offset", [](const ParamRecord& p) {
+                const SampleArgs* s =
+                    sampleArgsByName(valueAs<std::string>(*findParam(p, "textureType")));
+                if (s != nullptr && s->hasOffset) {
+                    return std::vector<Value>{Value(false), Value(true)};
+                }
+                return std::vector<Value>{Value(false)};
+            });
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string testTextureType = t.param<std::string>("testTextureType");
+        const std::string textureType = t.param<std::string>("textureType");
+        const bool offset = t.param<bool>("offset");
+        const SampleArgs* s = sampleArgsByName(textureType);
+
+        const std::string coordWGSL = bt::createWgsl(s->coordsArgType, 0);
+        const std::string arrayWGSL = s->hasArrayIndexArg ? ", 0" : "";
+        const std::string offsetWGSL = offset ? (", " + bt::createWgsl(s->offsetArgType, 0)) : "";
+
+        const std::string code =
+            "\n@group(0) @binding(0) var s: sampler;\n@group(0) @binding(1) var t: " +
+            testTextureType + ";\n@fragment fn fs() -> @location(0) vec4f {\n  let v = "
+            "textureSampleLevel(t, s, " +
+            coordWGSL + arrayWGSL + ", 0" + offsetWGSL + ");\n  return vec4f(0);\n}\n";
+
+        const SampleArgs* types = sampleArgsByName(testTextureType);
+        bool typesMatch = false;
+        if (types != nullptr) {
+            typesMatch = types->coordsArgType == s->coordsArgType &&
+                         types->hasArrayIndexArg == s->hasArrayIndexArg &&
+                         (offset ? (types->hasOffset == s->hasOffset &&
+                                    types->offsetArgType == s->offsetArgType)
+                                 : true);
+        }
+        const bool expectSuccess = testTextureType == textureType || typesMatch;
+        t.expectCompileResult(expectSuccess, code);
+    });
+
+CTS_TEST(g, "must_use")
+    .desc("Tests that the result must be used")
+    .params([](ParamsBuilder u) { return u.combine("use", {Value(true), Value(false)}); })
+    .fn([](ShaderValidationTest& t) {
+        const bool use = t.param<bool>("use");
+        const std::string code =
+            "\n    @group(0) @binding(0) var t : texture_2d<f32>;\n    @group(0) @binding(1) var s : "
+            "sampler;\n    fn foo() {\n      " +
+            std::string(use ? "_ =" : "") + " textureSampleLevel(t,s,vec2(0,0), 0);\n    }";
+        t.expectCompileResult(use, code);
+    });
+
+}  // namespace
