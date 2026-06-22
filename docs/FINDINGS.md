@@ -2222,4 +2222,37 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-135 — yawgpu Vulkan HAL: device-creation resource LEAK under per-process churn (whole-process collateral)
+
+- **Backend:** yawgpu (native Vulkan) — **yawgpu-specific HAL**. The failure string `HAL device creation
+  failed: vulkan` is yawgpu's own HAL device-creation layer (wgpu-native uses a different wgpu-core HAL, so
+  it is not shared, unlike F-133/F-134).
+- **Found by:** investigating the phaseH3 device-recycle (`32c1b34`) on Vulkan, 2026-06-23 (cts.exe
+  `85e7d9b`, yawgpu.dll Jun 21). Tests that own/churn their **own** `instance+adapter+device`
+  (the `capability_checks,limits,*` `LimitTest` fixture `limit_utils.h:330-432`, and
+  `state,device_lost,destroy` `destroy.spec.cpp:104,176,…`) create+destroy a device every case. In one
+  process this **leaks device-creation resources**; after ~150 creations `wgpuRequestDevice` starts failing.
+- **Tight repro (single file, ≤1k cases):**
+  `api,validation,capability_checks,limits,maxStorageBuffersPerShaderStage:*` (700 cases):
+  - single process, `CTS_DEVICE_RECYCLE_INTERVAL=0`, `--workers 1` → **fail=318, all
+    `requestDevice failed: HAL device creation failed: vulkan`** (onset at result ~#151; thereafter
+    success/failure intermixed → leak hovering at the creation ceiling, not a hard cliff).
+  - `--isolate --workers 1` (fresh process per case) → **fail=0**.
+- **Whole-area context:** full `api,validation` (39,349) single-proc recycle@500 = fail=13 **crash=9**
+  (`0xC0000005` access violations in exactly these churning families) vs `--isolate` truth = fail=5 crash=0.
+  So the leak manifests **nondeterministically** as either cascade device-creation failures or hard
+  access-violation crashes. The 9 crash areas are 100% clean per-case under isolate (11,677 records).
+- **Harness recycle is the WRONG LAYER:** phaseH3 rebuilds only the harness *cache* device; these tests
+  never use it → recycle (any interval) cannot help. `--isolate` (per-case process) is the only harness-level
+  containment and stays authoritative on Vulkan.
+- **Cross-check (wgpu-native):** INCONCLUSIVE — wgpu-native panics immediately on this file
+  (`src\lib.rs:2754: invalid error filter`, exit 127, a **separate unrelated wgpu-native bug**), so it never
+  reaches the churn. The yawgpu HAL error string already localizes the leak to yawgpu. A CTS-test-free
+  minimal churn loop (createInstance→adapter→device→release ×N) would give the definitive cross-backend proof.
+- **Status:** OPEN, **yawgpu-specific HAL**. Root-cause fix is in the yawgpu repo (device/instance teardown
+  leak in the Vulkan HAL). CTS-side carry: run these device-churning families under `--isolate` /
+  selective `--crash-list`. Spec: `specs/investigate-yawgpu-device-create-leak.md` (F-135).
+
+---
+
 _Add new findings as `F-00N` with the same fields._
