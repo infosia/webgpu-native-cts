@@ -2145,9 +2145,10 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   emits a clean validation error on the exact 6 cases — no crash.** So this is a **yawgpu naga-fork
   regression/robustness gap**, not shared upstream-naga behavior. A worker abort takes out the whole shard,
   so it also blocks neighbouring cases in single-process runs.
-- **Status:** OPEN (2026-06-22). yawgpu-fork fix: guard the `bitcast` lowering to return a validation error
-  for non-numeric source types instead of `unwrap()`. **Highest-priority of the cross-check findings (it is a
-  crash).** Re-verify after the fork patch.
+- **Status:** **RESOLVED** (yawgpu naga fork). Re-verified Metal: `bitcast:*` **crash=0** (the 6 abort
+  cases now compile to a clean validation error / pass; `pass=400 → 406`). The remaining 158 `bitcast` fails
+  are the unrelated shared-naga const-eval validation gaps tracked under **F-133** (e.g. `bad_const_to_f16`,
+  identical on wgpu-native), not this crash.
 
 ## F-132 — yawgpu: override-evaluated negative out-of-bounds array/matrix index not flagged at pipeline creation — Metal
 
@@ -2163,8 +2164,9 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   expected) / **yawgpu fail** (no error) / wgpu-native **pass**. The matrix `early_eval_errors` case behaves
   identically. So yawgpu differs from BOTH Dawn and upstream naga → **yawgpu-specific** override-range
   validation gap.
-- **Status:** OPEN (2026-06-22). yawgpu-fork fix: enforce the negative/OOB override-index range check at
-  pipeline creation. Low volume (10 cases) but a genuine yawgpu-only validation gap.
+- **Status:** **RESOLVED** (yawgpu naga fork). Re-verified Metal: `shader,validation,expression,access,*`
+  **fail=0** (array + matrix `early_eval_errors` now flag the OOB override index at pipeline creation,
+  Dawn-equal).
 
 ## F-133 — upstream-naga (shared yawgpu+wgpu-native): WGSL-frontend validation/const-eval gaps vs tint — NOT yawgpu-specific
 
