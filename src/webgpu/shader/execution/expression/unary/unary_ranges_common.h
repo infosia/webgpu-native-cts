@@ -88,8 +88,10 @@ inline I128 i128FromI64(int64_t v) {
 inline I128 i128Mul(int64_t a, int64_t b) {
     // Signed 64x64 -> 128.
     const bool neg = (a < 0) != (b < 0);
-    uint64_t ua = static_cast<uint64_t>(a < 0 ? -(static_cast<unsigned long long>(a)) : a);
-    uint64_t ub = static_cast<uint64_t>(b < 0 ? -(static_cast<unsigned long long>(b)) : b);
+    // Negate in unsigned (0 - x, not -x) so INT64_MIN is well-defined and MSVC
+    // does not warn C4146 (unary minus on unsigned type).
+    uint64_t ua = static_cast<uint64_t>(a < 0 ? (0ull - static_cast<unsigned long long>(a)) : static_cast<unsigned long long>(a));
+    uint64_t ub = static_cast<uint64_t>(b < 0 ? (0ull - static_cast<unsigned long long>(b)) : static_cast<unsigned long long>(b));
     // Unsigned 64x64 -> 128.
     const uint64_t a0 = ua & 0xFFFFFFFFull, a1 = ua >> 32;
     const uint64_t b0 = ub & 0xFFFFFFFFull, b1 = ub >> 32;

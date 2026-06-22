@@ -7,6 +7,8 @@
 // the [-pi, pi] domain (unbounded outside); abstract uses the f32 cosInterval (inherited).
 // f16 is deferred (no Metal oracle).
 
+// MSVC does not define M_PI unless _USE_MATH_DEFINES precedes <cmath> (benign on clang/gcc).
+#define _USE_MATH_DEFINES
 #include <cmath>
 #include <vector>
 

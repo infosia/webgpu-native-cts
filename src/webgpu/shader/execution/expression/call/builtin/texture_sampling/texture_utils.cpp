@@ -6317,7 +6317,7 @@ TexelGenerator makeRandomDepthComparisonTexelGenerator(WGPUTextureFormat format,
                                           static_cast<int64_t>(d)});
         const double normalized = clamp01(static_cast<double>(rnd) / 4294967295.0);
         const uint32_t fi = static_cast<uint32_t>(normalized * (kFixedValues.size() - 1));
-        const double value = kFixedValues[std::min<uint32_t>(fi, kFixedValues.size() - 1u)];
+        const double value = kFixedValues[std::min<uint32_t>(fi, static_cast<uint32_t>(kFixedValues.size() - 1u))];
         texel.values[0] = quantizeDepthStencilValue(quantFormat, value);
         return texel;
     };
@@ -6381,7 +6381,7 @@ double ulpFromZero(double value, ComponentDataType type, uint32_t bits) {
             const double scale = type == ComponentDataType::Snorm
                 ? static_cast<double>((1 << (bits - 1)) - 1)
                 : static_cast<double>(bits >= 32 ? 4294967295.0 : ((1u << bits) - 1u));
-            return std::llround(value * scale);
+            return static_cast<double>(std::llround(value * scale));
         }
         case ComponentDataType::Float:
         case ComponentDataType::Ufloat: {

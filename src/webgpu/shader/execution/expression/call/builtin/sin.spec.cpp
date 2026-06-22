@@ -6,6 +6,8 @@
 // Execution tests for the 'sin' builtin function. sin has an inherited accuracy (absolute-error
 // 2^-11 for f32 over the [-pi, pi] domain); abstract uses the f32 sinInterval. f16 is deferred.
 
+// MSVC does not define M_PI unless _USE_MATH_DEFINES precedes <cmath> (benign on clang/gcc).
+#define _USE_MATH_DEFINES
 #include <cmath>
 #include <vector>
 

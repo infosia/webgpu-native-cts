@@ -246,7 +246,17 @@ std::string wgSizeToString(const WGSize& size) {
 
 WGSize wgSizeFromString(const std::string& text) {
     WGSize size{1, 1, 1};
+    // MSVC deprecates std::sscanf (C4996) under /W4 /WX; the parse is numeric-only
+    // (no %s/%c buffer), so suppress narrowly here rather than switch to the
+    // non-portable sscanf_s (same pattern as common/harness.cpp).
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
     std::sscanf(text.c_str(), "[%u,%u,%u]", &size[0], &size[1], &size[2]);
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
     return size;
 }
 
@@ -266,7 +276,14 @@ std::string framebufferSizeToString(const FramebufferSize& size) {
 
 FramebufferSize framebufferSizeFromString(const std::string& text) {
     FramebufferSize size{3, 3};
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
     std::sscanf(text.c_str(), "[%u,%u]", &size[0], &size[1]);
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
     return size;
 }
 
