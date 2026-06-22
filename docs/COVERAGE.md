@@ -416,9 +416,13 @@ Notes on the pre-classified rows:
   shader execution is essentially complete (phaseY7–Y13): all structural files + the entire
   `expression/call/builtin` family (atomics, texture, sync/derivative, integer/bit/pack, the P4
   math/trig builtins on a ported **FP-interval acceptance framework** — f32/f16/abstract — and all
-  binary/unary operators, conversions, constructors, access). The remaining **13 deferred** are the
-  `subgroup*`/`quadBroadcast`/`quadSwap` **execution** builtins (optional `subgroups` feature — Dawn-Metal
-  skips, no oracle) + `texture_utils` (an upstream util, N/A). `shader/validation` is now **complete**
+  binary/unary operators, conversions, constructors, access). The remaining **13** (phaseY14, in progress)
+  are the `subgroup*`/`quadBroadcast`/`quadSwap` **execution** builtins (10 subgroup + 2 quad) +
+  `texture_utils` (a real 3-`g.test` meta-test of the CTS texture random-data / texel-readback /
+  sampling-weight helpers — **not** a plain util). **Reclassified 2026-06-22: portable with a Dawn-Metal
+  oracle** — Dawn advertises `WGPUFeatureName_Subgroups` on Metal (the phaseSV2 subgroup *validation*
+  specs ran, and Dawn's own CTS expectations run subgroup *execution* on Mac, e.g. an `[ amd mac ]`
+  entry), so the earlier "Dawn-Metal skips, no oracle / N/A" note was stale. `shader/validation` is now **complete**
   (phaseSV1 `extension`/`shader_io`/`decl`/`functions`/`types`/`const_assert`/`uniformity`; phaseSV2
   `parse`/`statement`/`expression` incl. all 114 builtin signature/type/const-overflow validation specs —
   the subgroup/quad *validation* builtins **do** run on Dawn-Metal since the feature is present). Dawn
