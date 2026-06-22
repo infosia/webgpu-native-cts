@@ -83,23 +83,23 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 
 ## Status
 
-**Active.** The harness is complete; tests are ported in parallel batches. All three backends build
-link-agnostically and run on real GPUs — verified on **macOS / Apple Metal** and **Windows 11 / Vulkan**
-(NVIDIA RTX 5060 Ti). Coverage so far: the entire **`api`** surface, **all of `shader/execution`** (P4
-math/trig on a ported FP-interval acceptance framework — f32/f16/abstract; the `subgroup*`/`quad*`
-execution builtins on a ported `subgroup_util` engine; the `texture_utils` meta-test), and **all of
-`shader/validation`** (parse/statement/expression incl. the 114 builtin signature/type/const-overflow
-validation specs, on a ported `ShaderValidationTest` enabler).
-See [coverage](#port-coverage) below and [COVERAGE](docs/COVERAGE.md).
+**Active.** The harness is complete and all three backends build link-agnostically and run on real GPUs
+(**macOS / Apple Metal** and **Windows 11 / Vulkan**, NVIDIA RTX 5060 Ti). **Every portable upstream area is
+ported:** the entire **`api`** surface (`api/validation` + `api/operation`), **all of `shader/execution`**
+(the FP-interval f32/f16/abstract math framework, the `subgroup*`/`quad*` execution builtins on a ported
+`subgroup_util` engine, and the `texture_utils` meta-test), and **all of `shader/validation`**
+(parse/statement/expression + the 114 builtin signature/type/const-overflow specs, on a ported
+`ShaderValidationTest` enabler). The only unported upstream is `compat` (todo) and `web_platform`/`idl`
+(N/A — no C-API surface). See [coverage](#port-coverage) below and [COVERAGE](docs/COVERAGE.md).
 
-**Current conformance (Metal whole-suite, 2026-06-20):** yawgpu's `api/*` and the phaseSV1
-`shader/validation` subdirs are `fail=0`, and its f32/f16/abstract **runtime** math is Dawn-equal. The
-phaseSV2 `shader/validation` additions (parse/statement/expression, 167 files, 2026-06-22) are
-**Dawn-oracle verified** (`fail=0` except 48 documented **F-130** divergences); their yawgpu cross-check is
-pending a later sweep (the campaign runs Dawn-only for speed). The one open yawgpu item remains **F-124** —
-the composite-result (matrix / struct / f16-struct) abstract-float **const-eval** readback (~88 cases).
-Per-finding history lives in [FINDINGS](docs/FINDINGS.md); per-backend numbers are in
-[Test results](#test-results) below.
+**Conformance (current).** Against the **Dawn** oracle every ported test is green except 48
+`shader/validation` cases (**F-130**, a Dawn const-fold gap). On **yawgpu** (Metal): `api/*` is `fail=0` and
+the f32/f16/abstract **runtime** math matches Dawn; its open implementation defects are **F-124**
+(composite-result abstract-float const-eval, ~88 cases), **F-131** (`bitcast`-from-non-numeric crash), and
+**F-132** (override-OOB index). The bulk of yawgpu's shader-frontend divergences are **shared with
+wgpu-native** (upstream naga, **F-133**/**F-134**) — not yawgpu-specific. **wgpu-native** is a panic-heavy
+bring-up reference. Per-backend numbers: [Test results](#test-results); per-finding detail:
+[FINDINGS](docs/FINDINGS.md).
 
 ### Port coverage
 
@@ -114,10 +114,10 @@ pie showData
     "Todo" : 20
 ```
 
-**The entire `api` surface is done** — all 201 `api/validation` + `api/operation` files are accounted for
-(complete, partial, or classified N/A), with **zero remaining todo**. "Addressed" below = complete + partial
-+ N/A (every upstream file resolved); the remainder is deferred (`subgroups` execution builtins,
-expression-precision execution) or todo.
+**Every portable area is done** — all 201 `api/*` files and all 446 `shader/*` files (execution +
+validation) are accounted for (complete, partial, or classified N/A), with **zero remaining todo** in those
+areas. "Addressed" below = complete + partial + N/A (every upstream file resolved); the only remainder is
+`compat` (todo) and `web_platform`/`idl` (N/A).
 
 ```mermaid
 xychart-beta
