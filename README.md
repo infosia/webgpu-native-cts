@@ -176,86 +176,40 @@ Buckets overlap where a finding affects several backends (e.g. F-045, F-082).
 
 ### Test results
 
-#### Metal whole-suite sweep (macOS) — 462 files, `webgpu:*:*` `--workers 8`
+#### Per-area conformance (Metal, macOS) — 642 files, by area, 2026-06-22
 
-The headline result. Whole-suite totals first; then **fails broken out by area** so naga-lineage
-findings are not conflated with yawgpu's own implementation. Reported `fail` is the **real,
-per-file-reproducible** count — whole-suite `adapter is "consumed"` / GPU-state-degradation collateral
-(verified `fail=0` re-run alone) is excluded.
+Real fails **by area**, so naga-lineage divergences are not conflated with yawgpu's own implementation.
+Reported counts are **isolation-confirmed real** fails/crashes — single-process whole-area runs accumulate
+`adapter is "consumed"` / GPU-state-degradation collateral (e.g. Dawn, the oracle, false-fails ~336k
+`api,validation` cases in one process; `fail=0` per-file), which is **excluded**. Each yawgpu/wgpu-native
+divergence is classified **yawgpu-only** (Dawn==wgpu-native pass, yawgpu differs) vs **shared upstream-naga**
+(yawgpu==wgpu-native, both vs Dawn/tint) per the 3-backend rule.
 
-| Backend | Platform | pass | skip | fail (real) | crash | Verdict |
-|---------|----------|-----:|-----:|-----:|------:|---------|
-| **Dawn** (oracle) | Metal | 1522679 | 81880 | **0** | 0 | green (oracle). Raw whole-suite 2562 `fail` is all adapter-consumed collateral, excluded |
-| **yawgpu** | Metal | 1264728 | 339376 | **~88** | 0 | `api/*` **fail=0**, `shader/validation` **fail=0** (F-120 fixed). The ~88 shader/execution non-passes are F-124 composite-result abstract-float/f16 const-eval (transpose/determinant/smoothstep abstract + modf/frexp); the scalar/vector path + F-122/F-123/F-125 are fixed. ~2443 api degradation collateral excluded |
-| **wgpu-native** | Metal | 1003747 | 398626 | 37567 | 38550 | bring-up reference (panic-heavy, **not** triaged) — see area split. Contained via crash-resume |
+| Area | **Dawn** (oracle) | **yawgpu** (Metal) | **wgpu-native** (Metal, bring-up) |
+|------|-------------------|--------------------|-----------------------------------|
+| `api/validation` (129) | **fail 0** | **fail 0** | panic-heavy bring-up (crash ≈6.9k, not triaged) |
+| `api/operation` (72) | **fail 0** | **fail 0** | panic-heavy bring-up (crash ≈0.2k, not triaged) |
+| `shader/execution` (239) | **fail 0** | **fail ~88** (F-124 composite abstract-float/f16 const-eval: transpose/determinant/smoothstep abstract + modf/frexp) **+ crash 16** (**F-134**, shared-naga `non_zero:concrete_vector_mix`). f32/f16/abstract **runtime** math all green; `subgroup*`/`quad*` correctly **skip** (no `subgroups` feature) | crash-heavy (panics) + F-124-class + F-134 |
+| `shader/validation` (207) | **fail 48** (**F-130**, `bitwise_shift:partial_eval_errors` lhs=const — a Dawn const-fold gap) | **fail 77486 + crash 6** → **F-131** crash 6 (`bitcast`-from-non-numeric, **yawgpu-only**) + **F-132** fail 10 (override-OOB index, **yawgpu-only**) + **F-133** ~77470 (**shared upstream-naga**) | **fail 73737** (**F-133** shared upstream-naga; ≈ yawgpu minus the 16 yawgpu-only cases) |
 
-**Fails by area** — where each backend's non-passes actually live:
+> **The split is the point.** yawgpu's `api/*` is **fully green** and its `shader/execution` **runtime** math
+> (f32/f16/abstract) matches Dawn. The 2026-06-22 phaseSV2/phaseY14 cross-check then found that, of yawgpu's
+> shader-frontend divergences, only **F-131** (bitcast crash) and **F-132** (override-OOB) are yawgpu-only;
+> the **~77k `shader/validation` + the const-eval `shader/execution` set are shared upstream-naga**
+> (byte-identical on yawgpu and wgpu-native, both vs Dawn/tint — naga frontend/const-eval gaps, **F-133/F-134**,
+> not yawgpu defects). The CTS ports stay **faithful and Dawn-oracle green** (only 48 F-130 Dawn divergences,
+> unmasked).
 
-| Backend | `api/*` | `shader/execution` | `shader/validation` |
-|---------|---------|--------------------|---------------------|
-| **yawgpu** | fail 0 (≈2443 degradation collateral, `fail=0` per-file) | **fail ~88** — only **F-124** composite-result abstract-float/f16 const-eval remains (transpose/determinant/smoothstep abstract + struct-returning modf/frexp abstract & f16); the scalar/vector abstract-float path + F-122/F-123/F-125 are fixed. f32/f16/abstract runtime math all green | **fail 0** — F-120 **RESOLVED** (structural validation + full graph uniformity analysis, yawgpu naga fork) |
-| **wgpu-native** | degradation collateral | **crash ~31k + fail ~4k** — no `shader-f16` + unimplemented/abstract-float paths panic | **fail 23467** — upstream naga (no uniformity analysis) + broader under-validation; yawgpu's fork fixed this, upstream naga has not |
+**Skips** (yawgpu) are large because of legitimately **feature-unsupported** cases on the Metal adapter —
+chiefly `subgroups` (the `uniformity` subgroup g.tests + the `subgroup*`/`quad*` execution builtins) and
+`unrestricted_pointer_parameters`. Dawn exposes these so it runs them. yawgpu's **`shader-f16` runs fully**
+(all f16 math/operators green, Dawn-equal), and the subgroup/quad **validation** specs run on Dawn-Metal.
 
-> **The split is the point:** yawgpu's `api/*` and `shader/validation` are now **fully green**; its only
-> non-passes are **const-eval** in `shader/execution` — the shared-naga abstract-float readback (F-124,
-> wgpu-native crashes the same cases) plus three small yawgpu-only const-eval bugs (F-122/F-123/F-125).
-> The f32/f16/abstract **runtime** math is entirely green, confirming yawgpu's HAL math + the FP-interval
-> framework agree with Dawn.
-
-**Skips:** large because of legitimately **feature-unsupported** cases on yawgpu's Metal adapter — chiefly
-`subgroups` (the `uniformity` subgroup g.tests alone skip ~133k) and `unrestricted_pointer_parameters`,
-plus the `subgroup*`/`quad*` execution builtins (deferred, no Metal oracle). Dawn has these features so it
-runs them. yawgpu's **`shader-f16` runs fully** (all f16 math/operators green, Dawn-equal).
-
-#### MoltenVK whole-suite sweep (macOS / Vulkan) — 462 files, `CTS_YAWGPU_BACKEND=vulkan` + MoltenVK
-
-| Backend | Platform | pass | skip | fail (real) | crash | Verdict |
-|---------|----------|-----:|-----:|-----:|------:|---------|
-| **yawgpu** | Vulkan (MoltenVK) | 1249037 | 339376 | **16154** | 16 | Vulkan-path residuals — **no new yawgpu-core defects**, and `shader/validation` **fail=0** (F-120 fork fix applies to Vulkan too). Decomposes into: **F-104** `copyTextureToTexture` 14512 (MoltenVK-only translation artifact, native-Vulkan-green, fail=14512 in isolation); **F-070-family** SPIRV-Cross residue (`zero_init`/`robust_access_vertex`/`shader_io,fragment_builtins`, MoltenVK-only); + `shader/execution` const-eval (F-124/F-122/F-123/F-125, same as Metal). Raw whole-suite `fail=18692` also includes ~2538 degradation collateral (`fail=0` per-file) — excluded |
-
-#### Native Vulkan whole-suite sweep (Windows 11 / NVIDIA RTX 5060 Ti) — 462 files, `cts.exe --isolate`
-
-The native-Vulkan platform result. yawgpu's native Vulkan HAL also passes the entire ported suite; the
-only `shader/execution` non-passes are the same **const-eval** set as Metal (F-124 + F-122/F-123/F-125),
-and `shader/validation` is `fail=0` (F-120 fork fix applies to Vulkan too). The MoltenVK translation
-artifacts (F-104 `copyTextureToTexture`, F-070-family SPIRV-Cross residue) are **not** yawgpu defects —
-each is green on native Vulkan.
-
-This sweep ran on the **Jun-19 `yawgpu.dll`**, which predates the naga fixes (F-120 uniformity/
-shader-validation, F-121 f16, F-122/F-123/F-125, F-124 scalar/vector), so the shader/validation + f16
-fails below are **expected residuals of already-resolved findings**, not new defects. On this box raw
-long sweeps **hard-freeze the machine** (a CPU-thermal limit, see **F-126**), so it was run in
-thermal-safe chunks with cooldowns and reached completion at **crash=0, no freeze**.
-
-**Counts are per-case** (`--isolate` = one process per case) — **not comparable** to the per-subcase
-Metal/MoltenVK rows above. Fails are per-subcase.
-
-| Backend | Platform | pass (case) | skip (case) | fail (subcase) | crash | xfail |
-|---------|----------|-----:|-----:|-----:|------:|------:|
-| **yawgpu** | Vulkan (native, NVIDIA RTX 5060 Ti) — **Jun-19 build** | 89794 | 59058 | **594** | 0 | 11 |
-
-- **~500 of the 594 are already-resolved or known-`xfail` on this pre-fix build:** `shader/validation`
-  **476** (**F-120** — `uniformity` 409 + shader_io/decl/etc; RESOLVED post-Jun-19), f16 **14** (**F-121**),
-  `fragment_builtins`/`render_pipeline,misc` **10** (**F-085**/**F-111** `xfail`).
-- **Genuinely-new native-Vulkan candidates (~92, need a post-rebuild re-sweep before filing):**
-  `shader,execution,robust_access` **24** (OOB write not clamped — `expected 0, got 3`), `textureStore`
-  `rgb10a2unorm` 3d/2d-array **20** (format pack), `textureLoad` `*-srgb` **24** (green-channel sRGB-decode
-  rounding, minor), `fwidth`/`fwidthFine`/`fwidthCoarse` f32 **24** (derivatives), and 1 `compute_pass`
-  `indirect_dispatch_buffer,usage` (`HAL queue submission failed`). Full decomposition in
-  [FINDINGS](docs/FINDINGS.md).
-
-#### wgpu-native (native Vulkan) — bring-up reference
-
-A **whole-suite** Vulkan run (234-file listing, `--workers 8`) measures
-`pass=289054 skip=215886 fail=9551 crash=7967 xfail=92` (raw). These are **not new defects** — they
-are the wgpu-native panic + missing-validation families already recorded per area in
-[COVERAGE](docs/COVERAGE.md) as *bring-up reference* (F-097 device-lost 2568; F-027/F-028 3D
-copy/readback ≈3000; the F-092-area depth-readonly gaps 864; limits/alignment `unimplemented!()`
-panics, contained as `crash` by `--workers` crash-resume). wgpu-native's
-`expectations/wgpu-native-vulkan.txt` (8 lines) has **not yet been regenerated for the grown suite**,
-so a full run is not triaged to `fail=0 crash=0` — regenerating
-it via `--isolate --emit-crash-list` is pending. yawgpu remains the **primary** conformance subject;
-wgpu-native is the bring-up reference.
+_Vulkan results (MoltenVK on macOS, native Vulkan on Windows/NVIDIA) are **pending a fresh sweep** against
+the grown 642-file suite — the prior snapshots predated the phaseSV2/phaseY14 additions and have been
+removed to avoid stale numbers. The phaseSV2 shared-naga gaps (F-133) and yawgpu-only items (F-131/F-132)
+apply to the Vulkan path too (same naga frontend) and will be re-measured there. wgpu-native remains a
+bring-up reference, not triaged to `fail=0`._
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
