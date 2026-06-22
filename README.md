@@ -119,14 +119,6 @@ validation) are accounted for (complete, partial, or classified N/A), with **zer
 areas. "Addressed" below = complete + partial + N/A (every upstream file resolved); the only remainder is
 `compat` (todo) and `web_platform`/`idl` (N/A).
 
-```mermaid
-xychart-beta
-    title "Coverage addressed (complete + partial + N/A) of upstream files, %"
-    x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
-    y-axis "addressed %" 0 --> 100
-    bar [100, 100, 100, 100, 97]
-```
-
 | Area | Addressed* | Note |
 |------|----------:|------|
 | `api/validation` | **129 / 129 ✅** | **fully ported** — every file complete (112), partial (14), or N/A (3); no todo (Y-6 V1–V10: capability_checks/features + all 35 limits) |
