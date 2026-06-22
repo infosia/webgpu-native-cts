@@ -27,15 +27,15 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 | `api/validation` | 129 | 112 | 14 | 3 | 0 | 0 |
 | `api/operation` | 72 | 28 | 42 | 2 | 0 | 0 |
 | `shader/validation` | 207 | 207 | 0 | 0 | 0 | 0 |
-| `shader/execution` | 239 | 226 | 0 | 0 | 13 | 0 |
+| `shader/execution` | 239 | 239 | 0 | 0 | 0 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **573** | **56** | **21** | **13** | **20** |
+| **Total** | **683** | **586** | **56** | **21** | **0** | **20** |
 
-> Reconciled 2026-06-22 to the on-disk `.spec.cpp` count: 629 files (complete + partial) under
-> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 226, shader/validation 207).
+> Reconciled 2026-06-22 to the on-disk `.spec.cpp` count: 642 files (complete + partial) under
+> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 239, shader/validation 207).
 > `api/operation` has **every
 > portable file opened** (70/72; only `buffers/{map_ArrayBuffer,map_detach}` are N/A — JS ArrayBuffer
 > detach), but it is **not fully complete**: per the area table 42 of those 70 files are **partial** —
@@ -412,17 +412,17 @@ Notes on the pre-classified rows:
   workers — these depend on the web platform and have no native C-API analog. See
   [00-overview](00-overview.md) non-goals.
 - **`idl` (3) → N/A**: WebIDL surface/constant tests; the C API has no IDL layer.
-- **`shader/validation` (207) → 207 ported, 0 deferred; `shader/execution` (239) → 226 ported, 13 deferred**:
-  shader execution is essentially complete (phaseY7–Y13): all structural files + the entire
+- **`shader/validation` (207) → 207 ported, 0 deferred; `shader/execution` (239) → 239 ported, 0 deferred —
+  both areas COMPLETE**: shader execution is fully ported (phaseY7–Y14): all structural files + the entire
   `expression/call/builtin` family (atomics, texture, sync/derivative, integer/bit/pack, the P4
-  math/trig builtins on a ported **FP-interval acceptance framework** — f32/f16/abstract — and all
-  binary/unary operators, conversions, constructors, access). The remaining **13** (phaseY14, in progress)
-  are the `subgroup*`/`quadBroadcast`/`quadSwap` **execution** builtins (10 subgroup + 2 quad) +
-  `texture_utils` (a real 3-`g.test` meta-test of the CTS texture random-data / texel-readback /
-  sampling-weight helpers — **not** a plain util). **Reclassified 2026-06-22: portable with a Dawn-Metal
-  oracle** — Dawn advertises `WGPUFeatureName_Subgroups` on Metal (the phaseSV2 subgroup *validation*
-  specs ran, and Dawn's own CTS expectations run subgroup *execution* on Mac, e.g. an `[ amd mac ]`
-  entry), so the earlier "Dawn-Metal skips, no oracle / N/A" note was stale. `shader/validation` is now **complete**
+  math/trig builtins on a ported **FP-interval acceptance framework** — f32/f16/abstract — all
+  binary/unary operators, conversions, constructors, access) + **phaseY14** the `subgroup*`/`quadBroadcast`/
+  `quadSwap` **execution** builtins (10 subgroup + 2 quad, on a ported `subgroup_util` compute/fragment/
+  accuracy engine) + `texture_utils` (a real 3-`g.test` meta-test of the CTS texture random-data /
+  texel-readback / sampling-weight helpers — **not** a plain util). The earlier "Dawn-Metal skips subgroups,
+  no oracle / texture_utils N/A" deferral was **stale**: Dawn advertises `WGPUFeatureName_Subgroups` on Metal
+  and runs subgroup *execution* there (Dawn-oracle green, fail=0; subgroup-size gates honored faithfully —
+  Dawn-Metal `subgroupMaxSize=32`). `shader/validation` is now **complete**
   (phaseSV1 `extension`/`shader_io`/`decl`/`functions`/`types`/`const_assert`/`uniformity`; phaseSV2
   `parse`/`statement`/`expression` incl. all 114 builtin signature/type/const-overflow validation specs —
   the subgroup/quad *validation* builtins **do** run on Dawn-Metal since the feature is present). Dawn

@@ -85,10 +85,11 @@ each backend supplies its own `webgpu-headers/webgpu.h` (Dawn its generated head
 
 **Active.** The harness is complete; tests are ported in parallel batches. All three backends build
 link-agnostically and run on real GPUs — verified on **macOS / Apple Metal** and **Windows 11 / Vulkan**
-(NVIDIA RTX 5060 Ti). Coverage so far: the entire **`api`** surface, all of **`shader/execution`** except
-the optional `subgroups` **execution** builtins (P4 math/trig run on a ported FP-interval acceptance
-framework — f32/f16/abstract), and **all of `shader/validation`** (parse/statement/expression incl. the
-114 builtin signature/type/const-overflow validation specs, on a ported `ShaderValidationTest` enabler).
+(NVIDIA RTX 5060 Ti). Coverage so far: the entire **`api`** surface, **all of `shader/execution`** (P4
+math/trig on a ported FP-interval acceptance framework — f32/f16/abstract; the `subgroup*`/`quad*`
+execution builtins on a ported `subgroup_util` engine; the `texture_utils` meta-test), and **all of
+`shader/validation`** (parse/statement/expression incl. the 114 builtin signature/type/const-overflow
+validation specs, on a ported `ShaderValidationTest` enabler).
 See [coverage](#port-coverage) below and [COVERAGE](docs/COVERAGE.md).
 
 **Current conformance (Metal whole-suite, 2026-06-20):** yawgpu's `api/*` and the phaseSV1
@@ -107,9 +108,8 @@ Per-finding history lives in [FINDINGS](docs/FINDINGS.md); per-backend numbers a
 ```mermaid
 pie showData
     title Upstream .spec.ts files (683)
-    "Ported — complete" : 573
+    "Ported — complete" : 586
     "Ported — partial" : 56
-    "Deferred (subgroups execution, expr-precision)" : 13
     "Not portable (N/A)" : 21
     "Todo" : 20
 ```
@@ -124,16 +124,16 @@ xychart-beta
     title "Coverage addressed (complete + partial + N/A) of upstream files, %"
     x-axis ["api/validation", "api/operation", "shader/execution", "shader/validation", "total"]
     y-axis "addressed %" 0 --> 100
-    bar [100, 100, 95, 100, 95]
+    bar [100, 100, 100, 100, 97]
 ```
 
 | Area | Addressed* | Note |
 |------|----------:|------|
 | `api/validation` | **129 / 129 ✅** | **fully ported** — every file complete (112), partial (14), or N/A (3); no todo (Y-6 V1–V10: capability_checks/features + all 35 limits) |
 | `api/operation` | **72 / 72 ✅** | **fully ported** — every file complete (28), partial (42), or N/A (2); no todo. Partials leave some native-portable breadth deferred (vertical-first) |
-| `shader/execution` | 226 / 239 | **essentially complete** — structural files + the entire `expression/call/builtin` family: `atomics`, the texture built-in family, sync/derivatives, integer/bit/pack, the **P4 math/trig builtins** on a ported **FP-interval acceptance framework** (f32 / f16 / abstract-float), all **binary/unary operators**, conversions, constructors, and `expression/access/*`. The 13 remaining (phaseY14, in progress) are `subgroup*`/`quadBroadcast`/`quadSwap` **execution** builtins + `texture_utils` (a real 3-`g.test` meta-test, not a util) — **reclassified 2026-06-22 as portable with a Dawn-Metal oracle** (Dawn exposes `WGPUFeatureName_Subgroups` on Metal; the prior "no oracle / N/A" note was stale) |
+| `shader/execution` | **239 / 239 ✅** | **fully ported** — structural files + the entire `expression/call/builtin` family: `atomics`, the texture built-in family, sync/derivatives, integer/bit/pack, the **P4 math/trig builtins** on a ported **FP-interval acceptance framework** (f32 / f16 / abstract-float), all **binary/unary operators**, conversions, constructors, `expression/access/*`, + **phaseY14** the `subgroup*`/`quadBroadcast`/`quadSwap` **execution** builtins (on a ported `subgroup_util` compute/fragment/accuracy engine) and the `texture_utils` meta-test. Dawn-oracle green (fail=0; subgroup-size gates honored — Dawn-Metal `subgroupMaxSize=32`) |
 | `shader/validation` | **207 / 207 ✅** | **fully ported** — phaseSV1 `extension`/`shader_io`/`decl`/`functions`/`types`/`const_assert`/`uniformity` (40) + phaseSV2 `parse` (12), `statement` (17), `expression` (24 non-builtin + 114 builtin signature/type/const-overflow validation specs) — on a ported `ShaderValidationTest` enabler (`expectCompileResult`/`expectPipelineResult`). **Dawn-oracle green** except 48 documented **F-130** divergences (`bitwise_shift:partial_eval_errors` lhs=const); phaseSV1 was 3-backend cross-checked (**F-120** fixed in yawgpu's naga fork incl. full uniformity), phaseSV2 yawgpu cross-check pending |
-| **Total** | **650 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
+| **Total** | **663 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
 
 \* addressed = complete + partial + N/A (every upstream file resolved). Per-file detail and what each batch
 added: [COVERAGE](docs/COVERAGE.md).
