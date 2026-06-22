@@ -170,12 +170,9 @@ Buckets overlap where a finding affects several backends (e.g. F-045, F-082).
 
 #### Per-area conformance (Metal, macOS) — 642 files, by area, 2026-06-22
 
-Real fails **by area**, so naga-lineage divergences are not conflated with yawgpu's own implementation.
-Reported counts are **isolation-confirmed real** fails/crashes — single-process whole-area runs accumulate
-`adapter is "consumed"` / GPU-state-degradation collateral (e.g. Dawn, the oracle, false-fails ~336k
-`api,validation` cases in one process; `fail=0` per-file), which is **excluded**. Each yawgpu/wgpu-native
-divergence is classified **yawgpu-only** (Dawn==wgpu-native pass, yawgpu differs) vs **shared upstream-naga**
-(yawgpu==wgpu-native, both vs Dawn/tint) per the 3-backend rule.
+Real fails **by area** (`--workers 8`), so naga-lineage divergences are not conflated with yawgpu's own
+implementation. Each yawgpu/wgpu-native divergence is classified **yawgpu-only** (Dawn==wgpu-native pass,
+yawgpu differs) vs **shared upstream-naga** (yawgpu==wgpu-native, both vs Dawn/tint) per the 3-backend rule.
 
 | Area | **Dawn** (oracle) | **yawgpu** (Metal) | **wgpu-native** (Metal, bring-up) |
 |------|-------------------|--------------------|-----------------------------------|
