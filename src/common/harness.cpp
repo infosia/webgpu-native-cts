@@ -1,6 +1,7 @@
 #include "cts/gpu.h"
 
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <utility>
@@ -32,9 +33,11 @@ struct DeviceCache {
     WGPUAdapter adapter = nullptr;
     WGPUDevice device = nullptr;
     WGPUQueue queue = nullptr;
+    WGPUAdapter adapterAllFeatures = nullptr;
     WGPUDevice deviceAllFeatures = nullptr;
     WGPUQueue queueAllFeatures = nullptr;
     bool allFeaturesDeviceUsedFallback = false;
+    bool deviceLost = false;
 
     ~DeviceCache() {
         if (queueAllFeatures != nullptr) {
@@ -42,6 +45,9 @@ struct DeviceCache {
         }
         if (deviceAllFeatures != nullptr) {
             wgpuDeviceRelease(deviceAllFeatures);
+        }
+        if (adapterAllFeatures != nullptr) {
+            wgpuAdapterRelease(adapterAllFeatures);
         }
         if (queue != nullptr) {
             wgpuQueueRelease(queue);
@@ -67,6 +73,16 @@ void onUncapturedError(WGPUDevice const*, WGPUErrorType, WGPUStringView message,
     if (g_currentTest != nullptr) {
         g_currentTest->recordUncapturedError("uncaptured error: " + toString(message));
     }
+}
+
+// phaseH3-A: detect genuine device loss so the cache can self-heal. Destroyed /
+// CallbackCancelled fire during our own teardown and must NOT trigger a recycle.
+void onDeviceLost(WGPUDevice const*, WGPUDeviceLostReason reason, WGPUStringView, void*, void*) {
+    if (reason == WGPUDeviceLostReason_Destroyed
+        || reason == WGPUDeviceLostReason_CallbackCancelled) {
+        return;
+    }
+    cache().deviceLost = true;
 }
 
 struct QueueWorkDoneState {
@@ -104,20 +120,43 @@ void onManyQueueWorkDone(WGPUQueueWorkDoneStatus status, WGPUStringView message,
     ++state->completed;
 }
 
+void ensureInstance(DeviceCache& c) {
+    if (c.instance != nullptr) {
+        return;
+    }
+    c.instance = createInstance();
+    if (c.instance == nullptr) {
+        throw TestFailed("failed to create WebGPU instance");
+    }
+}
+
 void ensureAdapter(DeviceCache& c) {
     if (c.adapter != nullptr) {
         return;
     }
 
-    c.instance = createInstance();
-    if (c.instance == nullptr) {
-        throw TestFailed("failed to create WebGPU instance");
-    }
+    ensureInstance(c);
     AdapterResult adapter = requestAdapterSync(c.instance, nullptr);
     if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
         throw TestFailed("failed to request adapter: " + adapter.message);
     }
     c.adapter = adapter.adapter;
+}
+
+// The native adapter is consumed by requestDevice (Dawn marks it "consumed"),
+// so the all-features/max-limits device needs its OWN adapter rather than
+// sharing the one used for the default device.
+void ensureAdapterAllFeatures(DeviceCache& c) {
+    if (c.adapterAllFeatures != nullptr) {
+        return;
+    }
+
+    ensureInstance(c);
+    AdapterResult adapter = requestAdapterSync(c.instance, nullptr);
+    if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
+        throw TestFailed("failed to request all-features/max-limits adapter: " + adapter.message);
+    }
+    c.adapterAllFeatures = adapter.adapter;
 }
 
 WGPUDevice getDevice() {
@@ -130,6 +169,8 @@ WGPUDevice getDevice() {
 
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
     descriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
+    descriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+    descriptor.deviceLostCallbackInfo.callback = onDeviceLost;
     DeviceResult device = requestDeviceSync(c.instance, c.adapter, &descriptor);
     if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
         throw TestFailed("failed to request device: " + device.message);
@@ -145,22 +186,24 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
         return c.deviceAllFeatures;
     }
 
-    ensureAdapter(c);
+    ensureAdapterAllFeatures(c);
 
     WGPULimits limits = WGPU_LIMITS_INIT;
-    if (wgpuAdapterGetLimits(c.adapter, &limits) != WGPUStatus_Success) {
+    if (wgpuAdapterGetLimits(c.adapterAllFeatures, &limits) != WGPUStatus_Success) {
         throw TestFailed("failed to get adapter limits");
     }
 
     WGPUSupportedFeatures supportedFeatures = WGPU_SUPPORTED_FEATURES_INIT;
-    wgpuAdapterGetFeatures(c.adapter, &supportedFeatures);
+    wgpuAdapterGetFeatures(c.adapterAllFeatures, &supportedFeatures);
 
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
     descriptor.requiredFeatureCount = supportedFeatures.featureCount;
     descriptor.requiredFeatures = supportedFeatures.features;
     descriptor.requiredLimits = &limits;
     descriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
-    DeviceResult device = requestDeviceSync(c.instance, c.adapter, &descriptor);
+    descriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+    descriptor.deviceLostCallbackInfo.callback = onDeviceLost;
+    DeviceResult device = requestDeviceSync(c.instance, c.adapterAllFeatures, &descriptor);
     wgpuSupportedFeaturesFreeMembers(supportedFeatures);
 
     if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
@@ -177,7 +220,7 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
         std::vector<WGPUFeatureName> fallbackFeatures;
         fallbackFeatures.reserve(kTextureFeatures.size());
         for (WGPUFeatureName feature : kTextureFeatures) {
-            if (wgpuAdapterHasFeature(c.adapter, feature)) {
+            if (wgpuAdapterHasFeature(c.adapterAllFeatures, feature)) {
                 fallbackFeatures.push_back(feature);
             }
         }
@@ -187,7 +230,9 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
         fallbackDescriptor.requiredFeatures = fallbackFeatures.data();
         fallbackDescriptor.requiredLimits = &limits;
         fallbackDescriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
-        device = requestDeviceSync(c.instance, c.adapter, &fallbackDescriptor);
+        fallbackDescriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+        fallbackDescriptor.deviceLostCallbackInfo.callback = onDeviceLost;
+        device = requestDeviceSync(c.instance, c.adapterAllFeatures, &fallbackDescriptor);
         c.allFeaturesDeviceUsedFallback = true;
     }
 
@@ -197,6 +242,86 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
     c.deviceAllFeatures = device.device;
     c.queueAllFeatures = wgpuDeviceGetQueue(c.deviceAllFeatures);
     return c.deviceAllFeatures;
+}
+
+// phaseH3-B: periodic / on-loss device recycle to avoid whole-suite
+// "GPU-state-degradation collateral". Cases run serially per worker process, so
+// recycling at the case boundary is concurrency-safe.
+unsigned long g_caseCounter = 0;
+
+unsigned long deviceRecycleInterval() {
+    static const unsigned long interval = [] {
+        // MSVC deprecates std::getenv (C4996) and the project builds /W4 /WX; the returned pointer is
+        // read immediately and only parsed, so suppress the warning narrowly here (same pattern as
+        // backend_yawgpu.cpp) rather than weaken /WX globally. Semantics are identical on every platform.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        const char* value = std::getenv("CTS_DEVICE_RECYCLE_INTERVAL");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+        if (value == nullptr || *value == '\0') {
+            return 500UL;
+        }
+        char* end = nullptr;
+        const unsigned long parsed = std::strtoul(value, &end, 10);
+        if (end == value) {
+            return 500UL;
+        }
+        return parsed;
+    }();
+    return interval;
+}
+
+// Release the cached instance/adapter/device handles (same order as the
+// destructor), null the fields, and reset the recycle-relevant flags so the next
+// device()/queue() lazily rebuilds from a fresh instance+adapter. The adapter is
+// consumed by requestDevice, so a rebuild MUST start from a fresh instance.
+void teardownDevices(DeviceCache& c) {
+    if (c.queueAllFeatures != nullptr) {
+        wgpuQueueRelease(c.queueAllFeatures);
+        c.queueAllFeatures = nullptr;
+    }
+    if (c.deviceAllFeatures != nullptr) {
+        wgpuDeviceRelease(c.deviceAllFeatures);
+        c.deviceAllFeatures = nullptr;
+    }
+    if (c.adapterAllFeatures != nullptr) {
+        wgpuAdapterRelease(c.adapterAllFeatures);
+        c.adapterAllFeatures = nullptr;
+    }
+    if (c.queue != nullptr) {
+        wgpuQueueRelease(c.queue);
+        c.queue = nullptr;
+    }
+    if (c.device != nullptr) {
+        wgpuDeviceRelease(c.device);
+        c.device = nullptr;
+    }
+    if (c.adapter != nullptr) {
+        wgpuAdapterRelease(c.adapter);
+        c.adapter = nullptr;
+    }
+    if (c.instance != nullptr) {
+        wgpuInstanceRelease(c.instance);
+        c.instance = nullptr;
+    }
+    c.deviceLost = false;
+    c.allFeaturesDeviceUsedFallback = false;
+}
+
+void recycleDevicesIfNeeded() {
+    DeviceCache& c = cache();
+    if (c.deviceLost) {
+        teardownDevices(c);
+        return;
+    }
+    const unsigned long interval = deviceRecycleInterval();
+    if (interval != 0 && g_caseCounter != 0 && (g_caseCounter % interval == 0)) {
+        teardownDevices(c);
+    }
 }
 
 } // namespace
@@ -264,6 +389,13 @@ const std::string& Fixture::uncapturedError() const {
 }
 
 void setCurrentTest(Fixture* fixture) {
+    if (fixture != nullptr) {
+        // phaseH3-B: at the start of each case, before the fixture touches the
+        // device, heal a lost device / periodically recycle. setCurrentTest(nullptr)
+        // (case end) must not recycle or count.
+        recycleDevicesIfNeeded();
+        ++g_caseCounter;
+    }
     g_currentTest = fixture;
 }
 
