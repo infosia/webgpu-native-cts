@@ -2127,4 +2127,80 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
+## F-131 — yawgpu: `bitcast` from a non-numeric type CRASHES the WGSL frontend (signal 6) — Metal
+
+- **Backend:** yawgpu (Metal). Deterministic crash. **yawgpu-specific** (Dawn + wgpu-native handle cleanly).
+- **Found by:** `shader,validation,expression,call,builtin,bitcast` — **6 crashes** (signal 6 / Abort trap),
+  alongside 158 fails, on the phaseSV2 validation port. Surfaced during the 2026-06-22 yawgpu cross-check.
+- **Crashing cases (all `direction="from"`, bitcast whose SOURCE expr is a non-numeric type):**
+  - `bad_type_constructible:type="array<i32,2>";direction="from"`
+  - `bad_type_constructible:type="S";direction="from"` (a struct)
+  - `bad_type_nonconstructible:var="s";direction="from"` (sampler), `var="t"` (texture), `var="b"` (buffer
+    binding), `var="p"` (pointer)
+- **Root cause (yawgpu's naga fork):** `Option::unwrap()` on `None` panic at
+  `naga/src/front/wgsl/lower/mod.rs:3190` when lowering a `bitcast` whose source expression has a
+  non-numeric type (array / struct / atomic / sampler / texture / pointer). The frontend should emit a
+  clean validation error (bitcast operands must be numeric scalars/vectors) — instead it aborts the process.
+- **Cross-check (3-backend):** Dawn passes all 564 bitcast cases; **wgpu-native (upstream naga `01e4e71`)
+  emits a clean validation error on the exact 6 cases — no crash.** So this is a **yawgpu naga-fork
+  regression/robustness gap**, not shared upstream-naga behavior. A worker abort takes out the whole shard,
+  so it also blocks neighbouring cases in single-process runs.
+- **Status:** OPEN (2026-06-22). yawgpu-fork fix: guard the `bitcast` lowering to return a validation error
+  for non-numeric source types instead of `unwrap()`. **Highest-priority of the cross-check findings (it is a
+  crash).** Re-verify after the fork patch.
+
+## F-132 — yawgpu: override-evaluated negative out-of-bounds array/matrix index not flagged at pipeline creation — Metal
+
+- **Backend:** yawgpu (Metal). Deterministic. **yawgpu-specific** (Dawn + wgpu-native both flag it).
+- **Found by:** `shader,validation,expression,access,{array,structure,vector,matrix}` — **10 fail**
+  (array 9 + matrix 1), `early_eval_errors` tests. 2026-06-22 yawgpu cross-check.
+- **Root cause:** when an array/matrix index is an **override-expression** that evaluates to a negative
+  (out-of-bounds) constant, the WGSL spec requires a **pipeline-creation** validation error. yawgpu's naga
+  fork does not flag it (the pipeline is created), where Dawn (tint) and wgpu-native (upstream naga) both
+  reject it.
+- **Cross-check (3-backend):**
+  `access,array:early_eval_errors:case="runtime_array_override_oob_neg"` → Dawn **pass** (errors as
+  expected) / **yawgpu fail** (no error) / wgpu-native **pass**. The matrix `early_eval_errors` case behaves
+  identically. So yawgpu differs from BOTH Dawn and upstream naga → **yawgpu-specific** override-range
+  validation gap.
+- **Status:** OPEN (2026-06-22). yawgpu-fork fix: enforce the negative/OOB override-index range check at
+  pipeline creation. Low volume (10 cases) but a genuine yawgpu-only validation gap.
+
+## F-133 — upstream-naga (shared yawgpu+wgpu-native): WGSL-frontend validation/const-eval gaps vs tint — NOT yawgpu-specific
+
+- **Backend:** yawgpu (Metal) **and** wgpu-native (upstream naga `01e4e71`) — **identical** behavior and
+  byte-identical error messages; both diverge from Dawn/tint. Classified **shared-naga / upstream-naga**, NOT
+  a yawgpu defect (per [[naga-fix-crosscheck-wgpu-native]]).
+- **Found by:** the 2026-06-22 yawgpu cross-check of the phaseSV2 `shader/validation` port (Dawn-oracle
+  green). ~**77k** yawgpu validation fails decompose into these upstream-naga gaps (each verified
+  yawgpu==wgpu-native, Dawn passes):
+  1. **Builtin const-eval not implemented (~76k)** — naga errors `"Not implemented as constant expression:
+     <Builtin>"` on valid `const`-stage builtin calls: `mix`, `faceForward`, `refract`, `reflect`,
+     `transpose`, `fma`, `pow`, `extractBits`, `unpack2x16float`, etc. (dominant: faceForward 23848, mix
+     21461). Plus **premature abstract-float concretization** (`length`, `distance`, `normalize`: "the
+     concrete type f32 cannot represent the abstract value … accurately" on large abstract-float const args
+     tint keeps abstract). Same family as **F-124**.
+  2. **`@diagnostic(...)` directive (parse, 384)** — `"@diagnostic(…) attribute(s) not yet implemented"`
+     (gfx-rs/wgpu#5320); no duplicate/conflicting/scope validation
+     (`parse,diagnostic:{duplicate_attribute_same_location, conflicting_attribute_different_location,
+     valid_locations, diagnostic_scoping, warning_unknown_rule}`).
+  3. **binary operators (569)** — `div_rem` const div/rem-by-zero in compound-assign (512),
+     `short_circuiting_and_or` non-bool operands (45), `comparison` relational-on-bool (8), `and_or_xor`
+     naga wrongly rejects valid `bool & bool` (4).
+  4. **precedence (74)** — WGSL mixed-precedence "requires parentheses" rule (e.g. `mul` vs `shl`) unenforced.
+  5. **early_evaluation (7)** — infinite float literal in override context.
+  6. **statement (16)** — loop/behavior analysis (non-terminating loop, missing break).
+  7. **insertBits (30)** `offset+count > bitwidth`; **textureSample/textureGather (22/38)** const texel-offset
+     outside `[-8,7]` — range checks unenforced.
+- **Cross-check:** representative cases for every family give matching yawgpu+wgpu-native fail vs Dawn pass
+  (e.g. `mix:values:stage="constant";type="vec2<abstract-int>"` Dawn 125 pass / yawgpu 125 fail / wgpu 125
+  fail identical; `precedence:binary_requires_parentheses:op1="mul";op2="shl"` pass/fail/fail).
+- **Status:** OPEN, **upstream-naga** (not a yawgpu-fork defect). The user has deprioritized naga-frontend
+  work; recorded here so the divergence set is documented and not re-chased as "yawgpu bugs". yawgpu may
+  adopt these from upstream naga over time; the CTS ports stay faithful (unmasked) and Dawn-oracle green.
+  **execution** subgroup/quad correctly **skip** on yawgpu (no `subgroups` feature); `texture_utils` + texture
+  execution pass.
+
+---
+
 _Add new findings as `F-00N` with the same fields._

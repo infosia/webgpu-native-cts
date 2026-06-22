@@ -132,7 +132,7 @@ xychart-beta
 | `api/validation` | **129 / 129 ✅** | **fully ported** — every file complete (112), partial (14), or N/A (3); no todo (Y-6 V1–V10: capability_checks/features + all 35 limits) |
 | `api/operation` | **72 / 72 ✅** | **fully ported** — every file complete (28), partial (42), or N/A (2); no todo. Partials leave some native-portable breadth deferred (vertical-first) |
 | `shader/execution` | **239 / 239 ✅** | **fully ported** — structural files + the entire `expression/call/builtin` family: `atomics`, the texture built-in family, sync/derivatives, integer/bit/pack, the **P4 math/trig builtins** on a ported **FP-interval acceptance framework** (f32 / f16 / abstract-float), all **binary/unary operators**, conversions, constructors, `expression/access/*`, + **phaseY14** the `subgroup*`/`quadBroadcast`/`quadSwap` **execution** builtins (on a ported `subgroup_util` compute/fragment/accuracy engine) and the `texture_utils` meta-test. Dawn-oracle green (fail=0; subgroup-size gates honored — Dawn-Metal `subgroupMaxSize=32`) |
-| `shader/validation` | **207 / 207 ✅** | **fully ported** — phaseSV1 `extension`/`shader_io`/`decl`/`functions`/`types`/`const_assert`/`uniformity` (40) + phaseSV2 `parse` (12), `statement` (17), `expression` (24 non-builtin + 114 builtin signature/type/const-overflow validation specs) — on a ported `ShaderValidationTest` enabler (`expectCompileResult`/`expectPipelineResult`). **Dawn-oracle green** except 48 documented **F-130** divergences (`bitwise_shift:partial_eval_errors` lhs=const); phaseSV1 was 3-backend cross-checked (**F-120** fixed in yawgpu's naga fork incl. full uniformity), phaseSV2 yawgpu cross-check pending |
+| `shader/validation` | **207 / 207 ✅** | **fully ported** — phaseSV1 `extension`/`shader_io`/`decl`/`functions`/`types`/`const_assert`/`uniformity` (40) + phaseSV2 `parse` (12), `statement` (17), `expression` (24 non-builtin + 114 builtin signature/type/const-overflow validation specs) — on a ported `ShaderValidationTest` enabler (`expectCompileResult`/`expectPipelineResult`). **Dawn-oracle green** except 48 documented **F-130** divergences (`bitwise_shift:partial_eval_errors` lhs=const); phaseSV1 was 3-backend cross-checked (**F-120** fixed in yawgpu's naga fork incl. full uniformity); **phaseSV2/phaseY14 yawgpu cross-check done (2026-06-22)** — only **2 yawgpu-only** defects (**F-131** `bitcast`-from-non-numeric crash; **F-132** override-OOB index), the rest (~77k) are **shared upstream-naga** frontend/const-eval gaps (yawgpu==wgpu-native, **F-133**), not yawgpu-specific |
 | **Total** | **663 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
 
 \* addressed = complete + partial + N/A (every upstream file resolved). Per-file detail and what each batch
@@ -147,20 +147,26 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Findings — 126 surfaced to date (F-001…F-126)
+### Findings — 133 surfaced to date (F-001…F-133)
 
 **Current state only** — the full per-finding record (what, which backend, root cause, fix history,
 commit hashes) lives in [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced —
-never masked to make a test pass. The headline: **yawgpu's implementation (`api/*` + `shader/execution`
-runtime + the entire `shader/validation` frontend) is conformance-clean on native Metal**; the only open
-yawgpu item is **F-124** — the **composite-result** (matrix / struct / f16-struct) abstract-float
-const-eval readback (~88 cases; the scalar/vector path is fixed). The const-eval bugs **F-122/F-123/F-125**
-and the big naga-frontend block **F-120** (shader/validation + full WGSL uniformity analysis, ~22781 cases)
-are **now RESOLVED in yawgpu's naga fork**.
+never masked to make a test pass. The headline: **yawgpu's `api/*` and `shader/execution` runtime are
+conformance-clean on native Metal**, and the phaseSV1 `shader/validation` frontend is clean (F-120 fixed).
+The 2026-06-22 phaseSV2/phaseY14 cross-check (full `shader/validation` + subgroup/quad/texture execution)
+surfaced only **3 yawgpu-specific** open items — **F-124** composite-result abstract-float const-eval
+readback (~88 cases; scalar/vector path fixed), **F-131** `bitcast`-from-non-numeric crash (signal 6,
+naga-fork `unwrap` panic; Dawn + wgpu-native clean), and **F-132** override-evaluated OOB array/matrix index
+not flagged (10 cases) — while the bulk (~77k validation fails) are **shared upstream-naga** frontend/
+const-eval gaps (yawgpu == wgpu-native, both vs Dawn/tint; **F-133**), not yawgpu defects. The const-eval
+bugs **F-122/F-123/F-125** and the big naga-frontend block **F-120** (shader/validation + full WGSL
+uniformity analysis, ~22781 cases) are **RESOLVED in yawgpu's naga fork**. subgroup/quad execution correctly
+**skip** on yawgpu (no `subgroups` feature).
 
 | Bucket | # | Detail |
 |--------|--:|--------|
-| **yawgpu — open implementation defects** | **1 (partial)** | **F-124** abstract-float const-eval readback — the **scalar/vector** path is **fixed** (`97b4827`); ~88 **composite-result** cases remain (`transpose`/`determinant`/`smoothstep` abstract_float + struct-returning `modf`/`frexp` for abstract & f16), all const-eval `error command buffer`, Dawn-green. (F-122/F-123/F-125 — the other const-eval bugs — now **fixed**.) Plus the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` + F-111, carried as `xfail` |
+| **yawgpu — open implementation defects** | **3** | **F-124** abstract-float const-eval readback — **scalar/vector** path **fixed** (`97b4827`); ~88 **composite-result** cases remain (`transpose`/`determinant`/`smoothstep` abstract_float + struct-returning `modf`/`frexp` for abstract & f16), Dawn-green. **F-131** `bitcast`-from-non-numeric **crash** (signal 6, naga-fork `unwrap`-on-None; Dawn + wgpu-native clean) — highest priority. **F-132** override-evaluated OOB array/matrix index not flagged at pipeline creation (10 cases; Dawn + wgpu-native flag it). (F-122/F-123/F-125 const-eval bugs now **fixed**.) Plus the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` + F-111, carried as `xfail` |
+| upstream-naga (shared yawgpu + wgpu-native) — **not a yawgpu defect** | 1 | **F-133** — ~77k phaseSV2 validation fails that are **identical** on yawgpu and wgpu-native (both vs Dawn/tint): builtin const-eval "not implemented" (mix/faceForward/refract/…, same family as F-124), `@diagnostic(...)` directive unimplemented, binary/precedence/early-eval/statement/insertBits/texture-offset range checks. Upstream-naga frontend gaps; CTS ports stay faithful + Dawn-green |
 | yawgpu — fixed & hardware-re-verified | 97 | F-005…F-123 + F-125 incl. **F-120** (shader/validation + graph uniformity analysis), **F-121** (shader-f16), **F-122** (`<<` abstract-int const-eval), **F-123** (`sub_neg` precedence), **F-125** (`atanh` f32 const-eval); full list + commits in [FINDINGS](docs/FINDINGS.md) |
 | Spec in flux / feature gap — **not a defect** | 2 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb#5457, cts#4510 pending); F-111 `GPUExternalTexture` on the Vulkan backend — both `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 23+ | panics F-001–F-021 (contained via `--isolate`); F-015/F-027/F-028/F-036/F-045/F-048/F-052/F-056/F-084/F-088/F-097/F-113; plus upstream-naga shader/validation (no uniformity analysis) + shader-f16 unsupported (bring-up reference) |
