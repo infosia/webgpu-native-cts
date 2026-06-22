@@ -41,21 +41,6 @@ void skipIfNoSubgroups(sg::SubgroupTest& t) {
     }
 }
 
-struct SubgroupSizes {
-    uint32_t minSize;
-    uint32_t maxSize;
-};
-SubgroupSizes getSubgroupSizes(sg::SubgroupTest& t) {
-    WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
-    const WGPUStatus status = wgpuDeviceGetAdapterInfo(t.device(), &info);
-    if (status != WGPUStatus_Success) {
-        t.fail("wgpuDeviceGetAdapterInfo failed");
-    }
-    const SubgroupSizes sizes{info.subgroupMinSize, info.subgroupMaxSize};
-    wgpuAdapterInfoFreeMembers(info);
-    return sizes;
-}
-
 // TinyMT PRNG (faithful port of util/prng.ts). Deterministic per seed.
 class PRNG {
   public:
@@ -618,7 +603,7 @@ CTS_TEST(g, "fragment,all_active")
         const std::string op = t.param<std::string>("op");
         const uint32_t numInputs = size[0] * size[1];
 
-        const SubgroupSizes sizes = getSubgroupSizes(t);
+        const sg::SubgroupSizes sizes = sg::getSubgroupSizes(t);
         const uint32_t innerTexels = (size[0] - 1) * (size[1] - 1);
         if (innerTexels < sizes.minSize) {
             t.skip("Too few texels to be reliable");

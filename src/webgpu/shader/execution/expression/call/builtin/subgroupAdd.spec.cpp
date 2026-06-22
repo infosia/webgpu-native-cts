@@ -533,12 +533,7 @@ CTS_TEST(g, "fragment")
         const sg::FramebufferSize size = sg::framebufferSizeFromString(t.param<std::string>("size"));
         const WGPUTextureFormat format = WGPUTextureFormat_RGBA32Uint;
 
-        WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
-        if (wgpuDeviceGetAdapterInfo(t.device(), &info) != WGPUStatus_Success) {
-            t.fail("wgpuDeviceGetAdapterInfo failed");
-        }
-        const uint32_t subgroupMinSize = info.subgroupMinSize;
-        wgpuAdapterInfoFreeMembers(info);
+        const uint32_t subgroupMinSize = sg::getSubgroupSizes(t).minSize;
 
         const uint32_t innerTexels = (size[0] - 1) * (size[1] - 1);
         if (innerTexels < subgroupMinSize) {

@@ -47,20 +47,6 @@ void skipIfNoF16(sg::SubgroupTest& t) {
     }
 }
 
-struct SubgroupSizes {
-    uint32_t minSize;
-    uint32_t maxSize;
-};
-SubgroupSizes getSubgroupSizes(sg::SubgroupTest& t) {
-    WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
-    if (wgpuDeviceGetAdapterInfo(t.device(), &info) != WGPUStatus_Success) {
-        t.fail("wgpuDeviceGetAdapterInfo failed");
-    }
-    const SubgroupSizes sizes{info.subgroupMinSize, info.subgroupMaxSize};
-    wgpuAdapterInfoFreeMembers(info);
-    return sizes;
-}
-
 const std::vector<bt::Type>& kDataTypes() {
     static const std::vector<bt::Type> v = {
         bt::scalar(bt::ScalarKind::I32), bt::vec(2, bt::ScalarKind::I32),
@@ -505,7 +491,7 @@ CTS_TEST(g, "compute,split")
         const sg::WGSize wgSize = sg::wgSizeFromString(t.param<std::string>("wgSize"));
         const uint32_t wgThreads = wgSize[0] * wgSize[1] * wgSize[2];
 
-        const SubgroupSizes sizes = getSubgroupSizes(t);
+        const sg::SubgroupSizes sizes = sg::getSubgroupSizes(t);
         for (uint32_t size = sizes.minSize; size <= sizes.maxSize; size *= 2) {
             if (!testcase.filter(static_cast<uint32_t>(id), size)) {
                 t.skip("Skipping potential undefined behavior");
@@ -725,7 +711,7 @@ CTS_TEST(g, "fragment")
         const WGPUTextureFormat format = WGPUTextureFormat_RGBA32Uint;
 
         const uint32_t innerTexels = (size[0] - 1) * (size[1] - 1);
-        const SubgroupSizes subgroupSizes = getSubgroupSizes(t);
+        const sg::SubgroupSizes subgroupSizes = sg::getSubgroupSizes(t);
         if (innerTexels < subgroupSizes.maxSize) {
             t.skip("Too few texels to be reliable");
         }

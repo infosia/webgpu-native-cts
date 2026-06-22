@@ -33,22 +33,6 @@ void skipIfNoSubgroups(sg::SubgroupTest& t) {
     }
 }
 
-// Reads the device's subgroupMinSize / subgroupMaxSize from adapter info.
-struct SubgroupSizes {
-    uint32_t minSize;
-    uint32_t maxSize;
-};
-SubgroupSizes getSubgroupSizes(sg::SubgroupTest& t) {
-    WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
-    const WGPUStatus status = wgpuDeviceGetAdapterInfo(t.device(), &info);
-    if (status != WGPUStatus_Success) {
-        t.fail("wgpuDeviceGetAdapterInfo failed");
-    }
-    const SubgroupSizes sizes{info.subgroupMinSize, info.subgroupMaxSize};
-    wgpuAdapterInfoFreeMembers(info);
-    return sizes;
-}
-
 // Checks subgroupElect compute shader results.
 //
 // metadata: id in first half, subgroup_size in second half.
@@ -217,7 +201,7 @@ CTS_TEST(g, "compute,each_invocation")
         const sg::WGSize wgSize = sg::wgSizeFromString(t.param<std::string>("wgSize"));
         const uint32_t wgThreads = wgSize[0] * wgSize[1] * wgSize[2];
 
-        const SubgroupSizes sizes = getSubgroupSizes(t);
+        const sg::SubgroupSizes sizes = sg::getSubgroupSizes(t);
         if (sizes.maxSize <= paramId) {
             t.skip("No invocation selected");
         }
@@ -351,7 +335,7 @@ CTS_TEST(g, "fragment")
         const sg::FramebufferSize size = sg::framebufferSizeFromString(t.param<std::string>("size"));
         const WGPUTextureFormat format = WGPUTextureFormat_RGBA32Uint;
 
-        const SubgroupSizes sizes = getSubgroupSizes(t);
+        const sg::SubgroupSizes sizes = sg::getSubgroupSizes(t);
         const uint32_t innerTexels = (size[0] - 1) * (size[1] - 1);
         if (innerTexels < sizes.minSize) {
             t.skip("Too few texels to be reliable");

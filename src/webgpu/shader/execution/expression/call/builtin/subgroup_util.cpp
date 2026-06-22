@@ -10,6 +10,8 @@
 #include <cstring>
 #include <sstream>
 
+#include "common/webgpu/backend.h"
+#include "common/webgpu/sync.h"
 #include "webgpu/texture_format.h"
 
 namespace cts {
@@ -302,6 +304,50 @@ UintsPerFramebuffer getUintsPerFramebuffer(WGPUTextureFormat format, uint32_t wi
     result.uintsPerRow = bytesPerRow / 4u;
     result.uintsPerTexel = info.bytesPerBlock / info.blockWidth / info.blockHeight / 4u;
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// getSubgroupSizes.
+// ---------------------------------------------------------------------------
+//
+// Portable port of the upstream adapter.subgroupMinSize / subgroupMaxSize query.
+// wgpuDeviceGetAdapterInfo is absent from yawgpu, so query a temporary instance
+// + adapter via wgpuAdapterGetInfo (which every backend exports). The range is
+// cached after the first successful call (same pattern as compute_builtins.spec
+// querySubgroupRange).
+
+SubgroupSizes getSubgroupSizes(SubgroupTest& t) {
+    static bool cached = false;
+    static SubgroupSizes sizes = {0, 0};
+    if (cached) {
+        return sizes;
+    }
+
+    WGPUInstance instance = createInstance();
+    if (instance == nullptr) {
+        t.fail("failed to create a WebGPU instance for the subgroup-size query");
+    }
+    AdapterResult adapter = requestAdapterSync(instance, nullptr);
+    if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
+        wgpuInstanceRelease(instance);
+        t.fail("failed to request an adapter for the subgroup-size query: " + adapter.message);
+    }
+
+    WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
+    const WGPUStatus status = wgpuAdapterGetInfo(adapter.adapter, &info);
+    if (status == WGPUStatus_Success) {
+        sizes.minSize = info.subgroupMinSize;
+        sizes.maxSize = info.subgroupMaxSize;
+        wgpuAdapterInfoFreeMembers(info);
+    }
+    wgpuAdapterRelease(adapter.adapter);
+    wgpuInstanceRelease(instance);
+
+    if (status != WGPUStatus_Success) {
+        t.fail("wgpuAdapterGetInfo failed for the subgroup-size query");
+    }
+    cached = true;
+    return sizes;
 }
 
 // ---------------------------------------------------------------------------

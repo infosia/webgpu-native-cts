@@ -35,6 +35,18 @@ using FPInterval = expression::fp::FPInterval;
 // extends AllFeaturesMaxLimitsGPUTest).
 using SubgroupTest = AllFeaturesMaxLimitsGpuTest;
 
+// The device's subgroupMinSize / subgroupMaxSize, read from adapter info.
+struct SubgroupSizes {
+    uint32_t minSize;
+    uint32_t maxSize;
+};
+
+// Returns the device's subgroup min/max size range. Queried portably via a
+// temporary instance + adapter (wgpuAdapterGetInfo, which all backends export)
+// rather than wgpuDeviceGetAdapterInfo (absent from yawgpu). The result is
+// cached after the first call. Calls t.fail(...) on query failure.
+SubgroupSizes getSubgroupSizes(SubgroupTest& t);
+
 // Number of accuracy cases (the params combine count for runAccuracyTest seeds).
 constexpr uint32_t kNumCases = 1000;
 

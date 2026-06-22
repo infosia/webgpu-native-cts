@@ -539,13 +539,9 @@ CTS_TEST(g, "fragment")
         const int64_t quadIndex = t.param<int64_t>("quadIndex");
         const WGPUTextureFormat format = WGPUTextureFormat_RGBA32Uint;
 
-        WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
-        if (wgpuDeviceGetAdapterInfo(t.device(), &info) != WGPUStatus_Success) {
-            t.fail("wgpuDeviceGetAdapterInfo failed");
-        }
-        const uint32_t subgroupMinSize = info.subgroupMinSize;
-        const uint32_t subgroupMaxSize = info.subgroupMaxSize;
-        wgpuAdapterInfoFreeMembers(info);
+        const sg::SubgroupSizes subgroupSizes = sg::getSubgroupSizes(t);
+        const uint32_t subgroupMinSize = subgroupSizes.minSize;
+        const uint32_t subgroupMaxSize = subgroupSizes.maxSize;
 
         const uint32_t innerTexels = (size[0] - 1) * (size[1] - 1);
         if (innerTexels < subgroupMinSize) {
