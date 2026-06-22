@@ -26,16 +26,16 @@ A test marked `.unimplemented()` in a ported file counts the file as **partial**
 |------|---------------:|-------:|--------:|----:|---------:|-----:|
 | `api/validation` | 129 | 112 | 14 | 3 | 0 | 0 |
 | `api/operation` | 72 | 28 | 42 | 2 | 0 | 0 |
-| `shader/validation` | 207 | 40 | 0 | 0 | 167 | 0 |
+| `shader/validation` | 207 | 207 | 0 | 0 | 0 | 0 |
 | `shader/execution` | 239 | 226 | 0 | 0 | 13 | 0 |
 | `compat` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `web_platform` | 13 | 0 | 0 | 13 | 0 | 0 |
 | `idl` | 3 | 0 | 0 | 3 | 0 | 0 |
 | other (root/examples/etc.) | 5 | 0 | 0 | 0 | 0 | 5 |
-| **Total** | **683** | **406** | **56** | **21** | **180** | **20** |
+| **Total** | **683** | **573** | **56** | **21** | **13** | **20** |
 
-> Reconciled 2026-06-20 to the on-disk `.spec.cpp` count: 462 files (complete + partial) under
-> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 226, shader/validation 40).
+> Reconciled 2026-06-22 to the on-disk `.spec.cpp` count: 629 files (complete + partial) under
+> `src/webgpu/` (api/validation 126, api/operation 70, shader/execution 226, shader/validation 207).
 > `api/operation` has **every
 > portable file opened** (70/72; only `buffers/{map_ArrayBuffer,map_detach}` are N/A — JS ArrayBuffer
 > detach), but it is **not fully complete**: per the area table 42 of those 70 files are **partial** —
@@ -412,15 +412,18 @@ Notes on the pre-classified rows:
   workers — these depend on the web platform and have no native C-API analog. See
   [00-overview](00-overview.md) non-goals.
 - **`idl` (3) → N/A**: WebIDL surface/constant tests; the C API has no IDL layer.
-- **`shader/validation` (207) → 40 ported, 167 deferred; `shader/execution` (239) → 226 ported, 13 deferred**:
+- **`shader/validation` (207) → 207 ported, 0 deferred; `shader/execution` (239) → 226 ported, 13 deferred**:
   shader execution is essentially complete (phaseY7–Y13): all structural files + the entire
   `expression/call/builtin` family (atomics, texture, sync/derivative, integer/bit/pack, the P4
   math/trig builtins on a ported **FP-interval acceptance framework** — f32/f16/abstract — and all
   binary/unary operators, conversions, constructors, access). The remaining **13 deferred** are the
-  `subgroup*`/`quadBroadcast`/`quadSwap` builtins (optional `subgroups` feature — Dawn-Metal skips, no
-  oracle) + `texture_utils` (an upstream util, N/A). `shader/validation` has the `extension`/`shader_io`/
-  `decl`/`functions`/`types`/`const_assert`/`uniformity` subdirs (phaseSV1); the rest (`expression`,
-  `parse`, `statement`) deferred. See [07-roadmap](07-roadmap.md).
+  `subgroup*`/`quadBroadcast`/`quadSwap` **execution** builtins (optional `subgroups` feature — Dawn-Metal
+  skips, no oracle) + `texture_utils` (an upstream util, N/A). `shader/validation` is now **complete**
+  (phaseSV1 `extension`/`shader_io`/`decl`/`functions`/`types`/`const_assert`/`uniformity`; phaseSV2
+  `parse`/`statement`/`expression` incl. all 114 builtin signature/type/const-overflow validation specs —
+  the subgroup/quad *validation* builtins **do** run on Dawn-Metal since the feature is present). Dawn
+  oracle green except 48 documented F-130 divergences (`bitwise_shift:partial_eval_errors` lhs=const).
+  See [07-roadmap](07-roadmap.md).
 - **`api/regression`, `shader/regression`**: 0 files at this revision.
 
 These classifications are provisional; revisit per file when the area is worked.
