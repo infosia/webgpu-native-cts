@@ -403,6 +403,10 @@ SubcaseResult runOne(const std::string& query, const TestSpec& test, const Param
         }
         return SubcaseResult{query, fixture->warnings().empty() ? TestStatus::Pass : TestStatus::Warn, ""};
     } catch (const SkipTestCase& e) {
+        try {
+            fixture->finalize();
+        } catch (...) {
+        }
         setCurrentTest(nullptr);
         return SubcaseResult{query, TestStatus::Skip, e.what()};
     } catch (const TestFailed& e) {
