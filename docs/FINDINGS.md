@@ -1511,20 +1511,9 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
-## F-134 — upstream-naga (shared yawgpu+wgpu-native): `non_zero:concrete_vector_mix` constructor CRASHES — Metal
+## F-134 — upstream-naga (shared): `non_zero:concrete_vector_mix` bool-vector constructor const-eval CRASHES — Metal
 
-- **Backend:** yawgpu (Metal) **and** wgpu-native (Metal) — both crash identically; Dawn clean. **Shared-naga**
-  (NOT yawgpu-specific), per [[naga-fix-crosscheck-wgpu-native]].
-- **Found by:** `shader,execution,expression,constructor,non_zero:concrete_vector_mix` — **16 crashes**
-  (isolation-confirmed, not degradation collateral). Surfaced in the 2026-06-22 area sweep.
-- **Cross-check (isolated, 3-backend):** `…,non_zero:concrete_vector_mix:*` →
-  Dawn `pass=320 crash=0`; **yawgpu `pass=304 crash=16`; wgpu-native `pass=240 skip=64 crash=16`** — yawgpu
-  and upstream naga crash the identical 16 cases, Dawn passes → upstream-naga const-eval/lowering crash on
-  the concrete vector-mix zero/non-zero constructor path, not a yawgpu-fork defect.
-- **Status:** OPEN, **upstream-naga**. Recorded for completeness; not a yawgpu-specific bug. Related to the
-  broader naga frontend/const-eval gap set in **F-133**. (Note: the `call,user,ptr_params` "fails" seen in
-  the same whole-area run were **degradation collateral** — isolated, ptr_params is `fail=0` on yawgpu, with
-  85 `unrestricted_pointer_parameters` feature-skips.)
+**RESOLVED on yawgpu** (naga fork `a98f6d3fc`) — naga `select` const-eval hit `unreachable!()` (`constant_evaluator.rs:5138`) on a nested-`Compose` bool-vector condition (a bool vector built from a mixed scalar+subvector constructor, serialized via `select` for const-eval). The 16 `type=bool;inputSource=const` crashes are now `pass=320 crash=0`, Dawn-equal; full `non_zero` 2144/0. Still present on wgpu-native (older upstream naga). (The `ptr_params` "fails" co-seen at discovery were degradation collateral — `fail=0` isolated.)
 
 ---
 
