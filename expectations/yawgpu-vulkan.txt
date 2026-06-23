@@ -39,3 +39,16 @@ webgpu:api,validation,render_pipeline,misc:external_texture:isAsync=true
 # *stricter*, so these 2 cases fail on every backend; also listed in expectations/yawgpu.txt (Metal).
 # See docs/FINDINGS.md.
 webgpu:api,validation,encoding,cmds,render,draw:index_buffer_format_dirtying:*
+
+# F-129 (CLOSED): denormal fwidth value mismatch on native Vulkan — NOT a yawgpu defect.
+# fwidth/fwidthFine/fwidthCoarse f32 fail near the denormal boundary, e.g.
+# inputs=(-10, -FLT_MIN, …) → expected[3]=[3.52648e-38, 4.70198e-38]; got 4.70198e-38 (the got value is
+# the acceptance interval's own upper endpoint — the CTS-computed interval is marginally too tight for the
+# NVIDIA Vulkan denormal result). The Dawn-Vulkan oracle (same GPU + API, built this host) fails all 8
+# f32 cases with the byte-identical value, so this is a CTS acceptance-interval / NVIDIA-denormal artifact
+# (F-104/F-090-class), not a yawgpu/naga defect. The separate `discard`+derivative SPIR-V gap (sub-cause 1)
+# was a real defect and is FIXED in yawgpu's naga fork (demote-to-helper), so it is not listed here.
+# Drop these if the upstream gpuweb/cts fwidth acceptance interval is widened for denormals.
+webgpu:shader,execution,expression,call,builtin,fwidth:f32:*
+webgpu:shader,execution,expression,call,builtin,fwidthFine:f32:*
+webgpu:shader,execution,expression,call,builtin,fwidthCoarse:f32:*

@@ -1406,7 +1406,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ---
 
-## F-129 — yawgpu Vulkan: `fwidth`/`fwidthFine`/`fwidthCoarse` — `discard`+derivative errors + denormal interval — native Vulkan
+## F-129 — yawgpu Vulkan: `fwidth`/`fwidthFine`/`fwidthCoarse` — `discard`+derivative errors + denormal interval — native Vulkan — CLOSED ((1) FIXED, (2) not-a-defect → xfail)
 
 - **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Windows). Deterministic. **Metal-green.**
 - **Found by:** `shader,execution,expression,call,builtin,{fwidth,fwidthFine,fwidthCoarse}:f32:*` — **8 fail
@@ -1423,20 +1423,36 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
      SPIR-V backend conformance gap.**
   2. **`non_uniform_discard=false` (12 cases) → value mismatch** near the denormal boundary, e.g.
      `inputs=(-10, -1.17549e-38, …)` (±`FLT_MIN`), `expected[3]=[3.52648e-38, 4.70198e-38]; got
-     4.70198e-38`. Likely NVIDIA flushing denormals in derivative computation (FTZ); needs confirmation
-     whether the divergence is yawgpu/naga-emitted or a driver derivative-precision artifact (candidate for
-     a driver-artifact classification like F-104/F-090-class, **not** necessarily a yawgpu defect).
-- **Cross-check:** wgpu-native (Vulkan) produced no verdicts for `fwidth` on this host (0/0/0/0) — no oracle;
-  Dawn + yawgpu/Metal green is the reference.
+     4.70198e-38`. **CLASSIFIED — driver/CTS-interval artifact, NOT a yawgpu defect** (see Dawn-Vulkan
+     oracle below): the got value is the acceptance interval's own *upper endpoint* (`4.70198e-38`), i.e.
+     the CTS-computed interval is marginally too tight for the NVIDIA Vulkan denormal `fwidth` result. F-104/
+     F-090-class artifact. → **xfail**, and a CTS-side acceptance-interval issue.
+- **Cross-check — Dawn-Vulkan oracle now available (2026-06-24, this host).** Built Dawn CTS
+  (`CTS_BACKEND=dawn`) and ran it on the same machine — adapter `backendType: vulkan`, NVIDIA GeForce RTX
+  5060 Ti (driver 610.62), i.e. the *same API + GPU* as yawgpu's Vulkan HAL. **Dawn fails all 8
+  `fwidth:f32:*` cases with the byte-identical `got 4.70198e-38` vs `expected[3]=[3.52648e-38, 4.70198e-38]`
+  — exactly yawgpu's value.** Because Dawn handles `discard` correctly, *both* `non_uniform_discard` ∈
+  {false,true} reduce to the same denormal value mismatch on Dawn (so the value defect is independent of the
+  discard handling). The oracle reproducing yawgpu's exact value on the same hardware is definitive: the
+  denormal `fwidth` mismatch is **not** a yawgpu/naga defect. (wgpu-native still gives no `fwidth` verdicts
+  on this host; Dawn is now the Vulkan oracle.)
 - **Status:** Sub-cause (1) **FIXED in naga fork `f82aa6a83`** (`fix(naga): discard is demote-to-helper, not
   a uniformity disruptor`) + yawgpu `b968d76`; naga now emits `OpDemoteToHelperInvocation` instead of
   `OpKill`. **Metal smoke test (2026-06-23, this host) confirms no regression and a net improvement:** the
   naga change is shared frontend code, so it was re-run on Metal — `shader,execution,statement,discard:*`
   went `6→4 fail` (the 2 `discard:derivatives` cases now pass), and all `{dpdx,dpdy,fwidth}*` execution +
   `validation,…,derivatives:*` stayed green (`pass=300` over the combined derivative/discard set, the only
-  fails being the 4 in F-136). Native-Vulkan re-verification of the `non_uniform_discard=true` (12) cases
-  pending on the NVIDIA/Windows host (no Vulkan oracle here). Sub-cause (2) (denormal interval, 12 cases)
-  still needs a driver-FTZ classification before deciding if it is a defect.
+  fails being the 4 in F-136).
+  **CLOSED (2026-06-24).** Sub-cause (1) is a genuine yawgpu/naga defect, **fixed** (above). Sub-cause (2)
+  is **not a yawgpu defect** — the Dawn-Vulkan-NVIDIA oracle (built this day, same GPU) produces the
+  byte-identical `got 4.70198e-38` and fails all 8 `fwidth:f32:*` cases identically; the mismatch is a
+  CTS acceptance-interval-too-tight / NVIDIA-denormal artifact (F-104/F-090-class). **Net effect on the
+  suite:** after the sub-cause (1) fix, yawgpu's `non_uniform_discard=true` cases no longer become error
+  pipelines — they reduce to the *same* sub-cause-(2) denormal value mismatch as `discard=false` (and as
+  Dawn), so all `{fwidth,fwidthFine,fwidthCoarse}:f32:*` cases now fail on the value check, identically to
+  the Vulkan oracle. → **xfail** these in `expectations/yawgpu-vulkan.txt` (non-defect, Dawn-Vulkan-equal),
+  and track the denormal `fwidth` acceptance-interval as a **CTS-side interval issue** (verify against
+  upstream gpuweb/cts). No further yawgpu action.
 - **Uncovered (separate, pre-existing on Metal):** the Metal smoke re-run surfaced **4 yawgpu Metal fails not
   from this fix** — `discard:{three_quarters,function_call}` (`useStorageBuffers ∈ {false,true}`). Present
   with **both** the pre-F-129 naga (`a98f6d3fc`) and the new rev, so independent of F-129. → see **F-136**.
