@@ -2197,11 +2197,14 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 - **Cross-check:** representative cases for every family give matching yawgpu+wgpu-native fail vs Dawn pass
   (e.g. `mix:values:stage="constant";type="vec2<abstract-int>"` Dawn 125 pass / yawgpu 125 fail / wgpu 125
   fail identical; `precedence:binary_requires_parentheses:op1="mul";op2="shl"` pass/fail/fail).
-- **Status:** OPEN, **upstream-naga** (not a yawgpu-fork defect). The user has deprioritized naga-frontend
-  work; recorded here so the divergence set is documented and not re-chased as "yawgpu bugs". yawgpu may
-  adopt these from upstream naga over time; the CTS ports stay faithful (unmasked) and Dawn-oracle green.
-  **execution** subgroup/quad correctly **skip** on yawgpu (no `subgroups` feature); `texture_utils` + texture
-  execution pass.
+- **Status:** **MOSTLY FIXED on yawgpu** (its naga fork advanced to `f887a4097`), **still open on
+  wgpu-native** (older upstream naga). yawgpu fixed the bulk in its fork — const-eval builtins, binary-op
+  validation, and `@diagnostic(...)` directive surfacing — taking `shader/validation` from **~77k → 6612**
+  fails on Metal. The remaining 6612 are the not-yet-landed naga slices. wgpu-native (upstream naga) still
+  shows the full ~73.7k. This stays classified **upstream-naga** (the gaps are in naga, not yawgpu-specific
+  code); yawgpu simply leads upstream in closing them. CTS ports stay faithful (unmasked) and Dawn-oracle
+  green. **execution** subgroup/quad correctly **skip** on yawgpu (no `subgroups` feature); `texture_utils` +
+  texture execution pass.
 
 ---
 

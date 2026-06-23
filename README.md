@@ -95,9 +95,10 @@ ported:** the entire **`api`** surface (`api/validation` + `api/operation`), **a
 **Conformance (current).** Against the **Dawn** oracle every ported test is green except 48
 `shader/validation` cases (**F-130**, a Dawn const-fold gap). On **yawgpu** (Metal): `api/*` is `fail=0` and
 the f32/f16/abstract **runtime** math matches Dawn; its one open implementation defect is **F-124**
-(composite-result abstract-float const-eval, ~88 cases). The bulk of yawgpu's shader-frontend divergences
-are **shared with wgpu-native** (upstream naga, **F-133**/**F-134**) — not yawgpu-specific. **wgpu-native**
-is a panic-heavy bring-up reference. Per-backend numbers: [Test results](#test-results); per-finding detail:
+(composite-result abstract-float const-eval, ~88 cases). yawgpu's remaining `shader/validation` divergences
+(~6.6k) are **shared upstream-naga** (**F-133**/**F-134**) — not yawgpu-specific; yawgpu's naga fork has
+already fixed most of them (const-eval builtins, binary-op validation, `@diagnostic`), leading upstream
+naga (wgpu-native still shows the full set). **wgpu-native** is a panic-heavy bring-up reference. Per-backend numbers: [Test results](#test-results); per-finding detail:
 [FINDINGS](docs/FINDINGS.md).
 
 ### Port coverage
@@ -144,15 +145,16 @@ added: [COVERAGE](docs/COVERAGE.md).
 commit hashes) lives in [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced —
 never masked to make a test pass. The headline: **yawgpu's `api/*` and `shader/execution` runtime are
 conformance-clean on native Metal**, and the `shader/validation` frontend is clean. yawgpu's **one** open
-implementation defect is **F-124** — composite-result abstract-float const-eval readback (~88 cases). The
-bulk (~77k `shader/validation` fails) are **shared upstream-naga** frontend/const-eval gaps (yawgpu ==
-wgpu-native, both vs Dawn/tint; **F-133**/**F-134**), not yawgpu defects. subgroup/quad execution correctly
-**skip** on yawgpu (no `subgroups` feature).
+implementation defect is **F-124** — composite-result abstract-float const-eval readback (~88 cases). Its
+remaining `shader/validation` fails (~6.6k) are **shared upstream-naga** frontend/const-eval gaps
+(**F-133**/**F-134**), not yawgpu defects — and yawgpu's naga fork has already fixed most of them
+(const-eval builtins, binary-op validation, `@diagnostic`), so it leads upstream naga (wgpu-native still
+shows the full ~73.7k). subgroup/quad execution correctly **skip** on yawgpu (no `subgroups` feature).
 
 | Bucket | # | Detail |
 |--------|--:|--------|
 | **yawgpu — open implementation defects** | **1** | **F-124** abstract-float const-eval readback — **scalar/vector** path **fixed**; ~88 **composite-result** cases remain (`transpose`/`determinant`/`smoothstep` abstract_float + struct-returning `modf`/`frexp` for abstract & f16), Dawn-green. Plus the 2-case Dawn-leniency `draw,index_buffer_format_dirtying` + F-111, carried as `xfail` |
-| upstream-naga (shared yawgpu + wgpu-native) — **not a yawgpu defect** | 2 | **F-133** — ~77k `shader/validation` fails **identical** on yawgpu and wgpu-native (both vs Dawn/tint): builtin const-eval "not implemented" (mix/faceForward/refract/…, same family as F-124), `@diagnostic(...)` directive unimplemented, binary/precedence/early-eval/statement/insertBits/texture-offset range checks. **F-134** — `non_zero:concrete_vector_mix` execution crash (yawgpu == wgpu-native). Upstream-naga frontend gaps; CTS ports stay faithful + Dawn-green |
+| upstream-naga (shared) — **not a yawgpu defect** | 2 | **F-133** — naga WGSL-frontend/const-eval gaps vs tint (builtin const-eval "not implemented", `@diagnostic(...)` directive, binary/precedence/early-eval/statement/insertBits/texture-offset range checks). yawgpu's naga fork has **fixed most** (now **~6.6k** `shader/validation` fails on Metal, down from ~77k); wgpu-native (older upstream naga) still shows the full **~73.7k**. **F-134** — `non_zero:concrete_vector_mix` execution crash (yawgpu == wgpu-native). CTS ports stay faithful + Dawn-green |
 | yawgpu — fixed & hardware-re-verified | 99 | incl. **F-120** (shader/validation + graph uniformity analysis), **F-121** (shader-f16), **F-122**/**F-123**/**F-125** (const-eval/precedence), **F-131** (`bitcast`-from-non-numeric), **F-132** (override-OOB array/matrix index); full list in [FINDINGS](docs/FINDINGS.md) |
 | Spec in flux / feature gap — **not a defect** | 2 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb#5457, cts#4510 pending); F-111 `GPUExternalTexture` on the Vulkan backend — both `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 23+ | panics F-001–F-021 (contained via `--isolate`); F-015/F-027/F-028/F-036/F-045/F-048/F-052/F-056/F-084/F-088/F-097/F-113; plus upstream-naga shader/validation (no uniformity analysis) + shader-f16 unsupported (bring-up reference) |
@@ -174,7 +176,7 @@ yawgpu differs) vs **shared upstream-naga** (yawgpu==wgpu-native, both vs Dawn/t
 | `api/validation` (129) | **fail 0** | **fail 0** | panic-heavy bring-up (crash ≈6.9k, not triaged) |
 | `api/operation` (72) | **fail 0** | **fail 0** | panic-heavy bring-up (crash ≈0.2k, not triaged) |
 | `shader/execution` (239) | **fail 0** | **fail ~88** (F-124 composite abstract-float/f16 const-eval: transpose/determinant/smoothstep abstract + modf/frexp) **+ crash 16** (**F-134**, shared-naga `non_zero:concrete_vector_mix`). f32/f16/abstract **runtime** math all green; `subgroup*`/`quad*` correctly **skip** (no `subgroups` feature) | crash-heavy (panics) + F-124-class + F-134 |
-| `shader/validation` (207) | **fail 48** (**F-130**, `bitwise_shift:partial_eval_errors` lhs=const — a Dawn const-fold gap) | **fail ~77476, crash 0** — all **F-133** (**shared upstream-naga**); no yawgpu-specific defect open | **fail 73737** (**F-133** shared upstream-naga) |
+| `shader/validation` (207) | **fail 48** (**F-130**, `bitwise_shift:partial_eval_errors` lhs=const — a Dawn const-fold gap) | **fail 6612, crash 0** — all **F-133** (**shared upstream-naga**, naga fork fixed most; no yawgpu-specific defect open) | **fail ~73737** (**F-133** shared upstream-naga, full set) |
 
 > **The split is the point.** yawgpu's `api/*` is **fully green** and its `shader/execution` **runtime** math
 > (f32/f16/abstract) matches Dawn. The `shader/validation` divergences are **shared upstream-naga**
