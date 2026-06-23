@@ -2219,6 +2219,16 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   broader naga frontend/const-eval gap set in **F-133**. (Note: the `call,user,ptr_params` "fails" seen in
   the same whole-area run were **degradation collateral** — isolated, ptr_params is `fail=0` on yawgpu, with
   85 `unrestricted_pointer_parameters` feature-skips.)
+- **Update 2026-06-23 (root-caused, instrumented):** the residual createPipeline leak is a **VkDevice
+  concurrent-ceiling**, not a grow-forever leak. Instrumented slice
+  `maxStorageBuffersPerShaderStage:createPipeline,at_over:*`: **192 VkDevices created, 120 freed → up to
+  72 live at once** → driver refuses the next device (`HAL device creation failed`, fail=48). `wgpuDeviceRelease`
+  is correct (every call `strong_count==1`, frees the VkDevice). The lever is that **yawgpu's
+  `wgpuDeviceDestroy` does NOT reclaim the backend VkDevice** (only marks it lost; Dawn's `destroy()`
+  reclaims) — so the limit suite, which destroys a device per subcase and creates a pipeline on it, piles up
+  VkDevices on yawgpu but not Dawn. Fix is yawgpu-side (make destroy reclaim the device / ensure pipeline
+  release drops `Arc<core::Device>` promptly); CTS carry stays `--isolate`. The yawgpu fix task is in
+  the yawgpu repo's ephemeral `HANDOFF.md` (coding-agent exchange, git-ignored).
 
 ---
 
@@ -2260,9 +2270,9 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   leak is **createPipeline-specific** and accrues VkDevices (a leaked pipeline keeps its `Arc<core::Device>`
   alive). Layer-bisected: **HAL is clean** (HAL-level instance→adapter→device→compute-pipeline→drop ×200
   passes), pipeline caches are `Weak` (not retaining), CTS releases pipelines in `finalize()`, core doesn't
-  stash pipelines → the leak is in `yawgpu/src/ffi` + `yawgpu-core` (leading suspect: the **async**
-  create-pipeline pending-callback path; fails skew `async=true`). Round-2 evidence + next steps in the
-  yawgpu repo `specs/tracking/f135-vulkan-entry-leak-handoff.md`.
+  stash pipelines → the leak is in `yawgpu/src/ffi` + `yawgpu-core`. (Superseded by the round-3
+  root-cause below: a VkDevice concurrent-ceiling driven by `wgpuDeviceDestroy` not reclaiming the
+  backend device.) The yawgpu fix task is in the yawgpu repo's ephemeral `HANDOFF.md` (git-ignored).
 
 ---
 
