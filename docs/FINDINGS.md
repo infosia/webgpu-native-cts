@@ -2219,24 +2219,30 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   broader naga frontend/const-eval gap set in **F-133**. (Note: the `call,user,ptr_params` "fails" seen in
   the same whole-area run were **degradation collateral** — isolated, ptr_params is `fail=0` on yawgpu, with
   85 `unrestricted_pointer_parameters` feature-skips.)
-- **Update 2026-06-23 (root-caused, instrumented):** the residual createPipeline leak is a **VkDevice
-  concurrent-ceiling**, not a grow-forever leak. Instrumented slice
-  `maxStorageBuffersPerShaderStage:createPipeline,at_over:*`: **192 VkDevices created, 120 freed → up to
-  72 live at once** → driver refuses the next device (`HAL device creation failed`, fail=48). `wgpuDeviceRelease`
-  is correct (every call `strong_count==1`, frees the VkDevice). The lever is that **yawgpu's
-  `wgpuDeviceDestroy` does NOT reclaim the backend VkDevice** (only marks it lost; Dawn's `destroy()`
-  reclaims) — so the limit suite, which destroys a device per subcase and creates a pipeline on it, piles up
-  VkDevices on yawgpu but not Dawn. Fix is yawgpu-side (make destroy reclaim the device / ensure pipeline
-  release drops `Arc<core::Device>` promptly); CTS carry stays `--isolate`. The yawgpu fix task is in
-  the yawgpu repo's ephemeral `HANDOFF.md` (coding-agent exchange, git-ignored).
 
 ---
 
-## F-135 — yawgpu Vulkan HAL: device-creation resource LEAK under per-process churn (whole-process collateral)
+## F-135 — CTS harness: fixture device handles leaked on `SkipTestCase` (surfaced as a yawgpu Vulkan device-creation ceiling) — RESOLVED
 
-- **Backend:** yawgpu (native Vulkan) — **yawgpu-specific HAL**. The failure string `HAL device creation
-  failed: vulkan` is yawgpu's own HAL device-creation layer (wgpu-native uses a different wgpu-core HAL, so
-  it is not shared, unlike F-133/F-134).
+- **RESOLVED 2026-06-23 (CTS `4cacc03`). Root cause = CTS harness, NOT yawgpu.** `src/common/runner.cpp`
+  caught `SkipTestCase` without calling `fixture->finalize()` (the `TestFailed`/`std::exception` handlers do).
+  A fixture that acquires a device then **skips after acquisition** (`skipIfNotEnoughStorageBuffersInStage`
+  inside `LimitTest::testThenDestroyDevice`) leaked its device handle (`ownedDevices_` is released only in
+  `finalize()`). On native Vulkan the leaked handles hit the driver's ~72 concurrent-`VkDevice` ceiling →
+  `HAL device creation failed`. Instrumented proof: **192 device handles created, only 120
+  `wgpuDeviceDestroy`/`wgpuDeviceRelease` → 72 live**. **Fix:** call `finalize()` on skip (general — applies
+  to every fixture). **Verified:** tight repro `…createPipeline,at_over:*` single-proc **fail 48→0**;
+  `state,device_lost,destroy` single-proc == `--isolate` (fail=0); full `api,validation` crash 9→1.
+  **yawgpu EXONERATED** — `wgpuDeviceRelease` was always correct; the two yawgpu "fixes" (`b71e59c`
+  entry-share, `92d77e5` eager-destroy) were **false greens** (their unit tests passed but the CTS repro was
+  byte-identical) and `92d77e5` was reverted (yawgpu `7b3a963`). The residual full-suite
+  `HAL queue submission failed` cross-area collateral is a **separate** recycle-partial issue (`--isolate`
+  truth unchanged ~5), not F-135.
+- _Investigation trail below (superseded by the RESOLVED note above) — kept for the record; it initially
+  mis-pointed at a yawgpu HAL leak because the failure string `HAL device creation failed: vulkan` is
+  yawgpu's HAL device-creation layer._
+- **Backend (as first suspected):** yawgpu (native Vulkan). The failure string is yawgpu's own HAL
+  device-creation layer (wgpu-native uses a different wgpu-core HAL, so it is not shared, unlike F-133/F-134).
 - **Found by:** investigating the phaseH3 device-recycle (`32c1b34`) on Vulkan, 2026-06-23 (cts.exe
   `85e7d9b`, yawgpu.dll Jun 21). Tests that own/churn their **own** `instance+adapter+device`
   (the `capability_checks,limits,*` `LimitTest` fixture `limit_utils.h:330-432`, and
@@ -2259,9 +2265,8 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   (`src\lib.rs:2754: invalid error filter`, exit 127, a **separate unrelated wgpu-native bug**), so it never
   reaches the churn. The yawgpu HAL error string already localizes the leak to yawgpu. A CTS-test-free
   minimal churn loop (createInstance→adapter→device→release ×N) would give the definitive cross-backend proof.
-- **Status:** OPEN, **yawgpu-specific**. Root-cause fix is in the yawgpu repo. CTS-side carry: run these
-  device-churning families under `--isolate` / selective `--crash-list`. Spec:
-  `specs/investigate-yawgpu-device-create-leak.md` (F-135).
+- **Status:** RESOLVED — see the top note (CTS `runner.cpp` finalize-on-skip, `4cacc03`). The
+  `specs/investigate-yawgpu-device-create-leak.md` task and its yawgpu-side framing are superseded.
 - **Update 2026-06-23 (fix attempt 1 — PARTIAL):** yawgpu `b71e59c` shares the Vulkan `ash::Entry`
   process-wide (was `LoadLibrary`/`FreeLibrary` of `vulkan-1.dll` per instance). Rebuilt+deployed
   `yawgpu.dll`, re-ran the tight repro → **still fail=318** (unchanged). The entry fix is real (its HAL
@@ -2270,9 +2275,8 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   leak is **createPipeline-specific** and accrues VkDevices (a leaked pipeline keeps its `Arc<core::Device>`
   alive). Layer-bisected: **HAL is clean** (HAL-level instance→adapter→device→compute-pipeline→drop ×200
   passes), pipeline caches are `Weak` (not retaining), CTS releases pipelines in `finalize()`, core doesn't
-  stash pipelines → the leak is in `yawgpu/src/ffi` + `yawgpu-core`. (Superseded by the round-3
-  root-cause below: a VkDevice concurrent-ceiling driven by `wgpuDeviceDestroy` not reclaiming the
-  backend device.) The yawgpu fix task is in the yawgpu repo's ephemeral `HANDOFF.md` (git-ignored).
+  stash pipelines → the leak looked like `yawgpu/src/ffi` + `yawgpu-core`. (All superseded by the RESOLVED
+  note at the top: the true cause was the CTS harness not running `finalize()` on skip — yawgpu was correct.)
 
 ---
 

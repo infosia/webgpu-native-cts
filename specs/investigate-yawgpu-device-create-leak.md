@@ -1,5 +1,11 @@
 # F-135 — yawgpu Vulkan HAL: device-creation resource leak under per-process churn
 
+> **RESOLVED 2026-06-23 — this spec's premise was WRONG and is kept only for the record.** The leak was
+> NOT in yawgpu's HAL. Root cause was the CTS harness: `src/common/runner.cpp` did not call
+> `fixture->finalize()` on `SkipTestCase`, so limit fixtures leaked their device handles when skipping
+> after acquiring a device. Fixed in `src/common/runner.cpp` (commit `4cacc03`); yawgpu was exonerated.
+> See `docs/FINDINGS.md` F-135 for the full record. Everything below is the (superseded) original framing.
+
 > Investigation + finding-documentation task. The root-cause **fix is in yawgpu's HAL device/instance
 > lifecycle** (the separate yawgpu repo). This CTS-side task pinpoints the trigger, records the finding
 > (done: F-135 in `docs/FINDINGS.md`), and decides how the suite carries the affected families so a

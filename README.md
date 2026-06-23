@@ -138,7 +138,7 @@ added: [COVERAGE](docs/COVERAGE.md).
 - **Per-backend expectations** (`--expectations`) — runs with known divergences still exit 0,
   with nothing silently masked; `--workers N` shards a full sweep ~10× faster.
 
-### Findings — 134 surfaced to date (F-001…F-134)
+### Findings — 135 surfaced to date (F-001…F-135)
 
 **Current state only** — the full per-finding record (what, which backend, root cause, fix history,
 commit hashes) lives in [FINDINGS](docs/FINDINGS.md). Every divergence is reported and surfaced —
@@ -157,6 +157,7 @@ wgpu-native, both vs Dawn/tint; **F-133**/**F-134**), not yawgpu defects. subgro
 | Spec in flux / feature gap — **not a defect** | 2 | F-085 `sample_mask`/`position` per-sample semantics (gpuweb#5457, cts#4510 pending); F-111 `GPUExternalTexture` on the Vulkan backend — both `xfail` in the Vulkan-only expectation files |
 | wgpu-native — open | 23+ | panics F-001–F-021 (contained via `--isolate`); F-015/F-027/F-028/F-036/F-045/F-048/F-052/F-056/F-084/F-088/F-097/F-113; plus upstream-naga shader/validation (no uniformity analysis) + shader-f16 unsupported (bring-up reference) |
 | MoltenVK-only translation artifacts — green on native Metal + native Vulkan | 9 | F-104 `copyTextureToTexture` (14512, native-Vulkan-green), F-070 SPIRV-Cross residue, F-033, F-045, F-053/F-068 residuals, F-083, F-086, maxComputeWorkgroupStorageSize |
+| CTS harness — resolved (not a backend defect) | 1 | **F-135** — the test runner now releases a fixture's acquired resources (devices) when a test **skips after acquisition**; previously these leaked and, on native Vulkan, exhausted the driver's concurrent-`VkDevice` limit in the `capability_checks,limits` suite. **Not a yawgpu defect** — its device lifecycle is correct |
 
 Buckets overlap where a finding affects several backends (e.g. F-045, F-082).
 
