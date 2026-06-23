@@ -250,6 +250,14 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
 unsigned long g_caseCounter = 0;
 
 unsigned long deviceRecycleInterval() {
+    // Periodic device recycle is OFF by default (0). The on-device-loss self-heal
+    // (onDeviceLost -> deviceLost -> teardown) is what actually prevents the
+    // whole-suite "adapter consumed" collateral cascade; periodic recycle on a
+    // *healthy* device is not only unnecessary but actively breaks tests that hold
+    // device resources across subcases (it swaps the device mid-case at the
+    // per-subcase setCurrentTest boundary) — e.g. the texture-sampling execution
+    // tests create a texture/sampler in one subcase and use it across the rest.
+    // Opt in with CTS_DEVICE_RECYCLE_INTERVAL=N (>0) for backends that still need it.
     static const unsigned long interval = [] {
         // MSVC deprecates std::getenv (C4996) and the project builds /W4 /WX; the returned pointer is
         // read immediately and only parsed, so suppress the warning narrowly here (same pattern as
@@ -263,12 +271,12 @@ unsigned long deviceRecycleInterval() {
 #pragma warning(pop)
 #endif
         if (value == nullptr || *value == '\0') {
-            return 500UL;
+            return 0UL;
         }
         char* end = nullptr;
         const unsigned long parsed = std::strtoul(value, &end, 10);
         if (end == value) {
-            return 500UL;
+            return 0UL;
         }
         return parsed;
     }();
