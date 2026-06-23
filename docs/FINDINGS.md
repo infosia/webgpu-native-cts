@@ -1428,8 +1428,35 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
      a driver-artifact classification like F-104/F-090-class, **not** necessarily a yawgpu defect).
 - **Cross-check:** wgpu-native (Vulkan) produced no verdicts for `fwidth` on this host (0/0/0/0) — no oracle;
   Dawn + yawgpu/Metal green is the reference.
-- **Status:** OPEN (2026-06-21). Sub-cause (1) is a clear yawgpu/naga-fork SPIR-V fix; sub-cause (2) needs a
-  denormal/driver classification before deciding if it is a defect.
+- **Status:** Sub-cause (1) **FIXED in naga fork `f82aa6a83`** (`fix(naga): discard is demote-to-helper, not
+  a uniformity disruptor`) + yawgpu `b968d76`; naga now emits `OpDemoteToHelperInvocation` instead of
+  `OpKill`. **Metal smoke test (2026-06-23, this host) confirms no regression and a net improvement:** the
+  naga change is shared frontend code, so it was re-run on Metal — `shader,execution,statement,discard:*`
+  went `6→4 fail` (the 2 `discard:derivatives` cases now pass), and all `{dpdx,dpdy,fwidth}*` execution +
+  `validation,…,derivatives:*` stayed green (`pass=300` over the combined derivative/discard set, the only
+  fails being the 4 in F-136). Native-Vulkan re-verification of the `non_uniform_discard=true` (12) cases
+  pending on the NVIDIA/Windows host (no Vulkan oracle here). Sub-cause (2) (denormal interval, 12 cases)
+  still needs a driver-FTZ classification before deciding if it is a defect.
+- **Uncovered (separate, pre-existing on Metal):** the Metal smoke re-run surfaced **4 yawgpu Metal fails not
+  from this fix** — `discard:{three_quarters,function_call}` (`useStorageBuffers ∈ {false,true}`). Present
+  with **both** the pre-F-129 naga (`a98f6d3fc`) and the new rev, so independent of F-129. → see **F-136**.
+
+---
+
+## F-136 — yawgpu Metal: `discard:{three_quarters,function_call}` → error command buffer — Metal
+
+- **Backend:** yawgpu Metal (macOS, this host). Deterministic; reproduces under `--isolate` (not collateral).
+- **Found by:** `shader,execution,statement,discard:*` — **4 fail** (`pass=10`):
+  `three_quarters` and `function_call`, each `useStorageBuffers ∈ {false,true}`. Symptom:
+  `uncaptured error: queue submit cannot use an error command buffer` (no `compilationInfo` error surfaced —
+  the failure is at encode/submit, not shader compile).
+- **Oracle:** Dawn (Metal) passes all 14 `discard:*`. **yawgpu-only.**
+- **Independent of F-129:** reproduces identically with the pre-F-129 naga rev (`a98f6d3fc`) and the current
+  rev (`f82aa6a83`) — so the F-129 demote-to-helper change neither caused nor fixed it. Pre-existing; only
+  now caught because the F-129 Metal smoke re-ran `discard:*` (prior sweeps were Dawn-only).
+- **Status:** OPEN (2026-06-23). Not yet root-caused. `all`/`loop`/`continuing`/`derivatives`/
+  `uniform_read_loop` discard variants pass on Metal; only the `three_quarters` (partial-quad discard) and
+  `function_call` (discard inside a called fn) shapes fail.
 
 ---
 
