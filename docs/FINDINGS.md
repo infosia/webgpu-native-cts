@@ -2249,9 +2249,20 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   (`src\lib.rs:2754: invalid error filter`, exit 127, a **separate unrelated wgpu-native bug**), so it never
   reaches the churn. The yawgpu HAL error string already localizes the leak to yawgpu. A CTS-test-free
   minimal churn loop (createInstance→adapter→device→release ×N) would give the definitive cross-backend proof.
-- **Status:** OPEN, **yawgpu-specific HAL**. Root-cause fix is in the yawgpu repo (device/instance teardown
-  leak in the Vulkan HAL). CTS-side carry: run these device-churning families under `--isolate` /
-  selective `--crash-list`. Spec: `specs/investigate-yawgpu-device-create-leak.md` (F-135).
+- **Status:** OPEN, **yawgpu-specific**. Root-cause fix is in the yawgpu repo. CTS-side carry: run these
+  device-churning families under `--isolate` / selective `--crash-list`. Spec:
+  `specs/investigate-yawgpu-device-create-leak.md` (F-135).
+- **Update 2026-06-23 (fix attempt 1 — PARTIAL):** yawgpu `b71e59c` shares the Vulkan `ash::Entry`
+  process-wide (was `LoadLibrary`/`FreeLibrary` of `vulkan-1.dll` per instance). Rebuilt+deployed
+  `yawgpu.dll`, re-ran the tight repro → **still fail=318** (unchanged). The entry fix is real (its HAL
+  churn test passes) but there is a **second, distinct leak**. Bisected by subtest:
+  `createBindGroupLayout`=fail0, `createPipelineLayout`=fail0, **`createPipeline`=fail48** — the remaining
+  leak is **createPipeline-specific** and accrues VkDevices (a leaked pipeline keeps its `Arc<core::Device>`
+  alive). Layer-bisected: **HAL is clean** (HAL-level instance→adapter→device→compute-pipeline→drop ×200
+  passes), pipeline caches are `Weak` (not retaining), CTS releases pipelines in `finalize()`, core doesn't
+  stash pipelines → the leak is in `yawgpu/src/ffi` + `yawgpu-core` (leading suspect: the **async**
+  create-pipeline pending-callback path; fails skew `async=true`). Round-2 evidence + next steps in the
+  yawgpu repo `specs/tracking/f135-vulkan-entry-leak-handoff.md`.
 
 ---
 
