@@ -334,25 +334,13 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-005 — yawgpu mishandles several valid uncompressed texture formats
 
-- **Backend:** yawgpu (captured `55ac04d`). Not in wgpu-native/Dawn — the first finding against yawgpu.
-- **What:** `createTexture:dimension_type_and_format_compatibility` (T1) — yawgpu rejected 12 valid
-  color formats (`R16`/`RG16` Uint/Sint/Float/Unorm/Snorm + `RGB10A2Uint/Unorm`; enum
-  5/6/7/8/9/17/18/19/20/21/29/30) as `Undefined`, and **aborted** on `Depth24PlusStencil8` (enum 47)
-  at a compatible dimension. Recurred across T2–T7 wherever those formats are created. wgpu-native/Dawn
-  pass all.
-- **Resolved:** yawgpu `2667b0a` (format rejection) + `92db062` (D24S8 abort), re-test 2026-05-31 —
-  all cases pass; lines removed from `expectations/yawgpu.txt`.
+**RESOLVED** (yawgpu `2667b0a`+`92db062`) — 12 valid color formats rejected as `Undefined` + D24S8 abort; wgpu-native/Dawn always passed.
 
 ---
 
 ## F-006 — yawgpu disagrees on which texture formats are multisampleable
 
-- **Backend:** yawgpu (`55ac04d`). Not in wgpu-native/Dawn.
-- **What:** `createTexture:sampleCount,various_sampleCount_with_all_formats` (T2) — yawgpu rejected
-  `sampleCount=4` on the multisampleable tier1-blendable formats `R8/RG8/RGBA8Snorm` + `RG11B10Ufloat`
-  (enum 2/11/24/31), and wrongly *accepted* it on single-sample-only `R32Uint/Sint` (enum 15/16).
-- **Resolved:** yawgpu `2667b0a`, re-test 2026-05-31 — all 6 formats validate multisampling per spec.
-  wgpu-native/Dawn always passed.
+**RESOLVED** (yawgpu `2667b0a`) — wrong multisampleable-format set (`sampleCount=4`); wgpu-native/Dawn always passed.
 
 ---
 
@@ -386,47 +374,25 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-008 — yawgpu under-validates transient texture-usage combinations
 
-- **Backend:** yawgpu (`55ac04d`). Not in wgpu-native/Dawn.
-- **What:** `createTexture:usage` (T5) — yawgpu accepted without error the 6 invalid combinations
-  containing `TransientAttachment` other than exactly `RenderAttachment | TransientAttachment`
-  (transient alone, or with `CopySrc`/`CopyDst`/`TextureBinding`/`StorageBinding`). Dawn rejects them.
-- **Resolved:** yawgpu `2667b0a`, re-test 2026-05-31 — the 6 invalid combinations now raise a
-  validation error. wgpu-native/Dawn always passed.
+**RESOLVED** (yawgpu `2667b0a`) — 6 invalid `TransientAttachment` combos accepted; wgpu-native/Dawn always passed.
 
 ---
 
 ## F-009 — yawgpu over-restricts render-attachment dimension and under-validates storage usage
 
-- **Backend:** yawgpu (`55ac04d`). Not in wgpu-native (which aborts these inputs, F-007) or Dawn.
-- **What:** `createTexture:texture_usage` (T6) — yawgpu wrongly rejected `RENDER_ATTACHMENT` on **3D**
-  textures (spec: invalid only for 1D) and had `STORAGE_BINDING` validation gaps on tier1
-  storage-capable formats. Dawn passes all 330.
-- **Resolved:** yawgpu `2667b0a` (3D render-attachment) + `92db062` (`RGBA8Snorm` tier1 storage),
-  re-test 2026-05-31 — all cases pass; lines removed from `expectations/yawgpu.txt`.
+**RESOLVED** (yawgpu `2667b0a`+`92db062`) — 3D render-attachment over-rejected + tier1 storage gaps; Dawn always passed.
 
 ---
 
 ## F-010 — yawgpu's newly-enabled compressed / feature-gated formats have validation gaps
 
-- **Backend:** yawgpu (`e39f57f` — new once yawgpu enabled `texture-compression-*` /
-  `depth32float-stencil8` / `texture-formats-tier1`; feature-skipped on `55ac04d`). Not in
-  wgpu-native/Dawn.
-- **What:** `createTexture:texture_size,{2d,3d}_texture,compressed_format` (146 cases) — yawgpu
-  accepted compressed textures whose width/height is not a multiple of the block size (or exceeds the
-  dimension limit). Dawn rejects these.
-- **Resolved:** yawgpu `92db062`, re-test 2026-05-31 — block-alignment and size limits now validated;
-  all 146 pass. Surfaced *and* fixed within the re-test cycle. wgpu-native/Dawn always passed.
+**RESOLVED** (yawgpu `92db062`) — compressed-format block-alignment / size limits unvalidated; wgpu-native/Dawn always passed.
 
 ---
 
 ## F-011 — yawgpu createView view-dimension gaps (2D-multilayer, cube, cube-array square)
 
-- **Backend:** yawgpu (`92db062`). Not in wgpu-native/Dawn.
-- **What:** `createView:{dimension,cube_faces_square}` (T9, 12 cases) — yawgpu rejected a `2D` view of a
-  multi-layer 2D texture (no single-layer default), rejected `Cube` views outright, and did not enforce
-  the square-face requirement for `CubeArray`. Dawn/wgpu-native pass all 36.
-- **Resolved:** yawgpu `41e007b` (*"fix createView view-dimension gaps (F-011)"*), re-test 2026-05-31 —
-  all 12 pass (`pass=2970 skip=16 fail=0 crash=0`). Removed from `expectations/yawgpu.txt`.
+**RESOLVED** (yawgpu `41e007b`) — 2D-multilayer/cube/cube-array-square view-dimension gaps; Dawn/wgpu-native always passed.
 
 ---
 
@@ -467,13 +433,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-014 — yawgpu under-validates 3D-texture view array-layer ranges
 
-- **Backend:** yawgpu (found on `41e007b`). Not in wgpu-native (which aborts, F-013) or Dawn.
-- **What:** `createView:array_layers` (T10) — for a **3D** texture (one array layer) yawgpu accepted
-  out-of-range `baseArrayLayer`/`arrayLayerCount` (≠1) that should be a validation error. The 1D/2D
-  array cases were validated correctly; Dawn passes all 9.
-- **Resolved:** yawgpu `baa78cb` (*"validate 3D-texture view array-layer ranges (F-014)"*), re-test
-  2026-05-31 — both 3D cases pass (`pass=3777 skip=200 fail=0 crash=0`). Removed from
-  `expectations/yawgpu.txt`.
+**RESOLVED** (yawgpu `baa78cb`) — out-of-range 3D-texture view array-layer ranges accepted; Dawn always passed.
 
 ---
 
@@ -507,14 +467,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-016 — yawgpu rejects read-write storage textures on read-write-capable formats
 
-- **Backend:** yawgpu (`baa78cb`). Not in Dawn (accepts) or wgpu-native (which aborts, F-017).
-- **What:** `createBindGroupLayout:{visibility,visibility,VERTEX_shader_stage_storage_texture_access}`
-  (T13) — a `storageTexture` BGL entry with `access:'read-write'` on `r32float`/`r32uint` was rejected;
-  yawgpu's read-write-capable set was missing the core `r32uint/r32sint/r32float` (no feature gate). Dawn
-  accepts all 8 of each.
-- **Resolved:** yawgpu `4292f76` (*"r32uint/r32sint/r32float support read-write storage (F-016)"*),
-  re-test 2026-06-01 — all 16 pass (`pass=4131 skip=200 fail=0 crash=0`, identical to Dawn). Removed from
-  `expectations/yawgpu.txt`.
+**RESOLVED** (yawgpu `4292f76`) — read-write storage rejected on r32 formats; Dawn always passed.
 
 ---
 
@@ -542,14 +495,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-018 — yawgpu over-restricts BindGroupLayout storage-texture bindings
 
-- **Backend:** yawgpu (`4292f76`). Not in Dawn (accepts both) or wgpu-native (which aborts, F-017/F-019).
-- **What:** `createBindGroupLayout:{storage_texture,layout_dimension / storage_texture,formats}` (T14) —
-  yawgpu rejected a valid `1d` storage-texture view dimension, and rejected `rgba8snorm` (a core
-  writable/readable storage format, no feature gate) for write-only/read-only access. Dawn accepts both
-  (3 cases). (The `rgba8snorm`-storage root is the BGL-path remnant of [F-009](#f-009--yawgpu-over-restricts-render-attachment-dimension-and-under-validates-storage-usage).)
-- **Resolved:** yawgpu `925520a` (*"BGL storage-texture 1D view dim + rgba8snorm base storage (F-018)"*),
-  re-test 2026-06-01 — all 3 pass (`pass=4271 skip=377 fail=0 crash=0`). Removed from
-  `expectations/yawgpu.txt`.
+**RESOLVED** (yawgpu `925520a`) — 1D storage-texture view dim + rgba8snorm base storage over-rejected; Dawn always passed.
 
 ---
 
@@ -578,15 +524,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-020 — yawgpu rejects null bind-group-layout slots in createPipelineLayout
 
-- **Backend:** yawgpu (`925520a`). Not in Dawn (accepts) or wgpu-native (which aborts, F-021). This is the
-  **"null bind group layouts"** feature — a pipeline layout may have null (unused) BGL slots.
-- **What:** `createPipelineLayout:bind_group_layouts,null_bind_group_layouts` (T18) — a pipeline layout
-  with exactly one `null`/`undefined` BGL slot (valid, unused) was rejected (*"bindGroupLayouts elements
-  must not be null"*); yawgpu didn't implement null BGL slots (it accepted the `empty`-BGL subcases).
-  Dawn passes.
-- **Resolved:** yawgpu `f75fc0a` (*"implement null bind-group-layout slots (F-020)"*), re-test
-  2026-06-01 — all 30 subcases pass (`pass=4307 skip=377 fail=0 crash=0`). Removed from
-  `expectations/yawgpu.txt`.
+**RESOLVED** (yawgpu `f75fc0a`) — null (unused) BGL slots not implemented; Dawn always passed.
 
 ---
 
@@ -616,78 +554,31 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-022 — yawgpu does not defer `minBindingSize` validation (rejects `minBindingSize = 0` at pipeline creation)
 
-- **Backend:** yawgpu (`f75fc0a`). Not in Dawn (defers, accepts) or wgpu-native (which aborts on the null
-  BGL first, F-021).
-- **What:** `createPipelineLayout:{create,set}_pipeline_with_null_bind_group_layouts` (T21) — with a BGL
-  `buffer{type:uniform}` `minBindingSize` of 0 (unset) against a 4-byte shader uniform, yawgpu rejected at
-  **pipeline creation** (*"minBindingSize is too small"*) instead of deferring the size check to bind time.
-  Dawn passes both.
-- **Resolved:** yawgpu `798fc6a` (*"defer minBindingSize=0 to bind time in createPipelineLayout compat
-  (F-022)"*), re-test 2026-06-01 — both tests pass (`pass=4332 skip=383 fail=0 crash=0`). Removed from
-  `expectations/yawgpu.txt`.
+**RESOLVED** (yawgpu `798fc6a`) — `minBindingSize=0` rejected at pipeline creation instead of deferred to bind time; Dawn always passed.
 
 ---
 
 ## F-023 — yawgpu aborts on a 0-size clearBuffer / copyBufferToBuffer (un-ended Metal blit encoder)
 
-- **Backend:** yawgpu (`798fc6a`, Metal). Not in Dawn (handles 0-size ops). wgpu-native hits a *different*
-  abort on the clearBuffer case (F-002); it passes the 0-size copy.
-- **What:** `api,operation,command_buffer:{clearBuffer:clear (size=0), copyBufferToBuffer:single
-  (copySize=0)}` (T22) — a 0-byte clear/copy (a valid no-op) aborted via *"Command encoder released
-  without endEncoding"*: yawgpu's Metal backend made a blit command encoder for the no-op and released it
-  without `endEncoding`. Dawn executes it cleanly.
-- **Resolved:** yawgpu `e56f30a` (*"resolve WGPU_WHOLE_SIZE in clearBuffer — F-023 fully complete"*),
-  staged: `8646e5f` ended the blit encoder (which then exposed that `clearBuffer` never zeroed),
-  `a344faf` + `e56f30a` implemented the zero-fill and the start-of-range word. At `e56f30a`:
-  `command_buffer,* pass=5 fail=0 crash=0` (Dawn-equal); `api,validation` unchanged. Removed from
-  `expectations/yawgpu.txt`.
-- **Diagnosis note (applies to all real-GPU findings):** this verification must run with the Bash sandbox
-  **disabled**. Under the macOS sandbox, Metal `enumerate_adapters` returns no adapters and every case
-  false-fails with *"failed to create WebGPU instance"* — a harness/environment artifact, not a backend
-  defect.
+**RESOLVED** (yawgpu `e56f30a`, Metal) — 0-size clear/copy aborted via un-ended Metal blit encoder; Dawn always handled it.
 
 ---
 
 ## F-024 — yawgpu loses data in an rgba8uint texture-copy roundtrip (copyBufferToTexture → copyTextureToBuffer)
 
-- **Backend:** yawgpu (`e56f30a`, Metal). Not in Dawn or wgpu-native — both pass.
-- **What:** `api,operation,command_buffer/basic:{b2t2b,b2t2t2b}` (T23) — a `u32 0x01020304` uploaded into a
-  `1×1×1` `rgba8uint` texture via `copyBufferToTexture` (`bytesPerRow=256`) and copied back read **all
-  zeros** (`expected 4, got 0`). `b2t2b`/`b2t2t2b` failed identically, isolating it to the copy path (not
-  `copyTextureToTexture`); buffer↔buffer paths were clean. Root cause: yawgpu's HAL texture-format set
-  didn't include `rgba8uint`, so the copy was silently a no-op.
-- **Resolved:** yawgpu `6580617` (add `rgba8uint`) → `c893eac` (*"expand texture-format coverage to all
-  uncompressed color formats"*), re-test on real-GPU Metal — `command_buffer,basic pass=3` (Dawn-equal),
-  rest of T23 unchanged, `api,validation` unchanged (`pass=4332 skip=383`). Removed from
-  `expectations/yawgpu.txt`. 3-way confirmed throughout.
+**RESOLVED** (yawgpu `c893eac`, Metal) — HAL lacked `rgba8uint`, copy silently a no-op; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-025 — yawgpu `queueWriteTexture` writes zeros to color textures
 
-- **Backend:** yawgpu (captured `c893eac`, Metal). Not in Dawn or wgpu-native — both pass.
-- **What:** `api,operation,command_buffer/image_copy` (T24b) — every `WriteTexture`-init case
-  (`initMethod=0`, upload via `wgpuQueueWriteTexture`) read back **all zeros** (`expected 0.00392157, got
-  0`) across all 5 tests. With [F-026](#f-026--yawgpu-mishandles-non-default-buffer-layout-and-mip-levels-in-copybuffertotexture--copytexturetobuffer)
-  the full yawgpu run was `pass=21860 fail=115396` (vs Dawn `137256/0`).
-- **Resolved:** yawgpu `1e6c70b` (*"HAL texture dimension/array/mip support + queueWriteTexture upload
-  (F-025, F-026)"*), re-test 2026-06-03 — the `WriteTexture` path now uploads correctly; full `image_copy`
-  is `pass=137256 fail=0` (Dawn-equal). No `expectations/yawgpu.txt` lines were ever added (surfaced and
-  fixed, not masked).
+**RESOLVED** (yawgpu `1e6c70b`, Metal) — `queueWriteTexture` upload path wrote zeros; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-026 — yawgpu mishandles non-default buffer layout (and mip levels) in `copyBufferToTexture` / `copyTextureToBuffer`
 
-- **Backend:** yawgpu (captured `c893eac`, Metal). Not in Dawn or wgpu-native — both pass.
-- **What:** `api,operation,command_buffer/image_copy` (T24b) — `CopyB2T`-init cases (`initMethod=1`) with a
-  non-trivial buffer layout (`offset`/`bytesPerRow`/`rowsPerImage`) or a non-base mip level read back
-  **wrong non-zero data** (`expected 0.00392157, got 0.705882`) — texels at the wrong linear offset, in the
-  copy itself (both `FullCopyT2B` and `PartialCopyT2B`). Tightly-packed base-mip cases passed; Dawn passes
-  all.
-- **Resolved:** yawgpu `1e6c70b` (same commit as [F-025](#f-025--yawgpu-queuewritetexture-writes-zeros-to-color-textures)),
-  re-test 2026-06-03 — `copyBufferToTexture`/`copyTextureToBuffer` now honour non-default layout and
-  per-mip sub-resource size; full `image_copy` is `pass=137256 fail=0`. No expectations were added.
+**RESOLVED** (yawgpu `1e6c70b`, Metal) — non-default buffer layout / non-base mip mishandled; Dawn/wgpu-native always passed.
 
 ---
 
@@ -755,170 +646,43 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-029 — yawgpu leaks Vulkan device resources across image_copy cases (later tests in the same process fail)
 
-- **Backend:** yawgpu (`1e6c70b`, Vulkan / Windows, NVIDIA RTX 5060 Ti). **Cross-backend not yet
-  confirmed** — only yawgpu was run; whether wgpu-native/Dawn show the same behavior on Windows/Vulkan
-  is unverified. **Distinct from** the resolved correctness findings
-  [F-025](#f-025--yawgpu-queuewritetexture-writes-zeros-to-color-textures)/[F-026](#f-026--yawgpu-mishandles-non-default-buffer-layout-and-mip-levels-in-copybuffertotexture--copytexturetobuffer):
-  `image_copy` run **alone** still passes `137256/0`; this is a *cross-test* resource leak, not a
-  copy-correctness defect.
-- **Found by:** the whole-listing fast-mode run
-  `cts --sample-formats --crash-list expectations/yawgpu.crash.txt <all file-level :* queries>`
-  → `pass=944 skip=39 fail=504 crash=0` (2026-06-03; the listing was the 16 files before T25's
-  `copyTextureToTexture` landed). The 504 failures collapse to one root cause.
-- **Observed:** every test doing GPU execution/readback that runs *after* `image_copy` in the same
-  process fails:
-  - In the combined run — `pixel mismatch … expected X, got 0` (the 8 sampled `image_copy` formats)
-    and `GPU buffer mismatch … got 0` (`clearBuffer` / `copyBufferToBuffer` operation): readback
-    returns all **zeros**.
-  - Isolated probe — `image_copy:*` then `clearBuffer:clear:*` in **one** process → clearBuffer fails
-    `failed to request device: HAL device creation failed: vulkan` (all 25585 subcases). So once
-    `image_copy` has run, yawgpu can no longer create a fresh Vulkan device.
-- **Isolation (proves cross-test, not per-test):** run on its own, each is clean —
-  `clearBuffer:clear` `pass=50/0`, `copyBufferToBuffer:single` `pass=340/0`, `writeBuffer` `pass=24/0`;
-  `clearBuffer:*` + `copyBufferToBuffer:*` together (no `image_copy`) `pass=392/0`; and `image_copy`
-  alone is `pass=137256/0` (F-025/F-026 record). Only the **sequence** `image_copy` → (any later test
-  that creates a device) fails.
-- **Diagnosis:** `image_copy` does not release device-level GPU resources per case (the device itself
-  and/or `VkDeviceMemory` / textures), so the Vulkan physical device is exhausted and the next
-  `requestDevice` fails during HAL device creation. `clearBuffer` + `copyBufferToBuffer` create
-  comparably many devices without exhausting, so the leak is specific to the **image_copy / texture**
-  path. (Each ported operation/image_copy test creates its own device.) The two combined-run signatures
-  — `got 0` readback vs. outright device-creation failure — are both consistent with device-resource
-  exhaustion (a partially-degraded device returns zeros; a fully-failed creation errors).
-- **Why it surfaces now:** the all-green combined run recorded at `e56f30a` (2026-06-02, 12 file-level
-  queries, `pass=4131/0`) did **not** include `image_copy` (T24b landed later, `c893eac`→`1e6c70b`).
-  The current listing is the first combined run to include a *passing* `image_copy`, which is what
-  exposes the leak. So this is a newly-surfaced defect, not a regression of previously-working behavior.
-- **Isolation note:** `--crash-list` (empty here) does not help — these are **fails**, not aborts, so
-  `crash=0` and nothing is forked. Per-case `--isolate` *would* sidestep the leak (each case in a fresh
-  process) at the cost of speed.
-- **Root cause (confirmed, Vulkan validation layers).** The diagnosis above was confirmed precisely:
-  yawgpu's `submit_copies` returned without keeping the resources a submission references alive, so the
-  per-case **staging buffer** (`queueWriteTexture`) and the **copy-target texture** were destroyed
-  while still in use by an executing command buffer. With `VK_LAYER_KHRONOS_validation`, a single
-  `image_copy` write case emits `VUID-vkDestroyBuffer-buffer-00922` and `VUID-vkDestroyImage-image-01000`
-  ("…currently in use by VkCommandBuffer"), and at teardown `VUID-vkDestroyDevice-device-05137`
-  (command buffers undestroyed — the retire ring failed to drain after the device was lost). Freeing the
-  image's `DEVICE_LOCAL` `VkDeviceMemory` in-flight is what loses/exhausts the device on NVIDIA, which is
-  why the texture path is fatal where the buffer-only path (same UB class, host-visible memory) survives.
-- **Resolved:** yawgpu `1e67300` (*"retain in-flight Vulkan copy resources until fence signals (F-029)"*)
-  — the Vulkan retire ring now retains the owning `Arc`s for every buffer/texture a submission references
-  and drops them only after the fence signals. Re-test on real-GPU Windows/Vulkan (NVIDIA): validation
-  layers emit **zero** of the three VUIDs; the cross-test poison is gone (`image_copy:undefined_params:*`
-  then `clearBuffer:clear:*` in one process → `clearBuffer` `pass=50/0`, no device-creation failure);
-  `image_copy` alone remains `137256/0`. No `expectations/yawgpu.txt` lines were ever added (surfaced,
-  not masked).
+**RESOLVED** (yawgpu `1e67300`, Vulkan) — in-flight copy resources freed early, exhausting the VkDevice for later tests; retire ring now retains them until the fence signals.
 
 ---
 
 ## F-030 — yawgpu `MAP_READ` readback reads the buffer before the GPU copy completes (intermittent zeros)
 
-- **Backend:** yawgpu (Vulkan / Windows, NVIDIA RTX 5060 Ti). Surfaced **after** the
-  [F-029](#f-029--yawgpu-leaks-vulkan-device-resources-across-image_copy-cases-later-tests-in-the-same-process-fail)
-  fix: F-029's catastrophic device loss had **masked** this entirely (whole files were failing
-  `~6191/6192`). With F-029 fixed, a small residual remained.
-- **Found by:** `api,operation,command_buffer,image_copy:*` on real-GPU Vulkan after the F-029 fix —
-  ~0.4% of cases fail `pixel mismatch … expected X, got 0`, with a **nondeterministic** count that
-  varies run to run (`image_copy:mip_levels:*` standalone gave fail counts `0, 1, 2, 0, 0` over five
-  runs). The full `image_copy:*` landed at `pass≈136684 fail≈572` instead of `137256/0`.
-- **Observed:** a `MAP_READ` of a buffer that was just filled by `copyTextureToBuffer` /
-  `copyBufferToBuffer` occasionally reads back zeros — the host read raced ahead of the GPU copy.
-- **Root cause:** the buffer-map readback had **no GPU-completion wait**. `mapAsync` set the pending
-  map's outcome to `Success` eagerly, and `resolve_pending_map` read host-visible memory without
-  waiting for the copy submission to finish (`submit_copies` is asynchronous — it registers a fence in
-  the retire ring and returns). Small/fast copies usually won the race, hence the intermittency and the
-  bias toward textures over the tiny buffer-copy tests. (Independent of F-029 — F-029 only un-masked it.)
-- **Resolved:** yawgpu `1297b7e` (*"wait for GPU completion before MAP_READ readback (F-030)"*) — added
-  `HalQueue::wait_idle` (Vulkan `queue_wait_idle`; Metal empty-commit+wait; GLES `glFinish`; Noop no-op)
-  and `Queue`/`Device::wait_idle`; a read-map now idles the device queue before exposing data (including
-  Vulkan persistently-mapped buffers). Re-test on real-GPU Windows/Vulkan: `image_copy:mip_levels:*` is
-  deterministically `pass=6192 fail=0` across repeated runs and full `image_copy:*` is back to
-  `pass=137256 fail=0`. No `expectations/yawgpu.txt` lines (surfaced, not masked).
+**RESOLVED** (yawgpu `1297b7e`, Vulkan) — `MAP_READ` raced ahead of the GPU copy (intermittent zeros); read-map now idles the device queue first.
 
 ---
 
 ## F-031 — yawgpu diverges on the depth aspect of `copyTextureToTexture` (copied depth fails an equality re-render)
 
-- **Backend:** yawgpu (Metal + Vulkan). Not in Dawn/wgpu-native (both pass all 216).
-- **What:** `copyTextureToTexture:copy_depth_stencil` (T26) — the copied **depth** aspect failed the
-  `depthCompare:'equal'` re-render (no green) for all depth formats; stencil-only `Stencil8` passed
-  (`pass=36 fail=180`). Root cause: yawgpu's regular real-backend render path had no depth support.
-- **Resolved:** yawgpu `f3afc31` (Metal, 7 depth-render gaps) + `cac328a` (Vulkan HAL); re-test
-  `copy_depth_stencil` `pass=216 fail=0` on Metal **and** native Windows/Vulkan. GLES untested.
+**RESOLVED** (yawgpu `f3afc31`+`cac328a`, Metal + Vulkan) — render path had no depth support; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-032 — yawgpu returns zeros for depth/stencil aspect buffer⇄texture copies (except plain Stencil8)
 
-- **Backend:** yawgpu (Metal + Vulkan). Not in Dawn/wgpu-native (both pass all 1152).
-- **What:** the T27 `image_copy` depth/stencil aspect ports — yawgpu returned **zeros** for depth-aspect
-  `copyTextureToBuffer` (all depth formats) and stencil-aspect copies of packed depth+stencil formats;
-  plain `Stencil8` passed (`pass=288 fail=864`). (Surfaced because the T27 readback buffers are
-  zero-initialized — a no-write copy fails instead of being masked by a pre-filled buffer.)
-- **Resolved:** yawgpu `c8f15d5`+`af9ac5c` (Metal) + `3c847ac` (Vulkan HAL); re-test `image_copy`
-  depth/stencil `pass=1152 fail=0` on Metal **and** native Windows/Vulkan.
+**RESOLVED** (yawgpu `c8f15d5`+`af9ac5c`+`3c847ac`, Metal + Vulkan) — depth/stencil-aspect copies returned zeros; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-033 — color `copyTextureToTexture` pixel mismatches on Mac via MoltenVK (confirmed MoltenVK artifact, not a yawgpu defect)
 
-- **Environment finding, not a backend conformance defect.** Backend: yawgpu's **Vulkan** HAL **run on
-  macOS through MoltenVK** (`CTS_YAWGPU_BACKEND=vulkan` on a `--features vulkan` build — see
-  `docs/06-build-and-run.md`). **Not** present on yawgpu **Metal**, and **native Windows/Vulkan (NVIDIA)
-  does not exhibit it** (the yawgpu developer re-checked native Windows/Vulkan directly: color
-  `copyTextureToTexture` is clean there) — so this is a **MoltenVK (Vulkan→Metal) translation artifact**,
-  not a yawgpu Vulkan-HAL bug.
-- **Found by:** the fast-mode (`--sample-formats`) whole-suite measurement on yawgpu-Vulkan/MoltenVK
-  (2026-06-03). `api,validation` is **fully clean** (`pass=9561 skip=816 fail=0`); the only color
-  divergence is in `copyTextureToTexture`.
-- **Observed:** `copyTextureToTexture` **color** (`color_textures,non_compressed,{non_array,array}` and
-  `zero_sized`) — `pixel mismatch … expected 0, got 1` at scattered texels, across many color formats
-  (RGBA8Unorm = `format=22`, and 23/24/25/27/30/40/41/…), ~half of the sampled color-T2T subcases
-  (≈3116 fail; e.g. one `RGBA8Unorm` case sequentially `pass=58 fail=54` vs Metal `112/0`). Color T2T is
-  a **byte-exact** copy (no format conversion), so an off-by-one byte points at the copy/blit path.
-- **Tight scope (what isolates it to MoltenVK's texture-to-texture path):** on the same MoltenVK run,
-  **buffer⇄texture** color copies are clean — `image_copy` color `pass=25824` (its only fails are the
-  depth/stencil F-032 cases), and `copyBufferToBuffer`/`writeBuffer`/`clearBuffer`/`basic` have **0**
-  fails. Only **texture→texture** color copy diverges.
-- **Depth/stencil on this (2026-06-03 MoltenVK) run were the known findings, not F-033:** `copy_depth_stencil`
-  `fail=180` ([F-031](#f-031--yawgpu-diverges-on-the-depth-aspect-of-copytexturetotexture-copied-depth-fails-an-equality-re-render))
-  and `image_copy` depth/stencil `fail=864`
-  ([F-032](#f-032--yawgpu-returns-zeros-for-depthstencil-aspect-buffertexture-copies-except-plain-stencil8))
-  — **both since fixed on the Vulkan HAL** (`cac328a` / `3c847ac`; native Windows `216/0` and `1152/0`).
-- **Status:** **CONFIRMED MoltenVK-only — not a yawgpu defect**, low priority. The predicted native check
-  is now done: the full ported suite on **native Vulkan (Windows/NVIDIA, 2026-06-04)** — including all color
-  `copyTextureToTexture` — is **clean** (`pass=7208 skip=388 fail=0`), so the color-T2T cases that mismatch
-  under MoltenVK pass on native Vulkan, confirming this is a MoltenVK (Vulkan→Metal) translation limitation,
-  not actionable for yawgpu. No `expectations/` lines added. (Recorded because the Mac→Vulkan-via-MoltenVK
-  path is now a documented diagnostic — see `docs/06-build-and-run.md` — and this is its main known caveat.)
-- **Re-confirmed on Mac/MoltenVK at the latest yawgpu (`3c847ac`, 2026-06-04):** color
-  `copyTextureToTexture` still mismatches (full run `pass=16614 fail=14512` — `color_textures` `array`
-  9400 + `non_array` 5076 + `zero_sized` 36, same `expected 0, got 1` signature), while F-031
-  `copy_depth_stencil` (`216/0`) and F-032 `image_copy` depth/stencil (`1152/0`) now **pass under MoltenVK
-  too**. So only the color-T2T translation gap remains under MoltenVK, and native Windows/Vulkan is clean —
-  isolating it firmly to MoltenVK, not yawgpu.
+**MoltenVK translation artifact** (not a yawgpu defect; native-Vulkan-green + Metal-green) — color `copyTextureToTexture` byte-exact pixel mismatches under MoltenVK only.
 
 ---
 
 ## F-034 — yawgpu: a fragment storage write is lost on **indexed / indirect** draws
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 744).
-- **What:** the T30 `rendering/draw` ports — a fragment `read_write` storage write read back `0` on
-  **indexed / indirect** draws (`drawIndexed`/`drawIndirect`/`drawIndexedIndirect`); plain `draw` worked
-  (`pass=340 fail=224`). Root cause: yawgpu didn't execute the indexed/indirect draw paths at all.
-- **Resolved:** yawgpu `36a6b66` (implement indexed/indirect draw execution); re-test `rendering/draw`
-  `pass=564 fail=0`.
+**RESOLVED** (yawgpu `36a6b66`, cross-HAL) — indexed/indirect draw paths not executed; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-035 — yawgpu ignores `GPUColorTargetState` `blend` and `writeMask` (writes the raw fragment output) — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn (passes all 23).
-- **What:** the T31 `rendering/color_target_state` ports — yawgpu wrote the raw fragment output to all
-  channels, ignoring **both** `GPUColorTargetState.writeMask` and `.blend` (`pass=2 fail=21`; a case
-  passed only when the expected value equaled the unmasked/unblended source).
-- **Resolved:** yawgpu `74f5ef2` (apply color-target blend + writeMask + blend constant); re-test
-  `color_target_state` `pass=23 fail=0` on both HALs.
+**RESOLVED** (yawgpu `74f5ef2`, cross-HAL) — `blend`/`writeMask` ignored, raw fragment output written; Dawn always passed.
 
 ---
 
@@ -949,90 +713,49 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-037 — yawgpu Metal HAL: non-deterministic depth-attachment render/readback race
 
-- **Backend:** yawgpu **Metal HAL only** (Dawn/wgpu-native/yawgpu-Vulkan all clean `130/130`).
-- **What:** the T32 `rendering/depth` ports flaked non-deterministically on Metal (`fail≈33–44`, varying;
-  `expected 1, got 0` — the drawn point intermittently not covered); every case passed in isolation. Root
-  cause: yawgpu's Metal HAL didn't emit `[[point_size]]` for **`point-list`** pipelines (the depth tests
-  are the suite's first point-list users), so point size was undefined. (Initial sync-race hypothesis was
-  wrong.)
-- **Resolved:** yawgpu `186cd54` (emit `[[point_size]]` for Metal point-list); re-test `pass=130 fail=0`
-  across 11 runs. Metal-only fix.
+**RESOLVED** (yawgpu `186cd54`, Metal-only) — missing `[[point_size]]` for point-list pipelines; Dawn/wgpu-native/yawgpu-Vulkan always clean.
 
 ---
 
 ## F-038 — yawgpu mishandles stencil operations, compare, and masks — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 188).
-- **What:** the T33 `rendering/stencil` ports — yawgpu mishandled stencil ops/compare/masks (`pass=97
-  fail=91`). Single root cause: the dynamic stencil reference (`setStencilReference`) wasn't threaded to
-  the HAL, scrambling everything downstream.
-- **Resolved:** yawgpu `40f5d7f` (thread dynamic stencil reference to the HAL); re-test `rendering/stencil`
-  `pass=188 fail=0` on both HALs.
+**RESOLVED** (yawgpu `40f5d7f`, cross-HAL) — dynamic stencil reference not threaded to the HAL; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-039 — yawgpu: two dispatches in one compute pass lose their writes under batch execution — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass every mode).
-- **What:** the T35 `memory_sync/single_buffer` `two_dispatches_in_the_same_compute_pass` read back `0`
-  instead of `2` (both writes lost) **only under batch/`--isolate`** (passed in isolation; `pass=24 fail=1`).
-  Root cause: yawgpu treated the whole compute pass as one usage scope instead of per-dispatch.
-- **Resolved:** yawgpu `89f25df` (per-dispatch usage scope); re-test `single_buffer` `pass=25 fail=0` across
-  all run modes on both HALs.
+**RESOLVED** (yawgpu `89f25df`, cross-HAL) — whole compute pass treated as one usage scope, not per-dispatch; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-040 — yawgpu: multisample resolve does not write the resolve target — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 14).
-- **What:** the T36 `render_pass/resolve` port — yawgpu's MSAA resolve never wrote the `resolveTarget`
-  (all 12 `render_pass_resolve` subcases `expected 1, got 0`; non-MSAA `storeop2` passed; `pass=2 fail=12`).
-  Root cause: no MSAA render pipeline / multisample-resolve / multi-color-attachment support.
-- **Resolved:** yawgpu `bc8c280`+`3303058`; re-test `render_pass/resolve` `pass=12 fail=0` on both HALs.
+**RESOLVED** (yawgpu `bc8c280`+`3303058`, cross-HAL) — no MSAA-resolve support, `resolveTarget` never written; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-041 — yawgpu: read-only storage-texture `textureLoad` reads back zero — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 3).
-- **What:** the T37 `storage_texture/read_only` port — `textureLoad` on a `texture_storage_2d<…, read>`
-  returned `0` (output buffer all zeros; `pass=0 fail=3`). The compute storage-**buffer** path worked.
-  Root cause: storage-texture bindings weren't wired to the shader + the Metal HAL lacked MSL runtime-array
-  buffer sizes.
-- **Resolved:** yawgpu `2e4edb7`; re-test `read_only:basic` `pass=3 fail=0` on both HALs.
+**RESOLVED** (yawgpu `2e4edb7`, cross-HAL) — storage-texture bindings not wired to the shader; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-042 — yawgpu: a render-stage (fragment) storage-buffer write from a point draw reads back zero — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 5).
-- **What:** the T39 `memory_sync/single_buffer` `two_draws_*` ports — a fragment-stage `read_write` storage
-  write from a point draw read back `0` (`pass=0 fail=5`, incl. the non-bundle subcase). The compute
-  storage write worked. Root cause: the render usage scope rejected write+write across draws + render-bundle
-  draws weren't executed.
-- **Resolved:** yawgpu `042902b`+`eadc2f6`; re-test `two_draws_*` `pass=5 fail=0` on both HALs.
+**RESOLVED** (yawgpu `042902b`+`eadc2f6`, cross-HAL) — render usage scope rejected write+write + render-bundle draws not executed; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-043 — yawgpu: render-pass `depthSlice` is ignored — always renders to slice 0 of a 3D texture — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 6).
-- **What:** the T43 `rendering/3d_texture_slices` port — yawgpu ignored
-  `WGPURenderPassColorAttachment.depthSlice`, always rendering to slice 0 of a 3D texture (the 3
-  `depthSlice=1` cases failed; `pass=3 fail=3`). Mip routing was fine. Root cause: `depthSlice` wasn't
-  threaded into the 3D render-target view.
-- **Resolved:** yawgpu `c6935f7`; re-test `one_color_attachment,mip_levels` `pass=6 fail=0` on both HALs.
+**RESOLVED** (yawgpu `c6935f7`, cross-HAL) — `depthSlice` not threaded into the 3D render-target view; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-044 — yawgpu: non-`float32` vertex formats decode to zero in the shader — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 9).
-- **What:** the T46 `vertex_state/correctness` port — yawgpu decoded only `float32x4`; the other 8
-  representative formats (`float16/uint/sint/unorm/snorm/packed`) read back **all zeros** in the shader
-  (`pass=1 fail=8`). Vertex-format *conversion* wasn't applied (only the 32-bit-float passthrough).
-- **Resolved:** yawgpu `706087f` (full vertex-format set); re-test `vertex_format_to_shader_format_
-  conversion` `pass=9 fail=0` on both HALs.
+**RESOLVED** (yawgpu `706087f`, cross-HAL) — vertex-format conversion not applied beyond 32-bit-float passthrough; Dawn/wgpu-native always passed.
 
 ---
 
@@ -1044,21 +767,11 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-046 — yawgpu: face culling / `front_facing` winding is mishandled — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass).
-- **What:** the T47 `render_pipeline/culling_tests` port — yawgpu computed `@builtin(front_facing)` with the
-  wrong winding (the CCW triangle read red when `frontFace=ccw`), so both the color and the `cullMode`
-  decision were wrong (`pass=2 fail=10`).
-- **Resolved:** yawgpu `f82c2d6`+`d6e700a` (cull/frontFace threaded through the subpass path); re-test
-  `culling` `pass=12 fail=0` on both HALs.
+**RESOLVED** (yawgpu `f82c2d6`+`d6e700a`, cross-HAL) — `@builtin(front_facing)` winding wrong, breaking color + `cullMode`; Dawn/wgpu-native always passed.
 
 ## F-047 — yawgpu: pipeline-overridable constants are ignored (read as zero) — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass).
-- **What:** the T50 `render_pipeline/overrides` (`pass=1 fail=5`) + T56 `compute_pipeline/overrides`
-  (`pass=0 fail=1`) ports — WGSL `override` constants read back `0` (neither the WGSL default nor the
-  pipeline `WGPUConstantEntry` value applied), in **both render and compute** pipelines.
-- **Resolved:** yawgpu `fff8634` (apply overridable constants in shader codegen); re-test render `pass=6` +
-  compute `pass=1` on both HALs.
+**RESOLVED** (yawgpu `fff8634`, cross-HAL) — WGSL `override` constants ignored in render + compute pipelines; Dawn/wgpu-native always passed.
 
 ---
 
@@ -1070,35 +783,19 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-049 — yawgpu: render-bundle execution mishandles the viewport rect, bundle draw-args, and repeated/blended replay — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass all 4).
-- **What:** the T54 `command_buffer/render/render_bundle` port — only `basic` passed (`pass=1 fail=3`): the
-  render-pass **viewport rect was ignored** (reused-bundle test filled the whole target), and the
-  two-bundle / blended-replay cases mis-applied bundle draw-args / blend.
-- **Resolved:** yawgpu `f82c2d6` (viewport/scissor threaded through the subpass path — same fix as F-046);
-  re-test `render_bundle` `pass=4 fail=0` on both HALs.
+**RESOLVED** (yawgpu `f82c2d6`, cross-HAL) — viewport rect ignored + bundle draw-args/blend mis-applied; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-050 — yawgpu: occlusion query returns zero even when samples pass — cross-HAL
 
-- **Backend:** yawgpu (cross-HAL, Metal == Vulkan/MoltenVK). Not in Dawn/wgpu-native (both pass).
-- **What:** the T58 `command_buffer/queries/occlusionQuery` port — `occlusion_query,basic` resolved to `0`
-  for a covering draw (passing samples never counted; `empty` coincidentally passed; `pass=1 fail=1`).
-- **Resolved:** yawgpu `37d36e6`+`e70d18d` (occlusion-query execution on Metal + Vulkan); re-test
-  `occlusionQuery` `pass=2 fail=0` on both HALs.
+**RESOLVED** (yawgpu `37d36e6`+`e70d18d`, cross-HAL) — occlusion query never counted passing samples; Dawn/wgpu-native always passed.
 
 ---
 
 ## F-051 — yawgpu Metal HAL: crash creating a default view of a multisampled texture — Metal-HAL-only
 
-- **Backend:** yawgpu **Metal HAL only** (Vulkan/MoltenVK + Dawn always passed). Distinct from the
-  wgpu-native sample_mask defect (F-052).
-- **What:** the T59 `render_pipeline/sample_mask` MSAA port — yawgpu's Metal HAL aborted creating a default
-  `createView()` of a `sampleCount=4` texture (`_mtlValidateArgumentsForTextureViewOnDevice … textureType
-  (MTLTextureType2DMultisample) not compatible with texture view textureType (MTLTextureType2D)`); it
-  hardcoded `MTLTextureType2D` instead of propagating the source's multisample-ness.
-- **Resolved:** yawgpu `c29dc78`-era update; re-test `sample_mask` `pass=6 fail=0 crash=0` on both HALs
-  (Metal + MoltenVK). Removed from `expectations/yawgpu.crash.txt`. Surfaced, not masked.
+**RESOLVED** (yawgpu `c29dc78`-era, Metal-HAL-only) — hardcoded `MTLTextureType2D` instead of propagating multisample-ness; Dawn/Vulkan always passed.
 
 ---
 
@@ -1233,7 +930,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-069 — yawgpu: workgroup-memory loads read zeros (memory_layout) — Metal-dominant
 
-- **RESOLVED** (yawgpu `a034b24`; re-verified 2026-06-11): `shader,execution,memory_layout` `read_layout`/`write_layout` — `var<workgroup>` round-trips read back zeros (55 yawgpu-only cases, Metal-dominant). The 55 pass on Metal; remaining `memory_layout` tracked under F-070.
+**RESOLVED** (yawgpu `a034b24`) — `var<workgroup>` round-trips read back zeros (55 cases, Metal-dominant); remaining `memory_layout` tracked under F-070.
 
 ---
 
@@ -1333,21 +1030,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-083 — yawgpu: workgroupBarrier does not order non-atomic storage-texture accesses — MoltenVK-only (native Vulkan green)
 
-- **Backend:** yawgpu Vulkan via MoltenVK only (Metal passes; Dawn passes; **native Vulkan passes** —
-  see below). On MoltenVK reproducible, not statistical noise: 17k–25k disallowed observations out of
-  65 536 per run.
-- **Found by:** `shader,execution,memory_model,barrier` `workgroup_barrier_load_store`
-  `accessValueType="u32";memType="non_atomic_texture";accessPair="rw";normalBarrier=true`.
-- **Observed:** `memory model test failed: testResults[1] == 25567, expected == 0 (disallowed weak
-  behavior observed)` — a `workgroupBarrier()` between a non-atomic storage-texture write and a read does
-  not establish ordering on the MoltenVK path.
-- **Native-Vulkan run (2026-06-11, Windows 11 / NVIDIA RTX 5060 Ti, yawgpu `9382206`):**
-  `memory_model,barrier:*` = `pass=12 skip=24 fail=0` (skips are shader-f16 / workgroupUniformLoad
-  variants), green on **two consecutive runs** including the exact failing case above. The ordering
-  hole does not exist on a native Vulkan driver.
-- **Status:** **RECLASSIFIED — MoltenVK translation artifact** (same class as F-033/F-045/F-053/
-  F-068-residual: the SPIR-V→Metal translation, not yawgpu's emitted barriers, loses the image-memory
-  ordering). Not a yawgpu defect on native Vulkan; record kept for the MoltenVK environment.
+**MoltenVK translation artifact** (not a yawgpu defect; native-Vulkan-green + Metal-green) — `workgroupBarrier` storage-texture ordering lost only under MoltenVK.
 
 ---
 
@@ -1364,56 +1047,13 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-085 — Vulkan per-sample dispatch: sample_mask / position fragment builtins — NOT an implementation defect (spec in flux; xfail)
 
-- **Backend:** **every Vulkan-based implementation** — yawgpu (MoltenVK AND native Windows/Vulkan,
-  NVIDIA RTX 5060 Ti, yawgpu `9382206`), **wgpu-native on the same machine/driver (identical 92
-  fails; verified 2026-06-11 — its earlier "fully green" Y-4b record was wgpu-native-on-Metal)**,
-  and Dawn (no FragCoord/SampleMaskIn normalization on Vulkan: `RenderPipelineVk.cpp` enables
-  sample shading only for framebuffer fetch; Chromium suppresses exactly these cases on
-  Linux/Vulkan via crbug.com/407144390). Metal-family targets pass (Metal's builtins natively
-  match the current oracle).
-- **Found by:** `shader,execution,shader_io,fragment_builtins` — `inputs,sample_mask` (88) and
-  `inputs,position` (4), exactly the `sampleCount=4` × `interpolation="…,sample"` (linear/perspective)
-  cases; same 92-case set and signature on MoltenVK and native Vulkan.
-- **Observed:** with `@interpolate(…, sample)` forcing per-sample dispatch, Vulkan's native
-  semantics surface: the `sample_mask` input contains only the current sample's bit (1/2/4/8;
-  spec-conformant per the Vulkan `SampleMask` builtin definition) where the current CTS oracle
-  expects the full coverage mask (15), and `position.xy` is at the sample location where the
-  oracle expects the pixel center. The port's oracle matches upstream `fragment_builtins.spec.ts`
-  exactly — this is not a porting bug.
-- **Root cause:** WebGPU↔Vulkan semantic gap, currently being resolved **in Vulkan's favor**: the
-  WGSL WG resolved to respecify `sample_mask` input to single-bit-under-per-sample-invocation
-  (gpuweb/gpuweb#5457, WGSL minutes 2025-12-09 / 2026-01-06; CTS change gpuweb/cts#4510 pending
-  merge). `position` center-vs-sample-location remains an open spec question (gpuweb/gpuweb#4777).
-- **Status:** **RECLASSIFIED — not an implementation defect.** The 92 cases are `xfail` in the
-  **Vulkan-only** expectation files `expectations/yawgpu-vulkan.txt` and
-  `expectations/wgpu-native-vulkan.txt` (verified `fail=0 xfail=92`, exit 0 on Windows/Vulkan).
-  They are deliberately NOT in the Metal-run files (`expectations/yawgpu.txt`,
-  `expectations/wgpu-native.txt`) — Metal passes these cases, so a single shared file would emit
-  `xpass=92` noise on every Metal sweep (verified). Apply the `-vulkan` file for Vulkan-backend runs
-  only. When gpuweb/cts#4510 merges: re-port the new sample_mask oracle and drop those xfail
-  entries; keep the 4 `inputs,position` entries until gpuweb#4777 resolves.
+**Not a defect** — spec in flux (gpuweb#5457 / cts#4510 pending, position open in gpuweb#4777); every Vulkan impl (yawgpu, wgpu-native, Dawn) diverges from the current oracle; 92 cases xfail in `expectations/{yawgpu,wgpu-native}-vulkan.txt`.
 
 ---
 
 ## F-086 — yawgpu/naga-SPIR-V: three single-case Vulkan divergences (compound eval order, discard derivatives, IO-struct-in-buffer) — MoltenVK-only (native Vulkan green)
 
-- **Backend:** yawgpu Vulkan via MoltenVK only (yawgpu Metal, wgpu-native, Dawn pass; **native Vulkan
-  passes all three** — see below).
-- **Found / observed (MoltenVK):**
-  (a) `statement,compound` `eval_order`: `arr[idx()] += foo()` — the `expect_not_reached()` branch runs
-  (`arr[0] != 42` after the compound assignment), i.e. the WGSL-specified evaluation order of a compound
-  assignment's reference/RHS is violated on the SPIR-V path;
-  (b) `statement,discard` `derivatives:useStorageBuffers=true`: 2176 derivative elements outside
-  tolerance — helper-invocation/derivative semantics after discard;
-  (c) `shader_io,shared_structs` `shared_with_buffer`: `queue submit cannot use an error command buffer`
-  — a struct shared between entry-point IO and a storage buffer errors pipeline creation.
-- **Native-Vulkan run (2026-06-11, Windows 11 / NVIDIA RTX 5060 Ti, yawgpu `9382206`):** all three
-  cases **pass** — `compound:eval_order`, `discard:derivatives` (both `useStorageBuffers` variants),
-  and `shared_structs:shared_with_buffer`; the containing files are otherwise green too
-  (`statement,compound` + `statement,discard` + `shader_io,shared_structs` = fail=0).
-- **Status:** **RECLASSIFIED — MoltenVK translation artifacts** (per-item: the SPIR-V naga emits is
-  consumed correctly by a native driver; MoltenVK's SPIR-V→Metal translation diverges). Not yawgpu
-  defects on native Vulkan; record kept for the MoltenVK environment.
+**MoltenVK translation artifact** (not a yawgpu defect; native-Vulkan-green + Metal-green) — three single-case SPIR-V divergences (compound eval order, discard derivatives, IO-struct-in-buffer) only under MoltenVK.
 
 ---
 
@@ -1537,20 +1177,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-104 — MoltenVK translation artifact: `copyTextureToTexture` wrong data — Metal AND native Vulkan green
 
-- **Backend:** **MoltenVK only** (`api,operation,command_buffer,copyTextureToTexture` `pass=16614
-  fail=14512`); yawgpu **Metal green**, **native Windows/Vulkan green** (user-confirmed 2026-06-14 — the
-  cases do **not** fail on native Vulkan), Dawn green. Surfaced by the 2026-06-14 full sweep.
-- **Found by:** `api,operation,command_buffer,copyTextureToTexture:*` — the texture↔texture copy
-  data-correctness tests; pixel mismatches across color formats, including basic **2D** copies
-  (e.g. `srcFormat=r8unorm;dstFormat=r8unorm;dimension="2d"` — `pixel mismatch at 0,0,0`), not only 3D.
-- **Observed:** a `copyTextureToTexture` on the Vulkan path reads back wrong pixel data; Metal copies the
-  same cases correctly. Sibling of [F-103](#f-103) (the buffer↔texture `image_copy` Vulkan-HAL slice-stride
-  bug, fixed `e7db246`); the T2T path was not covered by that fix. The breadth (2D color, ~14.5k cases)
-  points to a copy-region / layout defect in yawgpu's Vulkan-HAL T2T path rather than a per-format issue.
-- **Status:** **MoltenVK translation artifact — NOT a yawgpu defect** (native-Vulkan-confirmed
-  2026-06-14: green on Windows/Vulkan). Same class as F-033/F-045/F-053/F-070-residue: yawgpu's Vulkan HAL
-  is correct (native Vulkan + Metal both pass); MoltenVK mistranslates the T2T copy. No yawgpu/naga action;
-  if applied to a Vulkan-backend run it belongs in `expectations/yawgpu-vulkan.txt`. Surfaced, not masked.
+**MoltenVK translation artifact** (not a yawgpu defect; native-Vulkan-green + Metal-green) — `copyTextureToTexture` color (2D + 3D, ~14.5k cases) reads wrong data only under MoltenVK.
 
 ---
 
@@ -1592,21 +1219,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-111 — yawgpu Vulkan: external textures unsupported (uncaptured error where validation expected) — native Vulkan
 
-- **Backend:** yawgpu native Vulkan (NVIDIA). Feature-completeness gap rather than a correctness bug.
-- **Found by:** `api,validation,render_pipeline,misc:external_texture:isAsync=false`/`true` — 2 cases.
-  Isolated `pass=742 fail=2`.
-- **Observed:** `uncaptured error: external textures are not supported on the Vulkan backend` — yawgpu's
-  Vulkan backend has no `GPUExternalTexture` support, so the validation test errors instead of exercising
-  the validation path. Needs either external-texture support on the Vulkan HAL or a capability-gated skip.
-- **Status:** **RESOLVED** (documented feature gap, 2026-06-15) — capability-gated skip, no yawgpu change.
-  naga's SPIR-V backend does not lower `naga::ImageClass::External` (the 3-plane + params expansion), so a
-  render pipeline whose shader uses `texture_external` is rejected at SPIR-V codegen with a
-  `GPUInternalError`; the validation case expects creation to succeed (Dawn supports external textures on
-  Vulkan). This is a feature-completeness gap, not a correctness defect (Metal has full external-texture
-  support), consistent with the prior "documented limitation, not a defect" treatment. The two cases are
-  listed as expected failures in `expectations/yawgpu-vulkan.txt`; re-verified native Vulkan (NVIDIA):
-  `external_texture` `xfail=2 fail=0` under that expectations file. Drop the entries if/when
-  external-texture SPIR-V lowering lands.
+**RESOLVED** (feature gap, 2026-06-15) — naga SPIR-V doesn't lower `texture_external` on Vulkan; capability-gated skip, 2 cases xfail in `expectations/yawgpu-vulkan.txt`; Metal has full support.
 
 ---
 
@@ -1639,247 +1252,59 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-114 — yawgpu: `textureSampleGrad` on 3D / cube textures errors (vec3 gradients) — cross-HAL (Metal)
 
-- **Backend:** yawgpu (Metal, Apple). Deterministic (same fail count at `--workers 1` and `8`).
-- **Found by:** `shader,execution,expression,call,builtin,textureSampleGrad:sampled_3d_coords:*`
-  (49815 fail) and `sampled_array_3d_coords:*` (7830 fail) — 57645 total, i.e. every
-  3D (`dim="3d"`) and cube (`dim="cube"`) subcase across all stages
-  (compute/fragment/vertex). The 2D / 2d-array Grad cases pass; `sampled_3d` Grad has
-  **0 passes** on yawgpu.
-- **Observed:** `uncaptured error: queue submit cannot use an error command buffer` — the
-  compute/render command buffer becomes an error object before submit, so nothing executes.
-- **Cross-check:** **Dawn passes textureSampleGrad fully (161865/0)**, so the port and WGSL
-  are correct. yawgpu's `textureSampleLevel`/`textureSample` on the SAME 3D/cube textures
-  pass (3D texture creation/upload/sampling is fine), so this is specific to the
-  `textureSampleGrad` builtin with vec3 gradients (3D/cube) — most likely naga's MSL lowering
-  of `textureSampleGrad` for a 3D/cube image, or a yawgpu-core validation of the grad call.
-  wgpu-native cross-check (shared upstream naga → would classify naga vs yawgpu-core) was
-  attempted but the wgpu-native run did not complete on this host (hung/too slow on the ~50k
-  -subcase query); **cross-check pending** per [[naga-fix-crosscheck-wgpu-native]].
-- **Status:** **RESOLVED 2026-06-18** (naga fork `infosia/wgpu` `430e6e3c8`, pinned-rev bump in
-  yawgpu `2d2594f`). Root cause was naga's MSL backend: `put_image_sample_level` emitted
-  `metal::gradient2d` for `textureSampleGrad` regardless of texture dimension, so 3D/cube
-  produced `gradient2d(float3, float3)` → Metal compile error → error command buffer → the
-  generic "queue submit cannot use an error command buffer". Not a yawgpu-core/HAL bug (the
-  generated MSL string was the proof). Fix makes the gradient builtin dimension-aware
-  (`gradient2d`/`gradient3d`/`gradientcube`) + naga snapshot test. Re-verified on yawgpu/Metal:
-  `textureSampleGrad:*` **135945 pass / 0 fail / 0 crash** (was 78300/57645). Confirms the
-  naga-MSL attribution; no cts-side change.
+**RESOLVED** (yawgpu `2d2594f`, naga fork `430e6e3c8`) — naga MSL emitted `gradient2d` regardless of texture dimension; Dawn-green throughout.
 
 ---
 
 ## F-115 — yawgpu: `textureLoad` on combined depth-stencil formats errors (Metal)
 
-- **Backend:** yawgpu (Metal, Apple). Deterministic.
-- **Found by:** `shader,execution,expression,call,builtin,textureLoad:*` — 384 fail, ALL
-  `format="depth24plus-stencil8"` (192) or `format="depth32float-stencil8"` (192), spread across
-  the arrayed / depth / multisampled / sampled_2d cases. Plain depth formats (depth16unorm,
-  depth24plus, depth32float) pass on yawgpu.
-- **Observed:** `uncaptured error: queue submit cannot use an error command buffer` — the command
-  buffer becomes an error object before submit.
-- **Cross-check:** **Dawn passes textureLoad fully (18048/0)**, and yawgpu passes textureLoad on the
-  depth-ONLY formats — so it is specific to the depth aspect of a COMBINED depth+stencil format under
-  textureLoad (the depth-only view / load of depth24plus-stencil8 / depth32float-stencil8). Likely
-  naga's MSL lowering of textureLoad on a depth aspect of a combined format, or yawgpu-core's
-  aspect-view validation. wgpu-native cross-check pending per [[naga-fix-crosscheck-wgpu-native]].
-- **Status:** **RESOLVED 2026-06-18** (yawgpu `baa0c81`, a yawgpu-core/HAL fix — naga rev unchanged,
-  confirming it was not a naga issue). Re-verified on yawgpu/Metal: `textureLoad:*` now 0 fail (was
-  384); the combined depth-stencil depth/stencil-aspect load path is fixed. The cts port was correct
-  (Dawn-green) throughout; no cts-side change.
+**RESOLVED** (yawgpu `baa0c81`, yawgpu-core/HAL) — combined depth-stencil aspect load path errored; Dawn-green throughout.
 
 ---
 
 ## F-116 — yawgpu: `arrayLength` off-by-one when binding size isn't a whole multiple of element stride (Metal)
 
-- **Backend:** yawgpu (Metal, Apple). Deterministic.
-- **Found by:** `shader,execution,expression,call,builtin,arrayLength:multiple_elements:buffer_size=1004;type="vec3<f32>"|"vec3<i32>"|"vec3<u32>";stride=16` — 3 cases. `GPU buffer mismatch: expected 62, got 63`.
-- **Observed:** for a runtime-sized `array<vec3<T>>` with element stride 16 bound over a 1004-byte
-  region, `arrayLength` returns **63**; the WGSL spec value is `floor((bindingSize − arrayOffset) /
-  elementStride) = floor(1004/16) = floor(62.75) = 62`. yawgpu over-counts by one when the binding
-  size is not a whole multiple of the element stride (here the element *size* 12 < *stride* 16, so the
-  trailing 12 bytes don't form a full strided element) — likely yawgpu rounds up / counts the last
-  element by size rather than stride.
-- **Cross-check:** **Dawn returns 62 (= the spec value, test passes)**; only yawgpu diverges. Likely
-  yawgpu-core's runtime-array-length derivation (the binding-size → element-count math), not naga.
-  wgpu-native cross-check pending per [[naga-fix-crosscheck-wgpu-native]].
-- **Status:** **RESOLVED 2026-06-18** (yawgpu `94694e2`). Re-verified on yawgpu/Metal:
-  `arrayLength:*` now 205 pass / 0 fail (was 3 fail); the non-stride-multiple binding now floors to
-  the spec element count. yawgpu-core fix; the cts port was correct (Dawn-green) throughout.
+**RESOLVED** (yawgpu `94694e2`, yawgpu-core) — `arrayLength` over-counted by one when binding size wasn't a stride multiple; Dawn-green throughout.
 
 ---
 
 ## F-117 — yawgpu/naga: `firstLeadingBit(u32)` of `0xFFFFFFFF` returns `0xFFFFFFFF` instead of 31 (Metal)
 
-- **Backend:** yawgpu (Metal). Deterministic.
-- **Found by:** `shader,execution,expression,call,builtin,firstLeadingBit:u32` — the all-ones input
-  `0xFFFFFFFF` returns `0xFFFFFFFF`; spec value is **31** (the most-significant set bit). Every other
-  u32 value is correct (e.g. 0x1FFFFFFF→28, 0x7FFFFFFF→30), and the i32 variant is fully correct.
-- **Cross-check:** Dawn returns 31 (test passes). **wgpu-native (upstream naga) ALSO FAILS** the u32
-  all-ones case — 12 fails on the runtime path (`firstLeadingBit:u32:inputSource="uniform"/"storage_r"/
-  "storage_rw"`, all vectorize): `0xFFFFFFFF` returns `0xFFFFFFFF`, expected 31 (verified 2026-06-19,
-  `build/cts`). Confirms a real **upstream-naga** lowering defect for `firstLeadingBit(u32)` all-ones;
-  the yawgpu fix legitimately preempts a bug upstream naga still carries (per [[naga-fix-crosscheck-wgpu-native]]).
-- **Status:** **RESOLVED 2026-06-18** (yawgpu `ee77bf3`). Re-verified yawgpu/Metal: `firstLeadingBit:*`
-  0 fail. cts port was correct (Dawn-green) throughout. wgpu-native still fails (upstream naga unfixed).
+**RESOLVED** (yawgpu `ee77bf3`) — `firstLeadingBit(u32)` all-ones; Dawn-green throughout; wgpu-native still fails (upstream naga).
 
 ## F-118 — yawgpu/naga: `insertBits` const-eval returns 0 (Metal)
 
-- **Backend:** yawgpu (Metal). Deterministic.
-- **Found by:** `shader,execution,expression,call,builtin,insertBits:integer:inputSource="const";*` —
-  all 8 const-eval cases (signed/unsigned × width 1–4) return **0** instead of the inserted result
-  (e.g. input `2303862050` → returns 0, expected 2303862050). The `uniform`/`storage_r`/`storage_rw`
-  input sources (runtime evaluation) all pass — **only `inputSource=const` fails**.
-- **Cross-check:** Dawn passes all input sources. **wgpu-native (upstream naga) ALSO FAILS** all 8
-  `insertBits:integer:inputSource="const";*` cases (return 0; verified 2026-06-19, `build/cts`), while
-  its `uniform`/`storage_r`/`storage_rw` runtime cases pass — identical signature to yawgpu. Confirms a
-  real **upstream-naga const-eval** defect for `insertBits`; the yawgpu fix preempts a bug upstream naga
-  still carries (per [[naga-fix-crosscheck-wgpu-native]]).
-- **Status:** **RESOLVED 2026-06-18** (yawgpu `ee77bf3`). Re-verified yawgpu/Metal: `insertBits:*` 0
-  fail (const-eval now correct). cts port was correct (Dawn-green) throughout. wgpu-native still fails
-  (upstream naga unfixed).
+**RESOLVED** (yawgpu `ee77bf3`) — `insertBits` const-eval returned 0; Dawn-green throughout; wgpu-native still fails (upstream naga).
 
 ---
 
 ## F-119 — yawgpu: `pack2x16float` / `unpack2x16float` error (Metal)
 
-- **Backend:** yawgpu (Metal). Deterministic.
-- **Found by:** `shader,execution,expression,call,builtin,pack2x16float:*` (4) and `unpack2x16float:*`
-  (4) — all input sources (const/uniform/storage_r/storage_rw) fail with `uncaptured error: queue
-  submit cannot use an error command buffer`. The 8 snorm/unorm pack/unpack builtins
-  (`{pack,unpack}{4x8,2x16}{snorm,unorm}`) all pass on yawgpu.
-- **Cross-check:** Dawn passes all 11 (port correct). **wgpu-native (upstream naga) PASSES** both
-  `pack2x16float:*` and `unpack2x16float:*` (all 8, verified 2026-06-19, `build/cts`) — so this is **NOT
-  a naga bug**; it was **yawgpu-specific**. `pack2x16float`/`unpack2x16float` are core WGSL builtins (no
-  `shader-f16` feature required — the f16 is internal); naga's MSL lowering emits `half`-typed code for
-  the internal f16 (un)packing, which Dawn/wgpu-native's Metal handle but yawgpu's pipeline rejected
-  until it enabled the internal-f16 path. Cross-check (wgpu-native green) confirms the yawgpu-side fix
-  was the right layer (per [[naga-fix-crosscheck-wgpu-native]]).
-- **Status:** **RESOLVED 2026-06-18** (yawgpu `bc1d44b`, enable `SHADER_FLOAT16_IN_FLOAT32` for
-  pack/unpack2x16float — confirms the internal-f16 diagnosis). Re-verified yawgpu/Metal:
-  `pack2x16float:*` + `unpack2x16float:*` 0 fail (now run, no skip). cts port was correct (Dawn-green).
-  wgpu-native already passed (not a naga bug — yawgpu-local feature-gating).
+**RESOLVED** (yawgpu `bc1d44b`) — internal-f16 path disabled for `pack/unpack2x16float`; Dawn + wgpu-native always passed (yawgpu-specific feature-gating).
 
 ---
 
 ## F-120 — shader/validation under/over-validation — **RESOLVED** (yawgpu naga-fork: structural validation + full graph uniformity analysis)
 
-- **Backend:** yawgpu (Metal) AND wgpu-native — **identical**. Deterministic.
-- **Found by:** `shader,validation,shader_io,*` (phaseSV1 batch). 34 cases where
-  the spec requires a validation error but **both naga-based backends accept** the shader ("expected a
-  validation error, got none"): `interpolate:integral_types` (12 — `@interpolate` on integral vertex IO
-  without `flat`), `pipeline_stage:placement` (6), `workgroup_size:*` (7), `locations:stage_inout` (4),
-  `align:parsing` (1, align > max i32), `id:id_non_override` (1), `interpolate:interpolation_validation`
-  (1), `size:*` (2). Dawn rejects all 34 (oracle green).
-- **Cross-check:** **3-way classifier → upstream-naga** (shared root). yawgpu's 34 fails are a strict
-  subset of wgpu-native's fails (yawgpu-only divergences = **0**); Dawn passes all. naga (shared frontend)
-  is more lenient than the WGSL spec / Dawn here. Root is in the shared naga frontend, **not** yawgpu-core
-  — but **yawgpu WILL address it in its naga fork** (user goal 2026-06-19: yawgpu should pass all CTS
-  wherever possible; user is working on it). So this is a **yawgpu work item**, tracked here for them to
-  fix in-fork, not a "won't fix".
-- **Also `decl/` (13, phaseSV1):** `override:array_size` (3), `var:module_scope_types` (4),
-  `var:shader_stage` (5), `var:address_space_access_mode` (1) — mix of "unexpected validation error for
-  valid shader" (naga over-strict) and "got none" (naga over-lenient). yawgpu fail=13 == wgpu-native
-  fail=13, yawgpu-only=0 → upstream-naga.
-- **Also `functions/`+`types/`+`const_assert/` (20 signatures / 267 cases) and `uniformity/`
-  (phaseSV1, per-g.test cross-check):** `uniformity:basics` alone ~21473 cases where both naga backends
-  diverge from Dawn's uniformity analysis (naga's uniformity diagnostics differ from Tint's), plus
-  binary_expressions (768), function_variables (130), pointers (37), etc. **Every one shared with
-  wgpu-native — yawgpu-only = 0 across the ENTIRE shader/validation area ported so far** (subgroup
-  g.tests skip on both backends: no `subgroups` feature on Metal). const_assert fully clean on yawgpu.
-- **Headline:** the whole shader/validation pivot (extension/shader_io/decl/functions/types/const_assert/
-  uniformity) surfaced **zero yawgpu-only findings** — yawgpu inherits naga's frontend behavior exactly.
-  The only yawgpu-specific finding from the pivot is **F-121** (f16, an execution path, not validation).
-  Measuring these on yawgpu at scale required the enabler thread_local-context fix (commit `9762c2a`);
-  per-g.test cross-check is reliable (aggregate runs still scale-degrade for the 181k-case uniformity). (extension/ + shader_io decl total: 34 + 13 = 47.)
-- **Status:** **PARTIALLY RESOLVED 2026-06-20** (yawgpu naga-fork rev bumps `8157263` shader_io slice,
-  `f502b19` decl-group, `9bc23d6` pointer-aliasing/atomic-ops/@id-on-fn, `b9d4393` pointer-type, `c80b32f`
-  unrestricted_pointer_parameters). Re-verified yawgpu/Metal: **`extension`/`shader_io`/`decl`/`functions`/
-  `types`/`const_assert` all `fail=0`** (was shader_io 34, decl 13, functions/types 267 = ~314 — all now
-  pass; `functions` also went skip 19056→0 as `unrestricted_pointer_parameters` now runs+passes).
-  **uniformity — NEARLY RESOLVED 2026-06-20** (yawgpu `0320944`: WGSL-standard **graph uniformity
-  analysis**, naga fork bumped to `783ced3bf`). Re-verified yawgpu/Metal per-g.test: ~22467 → **13**
-  remaining — `basics` 21473→**0** (pass 24697→46170), binary_expressions/function_variables/pointers/
-  short_circuit/unary/fragment/compute all → **0**. **STILL OPEN: 13 edge cases** — `uniformity:functions`
-  (12) `*_nonuniform_result` (a derivative/`textureSample*` non-uniform value flowing OUT of a function
-  return into a derivative context — not yet caught) + `uniformity:function_pointer_parameters:pointer_codependent3`
-  (1). These are gaps in yawgpu's NEW uniformity implementation (Dawn rejects, yawgpu still accepts);
-  wgpu-native fails them too but for a different root (upstream naga implements no uniformity analysis at
-  all). cts ports correct (Dawn-green). Re-verify the 13 when yawgpu's uniformity analysis covers
-  function-return non-uniformity + pointer codependency.
-- **Status: RESOLVED 2026-06-20** (yawgpu `66bee46`: uniformity edge cases — naga bumped to `4065fd824`,
-  after `0320944` graph uniformity analysis). Re-verified yawgpu/Metal: `uniformity:functions` 12→**0**,
-  `function_pointer_parameters` 1→**0**, **full `uniformity,*` sweep `fail=0`** (pass=47578, skip=133481 =
-  subgroups feature-gated). Combined with the structural fixes, **the ENTIRE `shader/validation` area is
-  now yawgpu-clean on Metal (fail=0)** — from 22781 down to 0. cts ports were correct (Dawn-green)
-  throughout; never masked. (wgpu-native still fails — upstream naga has no uniformity analysis — bring-up
-  reference.)
-- **Spec basis (verified 2026-06-20, [WGSL §uniformity](https://www.w3.org/TR/WGSL/#uniformity)):** this is
-  **spec-mandated, not implementation discretion** — Dawn/Tint is correct, naga is non-conformant. Uniformity
-  analysis is required; non-uniform control flow use of: derivatives/`textureSample*` → triggering rule
-  `derivative_uniformity` (default **error**, author-overridable via `diagnostic(off, derivative_uniformity)`,
-  which the CTS uses where applicable); subgroup/quad builtins → `subgroup_uniformity` (default error);
-  **barriers (`workgroupBarrier`/`storageBarrier`/`textureBarrier`) + `workgroupUniformLoad` → a
-  non-filterable shader-creation error** ("must only be called in uniform control flow"). naga does not
-  implement (full) uniformity analysis, so it accepts these — fixing this in yawgpu's naga fork means
-  **implementing WGSL uniformity analysis** (a substantial feature), which is why it remained after the
-  structural-validation fixes.
+**RESOLVED** (yawgpu naga-fork: structural fixes `8157263`/`f502b19`/`9bc23d6`/`b9d4393`/`c80b32f` + graph uniformity `0320944`/`66bee46`) — shared-naga under/over-validation; entire `shader/validation` area now yawgpu-clean on Metal (22781→0); wgpu-native still fails (upstream naga has no uniformity analysis).
 
 ---
 
 ## F-121 — yawgpu: newly-landed `shader-f16` errors the pipeline for f16 in access/bitcast (Metal)
 
-- **Backend:** yawgpu (Metal). Deterministic. Exposed by yawgpu enabling the `shader-f16` feature
-  (yawgpu `cace46a`), which converted ~640 previously-skipped f16 cases into runs.
-- **Found by:** `shader,execution,expression,access,*` (200) and `…,call,builtin,bitcast:*` (110) =
-  **310 f16 cases** that now RUN on yawgpu and **fail with a uniform signature**: `uncaptured error:
-  queue submit cannot use an error command buffer` (i.e. the compute pipeline/shader module for the f16
-  shader becomes an error object). Breakdown by input source: **`const` dominant (178)** + runtime
-  (`storage_r` 24, `storage_rw` 24, `uniform` 24) + ~60 `vector,components` (swizzle) f16 cases. The
-  `const` (const-eval) path fails almost entirely; runtime fails only for specific f16 type pairs (some
-  runtime f16 bitcast, e.g. `f16_to_f16:storage_r`, pass). Same error class as F-119 (internal-f16) and
-  the const-eval shape of F-118.
-- **Cross-check:** **Dawn passes all 310** (oracle — Dawn/Metal has shader-f16). **wgpu-native SKIPS
-  them** (its Metal adapter does not expose `shader-f16`), so it can't serve as the naga baseline here —
-  but these live in yawgpu's **own freshly-landed f16 implementation** (naga-fork f16 lowering /
-  yawgpu-core f16 pipeline), and Dawn proves the spec behavior, so this is a **yawgpu finding**, not
-  upstream-naga. cts ports are correct (Dawn-green, faithful; value-EXACT).
-- **Status:** **RESOLVED 2026-06-19** (yawgpu `c937a32` f16 bitcast via naga-fork rev bump + `a900cf8`
-  const struct/array containing a matrix errored Metal pipelines). Re-verified yawgpu/Metal: `access,*`
-  **0 fail** (pass=2511, skip=12 = non-f16 uniform_buffer_standard_layout), `bitcast` **0 fail**
-  (pass=458), and the full `call,builtin,*` sweep **702903 pass / 0 fail** (was 110). cts ports were
-  correct (Dawn-green) throughout. Confirms the diagnosis (f16 const-eval / MSL half lowering).
+**RESOLVED** (yawgpu `c937a32`+`a900cf8`) — newly-landed f16 const-eval / MSL half lowering errored pipelines (access/bitcast); Dawn-green throughout (wgpu-native skips, no shader-f16).
 
 ---
 
 ## F-122 — yawgpu: `<<` (shift left) abstract-int const-eval errors the pipeline (Metal)
 
-- **Backend:** yawgpu (Metal). Deterministic.
-- **Found by:** `shader,execution,expression,binary,bitwise_shift:shift_left_abstract:inputSource="const";*`
-  (phaseY13 Stage A) — all 4 vectorize variants (0/2/3/4) of abstract-int `<<` in the **const-eval** path
-  fail with `uncaptured error: queue submit cannot use an error command buffer` (the shader module /
-  compute pipeline becomes an error object). The `i32`/`u32` shift variants and the runtime input sources
-  pass — **only the abstract-int `const` path** errors.
-- **Cross-check:** **Dawn passes** (oracle). **wgpu-native passes** the same cases (isolation-confirmed) →
-  **yawgpu-only** (yawgpu-fork naga const-eval / yawgpu-core), **not** upstream-naga. Same error class and
-  const-eval-only shape as F-118 (`insertBits` const-eval) and F-117 (`firstLeadingBit`).
-- **Status:** **RESOLVED 2026-06-21** (yawgpu `653ca12`, naga bump 719570be9 — const-eval/parse edge
-  cases). Re-verified yawgpu/Metal: `shift_left_abstract:*` 4 pass / 0 fail. cts port was correct
-  (Dawn-green) throughout.
+**RESOLVED** (yawgpu `653ca12`, yawgpu-only) — abstract-int `<<` const-eval errored the pipeline; Dawn + wgpu-native always passed.
 
 ---
 
 ## F-123 — yawgpu: `sub_neg` operator-precedence const-eval errors the pipeline (Metal)
 
-- **Backend:** yawgpu (Metal). Deterministic.
-- **Found by:** `shader,execution,expression,precedence:precedence:expr="sub_neg";*` (phaseY13 Stage A) —
-  the subtraction-vs-unary-negation precedence case (`a - -b`, incl. `strip_spaces=true` → `a--b`) fails on
-  all 4 `decl` variants (`const`/`literal`/`override`/`var<private>`) with `uncaptured error: queue submit
-  cannot use an error command buffer`. Other precedence expressions pass.
-- **Cross-check:** **Dawn passes** (oracle). **wgpu-native passes** (isolation-confirmed) → **yawgpu-only**
-  (yawgpu-fork naga parse/const-eval), **not** upstream-naga.
-- **Status:** **RESOLVED 2026-06-21** (yawgpu `653ca12`, naga bump 719570be9). Re-verified yawgpu/Metal:
-  `precedence:*` 152 pass / 0 fail (0 `sub_neg` fails). cts port was correct (Dawn-green) throughout.
-  (Separately, `constructor,non_zero:concrete_vector_mix:type="bool"` const-eval **crashes** on BOTH yawgpu
-  and wgpu-native, 16 cases — shared **upstream-naga** crash, a yawgpu work item per F-120, not yawgpu-only.)
+**RESOLVED** (yawgpu `653ca12`, yawgpu-only) — `sub_neg` precedence const-eval errored the pipeline; Dawn + wgpu-native always passed.
 
 ---
 
@@ -1920,102 +1345,13 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-125 — yawgpu: `atanh` f32 const-eval returns out-of-interval values (Metal)
 
-- **Backend:** yawgpu (Metal). Deterministic.
-- **Found by:** `shader,execution,expression,call,builtin,atanh:f32:inputSource="const";*` (phaseY13 Stage
-  B/2) — all 4 vectorize variants fail as an **expression mismatch** (wrong value, not a pipeline error):
-  the const-evaluated `atanh(x)` lands outside the spec acceptance interval for inputs near the domain
-  edges (±1, where `atanh → ±∞`). The **runtime** input sources (`uniform`/`storage_r`/`storage_rw`) all
-  **pass** — only the **`const` (const-eval)** path is wrong.
-- **Cross-check:** **Dawn passes** (oracle) and **wgpu-native passes** the same cases (isolation-confirmed)
-  → **yawgpu-only** (yawgpu-fork naga const-eval of `atanh`), **not** upstream-naga. Same const-eval-only
-  shape as F-118/F-122 but a value error (vs pipeline error). Likely a less-accurate `atanh` const-eval
-  formula / edge handling near ±1.
-- **Status:** **RESOLVED 2026-06-21** (yawgpu `653ca12`, naga bump 719570be9). Re-verified yawgpu/Metal:
-  `atanh:f32` 16 pass / 0 fail. cts port was correct (Dawn-green) throughout.
+**RESOLVED** (yawgpu `653ca12`, yawgpu-only) — `atanh` f32 const-eval out-of-interval near ±1; Dawn + wgpu-native always passed.
 
 ---
 
 ## F-126 — yawgpu: texture-copy GPU out-of-bounds DMA write (whole-machine freeze) — native Vulkan (Intel/VT-d), cross-OS
 
-- **Backend:** yawgpu Vulkan. Surfaced on **Linux / Intel Iris 5100 (Haswell), Mesa ANV, with VT-d
-  (IOMMU) active for gfx**. The same whole-machine freeze is reported on **Windows / NVIDIA (RTX)** →
-  cross-vendor/OS, so the cause is the GPU work yawgpu submits, **not** an i915/Mesa-specific bug.
-- **Symptom:** during texture-copy operations the GPU issues a DMA **write outside the destination
-  allocation**. On Linux+VT-d the IOMMU catches it as
-  `DMAR: [DMA Write NO_PASID] Request device [00:02.0] ... [fault reason 0x05] PTE Write access is not set`
-  (in `journalctl -k`). Individual faults are survivable; they accumulate and eventually hard-freeze the
-  box (no recovery — `--case-timeout-ms` can't catch a hard GPU hang). On NVIDIA (no gfx-IOMMU layer) the
-  same illegal access manifests as a TDR/hang instead of a clean fault.
-- **Triggering tests:** `webgpu:api,operation,command_buffer,copyTextureToTexture:*` (242 cases) and
-  `webgpu:api,operation,command_buffer,image_copy:*` (2604 cases). copyTextureToTexture is the most
-  prolific.
-- **Pinpointed pattern (2026-06-20, per-case run + microsecond DMAR↔progress-log correlation): the OOB
-  is in MULTI-SLICE / MULTI-LAYER copies (`depth_or_array_layers > 1`).** Across 13 precisely-attributed
-  faults over 3 runs, **12/13 were the `color_textures,non_compressed,array` subtest** (2D-array,
-  multi-layer); the lone `non_array` fault was `dimension="3d"` (a 3D texture = multi-slice), so **all 13
-  are multi-slice/multi-layer**. The cleanest single run was **7/7 `array` + `dimension="3d"`**. It is
-  **format-independent** (r8uint, rg32sint, rgba16{unorm,sint,float}, rgba32{uint,sint,float}, …) and hits
-  both 2d-array and 3d. **Single-slice copies (`non_array` 1d/2d, depth=1) produced 0 faults.** `array`
-  is ~40 % of cases (95/237) but ~92 % of faults → strongly over-represented. ⇒ yawgpu's **per-layer /
-  per-slice destination addressing** overshoots the allocation for `>1` layer/slice. Code suspects:
-  `texture_copy_subresource_layers` (encode.rs:2780, layerCount/baseArrayLayer) and `texture_copy_extent`
-  (encode.rs:2807, extent.depth) in `yawgpu-hal/src/vulkan/encode.rs`.
-- **Reproduction recipe (VT-d ON = free OOB-write detector):**
-  1. Keep VT-d/`intel_iommu` enabled (it is by default here; no `intel_iommu=off` on the cmdline).
-  2. Watch the kernel log: `journalctl -k -f | grep 'PTE Write access is not set'`.
-  3. Run the file: `build-yawgpu-release/cts --isolate --workers 1 'webgpu:api,operation,command_buffer,copyTextureToTexture:*'`.
-  - **How many / how reliable:** observed in **3 independent runs** — the 2026-06-20 full sweep (faults at
-    copyTextureToTexture and image_copy), a chunk-wait run (**10+ faults** during copyTextureToTexture),
-    and a GPU-clock-capped run (**10 faults**, copyTextureToTexture alone). **~10 DMAR faults per warm run**
-    of copyTextureToTexture.
-  - **Caveat — heap-layout dependent & self-limiting:** a **cold** (post-reboot) per-case run of
-    copyTextureToTexture (247 cases) produced **0 faults**. The OOB *write* is likely deterministic per
-    buggy case, but it only *faults* when the OOB address lands on an unmapped/RO page — which needs prior
-    GPU/allocation churn ("warm"). Faults also tend to **cluster early in a run then taper** as the heap
-    settles into a layout where the overshoot lands on mapped pages. So: reliably reproducible warm, not
-    guaranteed cold, and the per-run fault count is small (single digits) — collect across passes/runs.
-    To pinpoint, run per-case (ms `RUN`/`OK` timestamps) and correlate against `journalctl -k -o
-    short-precise` fault times (`RUN ≤ fault ≤ OK`).
-  - **Not thermal:** capping the GPU to 350 MHz (GPU running cool at ~200 MHz) still produced the 10 faults
-    → OOB is independent of GPU heat/clock. (The separate whole-machine *freeze* is thermal — package hits
-    ~94–98 °C even with the GPU capped, i.e. heat is **CPU-dominated** from per-case process churn + naga;
-    that is a host HW limitation, distinct from this OOB.)
-- **Review outcome (validation-clean; attribution open):** yawgpu emits **valid** Vulkan copy commands
-  (llvmpipe + `VK_LAYER_KHRONOS_validation`: **0 VUID**, **0 sync-hazards** for both files); texture memory
-  is sized from the driver's `get_image_memory_requirements()`; yawgpu-core bounds-checks copies mip-aware.
-  At the CTS level copyTextureToTexture is **pass=242 fail=0** (the OOB corrupts outside the verified copy
-  region, so readback still passes — only the IOMMU sees it). So static + safe-dynamic review found no
-  validation-detectable defect; root cause is a **GPU-execution-time** OOB not visible to validation —
-  either yawgpu HAL or i915/ANV+VT-d. Definitive next step: capture the exact faulting case on HW
-  (Intel/TTY with the DMAR fault as oracle, or NVIDIA with Nsight Aftermath / GPU-AV).
-- **HW capture + emitted-command verification (2026-06-20, session 2) — yawgpu EXONERATED:**
-  1. **Caught the faulting cases deterministically, no freeze/reboot.** A warm, >1.2 s-spaced per-case
-     loop over the 94 `copyTextureToTexture` `array` cases with a self-stop after 3 new DMAR faults,
-     correlated 1:1 against ms-precision `RUN`/`OK` progress vs `journalctl -k` second-precision faults.
-     10 faults across runs, **100 % `color_textures,non_compressed,array` (multi-layer), 2d + 3d,
-     format-independent** (bgra8unorm-srgb, rgb10a2unorm, rgba16{unorm,snorm,sint,float},
-     rgba32{uint,sint,float}, rg32sint). Single-slice `non_array`: 0.
-  2. **Every emitted `VkImageCopy` is in-bounds.** A temporary `YAWGPU_DUMP_COPY` dump in
-     `encode_texture_to_texture` (reverted after) printed the emitted region for 3 caught cases; a parser
-     machine-checked **567 regions**: for all of them `offset+extent ≤ mip-extent` (mip 3 = 8×4 etc.),
-     `mipLevel < mipLevelCount`, `baseArrayLayer+layerCount ≤ arrayLayers`, D2 `extent.depth==1`,
-     D3 `layerCount==1`. **0 out-of-bounds / invalid emissions.**
-  3. **A faithful standalone Vulkan reproducer cannot reproduce the fault.** `f126_repro.c` (no yawgpu /
-     no CTS, mirrors the HAL path: per-image `VkDeviceMemory` from `get_image_memory_requirements`,
-     `UNDEFINED→TRANSFER_*_OPTIMAL` barriers, single multi-layer `VkImageCopy`) ran the full CTS `array`
-     geometry/format/size matrix (3 formats × 4 sizes incl. 31×32×**33**, full + offset baseArrayLayer,
-     ± CCS fast-clear aux, ~50 configs × 8–20k warm iterations) with **0 DMAR faults** — matching this
-     finding's own caveat that the OOB *write* only *faults* when it lands on an unmapped page, which
-     needs the full-CTS heap layout. So the IOMMU oracle is heap-unreliable for an isolated repro.
-  ⇒ yawgpu's copy path emits valid, in-bounds Vulkan and is **not** the defect. The OOB is a
-  **GPU-execution-time** miscompute by **Mesa ANV on Haswell (Gen7.5)** — which prints
-  `MESA-INTEL: warning: Haswell Vulkan support is incomplete` — surfaced by VT-d only on a warm heap.
-- **Status:** **RESOLVED for yawgpu (exonerated); root cause attributed to ANV-Haswell execution.**
-  The cross-OS **Windows/NVIDIA** freeze is **still unconfirmed as the same cause** (could be a distinct
-  bug) — confirm separately with Nsight Aftermath / GPU-AV before claiming one root cause. Spec:
-  `specs/investigate-copy-dma-oob-freeze.md`. **Re-opens F-104 `copyTextureToTexture`'s "native-Vulkan-green"
-  claim**: native Vulkan is **not** green on ANV-Haswell (the OOB is present there), though yawgpu is not at
-  fault. Quarantined in `build-yawgpu-release/run-linux-vulkan/quarantine.txt` so a warm sweep does not freeze.
+**RESOLVED for yawgpu (exonerated)** — multi-slice copy OOB DMA write; emitted `VkImageCopy` proven in-bounds, root cause attributed to Mesa ANV-Haswell execution; Windows/NVIDIA freeze still unconfirmed as the same cause.
 
 ---
 
@@ -2129,44 +1465,11 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-131 — yawgpu: `bitcast` from a non-numeric type CRASHES the WGSL frontend (signal 6) — Metal
 
-- **Backend:** yawgpu (Metal). Deterministic crash. **yawgpu-specific** (Dawn + wgpu-native handle cleanly).
-- **Found by:** `shader,validation,expression,call,builtin,bitcast` — **6 crashes** (signal 6 / Abort trap),
-  alongside 158 fails, on the phaseSV2 validation port. Surfaced during the 2026-06-22 yawgpu cross-check.
-- **Crashing cases (all `direction="from"`, bitcast whose SOURCE expr is a non-numeric type):**
-  - `bad_type_constructible:type="array<i32,2>";direction="from"`
-  - `bad_type_constructible:type="S";direction="from"` (a struct)
-  - `bad_type_nonconstructible:var="s";direction="from"` (sampler), `var="t"` (texture), `var="b"` (buffer
-    binding), `var="p"` (pointer)
-- **Root cause (yawgpu's naga fork):** `Option::unwrap()` on `None` panic at
-  `naga/src/front/wgsl/lower/mod.rs:3190` when lowering a `bitcast` whose source expression has a
-  non-numeric type (array / struct / atomic / sampler / texture / pointer). The frontend should emit a
-  clean validation error (bitcast operands must be numeric scalars/vectors) — instead it aborts the process.
-- **Cross-check (3-backend):** Dawn passes all 564 bitcast cases; **wgpu-native (upstream naga `01e4e71`)
-  emits a clean validation error on the exact 6 cases — no crash.** So this is a **yawgpu naga-fork
-  regression/robustness gap**, not shared upstream-naga behavior. A worker abort takes out the whole shard,
-  so it also blocks neighbouring cases in single-process runs.
-- **Status:** **RESOLVED** (yawgpu naga fork). Re-verified Metal: `bitcast:*` **crash=0** (the 6 abort
-  cases now compile to a clean validation error / pass; `pass=400 → 406`). The remaining 158 `bitcast` fails
-  are the unrelated shared-naga const-eval validation gaps tracked under **F-133** (e.g. `bad_const_to_f16`,
-  identical on wgpu-native), not this crash.
+**RESOLVED** (yawgpu naga fork) — `unwrap()` panic lowering `bitcast` from a non-numeric type; Dawn + wgpu-native always handled cleanly (yawgpu-specific).
 
 ## F-132 — yawgpu: override-evaluated negative out-of-bounds array/matrix index not flagged at pipeline creation — Metal
 
-- **Backend:** yawgpu (Metal). Deterministic. **yawgpu-specific** (Dawn + wgpu-native both flag it).
-- **Found by:** `shader,validation,expression,access,{array,structure,vector,matrix}` — **10 fail**
-  (array 9 + matrix 1), `early_eval_errors` tests. 2026-06-22 yawgpu cross-check.
-- **Root cause:** when an array/matrix index is an **override-expression** that evaluates to a negative
-  (out-of-bounds) constant, the WGSL spec requires a **pipeline-creation** validation error. yawgpu's naga
-  fork does not flag it (the pipeline is created), where Dawn (tint) and wgpu-native (upstream naga) both
-  reject it.
-- **Cross-check (3-backend):**
-  `access,array:early_eval_errors:case="runtime_array_override_oob_neg"` → Dawn **pass** (errors as
-  expected) / **yawgpu fail** (no error) / wgpu-native **pass**. The matrix `early_eval_errors` case behaves
-  identically. So yawgpu differs from BOTH Dawn and upstream naga → **yawgpu-specific** override-range
-  validation gap.
-- **Status:** **RESOLVED** (yawgpu naga fork). Re-verified Metal: `shader,validation,expression,access,*`
-  **fail=0** (array + matrix `early_eval_errors` now flag the OOB override index at pipeline creation,
-  Dawn-equal).
+**RESOLVED** (yawgpu naga fork) — negative override-evaluated OOB array/matrix index not flagged at pipeline creation; Dawn + wgpu-native always flagged it (yawgpu-specific).
 
 ## F-133 — upstream-naga (shared yawgpu+wgpu-native): WGSL-frontend validation/const-eval gaps vs tint — NOT yawgpu-specific
 
@@ -2227,59 +1530,7 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
 
 ## F-135 — CTS harness: fixture device handles leaked on `SkipTestCase` (surfaced as a yawgpu Vulkan device-creation ceiling) — RESOLVED
 
-- **RESOLVED 2026-06-23 (CTS `4cacc03`). Root cause = CTS harness, NOT yawgpu.** `src/common/runner.cpp`
-  caught `SkipTestCase` without calling `fixture->finalize()` (the `TestFailed`/`std::exception` handlers do).
-  A fixture that acquires a device then **skips after acquisition** (`skipIfNotEnoughStorageBuffersInStage`
-  inside `LimitTest::testThenDestroyDevice`) leaked its device handle (`ownedDevices_` is released only in
-  `finalize()`). On native Vulkan the leaked handles hit the driver's ~72 concurrent-`VkDevice` ceiling →
-  `HAL device creation failed`. Instrumented proof: **192 device handles created, only 120
-  `wgpuDeviceDestroy`/`wgpuDeviceRelease` → 72 live**. **Fix:** call `finalize()` on skip (general — applies
-  to every fixture). **Verified:** tight repro `…createPipeline,at_over:*` single-proc **fail 48→0**;
-  `state,device_lost,destroy` single-proc == `--isolate` (fail=0); full `api,validation` crash 9→1.
-  **yawgpu EXONERATED** — `wgpuDeviceRelease` was always correct; the two yawgpu "fixes" (`b71e59c`
-  entry-share, `92d77e5` eager-destroy) were **false greens** (their unit tests passed but the CTS repro was
-  byte-identical) and `92d77e5` was reverted (yawgpu `7b3a963`). The residual full-suite
-  `HAL queue submission failed` cross-area collateral is a **separate** recycle-partial issue (`--isolate`
-  truth unchanged ~5), not F-135.
-- _Investigation trail below (superseded by the RESOLVED note above) — kept for the record; it initially
-  mis-pointed at a yawgpu HAL leak because the failure string `HAL device creation failed: vulkan` is
-  yawgpu's HAL device-creation layer._
-- **Backend (as first suspected):** yawgpu (native Vulkan). The failure string is yawgpu's own HAL
-  device-creation layer (wgpu-native uses a different wgpu-core HAL, so it is not shared, unlike F-133/F-134).
-- **Found by:** investigating the phaseH3 device-recycle (`32c1b34`) on Vulkan, 2026-06-23 (cts.exe
-  `85e7d9b`, yawgpu.dll Jun 21). Tests that own/churn their **own** `instance+adapter+device`
-  (the `capability_checks,limits,*` `LimitTest` fixture `limit_utils.h:330-432`, and
-  `state,device_lost,destroy` `destroy.spec.cpp:104,176,…`) create+destroy a device every case. In one
-  process this **leaks device-creation resources**; after ~150 creations `wgpuRequestDevice` starts failing.
-- **Tight repro (single file, ≤1k cases):**
-  `api,validation,capability_checks,limits,maxStorageBuffersPerShaderStage:*` (700 cases):
-  - single process, `CTS_DEVICE_RECYCLE_INTERVAL=0`, `--workers 1` → **fail=318, all
-    `requestDevice failed: HAL device creation failed: vulkan`** (onset at result ~#151; thereafter
-    success/failure intermixed → leak hovering at the creation ceiling, not a hard cliff).
-  - `--isolate --workers 1` (fresh process per case) → **fail=0**.
-- **Whole-area context:** full `api,validation` (39,349) single-proc recycle@500 = fail=13 **crash=9**
-  (`0xC0000005` access violations in exactly these churning families) vs `--isolate` truth = fail=5 crash=0.
-  So the leak manifests **nondeterministically** as either cascade device-creation failures or hard
-  access-violation crashes. The 9 crash areas are 100% clean per-case under isolate (11,677 records).
-- **Harness recycle is the WRONG LAYER:** phaseH3 rebuilds only the harness *cache* device; these tests
-  never use it → recycle (any interval) cannot help. `--isolate` (per-case process) is the only harness-level
-  containment and stays authoritative on Vulkan.
-- **Cross-check (wgpu-native):** INCONCLUSIVE — wgpu-native panics immediately on this file
-  (`src\lib.rs:2754: invalid error filter`, exit 127, a **separate unrelated wgpu-native bug**), so it never
-  reaches the churn. The yawgpu HAL error string already localizes the leak to yawgpu. A CTS-test-free
-  minimal churn loop (createInstance→adapter→device→release ×N) would give the definitive cross-backend proof.
-- **Status:** RESOLVED — see the top note (CTS `runner.cpp` finalize-on-skip, `4cacc03`). The
-  `specs/investigate-yawgpu-device-create-leak.md` task and its yawgpu-side framing are superseded.
-- **Update 2026-06-23 (fix attempt 1 — PARTIAL):** yawgpu `b71e59c` shares the Vulkan `ash::Entry`
-  process-wide (was `LoadLibrary`/`FreeLibrary` of `vulkan-1.dll` per instance). Rebuilt+deployed
-  `yawgpu.dll`, re-ran the tight repro → **still fail=318** (unchanged). The entry fix is real (its HAL
-  churn test passes) but there is a **second, distinct leak**. Bisected by subtest:
-  `createBindGroupLayout`=fail0, `createPipelineLayout`=fail0, **`createPipeline`=fail48** — the remaining
-  leak is **createPipeline-specific** and accrues VkDevices (a leaked pipeline keeps its `Arc<core::Device>`
-  alive). Layer-bisected: **HAL is clean** (HAL-level instance→adapter→device→compute-pipeline→drop ×200
-  passes), pipeline caches are `Weak` (not retaining), CTS releases pipelines in `finalize()`, core doesn't
-  stash pipelines → the leak looked like `yawgpu/src/ffi` + `yawgpu-core`. (All superseded by the RESOLVED
-  note at the top: the true cause was the CTS harness not running `finalize()` on skip — yawgpu was correct.)
+**RESOLVED** (CTS `4cacc03`) — CTS-harness defect, NOT yawgpu: `runner.cpp` skipped `fixture->finalize()` on `SkipTestCase`, leaking device handles into yawgpu's ~72-VkDevice ceiling; fix runs `finalize()` on skip; yawgpu exonerated.
 
 ---
 
