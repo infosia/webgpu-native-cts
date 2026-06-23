@@ -51,4 +51,8 @@ const char* backendName() {
     return "yawgpu";
 }
 
+const WGPURequestAdapterOptions* adapterOptions() {
+    return nullptr;
+}
+
 } // namespace cts

@@ -11,4 +11,8 @@ const char* backendName() {
     return "wgpu-native";
 }
 
+const WGPURequestAdapterOptions* adapterOptions() {
+    return nullptr;
+}
+
 } // namespace cts

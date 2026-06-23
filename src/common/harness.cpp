@@ -135,7 +135,7 @@ void ensureAdapter(DeviceCache& c) {
     }
 
     ensureInstance(c);
-    AdapterResult adapter = requestAdapterSync(c.instance, nullptr);
+    AdapterResult adapter = requestAdapterSync(c.instance, cts::adapterOptions());
     if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
         throw TestFailed("failed to request adapter: " + adapter.message);
     }
@@ -151,7 +151,7 @@ void ensureAdapterAllFeatures(DeviceCache& c) {
     }
 
     ensureInstance(c);
-    AdapterResult adapter = requestAdapterSync(c.instance, nullptr);
+    AdapterResult adapter = requestAdapterSync(c.instance, cts::adapterOptions());
     if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
         throw TestFailed("failed to request all-features/max-limits adapter: " + adapter.message);
     }
@@ -464,7 +464,7 @@ WGPUDevice GpuTest::mismatchedDevice() {
     DeviceCache& c = cache();
     ensureAdapter(c);
     if (mismatchedAdapter_ == nullptr) {
-        AdapterResult adapter = requestAdapterSync(c.instance, nullptr);
+        AdapterResult adapter = requestAdapterSync(c.instance, cts::adapterOptions());
         if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
             fail("failed to request mismatched adapter: " + adapter.message);
         }

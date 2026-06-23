@@ -174,18 +174,26 @@ cmake -S . -B build-dawn -G "Visual Studio 17 2022" -A x64 \
 cmake --build build-dawn --config Release --target cts
 ```
 
-**Runtime: two DLLs must sit next to `cts.exe`** (in `build-dawn/Release/`):
+**Backend selection.** Like yawgpu, the Dawn shim requests a specific adapter backend rather than
+Dawn's platform default: **Vulkan** on non-Apple (Metal on Apple), overridable at runtime with
+`CTS_DAWN_BACKEND=vulkan|d3d12|d3d11|metal|opengl|opengles|null` (the shim sets
+`WGPURequestAdapterOptions.backendType`, a Dawn-only field). Unknown/unset keeps the platform
+default. This keeps Dawn on the same Vulkan path the yawgpu suite exercises.
 
-1. `webgpu_dawn.dll` (from `<dawn>/out/Release/Release/`), and
-2. `d3dcompiler_47.dll` (the **x64** copy from `<Windows SDK>/bin/<ver>/x64/`).
+**Runtime: the required DLLs must sit next to `cts.exe`** (in `build-dawn/Release/`):
 
-Without `d3dcompiler_47.dll` adjacent to the exe, Dawn's D3D12 device creation fails and **every**
-case reports `fail` with `failed to request all-features/max-limits device: DynamicLib.Open:
-d3dcompiler_47.dll Windows Error: 87 at EnsureFXC` — Dawn loads FXC from the executable directory,
-not from `System32`. A bare `cts.exe` (no query) prints the selected adapter and is a good smoke
-test; a harmless `vulkan-1.dll` Error 87 warning just means the Vulkan backend is unavailable and
-D3D12 is used. Verified on Windows / D3D12 / NVIDIA (2026-06-23): smoke cases green
-(`adapter_info`, `requestAdapter`, `buffers,map:mapAsync,read` all `fail=0 crash=0`).
+1. `webgpu_dawn.dll` (from `<dawn>/out/Release/Release/`),
+2. `d3dcompiler_47.dll` (the **x64** copy from `<Windows SDK>/bin/<ver>/x64/`), and
+3. `vulkan-1.dll` (the Vulkan loader, e.g. the x64 copy from `System32` or the Vulkan SDK) —
+   needed because Dawn defaults to the Vulkan backend.
+
+Dawn loads these from the **executable directory**, not from `System32` — a `System32` copy is not
+used and yields `DynamicLib.Open: ... Windows Error: 87`. Without `d3dcompiler_47.dll` **every** case
+fails with `failed to request all-features/max-limits device: DynamicLib.Open: d3dcompiler_47.dll
+Windows Error: 87 at EnsureFXC` (Dawn loads FXC for device creation); without `vulkan-1.dll` the
+default Vulkan adapter request fails. A bare `cts.exe` (no query) prints the selected adapter
+(`backendType: vulkan`) and is a good smoke test. Verified on Windows / Vulkan / NVIDIA (2026-06-24):
+smoke cases green (`adapter_info`, `requestAdapter`, `buffers,map:mapAsync,read` all `fail=0 crash=0`).
 
 ---
 

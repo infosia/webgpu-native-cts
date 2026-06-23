@@ -84,7 +84,7 @@ int runAdapterEnumeration() {
         return EXIT_FAILURE;
     }
 
-    cts::AdapterResult adapterResult = cts::requestAdapterSync(instance, nullptr);
+    cts::AdapterResult adapterResult = cts::requestAdapterSync(instance, cts::adapterOptions());
     if (adapterResult.status != WGPURequestAdapterStatus_Success || adapterResult.adapter == nullptr) {
         std::cerr << "failed to request WebGPU adapter";
         if (!adapterResult.message.empty()) {
