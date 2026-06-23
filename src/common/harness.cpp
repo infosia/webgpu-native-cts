@@ -1,7 +1,6 @@
 #include "cts/gpu.h"
 
 #include <array>
-#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <utility>
@@ -244,45 +243,6 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
     return c.deviceAllFeatures;
 }
 
-// phaseH3-B: periodic / on-loss device recycle to avoid whole-suite
-// "GPU-state-degradation collateral". Cases run serially per worker process, so
-// recycling at the case boundary is concurrency-safe.
-unsigned long g_caseCounter = 0;
-
-unsigned long deviceRecycleInterval() {
-    // Periodic device recycle is OFF by default (0). The on-device-loss self-heal
-    // (onDeviceLost -> deviceLost -> teardown) is what actually prevents the
-    // whole-suite "adapter consumed" collateral cascade; periodic recycle on a
-    // *healthy* device is not only unnecessary but actively breaks tests that hold
-    // device resources across subcases (it swaps the device mid-case at the
-    // per-subcase setCurrentTest boundary) — e.g. the texture-sampling execution
-    // tests create a texture/sampler in one subcase and use it across the rest.
-    // Opt in with CTS_DEVICE_RECYCLE_INTERVAL=N (>0) for backends that still need it.
-    static const unsigned long interval = [] {
-        // MSVC deprecates std::getenv (C4996) and the project builds /W4 /WX; the returned pointer is
-        // read immediately and only parsed, so suppress the warning narrowly here (same pattern as
-        // backend_yawgpu.cpp) rather than weaken /WX globally. Semantics are identical on every platform.
-#if defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable : 4996)
-#endif
-        const char* value = std::getenv("CTS_DEVICE_RECYCLE_INTERVAL");
-#if defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-        if (value == nullptr || *value == '\0') {
-            return 0UL;
-        }
-        char* end = nullptr;
-        const unsigned long parsed = std::strtoul(value, &end, 10);
-        if (end == value) {
-            return 0UL;
-        }
-        return parsed;
-    }();
-    return interval;
-}
-
 // Release the cached instance/adapter/device handles (same order as the
 // destructor), null the fields, and reset the recycle-relevant flags so the next
 // device()/queue() lazily rebuilds from a fresh instance+adapter. The adapter is
@@ -320,14 +280,16 @@ void teardownDevices(DeviceCache& c) {
     c.allFeaturesDeviceUsedFallback = false;
 }
 
+// On-loss self-heal: if the cached device was genuinely lost (onDeviceLost set
+// the flag), tear it down so the next device()/queue() rebuilds a fresh one. This
+// is what prevents the whole-suite "adapter consumed" collateral cascade. There is
+// deliberately NO periodic/forced recycle: forcing a swap of a *healthy* device
+// mid-run breaks tests that cache device-keyed GPU resources across subcases (the
+// texture-sampling execution helpers key pipeline caches by WGPUDevice, and a
+// recreated device can reuse a freed handle value -> use-after-free). On-loss only.
 void recycleDevicesIfNeeded() {
     DeviceCache& c = cache();
     if (c.deviceLost) {
-        teardownDevices(c);
-        return;
-    }
-    const unsigned long interval = deviceRecycleInterval();
-    if (interval != 0 && g_caseCounter != 0 && (g_caseCounter % interval == 0)) {
         teardownDevices(c);
     }
 }
@@ -398,11 +360,9 @@ const std::string& Fixture::uncapturedError() const {
 
 void setCurrentTest(Fixture* fixture) {
     if (fixture != nullptr) {
-        // phaseH3-B: at the start of each case, before the fixture touches the
-        // device, heal a lost device / periodically recycle. setCurrentTest(nullptr)
-        // (case end) must not recycle or count.
+        // At the start of each case, before the fixture touches the device, heal a
+        // device that was lost during a prior case. (No-op unless onDeviceLost fired.)
         recycleDevicesIfNeeded();
-        ++g_caseCounter;
     }
     g_currentTest = fixture;
 }
