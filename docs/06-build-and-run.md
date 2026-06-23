@@ -142,9 +142,50 @@ spec-in-flux set). Applying the `-vulkan` file on Metal would surface its entrie
 useful for yawgpu Vulkan HAL triage, but authoritative Vulkan conformance still requires native
 Vulkan hardware/OS coverage.
 
-For **Dawn** (added after yawgpu): it exposes a `webgpu_dawn` / `dawn::webgpu_dawn` CMake target
-and `include/webgpu/webgpu.h`; the `find_library`/header paths differ accordingly and are captured
-when Dawn is wired.
+**Dawn** (the oracle backend; `backend_dawn.cpp` just calls `wgpuCreateInstance` — no backend
+selection chaining). Dawn is built from its own checkout as a **monolithic CMake library** — no
+`depot_tools`/`gn` required, only CMake + a C++20 compiler + Python (the `third_party/` deps must
+already be populated, e.g. by a prior `gclient sync`, or fetched via `DAWN_FETCH_DEPENDENCIES=ON`):
+
+```bash
+# In your Dawn checkout (<dawn>): build the monolithic SHARED library.
+cmake -S <dawn> -B <dawn>/out/Release -G "Visual Studio 17 2022" -A x64 \
+      -DDAWN_BUILD_MONOLITHIC_LIBRARY=SHARED -DBUILD_SHARED_LIBS=OFF \
+      -DDAWN_ENABLE_INSTALL=ON -DDAWN_FETCH_DEPENDENCIES=ON \
+      -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_TESTS=OFF \
+      -DTINT_BUILD_TESTS=OFF -DTINT_BUILD_CMD_TOOLS=OFF
+cmake --build <dawn>/out/Release --config Release --target webgpu_dawn
+#   produces: out/Release/Release/webgpu_dawn.dll
+#             out/Release/src/dawn/native/Release/webgpu_dawn.lib
+```
+
+Point CTS at the Dawn checkout (headers) and build dir (library). The canonical `webgpu/webgpu.h`
+is a stub that includes the generated `dawn/webgpu.h`, so two header roots are needed —
+`<dawn>/include` and `<dawn>/out/Release/gen/include` — both supplied automatically from
+`CTS_DAWN_DIR` + `CTS_DAWN_BUILD_DIR`. With a multi-config Visual Studio generator the import lib
+lands in a `Release/` subdir that `find_library` does not search, so pass `CTS_DAWN_LIB` explicitly:
+
+```bash
+cmake -S . -B build-dawn -G "Visual Studio 17 2022" -A x64 \
+      -DCTS_BACKEND=dawn \
+      -DCTS_DAWN_DIR=<dawn> \
+      -DCTS_DAWN_BUILD_DIR=<dawn>/out/Release \
+      -DCTS_DAWN_LIB=<dawn>/out/Release/src/dawn/native/Release/webgpu_dawn.lib
+cmake --build build-dawn --config Release --target cts
+```
+
+**Runtime: two DLLs must sit next to `cts.exe`** (in `build-dawn/Release/`):
+
+1. `webgpu_dawn.dll` (from `<dawn>/out/Release/Release/`), and
+2. `d3dcompiler_47.dll` (the **x64** copy from `<Windows SDK>/bin/<ver>/x64/`).
+
+Without `d3dcompiler_47.dll` adjacent to the exe, Dawn's D3D12 device creation fails and **every**
+case reports `fail` with `failed to request all-features/max-limits device: DynamicLib.Open:
+d3dcompiler_47.dll Windows Error: 87 at EnsureFXC` — Dawn loads FXC from the executable directory,
+not from `System32`. A bare `cts.exe` (no query) prints the selected adapter and is a good smoke
+test; a harmless `vulkan-1.dll` Error 87 warning just means the Vulkan backend is unavailable and
+D3D12 is used. Verified on Windows / D3D12 / NVIDIA (2026-06-23): smoke cases green
+(`adapter_info`, `requestAdapter`, `buffers,map:mapAsync,read` all `fail=0 crash=0`).
 
 ---
 
