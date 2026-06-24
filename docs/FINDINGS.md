@@ -951,6 +951,21 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   `robust_access`: all 366 non-f16 case shards **abort** — pipeline creation fails validation
   (`ComputePipeline with '' label is invalid`) and the error surfaces as a Rust panic + `fatal runtime
   error` at `wgpuQueueSubmit` instead of a reportable error (same abort class as F-001).
+- **Root cause of (a) — confirmed (2026-06-24, wgpu-native `9176708`, wgpu-core 29.0.1, Metal):** the
+  `zero_init` failures are **all** `addressSpace="workgroup"` (re-run: `pass=925 fail=4164`; every fail is
+  `workgroup`, `function`/`private` all pass; Dawn oracle `5089/0`). Workgroup-memory zero-init in wgpu is a
+  naga **polyfill** (zeroing prologue + barrier) that wgpu-core injects **only when the pipeline stage
+  descriptor's `zero_initialize_workgroup_memory` flag is `true`** (`wgpu-core/src/device/resource.rs:3905`,
+  `pipeline.rs:185`). Browsers (Firefox/Gecko) call wgpu-core's Rust API directly and set this `true` per the
+  WebGPU spec requirement → polyfill runs → **the same tests pass on Firefox CTS**. But **wgpu-native's C FFI
+  hardcodes `zero_initialize_workgroup_memory: false`** at all three pipeline-creation sites
+  (`wgpu-native/src/lib.rs:2073` compute, `:2242` render-vertex, `:2340` render-fragment), each marked
+  `// TODO(wgpu.h)` — the field is not in the standard `webgpu.h` `ProgrammableStageDescriptor`, so the FFI
+  layer disables it. Hence the polyfill never runs and workgroup vars hold garbage. **Not a naga/wgpu-core
+  defect, not a test-port defect — a wgpu-native FFI conformance gap** (same wgpu-core/naga/Metal HAL as the
+  passing Dawn/Firefox paths; the only difference is this one bool). A wgpu-native fix would set the flag
+  `true` (or expose it via its `WGPUNativeShaderModuleDescriptor`-style extension) until upstream `webgpu.h`
+  gains the field.
 - **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
   `expectations/wgpu-native.*` on regen). Not masked.
 
