@@ -119,6 +119,11 @@ working GPU reset, so the hang is unrecoverable → whole-machine freeze (manual
   completes cleanly; **`cp_repro 1 0 0` freezes the box at `vkQueueWaitIdle`** (last sync'd line on
   disk). Pure-Vulkan reproduction ⇒ the defect is **Mesa ANV / Haswell**, not yawgpu. Per the Vulkan
   spec a zero-dim dispatch is valid and a no-op; ANV-Haswell mishandles it.
+- **Cross-host control (Windows / NVIDIA RTX 5060 Ti, yawgpu Vulkan, 2026-06-26):** the same
+  `compute_pass:dispatch_sizes:*` (incl. the zero-dim `lv_mult=0;lv_add=0` subcases that wedge Haswell)
+  runs `--isolate` `pass=12 fail=0 crash=0` with **no freeze** — the zero-dim dispatch is handled as a
+  correct no-op. Confirms the wedge is **Mesa ANV/Haswell-specific**, not yawgpu and not zero-dim
+  dispatch in general (a GPU with working reset/TDR is unaffected).
 
 **Status:** driver/HW defect — not fixable in yawgpu or the CTS (the test is legitimate). Mitigations:
 (a) quarantine `compute_pass` on this host (`run-linux-vulkan/full-0625/quarantine.txt`) so the sweep
