@@ -98,6 +98,42 @@ indirect-dispatch). These need a post-rebuild re-sweep (latest naga) before bein
 recorded here so the data is not lost. Sweep artifacts: `sweep-out/` (git-ignored), runner
 `chunked-sweep.sh` / `resume-sweep.sh`.
 
+## F-137 — zero-dimension compute dispatch hard-wedges ANV-Haswell (whole-machine freeze; NOT yawgpu)
+
+**Backend/host:** Linux, Intel Iris 5100 / **Haswell GT3**, Mesa ANV (`MESA-INTEL: warning: Haswell
+Vulkan support is incomplete`), VT-d on. **Found by:** `api,validation,encoding,cmds,compute_pass`
+during the 2026-06-25 Linux/Vulkan full sweep — the box froze *immediately* on that file (file 129),
+twice, with **no DMAR fault and no kernel log** (a clean GPU wedge, unlike F-126's IOMMU DMA-write).
+
+**Root cause (confirmed in pure Vulkan, yawgpu EXONERATED):** a `vkCmdDispatch` whose workgroup
+count has a **zero in any dimension** — e.g. `(1,0,0)` — hard-wedges the Haswell GPU. Haswell has no
+working GPU reset, so the hang is unrecoverable → whole-machine freeze (manual reboot). A normal
+`(1,1,1)` dispatch is fine.
+
+- **CTS path:** `compute_pass:dispatch_sizes` expands subcases over `smallDimValue ∈ {0,1}`, so its
+  first executed dispatch is always zero-dim (`(1,0,0)`, `(0,1,0)`, …). Per-case bisection
+  (`cp-bisect.sh`) froze on the first `dispatch_sizes` dispatch every time, on *different* `lv_*`
+  params — i.e. it is the zero dimension, not a specific size, and `shader,execution,zero_init`
+  (a normal `(1,1,1)` dispatch) passes immediately before it.
+- **Standalone proof (`cp_repro.c`, hand-written no-op SPIR-V, no yawgpu/naga):** `cp_repro 1 1 1`
+  completes cleanly; **`cp_repro 1 0 0` freezes the box at `vkQueueWaitIdle`** (last sync'd line on
+  disk). Pure-Vulkan reproduction ⇒ the defect is **Mesa ANV / Haswell**, not yawgpu. Per the Vulkan
+  spec a zero-dim dispatch is valid and a no-op; ANV-Haswell mishandles it.
+
+**Status:** driver/HW defect — not fixable in yawgpu or the CTS (the test is legitimate). Mitigations:
+(a) quarantine `compute_pass` on this host (`run-linux-vulkan/full-0625/quarantine.txt`) so the sweep
+survives; (b) an *optional* yawgpu/wgpu-level workaround would be to skip submission when any dispatch
+dimension is 0 (semantically a no-op), sidestepping the ANV-Haswell wedge. Repro artifacts (git-ignored):
+`run-linux-vulkan/{cp_repro.c,cp_repro.comp,cp_repro_build.sh,cp-bisect.sh}`.
+
+**Linux freeze landscape (so a future sweep stays survivable — both are host/driver, not yawgpu):**
+- **F-137 compute_pass zero-dim dispatch** — *immediate*, deterministic, no DMAR. Quarantined.
+- **F-126 copy OOB DMA write** — *load-dependent*: `copyTextureToTexture`+`image_copy` run clean cold
+  even at workers 1–8 (verified 2026-06-25: `image_copy` ×5, 692k subcases, only 3 survivable DMAR
+  faults), but a long *warm* session accumulates i915/IOMMU state until `image_copy` storms (~8 DMAR
+  faults in ~40 s) and freezes. Quarantined for warm sweeps; cold results are clean
+  (`copyTextureToTexture pass=31126 fail=0`, `image_copy pass=138408 fail=0`).
+
 ## Re-test summary
 
 Every defect this suite surfaced against **yawgpu** (the primary conformance subject) was fixed in yawgpu
