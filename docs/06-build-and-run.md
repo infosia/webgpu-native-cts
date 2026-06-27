@@ -102,6 +102,27 @@ cargo build --release --features metal        # produces target/release/libyawgp
 cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=<yawgpu>
 ```
 
+> **Tint frontend (link the dylib, not the static `.a`).** Since yawgpu's WGSL frontend
+> is **Tint** (Dawn's compiler, vendored via the `third_party/dawn` submodule), `libyawgpu.a`
+> carries unresolved references into the C++ shim library `libtint_shim.dylib` and **does not
+> link standalone** — a static-`.a` CTS build fails with
+> `Undefined symbols ... yawgpu_tint::imp::take_error`. Pass the **dylib** explicitly (it links
+> the shim via `@rpath`) and put the shim build dir on the loader path at runtime:
+>
+> ```bash
+> cargo build --release -p yawgpu --features metal   # also builds out/build/libtint_shim.dylib
+> SHIM_DIR=<yawgpu>/target/release/build/yawgpu-tint-*/out/build
+> cmake -S . -B build-yawgpu -DCTS_BACKEND=yawgpu \
+>       -DCTS_YAWGPU_DIR=<yawgpu> \
+>       -DCTS_YAWGPU_LIB=<yawgpu>/target/release/libyawgpu.dylib
+> cmake --build build-yawgpu --target cts -j
+> DYLD_LIBRARY_PATH=$SHIM_DIR build-yawgpu/cts --isolate --workers 6 \
+>       --expectations expectations/yawgpu.txt '<query>'
+> ```
+>
+> Building yawgpu requires the Dawn submodule initialized + its deps fetched (see the yawgpu
+> repo's `specs/reference/dependencies.md`). The static-`.a` flow below predates Tint.
+
 `cts::createInstance()` **must** chain `YaWGPUInstanceBackendSelect` to get a real GPU backend — an
 unchained yawgpu instance returns a Noop. The shim selects a platform default — Metal on Apple,
 Vulkan elsewhere (Windows/Linux) — and yawgpu must be built with the matching cargo feature
