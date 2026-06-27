@@ -344,10 +344,26 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
                 "\nfn bar(p : ptr<workgroup, u32>) { _ = *p; }"
                 "\nfn foo() { bar(&v); }"
                 "\n@compute @workgroup_size(1) fn main() { foo(); }");
+        } else if (feature == "packed_4x8_integer_dot_product") {
+            // The builtins are only valid behind the `requires` directive, which a
+            // backend accepts iff it exposes the feature.
+            supported = compilesWithoutError(
+                "requires packed_4x8_integer_dot_product;"
+                "\nfn f() { _ = dot4I8Packed(1u, 2u); }");
+        } else if (feature == "linear_indexing") {
+            // The `requires` directive compiles iff the backend allows the feature.
+            supported = compilesWithoutError(
+                "requires linear_indexing;"
+                "\n@compute @workgroup_size(1) fn main() {}");
+        } else if (feature == "texture_formats_tier1") {
+            // No clean shader-only usage probe; the `requires` directive itself is
+            // accepted iff the backend exposes the feature.
+            supported = compilesWithoutError(
+                "requires texture_formats_tier1;"
+                "\n@compute @workgroup_size(1) fn main() {}");
         } else {
-            // texture_formats_tier1 (a real optional feature with no clean,
-            // backend-portable trial-compile probe) and any unrecognized name:
-            // stay conservative and report unsupported on non-Dawn.
+            // Any unrecognized name: stay conservative and report unsupported on
+            // non-Dawn.
             supported = false;
         }
 #endif
