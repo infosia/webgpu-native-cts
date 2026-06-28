@@ -1227,13 +1227,24 @@ int main() {
             invalidSuiteThrows = true;
         }
         require(invalidSuiteThrows, "invalid suite query throws");
-        bool twoSegmentThrows = false;
+        bool noSeparatorThrows = false;
         try {
-            (void)cts::parseQuery("webgpu:file");
+            (void)cts::parseQuery("webgpu");
         } catch (const std::runtime_error&) {
-            twoSegmentThrows = true;
+            noSeparatorThrows = true;
         }
-        require(twoSegmentThrows, "two-segment query throws");
+        require(noSeparatorThrows, "query without ':' separator throws");
+        // Broad forms (documented in docs/02-harness.md, used upstream): the
+        // file/test/params fragments are optional and default to "*".
+        require(cts::parseQuery("webgpu:file").test == "*", "two-segment query selects all tests");
+        require(cts::parseQuery("webgpu:file").params == "*",
+                "two-segment query selects all params");
+        require(cts::parseQuery("webgpu:*").file == "*", "whole-suite query file wildcard");
+        require(cts::parseQuery("webgpu:*").test == "*", "whole-suite query test wildcard");
+        require(cts::parseQuery("webgpu:api,validation,*").file == "api,validation,*",
+                "multi-file prefix query file");
+        require(cts::parseQuery("webgpu:api,validation,*").test == "*",
+                "multi-file prefix query selects all tests");
 
         auto failures = cts::runSyntheticFailureForSelfTest();
         require(failures.size() == 1, "synthetic failure result count");

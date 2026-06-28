@@ -18,18 +18,31 @@ bool wildcardMatch(const std::string& pattern, const std::string& value) {
 } // namespace
 
 Query parseQuery(const std::string& text) {
+    // Grammar: suite ':' fileFragment [ ':' testFragment [ ':' paramsFragment ] ]
+    // The suite separator is required; the file/test/params fragments are optional
+    // and default to the "*" wildcard. This accepts the broad forms documented in
+    // docs/02-harness.md and used upstream: "webgpu:*" (whole suite) and
+    // "webgpu:api,validation,*" (all files under a path prefix), as well as the
+    // fully-qualified "webgpu:file:test:params".
     const size_t suiteEnd = text.find(':');
-    const size_t fileEnd =
-        suiteEnd == std::string::npos ? std::string::npos : text.find(':', suiteEnd + 1);
-    if (suiteEnd == std::string::npos || fileEnd == std::string::npos ||
-        text.substr(0, suiteEnd) != "webgpu") {
+    if (suiteEnd == std::string::npos || text.substr(0, suiteEnd) != "webgpu") {
         throw std::runtime_error("invalid query: " + text);
     }
-    const size_t testEnd = text.find(':', fileEnd + 1);
 
     Query query;
     query.suite = text.substr(0, suiteEnd);
+
+    const size_t fileEnd = text.find(':', suiteEnd + 1);
+    if (fileEnd == std::string::npos) {
+        // suite:file form -- select all tests/params under the file fragment.
+        query.file = text.substr(suiteEnd + 1);
+        query.test = "*";
+        query.params = "*";
+        return query;
+    }
     query.file = text.substr(suiteEnd + 1, fileEnd - suiteEnd - 1);
+
+    const size_t testEnd = text.find(':', fileEnd + 1);
     if (testEnd == std::string::npos) {
         query.test = text.substr(fileEnd + 1);
         query.params = "*";

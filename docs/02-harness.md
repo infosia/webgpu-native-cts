@@ -213,15 +213,19 @@ Mirrors `internal/query/`. The grammar (unchanged from upstream):
 suite ':' fileFragment ':' testFragment ':' paramsFragment
 ```
 
-Four query kinds, by specificity:
+Query kinds, by specificity:
 
 | Kind | Example | Selects |
 |------|---------|---------|
+| WholeSuite | `webgpu:*` | every file (the entire suite) |
 | MultiFile | `webgpu:api,validation,*` | all files under a path |
 | MultiTest | `webgpu:api,validation,createBuffer:*` | all tests in a file |
 | MultiCase | `webgpu:api,validation,createBuffer:size_alignment:*` | all cases of a test |
 | SingleCase | `webgpu:api,validation,createBuffer:size_alignment:usage=2` | one case |
 
+- The suite separator (`webgpu:`) is required; the file, test, and params fragments are each
+  optional and default to the `*` wildcard. So `webgpu:*` runs the whole suite and
+  `webgpu:api,validation,*` runs every file under that path — no need to enumerate files.
 - File path segments are comma-separated (`api,validation,createBuffer`) and map to
   `api/validation/createBuffer.spec.cpp` (the `MakeTestGroup` path argument).
 - Test path may itself contain `,` for nested test names.
