@@ -183,12 +183,17 @@ the same on native **Vulkan** (Windows / NVIDIA RTX 5060 Ti) bar the documented 
 remaining yawgpu/wgpu-native divergence is classified **naga-lineage** (now wgpu-native-only, since yawgpu
 moved to Tint) per the 3-backend rule.
 
-| Area | **Dawn** (oracle, Tint) | **yawgpu** (Metal + Vulkan, Tint) | **wgpu-native** (Metal, bring-up, naga) |
+| Area | **Dawn** (oracle, Tint) | **yawgpu** (Metal + Vulkan, Tint) | **wgpu-native** (Metal, bring-up, naga)† |
 |------|-------------------|--------------------|-----------------------------------|
-| `api/validation` (129) | **fail 0** | **fail 0** (pass 450,926 with `api/operation`) | panic-heavy bring-up (crash ≈6.9k, not triaged) |
-| `api/operation` (72) | **fail 0** | **fail 0** | panic-heavy bring-up (crash ≈0.2k, not triaged) |
-| `shader/execution` (239) | **fail 0** | **fail 0, crash 0** (pass 725,445) — Tint frontend, Dawn-equivalent; `subgroup*`/`quad*` correctly **skip** (no `subgroups` feature) | crash-heavy (panics) + naga const-eval (**F-124**-class, **F-134** crash) |
-| `shader/validation` (207) | **fail 48** (**F-130**, `bitwise_shift:partial_eval_errors` lhs=const — a Dawn const-fold gap) | **fail 0, crash 0** (pass 500,375) — Tint frontend matches Dawn | **fail ~73,737** (**F-133** naga frontend/const-eval gaps, full set) |
+| `api/validation` (129) | **fail 0** | **fail 0** (pass 450,926 with `api/operation`) | crash 6,857, fail 4,759 (panic-heavy bring-up) |
+| `api/operation` (72) | **fail 0** | **fail 0** | crash 171, fail 208 |
+| `shader/execution` (239) | **fail 0** | **fail 0, crash 0** (pass 725,445) — Tint frontend, Dawn-equivalent; `subgroup*`/`quad*` correctly **skip** (no `subgroups` feature) | crash 31,537, fail 198 — naga panics + const-eval (**F-124**-class, **F-134**) |
+| `shader/validation` (207) | **fail 48** (**F-130**, `bitwise_shift:partial_eval_errors` lhs=const — a Dawn const-fold gap) | **fail 0, crash 0** (pass 500,375) — Tint frontend matches Dawn | crash 0, fail 1,693 (**F-133** naga frontend/const-eval gaps) |
+
+† wgpu-native is panic-heavy, so its sweep runs under `--isolate` (per-**case** granularity, to contain the
+process aborts); its counts (fresh Metal sweep 2026-06-28: total pass 154,932 / fail 6,858 / crash 38,565)
+are **not** subcase-for-subcase comparable to the yawgpu/Dawn per-**subcase** columns. It is a bring-up
+reference, not triaged to `fail=0`.
 
 > **yawgpu now matches Dawn.** Because yawgpu and Dawn share the **Tint** WGSL frontend, yawgpu's
 > `shader/execution` and `shader/validation` are byte-equivalent to the oracle — `fail=0` across the board,

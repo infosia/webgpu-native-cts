@@ -69,7 +69,14 @@ migration section above), so its shader behaviour is Dawn-equivalent.
 | **Dawn** (oracle, Tint) | **0**¹ | 0 | fully green — ¹the only divergence anywhere is 48 `shader/validation` cases, the Dawn-only **F-130** const-fold gap, left unmasked |
 | **yawgpu — native Metal** (Tint) | **0** | 0 | green — pass **1,676,746** (`api/*` 450,926 + `shader/execution` 725,445 + `shader/validation` 500,375). Only `xfail`: `index_buffer_format_dirtying` (Dawn-leniency, yawgpu *stricter*) |
 | **yawgpu — native Vulkan** (Windows / NVIDIA RTX 5060 Ti, Tint) | **0** | 0 | green — same `fail=0 crash=0` as Metal, modulo documented **non-defect** `xfail`s: **F-085** (per-sample), **F-111** (external-texture), **F-129** (denormal `fwidth`), **F-141** (NVIDIA memory-model). The last two real Vulkan defects **F-127** + **F-138** are resolved (`bd21cfb`) |
-| **wgpu-native** (naga, `--isolate`) | naga-lineage | panics | bring-up reference — carries the naga-lineage shader findings (**F-124/F-129/F-133/F-134/F-136**) + the F-001…F-021 panics; not triaged to `fail=0` |
+| **wgpu-native** (naga, Metal, `--isolate`²) | **6,858** | **38,565** | bring-up reference — fresh sweep 2026-06-28: pass 154,932 / skip 67,138. **Panic-dominated** crash by area: `api` 7,028 + `shader/execution` 31,537; fail by area: `api` 4,967 + `shader/validation` 1,693 (naga-lineage). Carries the F-001…F-021 panics + naga-lineage **F-124/F-129/F-133/F-134/F-136**; not triaged to `fail=0` |
+
+¹ Dawn passes everything the suite runs except the 48 **F-130** cases (left unmasked). ² wgpu-native is
+panic-heavy, so its sweep must run under `--isolate` (per-**case** granularity) to contain the process
+aborts — its counts are **not** subcase-for-subcase comparable to the yawgpu/Dawn rows above (whole-suite
+per-**subcase**). Per-area (per-case): `api/validation` pass 20,193 / fail 4,759 / crash 6,857;
+`api/operation` pass 4,028 / fail 208 / crash 171; `shader/execution` pass 101,087 / fail 198 / crash
+31,537; `shader/validation` pass 29,624 / fail 1,693 / crash 0.
 
 MoltenVK (non-authoritative Vulkan coverage on macOS) still shows translation artifacts (**F-104**, **F-070**,
 **F-139**) that are green on both native Metal and native Vulkan — see those findings.
