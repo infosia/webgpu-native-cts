@@ -108,13 +108,22 @@ recorded here so the data is not lost. Sweep artifacts: `sweep-out/` (git-ignore
 - **Cross-check (attribution):** Dawn runs the same cases `fail=0` → the CTS oracle is correct, so this
   is a **real yawgpu Vulkan defect**. (Contrast F-128 `rgb10a2unorm`, where Dawn fails identically =
   oracle bug.)
-- **Regression:** the 2026-06-21 sweep (yawgpu `97b4827`) recorded `bgra8unorm` textureStore as
-  **passing** (F-128 then noted "other 1173 pass"); it fails on the 2026-06-28 build → a yawgpu change
-  between those builds broke `bgra8unorm` storage writes. (See also F-127, whose `robust_access`
-  failure widened on the same build — both point at a 2026-06-28 yawgpu Vulkan-HAL regression.)
-- **Leading suspect:** the Vulkan HAL `wgpu→vk` format/channel mapping for `bgra8unorm` storage views
-  (B↔R order); `expected 51, got 0` on byte 0 is consistent with a channel-order / zeroed-store error.
-- **Status:** OPEN (2026-06-28). yawgpu work item.
+- **Regression boundary = naga→Tint frontend migration.** The 2026-06-21 sweep (yawgpu `97b4827`)
+  had `bgra8unorm` textureStore **passing**; between `97b4827` and the 2026-06-28 build (`05bf865`,
+  84 commits) yawgpu **removed naga and made Tint the sole shader frontend** (`64fe785`/`7fda995`/
+  `b0dad39`). The SPIR-V (Vulkan) storage-texture path is now Tint-generated, and `bgra8unorm` storage
+  writes regressed there. (Same migration drives F-127 — see that finding.)
+- **Root cause (direction; the HAL VkFormat map is NOT the bug):** `yawgpu-hal/src/vulkan/format.rs:35`
+  correctly maps `Bgra8Unorm → VK_FORMAT_B8G8R8A8_UNORM`. The defect is in the **Tint SPIR-V
+  storage-texture path** (`yawgpu-core/src/shader_tint.rs` `texel_format`): SPIR-V has **no `Bgra8`
+  storage image format**, so `bgra8unorm` storage must be emitted as an `Rgba8` image with the B↔R
+  channel order handled on the write — `expected 51, got 0` at byte 0 is the classic channel-order /
+  zeroed-store symptom. This is the sibling of `4264df3` (which fixed `rgb10a2`/`rg11b10` storage
+  format names for Tint Dawn-parity but did **not** cover `bgra8unorm`).
+- **Note:** unrelated to yawgpu's *own* internal "F-138" (commit `0e5d92d`, texture lazy zero-init) —
+  finding-number collision between the two repos; this `docs/FINDINGS.md` F-138 is the bgra8unorm one.
+- **Status:** OPEN (2026-06-28; root-caused to the Tint SPIR-V storage path). yawgpu work item — xfail'd
+  in `expectations/yawgpu-vulkan.txt`.
 
 ---
 
@@ -1453,19 +1462,31 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   pre-F-112 `Restrict` policy, so F-112 traded uniform robustness for storage coherence.
 - **Cross-check:** wgpu-native (Vulkan) crashes the whole file (366, its known panic-heavy `robust_access`
   state, F-071/F-078) — no usable oracle; Dawn + yawgpu/Metal green is the spec reference.
-- **Fix direction:** keep `buffer = Unchecked` for **storage** (F-112) but **`Restrict` for uniform** — needs
-  a per-address-space split of the `buffer` bounds policy in the naga fork (naga cannot express it today).
-  yawgpu work item. **Definitive confirm:** rebuild with `buffer` forced back to `Restrict` and check the 24
-  uniform cases pass *and* F-112 (`coherence:corr`) re-breaks — proves the single-knob tension.
-- **Dawn cross-check + widening (2026-06-28):** the full `robust_access:linear_memory` test runs
-  `fail=0` on Dawn vs **216 fail** on yawgpu Vulkan → all are **real yawgpu defects** (not an oracle
-  bug). But the failure is now **far broader than the original 24 uniform/read cases**: by addressSpace
-  `workgroup=162`, `uniform=48`, `private=3`, `function=3`; by access `read=96`, `write=120`. F-127's
-  Jun-21 characterization had workgroup and all writes **passing**, so the 2026-06-28 yawgpu build
-  **regressed `robust_access` well beyond the uniform/read core** (cf. F-138, a textureStore regression
-  on the same build). Needs a fresh per-addressSpace triage; the uniform/read root cause above still
-  holds for that subset.
-- **Status:** OPEN (2026-06-21; widened 2026-06-28).
+- **Fix direction (Jun-21, naga era — now historical):** keep `buffer = Unchecked` for storage but
+  `Restrict` for uniform via a per-address-space split of naga's `buffer` policy. **Superseded —
+  naga was removed (see below).**
+- **ROOT CAUSE + widening (2026-06-28, Tint era):** Dawn runs the full `robust_access:linear_memory`
+  `fail=0` vs **216 fail** on yawgpu Vulkan → all **real yawgpu defects**. The failure widened far
+  beyond the original 24 uniform/read: by addressSpace `workgroup=162`, `uniform=48`, `private=3`,
+  `function=3`; by access `read=96`, `write=120`. **Cause = the naga→Tint frontend migration**: between
+  `97b4827` (Jun-21) and `05bf865` (Jun-28, 84 commits) yawgpu removed naga and made Tint the sole
+  frontend (`64fe785`/`7fda995`/`b0dad39`). naga had a **per-address-space** `BoundsCheckPolicy` —
+  F-112 set only `buffer = Unchecked`, leaving workgroup/function/private software-clamped. Tint's
+  SPIR-V path exposes only a **single whole-shader `robust` flag**, and yawgpu drives it as
+  `robust = !unchecked_buffer_bounds` with `unchecked_buffer_bounds = hal_device.robust_buffer_access2()`
+  (`yawgpu-core/src/compute_pipeline.rs:271` + `render_pipeline.rs:735` → `shader_tint.rs:70` →
+  `yawgpu-tint generate_spirv(robust)`). So on a robustBufferAccess2 device (NVIDIA), Tint robustness
+  is turned **OFF for the whole shader**; the device feature only zeroes *buffers*, so
+  **workgroup/function/private OOB and writes lose all clamping** → the widening. (Storage still passes
+  via the device feature; uniform partially fails at the 256 B granularity — the original F-127 core.)
+- **Fix direction (Tint era):** keep Tint robustness **ON** for non-buffer address spaces while still
+  relying on device robustBufferAccess2 for buffers (restore naga's per-address-space behaviour under
+  Tint). If Tint cannot express per-space robustness, enable it wholesale and re-validate F-112
+  (`coherence:corr`, which motivated turning buffer checks off). yawgpu work item (yawgpu-core
+  robustness wiring + yawgpu-tint). xfail'd (66 clean cases) in `expectations/yawgpu-vulkan.txt`; ~30
+  mixed pass/fail-subcase cases can't be pinned at query granularity (54 residual subcases).
+- **Status:** OPEN — root-caused to the naga→Tint migration (single whole-shader `robust` flag),
+  2026-06-28. Supersedes the Jun-21 naga `BoundsCheckPolicy` analysis above (naga removed).
 
 ---
 
