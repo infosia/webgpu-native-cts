@@ -122,8 +122,10 @@ recorded here so the data is not lost. Sweep artifacts: `sweep-out/` (git-ignore
   format names for Tint Dawn-parity but did **not** cover `bgra8unorm`).
 - **Note:** unrelated to yawgpu's *own* internal "F-138" (commit `0e5d92d`, texture lazy zero-init) —
   finding-number collision between the two repos; this `docs/FINDINGS.md` F-138 is the bgra8unorm one.
-- **Status:** OPEN (2026-06-28; root-caused to the Tint SPIR-V storage path). yawgpu work item — xfail'd
-  in `expectations/yawgpu-vulkan.txt`.
+- **RESOLVED (yawgpu `bd21cfb`, 2026-06-28):** fixed via the `bgra8unorm` storage-view path in
+  `yawgpu-hal/src/vulkan/texture.rs`. Re-verified on this host: `textureStore:texel_formats` +
+  `bgra8unorm_swizzle` `fail=0` (was 21). xfail entries removed from `expectations/yawgpu-vulkan.txt`.
+- **Status:** RESOLVED (yawgpu `bd21cfb`, 2026-06-28).
 
 ---
 
@@ -1485,8 +1487,18 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   (`coherence:corr`, which motivated turning buffer checks off). yawgpu work item (yawgpu-core
   robustness wiring + yawgpu-tint). xfail'd (66 clean cases) in `expectations/yawgpu-vulkan.txt`; ~30
   mixed pass/fail-subcase cases can't be pinned at query granularity (54 residual subcases).
-- **Status:** OPEN — root-caused to the naga→Tint migration (single whole-shader `robust` flag),
-  2026-06-28. Supersedes the Jun-21 naga `BoundsCheckPolicy` analysis above (naga removed).
+- **RESOLVED (yawgpu `bd21cfb`, 2026-06-28):** the fix **decouples robustness from the F-112 toggle**.
+  Previously `robust = !robust_buffer_access2()` turned Tint robustness off wholesale; now Tint SPIR-V
+  robustness stays **always ON**, and the toggle instead drives `VK_KHR_vulkan_memory_model`
+  (`vulkan_memory_model()` → Tint `SPV_KHR_vulkan_memory_model` output) to satisfy the F-112
+  workgroup-atomic coherence — which was a memory-model concern, not a robustness one. Re-verified on
+  this host: `robust_access:linear_memory` `fail=0` (was 216, all addressSpaces). xfail entries removed
+  from `expectations/yawgpu-vulkan.txt`.
+- **Residual (separate, pre-existing):** `memory_model,coherence:corr` still fails 1 case deterministically
+  (3/3); it was already failing in the pre-fix sweep, so it is **not** caused by this fix and the
+  `vulkan_memory_model` path did not resolve it — tracked separately (F-112/F-135 area).
+- **Status:** RESOLVED (yawgpu `bd21cfb`, 2026-06-28). Supersedes the Jun-21 naga `BoundsCheckPolicy`
+  analysis above (naga removed).
 
 ---
 
