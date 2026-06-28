@@ -35,7 +35,7 @@ entire naga-lineage finding class no longer manifests on yawgpu.
 | `shader/validation` | 500,375 | 166,767 | **0** | 0 |
 | **total** | **1,676,746** | — | **0** | **0** |
 
-Only carried Metal item: `draw,index_buffer_format_dirtying` (Dawn-leniency, yawgpu *stricter* — `xfail`).
+Only carried Metal item: the 2 `draw,index_buffer_format_dirtying` cases (a CTS port-oracle quirk — the Dawn oracle fails them identically; `xfail`), so effective `fail=0`.
 **Native Vulkan (Windows / NVIDIA RTX 5060 Ti) is confirmed identical** — same `fail=0 crash=0`, modulo the
 documented non-defect `xfail`s (F-085, F-111, F-129-denormal, F-141; see `expectations/yawgpu-vulkan.txt`).
 
@@ -66,12 +66,15 @@ migration section above), so its shader behaviour is Dawn-equivalent.
 
 | Backend | fail | crash | verdict |
 |---------|-----:|------:|---------|
-| **Dawn** (oracle, Tint) | **0**¹ | 0 | fully green — ¹the only divergence anywhere is 48 `shader/validation` cases, the Dawn-only **F-130** const-fold gap, left unmasked |
-| **yawgpu — native Metal** (Tint) | **0** | 0 | green — pass **1,676,746** (`api/*` 450,926 + `shader/execution` 725,445 + `shader/validation` 500,375). Only `xfail`: `index_buffer_format_dirtying` (Dawn-leniency, yawgpu *stricter*) |
+| **Dawn** (oracle, Tint) | **2**¹ | 0 | fully green — pass **1,990,994** / skip 104,942. ¹the only fails are the 2 `index_buffer_format_dirtying` cases (see ¹ below) |
+| **yawgpu — native Metal** (Tint) | **2**¹ | 0 | green — pass **1,676,746** / skip 419,190 (`api/validation` 274,833 + `api/operation` 176,093 + `shader/execution` 725,445 + `shader/validation` 500,375). **Fail profile byte-identical to the Dawn oracle** — the same 2 `index_buffer_format_dirtying` fails (`xfail`) |
 | **yawgpu — native Vulkan** (Windows / NVIDIA RTX 5060 Ti, Tint) | **0** | 0 | green — same `fail=0 crash=0` as Metal, modulo documented **non-defect** `xfail`s: **F-085** (per-sample), **F-111** (external-texture), **F-129** (denormal `fwidth`), **F-141** (NVIDIA memory-model). The last two real Vulkan defects **F-127** + **F-138** are resolved (`bd21cfb`) |
 | **wgpu-native** (naga, Metal, `--isolate`²) | **6,858** | **38,565** | bring-up reference — fresh sweep 2026-06-28: pass 154,932 / skip 67,138. **Panic-dominated** crash by area: `api` 7,028 + `shader/execution` 31,537; fail by area: `api` 4,967 + `shader/validation` 1,693 (naga-lineage). Carries the F-001…F-021 panics + naga-lineage **F-124/F-129/F-133/F-134/F-136**; not triaged to `fail=0` |
 
-¹ Dawn passes everything the suite runs except the 48 **F-130** cases (left unmasked). ² wgpu-native is
+¹ The 2 fails on **both** Dawn and yawgpu are `draw,index_buffer_format_dirtying`: the CTS oracle expects the
+dirtied-format draw to succeed, but every backend (**including the Dawn oracle**) rejects it — a CTS-port-oracle
+quirk (Dawn-confirmed), not a backend defect, carried as `xfail`. (The former **F-130** `bitwise_shift`
+Dawn divergence **no longer reproduces** on the current Dawn build — `fail=0`; see F-130.) ² wgpu-native is
 panic-heavy, so its sweep must run under `--isolate` (per-**case** granularity) to contain the process
 aborts — its counts are **not** subcase-for-subcase comparable to the yawgpu/Dawn rows above (whole-suite
 per-**subcase**). Per-area (per-case): `api/validation` pass 20,193 / fail 4,759 / crash 6,857;
@@ -86,13 +89,15 @@ MoltenVK (non-authoritative Vulkan coverage on macOS) still shows translation ar
 ## Status — current state & open findings
 
 **yawgpu (primary subject): no open implementation defects.** It passes the entire ported suite
-`fail=0 crash=0` on native Metal and native Vulkan (see the sweep above). The only carried items are
-documented **non-defects**: `draw,index_buffer_format_dirtying` (Dawn-leniency — yawgpu is *stricter*;
+`fail=0 crash=0` on native Metal and native Vulkan (see the sweep above) — its Metal fail profile is
+**byte-identical to the Dawn oracle**. The only carried items are documented **non-defects**: the 2
+`draw,index_buffer_format_dirtying` cases (a CTS port-oracle quirk the Dawn oracle fails identically;
 Metal + Vulkan) and the Vulkan-only `xfail`s **F-085**, **F-111**, **F-129** (denormal `fwidth`), **F-141**,
 all in `expectations/yawgpu-vulkan.txt`. No yawgpu defect is masked.
 
-**Open — Dawn (oracle):** **F-130** — the override shift-range check is skipped when the LHS const-folds to
-0 (48 `shader/validation` cases); left unmasked (yawgpu/Tint get it right).
+**Open — Dawn (oracle):** none. The former **F-130** override-shift divergence **no longer reproduces** on
+the current Dawn build (`fail=0`); Dawn now fails only the 2 shared `index_buffer_format_dirtying`
+port-oracle cases.
 
 **Open — wgpu-native (naga-based bring-up reference, not triaged to `fail=0`):** the panic-heavy validation
 surface (F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027, F-028, F-036, F-052, F-056,
@@ -229,31 +234,7 @@ dimension is 0 (semantically a no-op), sidestepping the ANV-Haswell wedge. Repro
 
 ## F-130 — Dawn: override shift-amount range check skipped when `lhs` const-folds to 0 (Metal)
 
-- **Backend:** Dawn (Metal, macOS — local `out/Release` build). Deterministic. Surfaced while porting
-  `shader,validation,expression,binary,bitwise_shift` (phaseSV2).
-- **Found by:** `shader,validation,expression,binary,bitwise_shift:partial_eval_errors` — **48 fail**
-  (`pass=208`). Every failing subcase is `lhs="const"; stage="pipeline"; value ∈ {32,33,64}` (i.e. shift
-  amount ≥ bit width), across `op ∈ {<<,>>}`, `type ∈ {i32,u32}`, `vectorize ∈ {_undef_,2,3,4}`. The
-  `value=31` pipeline subcases and all `stage="shader"` subcases pass.
-- **Shader (upstream, verbatim):** `override o = 0u; fn foo() -> T { const v : T = 0; return v << o; }`
-  with `o` supplied as a pipeline-override constant = `value`. Per WGSL §8.7, `e1 << e2` is a
-  **pipeline-creation error** when `e2` is an override-expression and `e2 ≥ bitwidth(e1)`, independent of
-  `e1`. Dawn const-folds `0 << o → 0` and **skips the override range check**, so no error is raised.
-- **Port is faithful (proven, not a port bug):**
-  - The `stage="shader"` siblings — `const v = 0; v << 32u` (const-expression shift) — **do** error on
-    Dawn and pass our test, so Dawn correctly range-checks const-expression shifts; only the *override*
-    (partial-evaluation) path is lenient.
-  - The `lhs="var"` siblings — `var v = 0; v << o` — **do** error at pipeline creation and pass, so our
-    `expectPipelineResult` plumbing (override constant application, error-scope capture) is correct.
-  - Therefore the divergence is specifically: Dawn drops the override shift-range diagnostic when the LHS
-    folds to the additive identity. A genuine Dawn spec-conformance gap.
-- **Cross-check:** Dawn's own `webgpu-cts/expectations.txt` skips this test only on `android-pixel-10`
-  (compat), not on desktop Metal — so upstream expects desktop Dawn to pass it; our local Dawn build
-  diverges. yawgpu/wgpu-native not cross-checked (campaign is Dawn-only per current directive).
-- **Status:** OPEN (2026-06-22). The port is left **unmasked** (48 documented subcase divergences) rather
-  than added to `expectations/dawn.txt`: the failing case queries also contain passing subcases
-  (`stage="shader"`, `value=31`), so a case-level expectation would create xpass noise
-  (see [[expectations-are-case-level]]). Re-check on a newer Dawn build.
+**NO LONGER REPRODUCES** (re-verified 2026-06-28 on the rebuilt `build-dawn`) — `shader,validation,expression,binary,bitwise_shift:partial_eval_errors` is now `pass=256 fail=0` on Dawn. The original 48 fails were a Dawn override-shift-range-check gap (`0 << o` const-folded to 0, skipping the WGSL §8.7 `e2 ≥ bitwidth(e1)` pipeline-creation diagnostic) on the then-current local Dawn build; a newer Dawn build enforces it. The port was always faithful and left unmasked; yawgpu/Tint always got it right. Was the only Dawn-oracle divergence — Dawn is now fully green except the 2 shared `index_buffer_format_dirtying` port-oracle cases.
 
 ---
 
@@ -498,7 +479,7 @@ dimension is 0 (semantically a no-op), sidestepping the ANV-Haswell wedge. Repro
 
 ## F-093 — yawgpu: encoding-validation gaps (compressed copy / encoder-state / pipeline-layout / vertex-OOB) — cross-HAL
 
-- **RESOLVED 2026-06-14** (yawgpu `cts(F-093a-d)`, re-verified green Metal + MoltenVK): `encoding,{copyTextureToTexture,render/draw,encoder_open_state,pipeline_bind_group_compat}` — compressed-copy over-validation [dominant], vertex-buffer OOB, encoder-open-state error timing, auto-vs-explicit pipeline-layout compat (cross-HAL). `copyTextureToTexture 9254/0`, `encoder_open_state 119/0`, `draw 15708/2`† (the 2 are the documented Dawn-leniency `index_buffer_format_dirtying`, not a defect), `pipeline_bind_group_compat 2520/0`.
+- **RESOLVED 2026-06-14** (yawgpu `cts(F-093a-d)`, re-verified green Metal + MoltenVK): `encoding,{copyTextureToTexture,render/draw,encoder_open_state,pipeline_bind_group_compat}` — compressed-copy over-validation [dominant], vertex-buffer OOB, encoder-open-state error timing, auto-vs-explicit pipeline-layout compat (cross-HAL). `copyTextureToTexture 9254/0`, `encoder_open_state 119/0`, `draw 15708/2`† (the 2 are the `index_buffer_format_dirtying` port-oracle cases the Dawn oracle fails identically, not a defect), `pipeline_bind_group_compat 2520/0`.
 
 ---
 

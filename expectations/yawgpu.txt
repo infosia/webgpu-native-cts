@@ -14,9 +14,10 @@
 # Vulkan-only xfails (F-085 etc., spec-in-flux) live in expectations/yawgpu-vulkan.txt — apply that
 # file instead for Vulkan-backend runs.
 #
-# Dawn-leniency (not a yawgpu defect): draw,index_buffer_format_dirtying. After binding an index
-# buffer with a format that is then made invalid by a pipeline change, yawgpu correctly rejects the
-# draw (the render bundle becomes an error bundle), where Dawn is lenient and the CTS oracle expects
-# the lenient behavior. yawgpu is *stricter*, so the 2 cases report as failures on every backend
-# (Metal and Vulkan). Listed here as expected so suite runs stay green; see docs/FINDINGS.md.
+# CTS port-oracle quirk (not a yawgpu defect): draw,index_buffer_format_dirtying. After binding an
+# index buffer with a format that is then made invalid by a pipeline change, the draw makes the render
+# bundle an error bundle. The CTS oracle expects the draw to succeed, but EVERY backend rejects it --
+# including the Dawn reference impl, which fails these same 2 cases identically (re-verified on
+# build-dawn 2026-06-28: `[Invalid RenderBundle] is invalid due to a previous error`). Dawn-confirmed
+# => a port-oracle issue, not a backend defect. Listed here so suite runs stay green; see docs/FINDINGS.md.
 webgpu:api,validation,encoding,cmds,render,draw:index_buffer_format_dirtying:*
