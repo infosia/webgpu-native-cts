@@ -75,3 +75,13 @@ webgpu:shader,execution,expression,call,builtin,fwidthCoarse:f32:*
 # native Vulkan — the authoritative target — is already correct. See memory f045-frag-depth-clamp.
 webgpu:api,operation,rendering,depth_clip_clamp:depth_test_input_clamped:unclippedDepth=false
 webgpu:api,operation,rendering,depth_clip_clamp:depth_clamp_and_clip:writeDepth=true
+
+# F-141: memory_model,coherence:corr (atomic_storage, intra_workgroup) -- NOT a yawgpu defect.
+# This NVIDIA RTX 5060 Ti reliably (4/4) exhibits a storage-atomic intra-workgroup memory-ordering
+# relaxation that WebGPU's memory model disallows ("disallowed weak behavior observed",
+# testResults[3] != 0). Dawn -- the reference impl -- fails the SAME case identically on the SAME GPU
+# (statistical test, so counts differ, but both reliably observe it), so this is a hardware/driver
+# memory-model property, not yawgpu and not a CTS-port oracle bug. Distinct from F-112 (atomic_workgroup
+# corr, a real yawgpu defect, RESOLVED). Unchanged by yawgpu bd21cfb's VK_KHR_vulkan_memory_model.
+# Drop if the NVIDIA driver or the upstream CTS corr tuning changes (would xpass). See docs/FINDINGS.md F-141.
+webgpu:shader,execution,memory_model,coherence:corr:memType="atomic_storage";testType="intra_workgroup"

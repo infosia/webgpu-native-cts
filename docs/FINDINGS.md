@@ -98,6 +98,30 @@ indirect-dispatch). These need a post-rebuild re-sweep (latest naga) before bein
 recorded here so the data is not lost. Sweep artifacts: `sweep-out/` (git-ignored), runner
 `chunked-sweep.sh` / `resume-sweep.sh`.
 
+## F-141 — `memory_model,coherence:corr` (atomic_storage, intra_workgroup) — NVIDIA HW weak behavior, NOT yawgpu
+
+- **Backend/host:** yawgpu native Vulkan **and Dawn**, NVIDIA RTX 5060 Ti (Windows). Reliable (4/4 on
+  each), not flaky.
+- **Found by:** `shader,execution,memory_model,coherence:corr` — **1 fail**,
+  `memType="atomic_storage";testType="intra_workgroup"`: *"memory model test failed … (disallowed weak
+  behavior observed)"* — `testResults[3] != 0` (e.g. yawgpu behaviors `[951,6897,0,2136]`, Dawn
+  `[263,9587,0,134]`). The other 5 `corr` cases pass.
+- **Cross-check (attribution):** **Dawn (the reference impl) fails the SAME case identically on the SAME
+  GPU** (the counts differ because it is a statistical stress test, but both reliably observe the
+  disallowed weak behavior). ⇒ **NOT a yawgpu defect** and **not** a CTS-port oracle bug — this NVIDIA
+  GPU/driver reliably exhibits a storage-atomic intra-workgroup memory-ordering relaxation that WebGPU's
+  memory model disallows. Same posture as F-085/F-139 (config-level, all impls agree).
+- **Distinct from F-112** (`atomic_WORKGROUP` corr — a real yawgpu `Restrict`-bounds defect, RESOLVED
+  `b602ff2`). This is `atomic_STORAGE`, and yawgpu == Dawn.
+- **Not changed by yawgpu `bd21cfb`** (the `VK_KHR_vulkan_memory_model` enablement): failed before and
+  after — it is a hardware/driver memory-model property, not a robustness/memory-model-output toggle.
+- **Disposition:** `xfail` on yawgpu-vulkan with rationale (likely a known NVIDIA memory-model stress
+  sensitivity / driver conformance gap). Revisit if the upstream CTS `corr` tuning or the NVIDIA driver
+  changes; drop the entry if it starts passing (xpass).
+- **Status:** xfail — not a yawgpu defect (Dawn-confirmed), 2026-06-28.
+
+---
+
 ## F-138 — yawgpu Vulkan: `textureStore` to `bgra8unorm` writes wrong/zero bytes — native Vulkan
 
 - **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Windows). Deterministic. **Dawn passes.**
