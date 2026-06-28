@@ -123,6 +123,18 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
+## F-140 — (unused finding number)
+
+Skipped — never assigned. The sequence runs F-138 → F-139 → **F-141**; no F-140 was ever filed. Recorded here so the gap is intentional, not a lost entry.
+
+---
+
+## F-139 — yawgpu: `depth_clip_clamp` frag_depth viewport clamp — MoltenVK-only artifact, NOT a yawgpu defect
+
+**MoltenVK-only translation artifact** (`1b2bd92`, 2026-06-27) — `api,operation,rendering,depth_clip_clamp:{depth_test_input_clamped:unclippedDepth=false, depth_clamp_and_clip:writeDepth=true}` (2 cases) fail **only through MoltenVK**. WebGPU requires shader-written `frag_depth` clamped to the viewport `[minDepth,maxDepth]` (and out-of-`[0,1]` primitives clipped); yawgpu's Vulkan HAL does this correctly on **native Vulkan** (`depthClampEnable` + `VK_EXT_depth_clip_enable`), and its Metal backend via an in-shader clamp transform (Tint MSL `clamp_frag_depth`). MoltenVK clamps Metal `[[depth]]` only to `[0,1]` and collapses `depthClampEnable` to `MTLDepthClipMode.Clamp` (defeating the clip), so these fail under translation only. Green on native Metal **and** native Vulkan. `xfail` in `expectations/yawgpu-vulkan.txt`; optional follow-up = port the in-shader clamp to the SPIR-V path. See memory `f045-frag-depth-clamp`.
+
+---
+
 ## F-138 — yawgpu Vulkan: `textureStore` to `bgra8unorm` writes wrong/zero bytes — native Vulkan
 
 **RESOLVED** (yawgpu `bd21cfb`, 2026-06-28) — the Tint SPIR-V storage path emitted `bgra8unorm` without the B↔R channel handling SPIR-V's `Rgba8`-only storage requires (21 cases, `expected 51 got 0`); fixed via the `bgra8unorm` storage-view path in `yawgpu-hal/src/vulkan/texture.rs`. Dawn always passed (real defect, not an oracle bug). `xfail`s dropped from `expectations/yawgpu-vulkan.txt`.
