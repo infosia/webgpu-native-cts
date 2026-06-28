@@ -98,6 +98,26 @@ indirect-dispatch). These need a post-rebuild re-sweep (latest naga) before bein
 recorded here so the data is not lost. Sweep artifacts: `sweep-out/` (git-ignored), runner
 `chunked-sweep.sh` / `resume-sweep.sh`.
 
+## F-138 — yawgpu Vulkan: `textureStore` to `bgra8unorm` writes wrong/zero bytes — native Vulkan
+
+- **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Windows). Deterministic. **Dawn passes.**
+- **Found by:** full yawgpu/Vulkan sweep 2026-06-28. `textureStore:texel_formats` — **20 fail, all
+  `format="bgra8unorm"`** + `textureStore:bgra8unorm_swizzle` **1 fail** = 21. `mismatch at byte 0:
+  expected 51, got 0, format bgra8unorm`. Every other store format passes (incl. `rgb10a2unorm`,
+  which used to fail as F-128 but was an oracle bug — now fixed).
+- **Cross-check (attribution):** Dawn runs the same cases `fail=0` → the CTS oracle is correct, so this
+  is a **real yawgpu Vulkan defect**. (Contrast F-128 `rgb10a2unorm`, where Dawn fails identically =
+  oracle bug.)
+- **Regression:** the 2026-06-21 sweep (yawgpu `97b4827`) recorded `bgra8unorm` textureStore as
+  **passing** (F-128 then noted "other 1173 pass"); it fails on the 2026-06-28 build → a yawgpu change
+  between those builds broke `bgra8unorm` storage writes. (See also F-127, whose `robust_access`
+  failure widened on the same build — both point at a 2026-06-28 yawgpu Vulkan-HAL regression.)
+- **Leading suspect:** the Vulkan HAL `wgpu→vk` format/channel mapping for `bgra8unorm` storage views
+  (B↔R order); `expected 51, got 0` on byte 0 is consistent with a channel-order / zeroed-store error.
+- **Status:** OPEN (2026-06-28). yawgpu work item.
+
+---
+
 ## F-137 — zero-dimension compute dispatch hard-wedges ANV-Haswell (whole-machine freeze; NOT yawgpu)
 
 **Backend/host:** Linux, Intel Iris 5100 / **Haswell GT3**, Mesa ANV (`MESA-INTEL: warning: Haswell
@@ -1437,28 +1457,41 @@ native Windows/Vulkan (user-confirmed), and fail only under MoltenVK's Vulkan→
   a per-address-space split of the `buffer` bounds policy in the naga fork (naga cannot express it today).
   yawgpu work item. **Definitive confirm:** rebuild with `buffer` forced back to `Restrict` and check the 24
   uniform cases pass *and* F-112 (`coherence:corr`) re-breaks — proves the single-knob tension.
-- **Status:** OPEN (2026-06-21).
+- **Dawn cross-check + widening (2026-06-28):** the full `robust_access:linear_memory` test runs
+  `fail=0` on Dawn vs **216 fail** on yawgpu Vulkan → all are **real yawgpu defects** (not an oracle
+  bug). But the failure is now **far broader than the original 24 uniform/read cases**: by addressSpace
+  `workgroup=162`, `uniform=48`, `private=3`, `function=3`; by access `read=96`, `write=120`. F-127's
+  Jun-21 characterization had workgroup and all writes **passing**, so the 2026-06-28 yawgpu build
+  **regressed `robust_access` well beyond the uniform/read core** (cf. F-138, a textureStore regression
+  on the same build). Needs a fresh per-addressSpace triage; the uniform/read root cause above still
+  holds for that subset.
+- **Status:** OPEN (2026-06-21; widened 2026-06-28).
 
 ---
 
-## F-128 — yawgpu Vulkan: `textureStore` to `rgb10a2unorm` packs wrong — native Vulkan
+## F-128 — `textureStore` to `rgb10a2unorm` "wrong pack" was a CTS oracle bug — RESOLVED (not a yawgpu defect)
 
-- **Backend:** yawgpu native Vulkan (NVIDIA RTX 5060 Ti, Windows). Deterministic. **Metal-green.**
-- **Found by:** `shader,execution,expression,call,builtin,textureStore:*` — **20 fail, all
-  `format="rgb10a2unorm"`** (every `viewDimension` ∈ {1d, 2d, 2d-array, 3d} × stage {compute, fragment} ×
-  mipLevel 0–2; `access=write`). `mismatch at byte 2: expected 0, got 240`. The other 1173 textureStore
-  cases (all other formats) pass. Confirmed post-rebuild 2026-06-21 (yawgpu `97b4827`).
-- **Observed:** storing into an `rgb10a2unorm` storage texture and reading the raw bytes back yields a wrong
-  byte 2 (`0xF0` where `0` is expected) — the 10/10/10/2 packing is off by a channel-order / bit-shift.
-- **Classification:** Metal passes the full textureStore suite, so this is **not** yawgpu-core or the shared
-  frontend — it is the **SPIR-V path** (naga SPIR-V backend or the Vulkan HAL). naga's SPIR-V image-format
-  mapping is correct (`StorageFormat::Rgb10a2Unorm → SpvImageFormat::Rgb10A2`, `back/spv/instructions.rs`),
-  so the leading suspect is the **Vulkan HAL format mapping** for `rgb10a2unorm` storage views (Vulkan's
-  canonical layout is `VK_FORMAT_A2B10G10R10_UNORM_PACK32`; a B↔R or A-position mismatch would shift byte 2)
-  — to be confirmed against the HAL's `wgpu→vk` format table.
-- **Cross-check:** wgpu-native (Vulkan) produced no verdicts for this file on this host (0/0/0/0) — no oracle;
-  Dawn + yawgpu/Metal green is the reference.
-- **Status:** OPEN (2026-06-21). yawgpu work item; root-cause the HAL `rgb10a2unorm` storage view mapping.
+- **Reclassified 2026-06-28** (was: "yawgpu Vulkan HAL packs `rgb10a2unorm` wrong", OPEN 2026-06-21).
+  The original finding mis-attributed this to the Vulkan HAL on **"Metal-green ⇒ Vulkan/HAL defect"**
+  reasoning. A **Dawn cross-check disproves that**: Dawn (the reference impl) fails the same 20
+  `rgb10a2unorm` cases **identically** → the fault is the **CTS port's expected-value oracle**, not any
+  backend.
+- **Root cause:** the `rgb10a2unorm` store input set includes `0.5`, and `0.5 × 1023 = 511.5` is an exact
+  10-bit quantization **tie**. The oracle's `std::llround` rounds half away from zero → 512 (`byte 2` =
+  `0x00`); GPUs that round the tie down store 511 (`0xF0`/`0xDF`) — hence `expected 0, got 240`. Both
+  neighbours are spec-permitted at an exact half, but the store comparison demanded **byte-exact** equality.
+  "Metal-green" was a red herring: the Apple GPU happens to round the tie up to 512, matching the
+  too-strict oracle.
+- **Fix (CTS oracle, backend-independent):** compare normalized (unorm/snorm) store components with **±1
+  ULP** instead of byte-exact (`texture_utils.cpp` `normalizedStoreTexelMatches`); int/float/padding stay
+  exact. Commit `833954c` (with the sibling textureLoad-sRGB, storage-textureLoad-coord, and trig-validation
+  `absBigInt` oracle fixes — all Dawn-confirmed). Post-fix: `rgb10a2unorm` passes on **both** yawgpu Vulkan
+  and Dawn.
+- **Lesson:** "Metal-green, Vulkan-fail" does **not** imply a Vulkan/HAL defect — a spec-permitted rounding
+  tie can split per-GPU. Cross-check against Dawn (or another reference) before attributing to a backend.
+- **Sibling real defect:** the `bgra8unorm` cases in the *same* `textureStore` test ARE a genuine yawgpu
+  Vulkan defect (Dawn passes them; `expected 51, got 0`) — split out to **F-138**.
+- **Status:** RESOLVED (oracle fix `833954c`, 2026-06-28).
 
 ---
 
