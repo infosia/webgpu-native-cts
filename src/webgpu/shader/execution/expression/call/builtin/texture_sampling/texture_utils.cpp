@@ -2794,7 +2794,8 @@ bool textureLoadBitsMatch(
         return std::fabs(floatFromBits(expected) - floatFromBits(got)) <= (1.0f / 65535.0f);
     }
     if (kind == LoadReturnKind::Float && baseFormat(format) != format && component < 3u) {
-        return std::fabs(floatFromBits(expected) - floatFromBits(got)) <= 0.00025f;
+        // sRGB textureLoad may be decoded by fixed-function hardware with 8 fractional bits.
+        return std::fabs(floatFromBits(expected) - floatFromBits(got)) <= (1.0f / 256.0f);
     }
     return false;
 }
@@ -2809,7 +2810,9 @@ std::vector<LoadCallData> makeLoadCalls(const TextureLoadCase& c) {
     calls.reserve(kCallCount);
     for (uint32_t i = 0; i < kCallCount; ++i) {
         LoadCallData call;
-        const uint32_t level = c.useLevel ? (i % c.mipLevelCount) : 0u;
+        // Storage texture views target baseMipLevel, so generate coords in the viewed mip.
+        const uint32_t level = c.useLevel ? (i % c.mipLevelCount)
+                                          : (c.storageTexture ? c.baseMipLevel : 0u);
         const WGPUExtent3D mipSize = physicalMipSize(c.baseSize, c.textureDimension, level);
         if (c.samplePoints == "texel-centre") {
             call.coords[0] = i % mipSize.width;
@@ -4081,6 +4084,37 @@ std::vector<uint8_t> storeEncodeTexel(WGPUTextureFormat format, const std::array
         comps.values[i] = storeClampComponent(format, i, valuesIn[i]);
     }
     return repr.packBits(repr.numberToBits(comps));
+}
+
+bool storeFormatHasNormalizedComponents(const TexelRepresentation& repr) {
+    for (TexelComponent component : repr.componentOrder) {
+        const uint32_t index = static_cast<uint32_t>(component);
+        const ComponentDataType type = repr.dataTypes[index];
+        if (type == ComponentDataType::Unorm || type == ComponentDataType::Snorm) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool normalizedStoreTexelMatches(const TexelRepresentation& repr, const uint8_t* expected, const uint8_t* got) {
+    const TexelBits expectedBits = repr.unpackBits(expected, repr.bytesPerBlock);
+    const TexelBits gotBits = repr.unpackBits(got, repr.bytesPerBlock);
+    for (TexelComponent component : repr.componentOrder) {
+        const uint32_t index = static_cast<uint32_t>(component);
+        const ComponentDataType type = repr.dataTypes[index];
+        const uint32_t expectedValue = expectedBits.values[index];
+        const uint32_t gotValue = gotBits.values[index];
+        if (type == ComponentDataType::Unorm || type == ComponentDataType::Snorm) {
+            const uint32_t diff = expectedValue > gotValue ? expectedValue - gotValue : gotValue - expectedValue;
+            if (diff > 1u) {
+                return false;
+            }
+        } else if (expectedValue != gotValue) {
+            return false;
+        }
+    }
+    return true;
 }
 
 struct TextureStorePipelineBundle {
@@ -5678,14 +5712,47 @@ void executeTextureStoreTexelFormats(AllFeaturesMaxLimitsGpuTest& t) {
     if (got.size() < expected.size()) {
         t.fail("textureStore readback too small");
     }
+    auto failMismatch = [&](size_t i, std::string_view label) {
+        std::ostringstream msg;
+        msg << "textureStore ";
+        if (!label.empty()) {
+            msg << label << " ";
+        }
+        msg << "mismatch at byte " << i << ": expected " << static_cast<uint32_t>(expected[i])
+            << ", got " << static_cast<uint32_t>(got[i]) << ", format " << textureFormatInfo(format).identifier
+            << ", viewDimension " << viewDimension << ", stage " << stage << ", access " << accessStr
+            << ", mipLevel " << mipLevel;
+        t.fail(msg.str());
+    };
+    const TexelRepresentation& storeRepr = texelRepresentation(format);
+    if (storeFormatHasNormalizedComponents(storeRepr)) {
+        // Normalized textureStore may round exact-half ties to either adjacent encoded integer.
+        std::vector<uint8_t> texelBytes(expected.size(), 0);
+        for (uint32_t z = 0; z < testMipLevelSize.depthOrArrayLayers; ++z) {
+            for (uint32_t y = 0; y < testMipLevelSize.height; ++y) {
+                for (uint32_t x = 0; x < testMipLevelSize.width; ++x) {
+                    const size_t byteOffset = static_cast<size_t>(z) * layout.bytesPerRow * layout.rowsPerImage
+                        + static_cast<size_t>(y) * layout.bytesPerRow + static_cast<size_t>(x) * bytesPerTexel;
+                    for (size_t b = 0; b < bytesPerTexel && byteOffset + b < texelBytes.size(); ++b) {
+                        texelBytes[byteOffset + b] = 1;
+                    }
+                    if (!normalizedStoreTexelMatches(
+                            storeRepr, expected.data() + byteOffset, got.data() + byteOffset)) {
+                        failMismatch(byteOffset, "normalized texel");
+                    }
+                }
+            }
+        }
+        for (size_t i = 0; i < expected.size(); ++i) {
+            if (!texelBytes[i] && got[i] != expected[i]) {
+                failMismatch(i, "padding byte");
+            }
+        }
+        return;
+    }
     for (size_t i = 0; i < expected.size(); ++i) {
         if (got[i] != expected[i]) {
-            std::ostringstream msg;
-            msg << "textureStore mismatch at byte " << i << ": expected " << static_cast<uint32_t>(expected[i])
-                << ", got " << static_cast<uint32_t>(got[i]) << ", format " << textureFormatInfo(format).identifier
-                << ", viewDimension " << viewDimension << ", stage " << stage << ", access " << accessStr
-                << ", mipLevel " << mipLevel;
-            t.fail(msg.str());
+            failMismatch(i, "");
         }
     }
 }

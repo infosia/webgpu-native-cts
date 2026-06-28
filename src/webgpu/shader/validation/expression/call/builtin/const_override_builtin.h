@@ -862,7 +862,10 @@ class ConstantOrOverrideValueChecker {
 };
 
 // absBigInt helper (util/math.ts) for acos/asin/atanh-style |v| <= 1 checks.
-inline int64_t absBigInt(int64_t v) { return v < 0 ? -v : v; }
+// Upstream BigInt can represent |INT64_MIN|; compute the magnitude without signed overflow.
+inline uint64_t absBigInt(int64_t v) {
+    return v < 0 ? (~static_cast<uint64_t>(v) + 1u) : static_cast<uint64_t>(v);
+}
 
 // Build a BuiltinValue for a type-key that may name a scalar/vector OR a matrix,
 // filled with integer `value` (matrices fill float). Used by tests whose type
