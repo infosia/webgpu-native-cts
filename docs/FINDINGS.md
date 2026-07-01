@@ -69,12 +69,14 @@ still open on wgpu-native); see git history for the full naga-era root-cause ana
 
 The full ported suite (642 files) at the current backends. yawgpu's WGSL frontend is now Tint (see the
 migration section above), so its shader behaviour is Dawn-equivalent. **yawgpu-Metal was re-swept 2026-07-02
-after a yawgpu update** (real hardware-limit reporting + `subgroups` exposure) — see **F-142**/**F-143**.
+after a yawgpu update** (real hardware-limit reporting + `subgroups` exposure), which briefly surfaced 19
+fails — both root-caused and resolved (**F-142** in yawgpu, **F-143** in the CTS harness); the row below is
+the post-fix state.
 
 | Backend | fail | crash | verdict |
 |---------|-----:|------:|---------|
 | **Dawn** (oracle, Tint) | **2**¹ | 0 | fully green — pass **1,990,994** / skip 104,942. ¹the only fails are the 2 `index_buffer_format_dirtying` cases (see ¹ below) |
-| **yawgpu — native Metal** (Tint, **re-swept 2026-07-02**) | **21**³ | 0 | crash-free — pass **1,990,512** / skip 105,405 (`api/validation` 292,960 + `api/operation` 228,595 + `shader/execution` 822,209 + `shader/validation` 646,748). A yawgpu update raised coverage to Dawn's level but surfaced **19 new defects** — **F-142** (5) + **F-143** (14) — Dawn does not have; **no longer byte-identical to the oracle**. Also the 2 shared `index_buffer_format_dirtying` `xfail`s. `shader/execution` `fail=0` |
+| **yawgpu — native Metal** (Tint, **re-swept 2026-07-02, post-fix**) | **2**¹ | 0 | green — `fail=0` on `api/operation` (228,600) + `shader/validation` (646,773) + `shader/execution` (822,209)³; the only 2 fails are the shared `index_buffer_format_dirtying` `xfail`s in `api/validation` (292,960 pass). **Fail profile byte-identical to the Dawn oracle again** after resolving **F-142** (5, fixed in yawgpu `e7eba41`) + **F-143** (14, a CTS-harness probe gap — yawgpu was correct). |
 | **yawgpu — native Vulkan** (Windows / NVIDIA RTX 5060 Ti, Tint) | **0** | 0 | green — same `fail=0 crash=0` as Metal, modulo documented **non-defect** `xfail`s: **F-085** (per-sample), **F-111** (external-texture), **F-129** (denormal `fwidth`), **F-141** (NVIDIA memory-model). The last two real Vulkan defects **F-127** + **F-138** are resolved (`bd21cfb`) |
 | **wgpu-native** (naga, Metal, `--isolate`²) | **6,858** | **38,565** | bring-up reference — fresh sweep 2026-06-28: pass 154,932 / skip 67,138. **Panic-dominated** crash by area: `api` 7,028 + `shader/execution` 31,537; fail by area: `api` 4,967 + `shader/validation` 1,693 (naga-lineage). Carries the F-001…F-021 panics + naga-lineage **F-124/F-129/F-133/F-134/F-136**; not triaged to `fail=0` |
 
@@ -88,10 +90,13 @@ per-**subcase**). Per-area (per-case): `api/validation` pass 20,193 / fail 4,759
 `api/operation` pass 4,028 / fail 208 / crash 171; `shader/execution` pass 101,087 / fail 198 / crash
 31,537; `shader/validation` pass 29,624 / fail 1,693 / crash 0.
 
-³ yawgpu Metal was **re-swept 2026-07-02** (the other rows are from 2026-06-28). The 21 fails are the 2
-shared `index_buffer_format_dirtying` port-oracle non-defects **plus 19 new yawgpu defects** exposed by the
-update's coverage increase: **F-142** (5 `requestDevice` real-limits inconsistencies) + **F-143** (14
-subgroup validation gaps). Dawn passes all 19 on the same M2.
+³ yawgpu Metal was **re-swept 2026-07-02, post-fix** (the other rows are from 2026-06-28). The update's
+coverage increase briefly exposed 19 fails, now all resolved: **F-142** (5 `requestDevice:limits,supported`)
+was a real yawgpu over-strict limit-relationship check, fixed in yawgpu (`e7eba41`); **F-143** (14 subgroup
+`requires` + `uniform_subgroup_ops`) was a CTS-harness gap (the non-Dawn `hasLanguageFeature` probe lacked a
+`subgroup_id`/`subgroup_uniformity` case → returned `false` → inverted the expected result), fixed in the
+harness — yawgpu was correct. `shader/execution` is unaffected by the fixes and stays `fail=0 crash=0` — the
+whole-suite sweep on `e7eba41` is pass 822,209 / skip 22,377, identical to the pre-fix count.
 
 MoltenVK (non-authoritative Vulkan coverage on macOS) still shows translation artifacts (**F-104**, **F-070**,
 **F-139**) that are green on both native Metal and native Vulkan — see those findings.
@@ -102,7 +107,7 @@ MoltenVK (non-authoritative Vulkan coverage on macOS) still shows translation ar
 
 **yawgpu (primary subject): no open implementation defects (2026-07-02, both re-sweep findings resolved).**
 A yawgpu update (real hardware-limit reporting + `subgroups` exposure) raised Metal coverage to Dawn's
-level (skip 419,190 → 105,405) and, with the wider coverage, briefly surfaced 19 fails that are now all
+level (skip 419,190 → 105,394) and, with the wider coverage, briefly surfaced 19 fails that are now all
 resolved: **F-142** (5 `requestDevice:limits,supported`) was a **real yawgpu over-strict limit-relationship
 check**, fixed in yawgpu (commit `e7eba41`); **F-143** (14 subgroup `requires` + `uniform_subgroup_ops`)
 was a **CTS-harness gap** (the non-Dawn `hasLanguageFeature` probe lacked a `subgroup_id`/`subgroup_uniformity`
