@@ -361,6 +361,17 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             supported = compilesWithoutError(
                 "requires texture_formats_tier1;"
                 "\n@compute @workgroup_size(1) fn main() {}");
+        } else if (feature == "subgroup_id") {
+            // `subgroup_id` / `subgroup_uniformity` are WGSL *language* features
+            // (distinct from the `enable subgroups;` extension); the `requires`
+            // directive for them compiles iff the backend exposes the feature.
+            supported = compilesWithoutError(
+                "requires subgroup_id;"
+                "\n@compute @workgroup_size(1) fn main() {}");
+        } else if (feature == "subgroup_uniformity") {
+            supported = compilesWithoutError(
+                "requires subgroup_uniformity;"
+                "\n@compute @workgroup_size(1) fn main() {}");
         } else {
             // Any unrecognized name: stay conservative and report unsupported on
             // non-Dawn.

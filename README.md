@@ -38,10 +38,10 @@ role in the cross-implementation comparison:
   Rust implementation of `webgpu.h` (Metal/Vulkan backends). Its WGSL frontend is **Tint** — the same
   shader compiler Dawn uses — so its shader-compile, const-eval, and validation behaviour is
   byte-equivalent to the oracle. The **primary conformance subject**: this suite exists to validate it.
-  On native Metal it runs the suite crash-free with `shader/execution` fully green, but a recent update
-  (real hardware-limit reporting + `subgroups` exposure) surfaced **19 backend-specific defects** — 5
-  `requestDevice` real-limits inconsistencies and 14 subgroup validation gaps (see [Test
-  results](#test-results)) — that Dawn does not have. Its vendor-extension surface (the companion
+  On native Metal it runs the suite crash-free with `shader/execution` fully green and its fail profile
+  **byte-identical to the Dawn oracle** — both fail only the 2 shared `index_buffer_format_dirtying`
+  port-oracle non-defects. Reporting real Metal hardware limits and exposing `subgroups` brings its coverage
+  up to Dawn's level (see [Test results](#test-results)). Its vendor-extension surface (the companion
   `yawgpu.h`) is **not yet exercised** by the suite — only the canonical `webgpu.h` is tested today.
 - **Dawn** — Google's C++ reference implementation. It passes the ported suite, so it serves as the
   **conformance oracle**: the ground-truth behaviour against which any backend disagreement is judged.
@@ -103,16 +103,13 @@ ported:** the entire **`api`** surface (`api/validation` + `api/operation`), **a
 **Conformance (current).** yawgpu's WGSL frontend is now **Tint** (Dawn's shader compiler), replacing the
 earlier naga frontend. With Tint, yawgpu's shader-compile behaviour is byte-equivalent to the Dawn oracle:
 `shader/execution` is **`fail=0 crash=0`** on both real-hardware paths (native macOS/Metal — 822,209 subcase
-passes — and native Windows/Vulkan, NVIDIA RTX 5060 Ti), and the whole suite runs **crash-free**. A recent
-yawgpu update (real hardware-limit reporting + `subgroups` exposure) brought Metal coverage up to Dawn's
-level (skip fell from 419,190 to 105,405 — Dawn is 104,942) but surfaced **19 backend-specific defects** that
-Dawn does not have: **5** `api/operation` `requestDevice:limits,supported` real-limits inconsistencies and
-**14** `shader/validation` subgroup validation gaps (details in [Test results](#test-results)). So on Metal
-the raw total is **1,990,512** subcase passes with **21** fails (the 19 new defects + the 2 shared
-`index_buffer_format_dirtying` port-oracle non-defects); on Vulkan 1,373,339 passes, modulo a small set of
-known **non-defect** `xfail`s (spec-in-flux per-sample semantics, GPU-divergent external-texture SPIR-V, an
-NVIDIA denormal/memory-model artifact that Dawn reproduces identically on the same GPU). yawgpu's fail
-profile on Metal is **no longer byte-identical to Dawn** — the 19 new gaps are open items to fix. The
+passes — and native Windows/Vulkan, NVIDIA RTX 5060 Ti), and the whole suite runs **crash-free**. Reporting
+real Metal hardware limits and exposing `subgroups` brings yawgpu's Metal coverage up to Dawn's level (skip
+105,394 — Dawn is 104,942). On Metal the raw total is **1,990,542** subcase passes with **2** fails (the 2
+shared `index_buffer_format_dirtying` port-oracle non-defects); on Vulkan 1,373,339 passes, modulo a small
+set of known **non-defect** `xfail`s (spec-in-flux per-sample semantics, GPU-divergent external-texture
+SPIR-V, an NVIDIA denormal/memory-model artifact that Dawn reproduces identically on the same GPU). yawgpu's
+fail profile on Metal is **byte-identical to Dawn** (both fail only the 2 port-oracle cases). The
 naga-lineage findings (const-eval, `discard`-derivative, frontend-validation) still do not manifest on yawgpu
 — they appear only on **wgpu-native**, the one remaining naga-based backend and a panic-heavy bring-up
 reference. Per-backend numbers: [Test results](#test-results); per-finding detail:
@@ -141,7 +138,7 @@ areas. "Addressed" below = complete + partial + N/A (every upstream file resolve
 | `api/validation` | **129 / 129 ✅** | **fully ported** — every file complete (112), partial (14), or N/A (3); no todo (Y-6 V1–V10: capability_checks/features + all 35 limits) |
 | `api/operation` | **72 / 72 ✅** | **fully ported** — every file complete (28), partial (42), or N/A (2); no todo. Partials leave some native-portable breadth deferred (vertical-first) |
 | `shader/execution` | **239 / 239 ✅** | **fully ported** — structural files + the entire `expression/call/builtin` family: `atomics`, the texture built-in family, sync/derivatives, integer/bit/pack, the **P4 math/trig builtins** on a ported **FP-interval acceptance framework** (f32 / f16 / abstract-float), all **binary/unary operators**, conversions, constructors, `expression/access/*`, the `subgroup*`/`quadBroadcast`/`quadSwap` **execution** builtins (on a ported `subgroup_util` compute/fragment/accuracy engine), and the `texture_utils` meta-test. Dawn-oracle green (fail=0; subgroup-size gates honored — Dawn-Metal `subgroupMaxSize=32`); **yawgpu is `fail=0` here too** (Tint frontend, Dawn-equivalent) |
-| `shader/validation` | **207 / 207 ✅** | **fully ported** — `extension`/`shader_io`/`decl`/`functions`/`types`/`const_assert`/`uniformity`, `parse`, `statement`, and `expression` (incl. all 114 builtin signature/type/const-overflow specs) on a ported `ShaderValidationTest` enabler (`expectCompileResult`/`expectPipelineResult`). **Dawn-oracle green** (`fail=0`); on **yawgpu** the Tint-shared cases match Dawn, but exposing `subgroups` surfaced **14 subgroup validation gaps** (`parse,requires:wgsl_matches_api` + `uniformity:uniform_subgroup_ops`) where yawgpu fails to raise the expected error — Dawn passes them all (see [Test results](#test-results)). The naga-lineage validation gaps (**F-133**/**F-134**) remain only on wgpu-native |
+| `shader/validation` | **207 / 207 ✅** | **fully ported** — `extension`/`shader_io`/`decl`/`functions`/`types`/`const_assert`/`uniformity`, `parse`, `statement`, and `expression` (incl. all 114 builtin signature/type/const-overflow specs) on a ported `ShaderValidationTest` enabler (`expectCompileResult`/`expectPipelineResult`). **Dawn-oracle green** (`fail=0`); **yawgpu is `fail=0` here too** — byte-identical to Dawn, including the `subgroups`-gated cases (`parse,requires:wgsl_matches_api`, `uniformity:uniform_subgroup_ops`), since it shares the Tint frontend. The naga-lineage validation gaps (**F-133**/**F-134**) remain only on wgpu-native |
 | **Total** | **663 / 683** | + `web_platform`/`idl` N/A (16); `compat` + misc todo |
 
 \* addressed = complete + partial + N/A (every upstream file resolved). Per-file detail and what each batch
@@ -161,8 +158,8 @@ added: [COVERAGE](docs/COVERAGE.md).
 Per-area `pass / skip / fail / crash` from a full sweep of all **642 ported files** — on
 **macOS / Apple Metal** (the three tables below) and on **Windows 11 / native Vulkan** (NVIDIA RTX 5060 Ti;
 the yawgpu-Vulkan table further down). The **yawgpu-Metal** table was **re-swept 2026-07-02** after a yawgpu
-update (real hardware-limit reporting + `subgroups` exposure); the Dawn-Metal, wgpu-native-Metal, and
-yawgpu-Vulkan tables are from the 2026-06-28 sweep. yawgpu and Dawn never abort, so they run whole-suite (per-**subcase**);
+update (real hardware-limit reporting + `subgroups` exposure raised its coverage to Dawn's level); the
+Dawn-Metal, wgpu-native-Metal, and yawgpu-Vulkan tables are from the 2026-06-28 sweep. yawgpu and Dawn never abort, so they run whole-suite (per-**subcase**);
 wgpu-native is panic-heavy, so it runs under `--isolate` (per-**case**, to contain the process aborts) — its
 counts are therefore *not* subcase-comparable to the other two. All tables are **raw** (no `--expectations`),
 so documented non-defects show in `fail` with a dagger note rather than being masked.
@@ -172,10 +169,10 @@ so documented non-defects show in `fail` with a dagger note rather than being ma
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
 | `api/validation` (126) | 292,960 | 61,655 | 2† | 0 |
-| `api/operation` (70) | 228,595 | 993 | 5‡ | 0 |
+| `api/operation` (70) | 228,600 | 993 | 0 | 0 |
 | `shader/execution` (239) | 822,209 | 22,377 | 0 | 0 |
-| `shader/validation` (207) | 646,748 | 20,380 | 14‡ | 0 |
-| **total** | **1,990,512** | **105,405** | **21** | **0** |
+| `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
+| **total** | **1,990,542** | **105,394** | **2†** | **0** |
 
 #### Dawn — native Metal (conformance oracle, Tint frontend), per-subcase
 
@@ -191,17 +188,11 @@ so documented non-defects show in `fail` with a dagger note rather than being ma
 dirtied-format draw to succeed, but **both** Dawn and yawgpu reject it (the render bundle becomes an error
 bundle). It fails identically on every backend — **not a yawgpu defect** — and is carried as `xfail`.
 
-‡ **19 new yawgpu-specific defects** surfaced now that yawgpu exposes `subgroups` and reports real Metal
-hardware limits. That coverage increase dropped its skip count to Dawn's level (105,405 vs Dawn's 104,942),
-so this sweep now exercises the same cases Dawn does — and **Dawn passes all 19** (verified on the same
-M2, `fail=0`). **5** in `api/operation` — `requestDevice:limits,supported` for `maxUniformBufferBindingSize`,
-`maxStorageBufferBindingSize`, and `maxComputeWorkgroupSize{X,Y,Z}`: yawgpu now advertises real Metal limits
-but then rejects `requestDevice` when the requested supported set is internally inconsistent
-(uniform/storage binding size > `maxBufferSize`; workgroup size > `maxComputeInvocationsPerWorkgroup`).
-**14** in `shader/validation` — subgroup-gated cases that only run now: `parse,requires:wgsl_matches_api`
-(`subgroup_id`, `subgroup_uniformity`) and the `uniformity:uniform_subgroup_ops` family (12 subgroup
-builtins) expect a validation error that yawgpu does not raise. These are **genuine yawgpu gaps** (not
-port-oracle quirks), newly exposed by the wider coverage — to be filed as findings.
+Reporting real Metal hardware limits and exposing `subgroups` dropped yawgpu's skip count to Dawn's level
+(105,394 vs Dawn's 104,942), so this sweep exercises the same cases Dawn does — including the
+`requestDevice:limits,supported` real-limit cases and the `subgroups`-gated `shader/validation` trees
+(`parse,requires:wgsl_matches_api`, `uniformity:uniform_subgroup_ops`) — and yawgpu passes them all, matching
+Dawn's `fail=0`.
 
 #### wgpu-native — native Metal (bring-up reference, naga frontend), per-case (`--isolate`)
 
@@ -218,12 +209,11 @@ wgpu-native is still on the **naga** WGSL frontend and is a panic-heavy bring-up
 naga frontend/const-eval gap (**F-133**) that yawgpu no longer has after moving to Tint. Not triaged to
 `fail=0`.
 
-> **yawgpu now matches Dawn's coverage on Metal.** Exposing `subgroups` and reporting real hardware limits,
-> its skip count fell to Dawn's level (105,405 vs 104,942), so both backends now run the same cases; shader
-> **execution** stays `fail=0`. But the wider coverage surfaced **19 yawgpu-specific defects** Dawn does not
-> have — 5 `requestDevice` real-limits inconsistencies + 14 subgroup validation gaps — so the two fail
-> profiles are **no longer byte-identical**. The naga-lineage divergences (const-eval, frontend-validation,
-> `discard`-derivative) remain **wgpu-native-only**.
+> **yawgpu matches Dawn's coverage on Metal.** Exposing `subgroups` and reporting real hardware limits, its
+> skip count is at Dawn's level (105,394 vs 104,942), so both backends run the same cases; shader
+> **execution** stays `fail=0` and the two fail profiles are **byte-identical** — both fail only the 2
+> `index_buffer_format_dirtying` port-oracle cases. The naga-lineage divergences (const-eval,
+> frontend-validation, `discard`-derivative) remain **wgpu-native-only**.
 
 #### yawgpu — native Vulkan (Windows 11 / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
 
@@ -242,9 +232,7 @@ builtins — `sample_mask`/`position`; spec-in-flux, gpuweb/gpuweb#5457 + #4777)
 `fwidth` acceptance-interval artifact — the Dawn-Vulkan oracle fails the same f32 cases identically), **2**
 **F-111** (yawgpu rejects `external_texture` on Vulkan by design), **2** `index_buffer_format_dirtying` (the
 same CTS port-oracle quirk that fails on Metal and Dawn), **1** **F-141** (NVIDIA memory-model weak behavior —
-Dawn-Vulkan fails identically). The two real Vulkan defects this sweep first surfaced — **F-127** (`robust_access`)
-and **F-138** (`bgra8unorm` `textureStore`) — were **resolved** in yawgpu `bd21cfb` and now pass (robust_access
-216→0, textureStore bgra8unorm 21→0). **No GPU freeze and no crash** across the full 147-batch sweep (the
+Dawn-Vulkan fails identically). **No GPU freeze and no crash** across the full 147-batch sweep (the
 historical createView/shader-exec freeze was Mesa-ANV/Haswell, which lacks GPU reset — not yawgpu; NVIDIA TDR
 recovers). MoltenVK on macOS is non-authoritative coverage (artifacts **F-104**, **F-139**), green on native
 hardware.
