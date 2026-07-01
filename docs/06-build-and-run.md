@@ -301,6 +301,22 @@ runs so many cases **sharing one process-global device** (`src/common/harness.cp
 degrades and later cases fail en masse with `HAL queue submission failed: vulkan` (fake fails). Plain
 `--workers` ties shard count to concurrency, so it cannot avoid both.
 
+> **Worker count is the knob — and the two jobs need different tools.** The mass
+> `HAL queue submission failed: vulkan` degradation is driven by **too few workers**
+> (each process then runs more cases on one shared device). It is a **fake-fail
+> artifact, not a backend regression** — do not diagnose a HAL bug from it, and do
+> not reach for `--isolate` to "fix" it.
+> - **Per-subcase deliverable (the README / COVERAGE result tables):** use plain
+>   **`--workers 8`, no `--isolate`**. This reports **per-subcase** counts and comes
+>   out clean (e.g. `api,validation` = `pass≈227,885 fail=0`, 354,617 subcase
+>   records). Dropping to `--workers 4` on the *same* query instead yields ~6,299
+>   fake `HAL queue submission failed` fails — the fix is to *raise* the worker
+>   count back to 8, never to switch isolation mode.
+> - **Per-case findings triage (crash classification, real-defect confirmation):**
+>   use `--isolate --workers N` (below). This reports **per-case** counts (smaller,
+>   different units — do not mix the two in one table) and is slower; use it to
+>   *classify*, not to produce the per-subcase tables.
+
 **Use `--isolate --workers N` (the per-case isolation pool).** Each case runs in its own child
 process — so in-process degradation cannot accrue — and up to `N` run at once with a capped default
 (`min(cores, 8)`; GPU/VRAM pressure, not CPU, is the limiter), which stays under the OS-freeze
