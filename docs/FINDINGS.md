@@ -535,9 +535,12 @@ dimension is 0 (semantically a no-op), sidestepping the ANV-Haswell wedge. Repro
 
 ---
 
-## F-085 — Vulkan per-sample dispatch: sample_mask / position fragment builtins — NOT an implementation defect (spec in flux; xfail)
+## F-085 — Vulkan per-sample dispatch fragment builtins: `sample_mask` xfail (spec in flux) + `position` RESOLVED on yawgpu
 
-**Not a defect** — spec in flux (gpuweb#5457 / cts#4510 pending, position open in gpuweb#4777); every Vulkan impl (yawgpu, wgpu-native, Dawn) diverges from the current oracle; 92 cases xfail in `expectations/{yawgpu,wgpu-native}-vulkan.txt`.
+**Split 2026-07-01** after a native-Vulkan re-run (NVIDIA RTX 5060 Ti) showed the two halves are not the same kind of finding:
+
+- **`inputs,sample_mask` (88 subcases) — still xfail, NOT an implementation defect.** Under Vulkan per-sample dispatch the `sample_mask` input is the current sample's single bit (Vulkan semantics) where the current CTS oracle expects the full coverage mask. yawgpu, wgpu-native **and Dawn** diverge identically on the same GPU (this port reproduces Dawn `fail=88`); spec in flux (gpuweb#5457 / cts#4510 pending). Kept xfail in `expectations/{yawgpu,wgpu-native}-vulkan.txt`.
+- **`inputs,position` (4 cases: `sampleCount=4; interpolation={perspective,linear},sample`) — RESOLVED on yawgpu (`90a269a`), no longer xfail.** WebGPU requires `@builtin(position)` to always be the pixel-center (fragment) coordinate, never a sample position (`fragment_builtins.spec.cpp:1011`); under Vulkan sample-rate shading the SPIR-V `FragCoord` builtin instead reflects the covered sample's location (the 4× MSAA offsets `0.375/0.125/…` vs expected `0.5`). The **current Dawn oracle passes these 4** (it reconstructs the pixel center via a polyfill), so this was a real yawgpu gap, not spec-in-flux — the earlier bundling with `sample_mask` (gpuweb#4777) was too conservative. Fixed by wiring Tint's `polyfill_pixel_center` option (+ a viewport-depth-range fragment push constant for the NDC-space z reconstruction) through the yawgpu-tint shim and the Vulkan HAL, matching Dawn's `RenderPipeline::NeedsPixelCenterPolyfill`. Re-verified native Vulkan: `inputs,position` **pass=32 fail=0** (was 28/4); full `fragment_builtins` `fail=0 xfail=88 xpass=0` with the updated expectations. The 4 position entries were dropped from `expectations/yawgpu-vulkan.txt`. (yawgpu ledger: `specs/tracking/cts-coverage.md` → F-085 position sub-part.)
 
 ---
 
