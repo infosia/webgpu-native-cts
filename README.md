@@ -157,12 +157,15 @@ added: [COVERAGE](docs/COVERAGE.md).
 
 Per-area `pass / skip / fail / crash` from a full sweep of all **642 ported files** — on
 **macOS / Apple Metal** (the three tables below) and on **Windows 11 / native Vulkan** (NVIDIA RTX 5060 Ti;
-the yawgpu-Vulkan table further down). The **yawgpu-Metal** table was **re-swept 2026-07-02** after a yawgpu
-update (real hardware-limit reporting + `subgroups` exposure raised its coverage to Dawn's level); the
-Dawn-Metal, wgpu-native-Metal, and yawgpu-Vulkan tables are from the 2026-06-28 sweep. yawgpu and Dawn never abort, so they run whole-suite (per-**subcase**);
-wgpu-native is panic-heavy, so it runs under `--isolate` (per-**case**, to contain the process aborts) — its
-counts are therefore *not* subcase-comparable to the other two. All tables are **raw** (no `--expectations`),
-so documented non-defects show in `fail` with a dagger note rather than being masked.
+the yawgpu-Vulkan table further down). The **yawgpu-Metal** and **wgpu-native-Metal** tables were **re-swept
+2026-07-02**; the Dawn-Metal and yawgpu-Vulkan tables are from the 2026-06-28 sweep. All three Metal backends
+now run whole-suite **per-subcase** (`--workers`, no `--isolate`): yawgpu and Dawn never abort; wgpu-native is
+panic-heavy but the parallel runner contains each abort (records it as one `crash`, case-level, and continues
+via a fresh forked worker), so it no longer needs `--isolate`. Because wgpu-native runs many cases per worker
+**process**, an abort can contaminate later cases in the same process — so its `crash` count is inflated ~4×
+versus a per-case isolate run (see the note under its table); read its numbers as run-mode-sensitive, not a
+like-for-like comparison to the robust backends. All tables are **raw** (no `--expectations`), so documented
+non-defects show in `fail` with a dagger note rather than being masked.
 
 #### yawgpu — native Metal (Tint frontend), per-subcase
 
@@ -194,20 +197,25 @@ Reporting real Metal hardware limits and exposing `subgroups` dropped yawgpu's s
 (`parse,requires:wgsl_matches_api`, `uniformity:uniform_subgroup_ops`) — and yawgpu passes them all, matching
 Dawn's `fail=0`.
 
-#### wgpu-native — native Metal (bring-up reference, naga frontend), per-case (`--isolate`)
+#### wgpu-native — native Metal (bring-up reference, naga frontend), per-subcase
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 20,193 | 7,540 | 4,759 | 6,857 |
-| `api/operation` (70) | 4,028 | 1,470 | 208 | 171 |
-| `shader/execution` (239) | 101,087 | 42,814 | 198 | 31,537 |
-| `shader/validation` (207) | 29,624 | 15,314 | 1,693 | 0 |
-| **total** | **154,932** | **67,138** | **6,858** | **38,565** |
+| `api/validation` (126) | 165,877 | 84,634 | 17,445 | 7,043 |
+| `api/operation` (70) | 145,018 | 76,709 | 2,771 | 1,669 |
+| `shader/execution` (239) | 63,365 | 130,051 | 1,840 | 121,797 |
+| `shader/validation` (207) | 251,905 | 316,541 | 98,696 | 0 |
+| **total** | **626,165** | **607,935** | **120,752** | **130,509** |
 
-wgpu-native is still on the **naga** WGSL frontend and is a panic-heavy bring-up reference: crash 38,565
-(dominated by `api/validation` 6,857 + `shader/execution` 31,537). Its `shader/validation` fail 1,693 is the
+wgpu-native is still on the **naga** WGSL frontend and is a panic-heavy bring-up reference, now run
+**per-subcase** (`--workers`, no `--isolate`) like the other backends. crash **130,509** — all genuine aborts
+(signal 6, not timeouts) — is dominated by `shader/execution` (121,797). That is **~4× the per-case isolate
+count** (a 2026-06-28 isolate run of `shader/execution` saw crash 31,537): with many cases sharing one worker
+process, an abort contaminates subsequent cases, so much of this reflects **shared-process execution**, not
+distinct backend defects — and pass is correspondingly deflated. Its `shader/validation` fail 98,696 is the
 naga frontend/const-eval gap (**F-133**) that yawgpu no longer has after moving to Tint. Not triaged to
-`fail=0`.
+`fail=0`; these numbers are run-mode-sensitive and not a like-for-like comparison to the robust yawgpu/Dawn
+backends.
 
 > **yawgpu matches Dawn's coverage on Metal.** Exposing `subgroups` and reporting real hardware limits, its
 > skip count is at Dawn's level (105,394 vs 104,942), so both backends run the same cases; shader
