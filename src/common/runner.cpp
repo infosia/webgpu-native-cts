@@ -1418,6 +1418,24 @@ void emitShardResults(const std::vector<SubcaseResult>& results) {
     }
 }
 
+#if !defined(_WIN32)
+void runForkedWorkerCases(
+    const std::vector<CaseRun>& cases,
+    const std::vector<size_t>& positions,
+    size_t next) {
+    setStdoutBinaryForResultProtocol();
+    try {
+        for (size_t i = next; i < positions.size(); ++i) {
+            const size_t position = positions[i];
+            emitShardResults(runCase(cases[position]));
+        }
+    } catch (...) {
+        _exit(1);
+    }
+    _exit(0);
+}
+#endif
+
 std::vector<SubcaseResult> collectShardResultRuns(
     const RunOptions& options,
     const std::vector<Query>& queries,
@@ -1454,7 +1472,7 @@ std::string shardArg(int shard, int workers) {
     return std::to_string(shard) + "/" + std::to_string(workers);
 }
 
-std::vector<std::string> workerArgs(
+[[maybe_unused]] std::vector<std::string> workerArgs(
     const RunOptions& options,
     const std::vector<std::string>& queryTexts,
     int shard,
@@ -1482,11 +1500,13 @@ std::vector<std::string> workerArgs(
 WorkerState spawnWorker(
     const RunOptions& options,
     const std::vector<std::string>& queryTexts,
+    const std::vector<CaseRun>& cases,
     int shard,
     int workers,
     const std::vector<size_t>& positions,
     size_t next) {
 #if defined(_WIN32)
+    (void)cases;
     SECURITY_ATTRIBUTES inheritable{};
     inheritable.nLength = sizeof(inheritable);
     inheritable.bInheritHandle = TRUE;
@@ -1587,18 +1607,12 @@ WorkerState spawnWorker(
             close(devNull);
         }
 
-        std::vector<std::string> args = workerArgs(options, queryTexts, shard, workers, positions, next);
-
-        std::vector<char*> argv;
-        argv.reserve(args.size() + 1);
-        for (std::string& arg : args) {
-            argv.push_back(arg.data());
-        }
-        argv.push_back(nullptr);
-        execv(options.executablePath.c_str(), argv.data());
-        _exit(127);
+        runForkedWorkerCases(cases, positions, next);
     }
 
+    (void)queryTexts;
+    (void)options;
+    (void)workers;
     close(stdoutPipe[1]);
     const int flags = fcntl(stdoutPipe[0], F_GETFL, 0);
     if (flags >= 0) {
@@ -1736,7 +1750,7 @@ std::optional<WorkerState> finishWorker(
     if (worker.next >= worker.positions.size()) {
         return std::nullopt;
     }
-    return spawnWorker(options, queryTexts, worker.shard, options.workers, worker.positions, worker.next);
+    return spawnWorker(options, queryTexts, cases, worker.shard, options.workers, worker.positions, worker.next);
 }
 
 std::vector<SubcaseResult> collectParallelRuns(
@@ -1756,7 +1770,7 @@ std::vector<SubcaseResult> collectParallelRuns(
             }
         }
         if (!positions.empty()) {
-            workers.push_back(spawnWorker(options, queryTexts, shard, options.workers, positions, 0));
+            workers.push_back(spawnWorker(options, queryTexts, cases, shard, options.workers, positions, 0));
         }
     }
 
