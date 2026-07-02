@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "common/case_plan.h"
 #include "common/query.h"
 #include "cts/format_sample.h"
 
@@ -364,14 +365,6 @@ void printTestListLine(const std::string& file, const TestSpec& test, bool sampl
     std::cout << "\n";
 }
 
-struct CaseRun {
-    std::string file;
-    const TestSpec* test = nullptr;
-    ParamRecord params;
-    std::vector<ParamRecord> subcases;
-    std::string query;
-};
-
 std::vector<CaseRun> collectCases(
     const std::vector<Query>& queries,
     bool sampleFormats,
@@ -615,6 +608,50 @@ std::string quoteWindowsArg(const std::string& arg) {
     quoted.push_back('"');
     return quoted;
 }
+
+class TemporaryCasePlan {
+  public:
+    explicit TemporaryCasePlan(const std::vector<CaseRun>& cases) {
+        char tempDir[MAX_PATH + 1]{};
+        const DWORD tempDirLength = GetTempPathA(static_cast<DWORD>(sizeof(tempDir)), tempDir);
+        if (tempDirLength == 0) {
+            throw std::runtime_error(windowsErrorMessage("GetTempPathA", GetLastError()));
+        }
+        if (tempDirLength >= static_cast<DWORD>(sizeof(tempDir))) {
+            throw std::runtime_error("GetTempPathA failed: temp path exceeds MAX_PATH");
+        }
+
+        char tempPath[MAX_PATH + 1]{};
+        if (GetTempFileNameA(tempDir, "cts", 0, tempPath) == 0) {
+            throw std::runtime_error(windowsErrorMessage("GetTempFileNameA", GetLastError()));
+        }
+        path_ = tempPath;
+
+        try {
+            serializeCasePlan(path_, cases);
+        } catch (...) {
+            (void)DeleteFileA(path_.c_str());
+            path_.clear();
+            throw;
+        }
+    }
+
+    TemporaryCasePlan(const TemporaryCasePlan&) = delete;
+    TemporaryCasePlan& operator=(const TemporaryCasePlan&) = delete;
+
+    ~TemporaryCasePlan() {
+        if (!path_.empty()) {
+            (void)DeleteFileA(path_.c_str());
+        }
+    }
+
+    const std::string& path() const {
+        return path_;
+    }
+
+  private:
+    std::string path_;
+};
 #endif
 
 std::string signalMessage(int signal) {
@@ -1453,6 +1490,20 @@ std::vector<SubcaseResult> collectShardResultRuns(
     return results;
 }
 
+std::vector<SubcaseResult> collectShardResultRunsFromPlan(const RunOptions& options) {
+    std::vector<SubcaseResult> results;
+    const std::vector<CaseRun> cases = loadCasePlan(options.casePlanPath);
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (!caseSelectedByShard(i, options)) {
+            continue;
+        }
+        std::vector<SubcaseResult> caseResults = runCase(cases[i]);
+        emitShardResults(caseResults);
+        results.insert(results.end(), caseResults.begin(), caseResults.end());
+    }
+    return results;
+}
+
 struct WorkerState {
     int shard = 0;
 #if defined(_WIN32)
@@ -1493,6 +1544,10 @@ std::string shardArg(int shard, int workers) {
     if (next < positions.size() && positions[next] > 0) {
         args.push_back("--shard-from");
         args.push_back(std::to_string(positions[next]));
+    }
+    if (!options.casePlanPath.empty()) {
+        args.push_back("--case-plan");
+        args.push_back(options.casePlanPath);
     }
     return args;
 }
@@ -1760,6 +1815,11 @@ std::vector<SubcaseResult> collectParallelRuns(
     const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
     std::vector<std::vector<SubcaseResult>> resultsByCase(cases.size());
     std::vector<std::string> queryTexts = options.queries;
+    RunOptions workerOptions = options;
+#if defined(_WIN32)
+    TemporaryCasePlan casePlan(cases);
+    workerOptions.casePlanPath = casePlan.path();
+#endif
 
     std::vector<WorkerState> workers;
     for (int shard = 0; shard < options.workers; ++shard) {
@@ -1770,7 +1830,7 @@ std::vector<SubcaseResult> collectParallelRuns(
             }
         }
         if (!positions.empty()) {
-            workers.push_back(spawnWorker(options, queryTexts, cases, shard, options.workers, positions, 0));
+            workers.push_back(spawnWorker(workerOptions, queryTexts, cases, shard, options.workers, positions, 0));
         }
     }
 
@@ -1827,7 +1887,7 @@ std::vector<SubcaseResult> collectParallelRuns(
             }
 
             std::optional<WorkerState> replacement =
-                finishWorker(std::move(workers[i]), options, queryTexts, cases, resultsByCase);
+                finishWorker(std::move(workers[i]), workerOptions, queryTexts, cases, resultsByCase);
             workers.erase(workers.begin() + static_cast<std::ptrdiff_t>(i));
             if (replacement) {
                 workers.push_back(std::move(*replacement));
@@ -1890,7 +1950,7 @@ std::vector<SubcaseResult> collectParallelRuns(
             }
 
             std::optional<WorkerState> replacement =
-                finishWorker(std::move(workers[i]), options, queryTexts, cases, resultsByCase);
+                finishWorker(std::move(workers[i]), workerOptions, queryTexts, cases, resultsByCase);
             workers.erase(workers.begin() + static_cast<std::ptrdiff_t>(i));
             if (replacement) {
                 workers.push_back(std::move(*replacement));
@@ -2248,7 +2308,11 @@ int runQueries(const RunOptions& options) {
     try {
         if (options.shardResults) {
             setStdoutBinaryForResultProtocol();
-            (void)collectShardResultRuns(runOptions, queries, &sampleStats);
+            if (!runOptions.casePlanPath.empty()) {
+                (void)collectShardResultRunsFromPlan(runOptions);
+            } else {
+                (void)collectShardResultRuns(runOptions, queries, &sampleStats);
+            }
             return 0;
         } else if (!options.crashListPath.empty()) {
             ExpectationSet crashList = loadExpectations(options.crashListPath);

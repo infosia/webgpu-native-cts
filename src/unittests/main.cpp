@@ -1,6 +1,9 @@
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <cstddef>
@@ -9,10 +12,13 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
+#include "common/case_plan.h"
 #include "common/query.h"
 #include "cts/format_sample.h"
 #include "cts/test.h"
@@ -57,6 +63,148 @@ void requireBytes(
     const std::vector<uint8_t>& expected,
     const std::string& message) {
     require(actual == expected, message);
+}
+
+cts::TestGroup<cts::Fixture> gCasePlanGroup =
+    cts::MakeTestGroup<cts::Fixture>("unittest,case_plan", "case-plan unit tests");
+
+CTS_TEST(gCasePlanGroup, "alpha")
+    .desc("case-plan alpha")
+    .fn([](cts::Fixture& fixture) { (void)fixture; });
+
+CTS_TEST(gCasePlanGroup, "beta")
+    .desc("case-plan beta")
+    .fn([](cts::Fixture& fixture) { (void)fixture; });
+
+const cts::TestSpec* findRegisteredTest(const std::string& file, const std::string& name) {
+    for (const cts::SpecFile& specFile : cts::Registry::instance().files()) {
+        if (specFile.path != file) {
+            continue;
+        }
+        for (const cts::TestSpec& test : specFile.tests) {
+            if (test.name == name) {
+                return &test;
+            }
+        }
+    }
+    throw std::runtime_error("missing registered test for unit test: " + file + ":" + name);
+}
+
+uint64_t doubleBits(double value) {
+    uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+bool valuesEqual(const cts::Value& a, const cts::Value& b) {
+    if (const auto* value = std::get_if<int64_t>(&a.data())) {
+        const auto* other = std::get_if<int64_t>(&b.data());
+        return other != nullptr && *value == *other;
+    }
+    if (const auto* value = std::get_if<bool>(&a.data())) {
+        const auto* other = std::get_if<bool>(&b.data());
+        return other != nullptr && *value == *other;
+    }
+    if (const auto* value = std::get_if<double>(&a.data())) {
+        const auto* other = std::get_if<double>(&b.data());
+        return other != nullptr && doubleBits(*value) == doubleBits(*other);
+    }
+    if (std::holds_alternative<cts::Value::Undefined>(a.data())) {
+        return std::holds_alternative<cts::Value::Undefined>(b.data());
+    }
+    const auto* value = std::get_if<std::string>(&a.data());
+    const auto* other = std::get_if<std::string>(&b.data());
+    return value != nullptr && other != nullptr && *value == *other;
+}
+
+void requireParamRecordEqual(
+    const cts::ParamRecord& actual,
+    const cts::ParamRecord& expected,
+    const std::string& context) {
+    require(actual.size() == expected.size(), context + " param count");
+    for (size_t i = 0; i < expected.size(); ++i) {
+        require(actual[i].first == expected[i].first, context + " param key order");
+        require(valuesEqual(actual[i].second, expected[i].second), context + " param value");
+    }
+}
+
+void requireCaseRunEqual(
+    const cts::CaseRun& actual,
+    const cts::CaseRun& expected,
+    const std::string& context) {
+    require(actual.file == expected.file, context + " file");
+    require(actual.test == expected.test, context + " test pointer");
+    require(actual.query == expected.query, context + " query");
+    requireParamRecordEqual(actual.params, expected.params, context + " params");
+    require(actual.subcases.size() == expected.subcases.size(), context + " subcase count");
+    for (size_t i = 0; i < expected.subcases.size(); ++i) {
+        requireParamRecordEqual(actual.subcases[i], expected.subcases[i], context + " subcase");
+    }
+}
+
+std::filesystem::path makeCasePlanTempPath() {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() /
+        ("webgpu_native_cts_case_plan_" + std::to_string(now) + ".bin");
+}
+
+class ScopedFile {
+  public:
+    explicit ScopedFile(std::filesystem::path path)
+        : path_(std::move(path)) {}
+
+    ScopedFile(const ScopedFile&) = delete;
+    ScopedFile& operator=(const ScopedFile&) = delete;
+
+    ~ScopedFile() {
+        std::error_code error;
+        std::filesystem::remove(path_, error);
+    }
+
+    const std::filesystem::path& path() const {
+        return path_;
+    }
+
+  private:
+    std::filesystem::path path_;
+};
+
+void testCasePlanRoundTrip() {
+    const std::string file = "unittest,case_plan";
+    const cts::TestSpec* alpha = findRegisteredTest(file, "alpha");
+    const cts::TestSpec* beta = findRegisteredTest(file, "beta");
+
+    const cts::ParamRecord representativeParams{
+        {"i64", cts::Value(int64_t(-1234567890123456789LL))},
+        {"double", cts::Value(0.1)},
+        {"bool", cts::Value(true)},
+        {"text", cts::Value(std::string("contains;:\"'delimiters"))},
+        {"empty", cts::Value(std::string())},
+        {"undef", cts::Value::undef()},
+    };
+    const std::vector<cts::ParamRecord> subcases{
+        cts::ParamRecord{{"subIndex", cts::Value(int64_t(0))}, {"subText", cts::Value("first")}},
+        cts::ParamRecord{{"subIndex", cts::Value(int64_t(1))}, {"subBool", cts::Value(false)}},
+    };
+    const cts::ParamRecord betaParams{{"order", cts::Value(int64_t(1))}};
+    const cts::ParamRecord alphaOrderParams{{"order", cts::Value(int64_t(2))}};
+    const std::vector<cts::CaseRun> cases{
+        cts::CaseRun{file, alpha, representativeParams, subcases, cts::caseQuery(file, alpha->name, representativeParams)},
+        cts::CaseRun{file, beta, betaParams, {}, cts::caseQuery(file, beta->name, betaParams)},
+        cts::CaseRun{file, alpha, alphaOrderParams, {}, cts::caseQuery(file, alpha->name, alphaOrderParams)},
+    };
+
+    ScopedFile planFile(makeCasePlanTempPath());
+    cts::serializeCasePlan(planFile.path().string(), cases);
+    const std::vector<cts::CaseRun> loaded = cts::loadCasePlan(planFile.path().string());
+
+    require(loaded.size() == cases.size(), "case-plan case count");
+    require(loaded[0].test->name == "alpha", "case-plan first case ordering");
+    require(loaded[1].test->name == "beta", "case-plan second case ordering");
+    require(loaded[2].test->name == "alpha", "case-plan third case ordering");
+    for (size_t i = 0; i < cases.size(); ++i) {
+        requireCaseRunEqual(loaded[i], cases[i], "case-plan case " + std::to_string(i));
+    }
 }
 
 int hexValueForTest(char ch) {
@@ -1245,6 +1393,8 @@ int main() {
                 "multi-file prefix query file");
         require(cts::parseQuery("webgpu:api,validation,*").test == "*",
                 "multi-file prefix query selects all tests");
+
+        testCasePlanRoundTrip();
 
         auto failures = cts::runSyntheticFailureForSelfTest();
         require(failures.size() == 1, "synthetic failure result count");

@@ -375,6 +375,7 @@ struct RunOptions {
     int shardCount = 0;            ///< Total shard count when sharding.
     size_t shardFrom = 0;          ///< Starting case offset within the shard.
     bool shardResults = false;     ///< Emit per-shard result output.
+    std::string casePlanPath;      ///< Serialized case plan loaded by shard-result workers.
     std::string runCaseQuery;      ///< When set, run exactly this one full case query (child mode).
     std::string expectationsPath;  ///< Path to the expected-failures file.
     std::string crashListPath;     ///< Path to a known-crash list to skip.

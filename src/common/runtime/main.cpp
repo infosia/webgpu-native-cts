@@ -64,7 +64,7 @@ const char* adapterTypeName(WGPUAdapterType type) {
 }
 
 void printUsage() {
-    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--workers N|auto] [--shard I/N] [--isolate] [--retries N] [--case-timeout-ms M] [--output <file>] [--baseline <file>] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
+    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--workers N|auto] [--shard I/N] [--case-plan <file>] [--isolate] [--retries N] [--case-timeout-ms M] [--output <file>] [--baseline <file>] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
               << "\n"
               << "Without arguments, creates a WebGPU instance, requests an adapter,\n"
               << "prints adapter information, and exits.\n"
@@ -252,6 +252,12 @@ int main(int argc, char** argv) {
                     std::cerr << "invalid --shard-from value: " << value << "\n";
                     return EXIT_FAILURE;
                 }
+            } else if (arg == "--case-plan") {
+                if (i + 1 >= argc) {
+                    std::cerr << "missing value for --case-plan\n";
+                    return EXIT_FAILURE;
+                }
+                options.casePlanPath = argv[++i];
             } else if (arg == "--run-case") {
                 if (i + 1 >= argc) {
                     std::cerr << "missing value for --run-case\n";

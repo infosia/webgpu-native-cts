@@ -154,6 +154,7 @@ file(GLOB_RECURSE CTS_SPEC_SOURCES CONFIGURE_DEPENDS
 )
 
 add_library(cts_harness
+    src/common/case_plan.cpp
     src/common/format_sample.cpp
     src/common/harness.cpp
     src/common/params.cpp
