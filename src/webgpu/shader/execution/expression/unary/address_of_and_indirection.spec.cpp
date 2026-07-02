@@ -198,11 +198,12 @@ bool maybeSkipF16(AllFeaturesMaxLimitsGpuTest& t, ScalarKind k) {
 
 // Mirrors upstream t.hasLanguageFeature('pointer_composite_access') via a one-shot probe instance
 // (language features are an instance-level property; the probe answer matches the harness instance).
-// Guarded for Dawn: only Dawn's lib exports wgpuInstanceHasWGSLLanguageFeature; on the non-Dawn
-// backends the feature cannot be queried, so it is treated as unsupported (the PCA cases skip,
-// matching upstream on implementations without the feature). The Dawn oracle is authoritative here.
+// Dawn and yawgpu both export wgpuInstanceHasWGSLLanguageFeature and define
+// WGPUWGSLLanguageFeatureName_PointerCompositeAccess, so both query the real instance-level answer.
+// wgpu-native does not export the query, so the feature is treated as unsupported there (the PCA
+// cases skip, matching upstream behavior on implementations without the feature).
 bool hasPCA() {
-#if defined(CTS_BACKEND_DAWN)
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
     static const bool supported = [] {
         WGPUInstance probe = createInstance();
         if (probe == nullptr) {

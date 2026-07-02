@@ -113,7 +113,10 @@ check**, fixed in yawgpu (commit `e7eba41`); **F-143** (14 subgroup `requires` +
 was a **CTS-harness gap** (the non-Dawn `hasLanguageFeature` probe lacked a `subgroup_id`/`subgroup_uniformity`
 case → returned `false` → inverted the expected result), fixed in the harness — yawgpu was correct and
 unchanged. With both fixed, yawgpu-Metal is **byte-identical to the Dawn oracle** again (only the 2 shared
-`draw,index_buffer_format_dirtying` `xfail`s). Native **Vulkan** last swept 2026-06-28: `fail=0` modulo the
+`draw,index_buffer_format_dirtying` `xfail`s). The residual **coverage** (skip-count) gap vs Dawn was also
+root-caused and closed: 427 of the 452 extra skips were **F-144**, a harness artifact (three
+`shader/execution` language-feature gates compiled out on non-Dawn builds) — fixed 2026-07-02 and verified
+per-file to Dawn parity; yawgpu was again correct and unchanged. Native **Vulkan** last swept 2026-06-28: `fail=0` modulo the
 documented `xfail`s. Carried **non-defects**: the 2 `draw,index_buffer_format_dirtying` cases (a CTS
 port-oracle quirk the Dawn oracle fails identically; Metal + Vulkan) and the Vulkan-only `xfail`s **F-085**,
 **F-111**, **F-129** (denormal `fwidth`), **F-141**, all in `expectations/yawgpu-vulkan.txt`. No yawgpu
@@ -132,6 +135,38 @@ F-133, F-134, F-136).
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
 Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
+
+---
+
+## F-144 — CTS-harness gap: three `shader/execution` language-feature gates compiled out on non-Dawn builds (427 subcases skipped vs Dawn) — RESOLVED, not a yawgpu defect
+
+- **Backend/host:** yawgpu native **Metal**, Apple M2 (macOS). Deterministic (skip-vs-run divergence,
+  not a fail). Found 2026-07-02 while attributing the residual whole-suite skip delta vs Dawn
+  (105,394 vs 104,942): per-area, `shader/execution` accounted for 427 of the 452 subcases.
+- **What:** three exec spec files query a WGSL language feature to decide whether their gated cases
+  run, but wrapped the query in `#if defined(CTS_BACKEND_DAWN)` with a hard `return false` fallback,
+  on the (stale) premise that only Dawn's lib exports `wgpuInstanceHasWGSLLanguageFeature` / defines
+  the enum values. yawgpu exports the query and its `webgpu-headers/webgpu.h` defines the needed
+  values, and it advertises all three features — so the gated cases skipped on yawgpu while Dawn ran
+  them:
+  - `expression/access/array/index.spec.cpp` — `uniform_buffer_standard_layout` (12 subcases)
+  - `expression/call/user/ptr_params.spec.cpp` — `unrestricted_pointer_parameters` (85 subcases)
+  - `expression/unary/address_of_and_indirection.spec.cpp` — `pointer_composite_access` (330 subcases)
+- **Fix (harness):** gate on `#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)` so both
+  robust backends query the real instance-level answer; wgpu-native (which genuinely lacks the
+  export) keeps the unsupported fallback. Same class as **F-143** (harness under-modeled yawgpu's
+  language-feature surface; yawgpu itself was correct and unchanged).
+- **Verification (real Metal, post-fix):** yawgpu `index` 226/0, `ptr_params` 121/0,
+  `address_of_and_indirection` 780/0 — pass counts and skip=0 **byte-identical to the Dawn build**
+  (re-run same day); `fail=0 crash=0` on all newly-unskipped subcases. `parse,requires` stays 26/0.
+  `statement/swizzle_assignment` (kept gated: the feature is unsafe-experimental in Tint and yawgpu's
+  header has no enum value) skips 162 on **both** backends — no delta.
+- **Not fixed here (both-backend skips, no Dawn delta):** `memory_layout` / `memory_model` runtime-skip
+  their `uniform_buffer_standard_layout` subcases on Dawn too; `compute_builtins`
+  `subgroup_size_attribute` needs Dawn-only `WGPUFeatureName_SubgroupSizeControl`. The remaining
+  whole-suite delta (`api/validation` net 28 Dawn-more, `api/operation` net 3 yawgpu-more) is
+  unattributed pending a case-level diff; the whole-suite tables predate this fix.
+- **Status:** RESOLVED (CTS-harness gap, not a yawgpu defect), 2026-07-02.
 
 ---
 

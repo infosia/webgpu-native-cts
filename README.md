@@ -221,7 +221,11 @@ backends.
 > skip count is at Dawn's level (105,394 vs 104,942), so both backends run the same cases; shader
 > **execution** stays `fail=0` and the two fail profiles are **byte-identical** — both fail only the 2
 > `index_buffer_format_dirtying` port-oracle cases. The naga-lineage divergences (const-eval,
-> frontend-validation, `discard`-derivative) remain **wgpu-native-only**.
+> frontend-validation, `discard`-derivative) remain **wgpu-native-only**. The residual 452-subcase skip
+> delta in the tables above was subsequently root-caused: 427 were **F-144**, a *harness* artifact (three
+> `shader/execution` language-feature gates compiled out on non-Dawn builds) — fixed 2026-07-02 and
+> verified per-file to Dawn parity (`index` 226, `ptr_params` 121, `address_of_and_indirection` 780, all
+> `skip=0 fail=0`); the yawgpu-Metal table predates that fix.
 
 #### yawgpu — native Vulkan (Windows 11 / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
 

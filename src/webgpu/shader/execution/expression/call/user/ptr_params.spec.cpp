@@ -11,7 +11,11 @@
 //
 // Most g.tests gate on the WGSL language feature 'unrestricted_pointer_parameters'; we query it via
 // wgpuInstanceHasWGSLLanguageFeature (a one-shot probe instance gives the same answer as the shared
-// harness instance, since language features are an instance-level property).
+// harness instance, since language features are an instance-level property). Dawn and yawgpu both
+// export this query and define WGPUWGSLLanguageFeatureName_UnrestrictedPointerParameters, so both
+// get the real instance-level answer; wgpu-native does not export the query, so the feature is
+// treated as unsupported there (the gated cases skip, matching upstream behavior on implementations
+// without the feature).
 
 #include <cstdint>
 #include <cstring>
@@ -35,7 +39,7 @@ TestGroup<GpuTest> testGroup = MakeTestGroup<GpuTest>(
 // t.skipIfLanguageFeatureNotSupported('unrestricted_pointer_parameters').
 // ---------------------------------------------------------------------------
 bool hasUnrestrictedPointerParameters() {
-#if defined(CTS_BACKEND_DAWN)
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
     static const bool supported = [] {
         WGPUInstance probe = createInstance();
         if (probe == nullptr) {
@@ -48,9 +52,10 @@ bool hasUnrestrictedPointerParameters() {
     }();
     return supported;
 #else
-    // Only Dawn's lib exports wgpuInstanceHasWGSLLanguageFeature; on the non-Dawn backends the
-    // feature cannot be queried, so it is treated as unsupported (the gated tests skip, matching
-    // upstream on implementations without the feature). The Dawn oracle is authoritative here.
+    // Dawn and yawgpu both export wgpuInstanceHasWGSLLanguageFeature and define the
+    // UnrestrictedPointerParameters enum value, so both query the real instance-level answer.
+    // wgpu-native does not export the query, so the feature is treated as unsupported there (the
+    // gated tests skip, matching upstream behavior on implementations without the feature).
     return false;
 #endif
 }

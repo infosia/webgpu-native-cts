@@ -37,11 +37,13 @@ WGPUStringView sv(std::string_view text) {
 
 // Mirrors upstream t.hasLanguageFeature('uniform_buffer_standard_layout'). WGSL language features
 // are an instance-level property, so a one-shot probe instance gives the same answer as the
-// harness's shared instance. On non-Dawn backends the webgpu-headers do not define the enum value,
-// so the feature is treated as unsupported (the affected uniform cases skip, matching upstream
-// behavior on implementations without the feature).
+// harness's shared instance. Dawn and yawgpu both export wgpuInstanceHasWGSLLanguageFeature and
+// define WGPUWGSLLanguageFeatureName_UniformBufferStandardLayout, so both query the real
+// instance-level answer. wgpu-native does not export the query, so the feature is treated as
+// unsupported there (the affected uniform cases skip, matching upstream behavior on
+// implementations without the feature).
 bool hasUniformBufferStandardLayout() {
-#if defined(CTS_BACKEND_DAWN)
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
     static const bool supported = [] {
         WGPUInstance probe = createInstance();
         if (probe == nullptr) {
