@@ -138,6 +138,57 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
+## F-145 — yawgpu: immediate-data set-state under-validated (`pipeline_immediate`) — native Vulkan (Dawn-confirmed real defect) — RESOLVED
+
+- **RESOLVED** (yawgpu `80bab07`, immediates required-slots + executeBundles-invalidation
+  fix, 2026-07-03; verified Windows / NVIDIA RTX 5060 Ti). The fix reflects the pipeline's
+  statically-used immediate words as a per-4-byte-word REQUIRED mask (via Tint's
+  `GetImmediateBlockInfo`, excluding struct padding), stores it on the render/compute
+  pipeline, checks `(written & required) == required` at draw/dispatch (encoder-
+  invalidating validation error on shortfall), and clears the pass's immediate
+  written-state on `executeBundles`. Re-run:
+  `webgpu:api,validation,encoding,programmable,pipeline_immediate:*` on yawgpu native
+  Vulkan = **181/181 (fail=0 crash=0)**, byte-identical to the Dawn oracle. No
+  regression: `setImmediates` 378/0, operation `immediate` 252/0, `pipeline,immediates`
+  30/0, `api,operation,render_pass` 70/0, `encoding,render_bundle` 113/0. yawgpu-core
+  unit tests 439/0 (new required-slots / unused-variable / padding-excluded /
+  executeBundles-invalidation coverage).
+
+- **Was** (surfaced 2026-07-03 on Windows / NVIDIA RTX 5060 Ti after un-stubbing
+  `api,validation,encoding,programmable,pipeline_immediate` — the port was stubbed
+  when no backend exported `wgpuXxxSetImmediates`; yawgpu Block 94 now does, so the
+  stub was lifted). yawgpu's brand-new immediate-data (push-constant) implementation
+  **accepts encoder state the WebGPU spec requires be rejected**. Two sub-behaviors,
+  both "expected validation error, got none":
+  - **`required_slots_set` / `usage="partial"` (42 subcases)** — when a pipeline
+    statically uses an immediate-data variable, every required 4-byte slot must be
+    set via `setImmediates` before draw/dispatch. yawgpu does not enforce
+    completeness: a partial set (missing required bytes) is wrongly accepted at
+    finish/submit. All encoderTypes (compute pass / render pass / render bundle),
+    all scenarios (scalar, vector, struct_padding, dynamic_indexing, mixed_types,
+    multiple_variables), all stages.
+  - **`render_bundle_execution_state_invalidation` (1 case, the `resetImmediates=false`
+    subcase)** — `executeBundles` must invalidate the render pass's current
+    immediate-data state; yawgpu leaves it valid, so a draw after `executeBundles`
+    without re-setting immediates is wrongly accepted.
+- **Dawn oracle confirms it is a real yawgpu defect, not a CTS port-oracle bug.**
+  The same un-stubbed spec rebuilt against Dawn passes the full test **181/181
+  (fail=0)**, including every `usage="partial"` case and both
+  `render_bundle_execution_state_invalidation` subcases. yawgpu = `pass=138 fail=43
+  crash=0`. Since Dawn (the reference impl) rejects exactly what yawgpu accepts, the
+  port is correct and the gap is in yawgpu's immediate-data validation layer (not
+  naga/Tint — this is set-state validation, distinct from the resolved F-064 which
+  was WGSL frontend errors on immediate-data modules).
+- **Fix is in yawgpu** (add the required-slots-complete check + the executeBundles
+  immediate-state invalidation). Not yet `xfail`'d in
+  `expectations/yawgpu-vulkan.txt`: the 42 `partial` cases are cleanly xfailable
+  (one case each), but `render_bundle_execution_state_invalidation` runs both
+  subcases under a single `:*` case query (subcase-granularity), so xfailing it
+  would xpass the passing `resetImmediates=true` subcase — hence fixing yawgpu is the
+  clean resolution rather than masking. The un-stub itself is correct and stays.
+
+---
+
 ## F-144 — CTS-harness gap: three `shader/execution` language-feature gates compiled out on non-Dawn builds (427 subcases skipped vs Dawn) — RESOLVED, not a yawgpu defect
 
 - **Backend/host:** yawgpu native **Metal**, Apple M2 (macOS). Deterministic (skip-vs-run divergence,
