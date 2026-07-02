@@ -106,7 +106,7 @@ earlier naga frontend. With Tint, yawgpu's shader-compile behaviour is byte-equi
 passes — and native Windows/Vulkan, NVIDIA RTX 5060 Ti), and the whole suite runs **crash-free**. Reporting
 real Metal hardware limits and exposing `subgroups` brings yawgpu's Metal coverage up to Dawn's level (skip
 105,394 — Dawn is 104,942). On Metal the raw total is **1,990,542** subcase passes with **2** fails (the 2
-shared `index_buffer_format_dirtying` port-oracle non-defects); on Vulkan 1,373,339 passes, modulo a small
+shared `index_buffer_format_dirtying` port-oracle non-defects); on Vulkan 1,607,298 passes, modulo a small
 set of known **non-defect** `xfail`s (spec-in-flux per-sample semantics, GPU-divergent external-texture
 SPIR-V, an NVIDIA denormal/memory-model artifact that Dawn reproduces identically on the same GPU). yawgpu's
 fail profile on Metal is **byte-identical to Dawn** (both fail only the 2 port-oracle cases). The
@@ -219,23 +219,21 @@ naga frontend/const-eval gap (**F-133**) that yawgpu no longer has after moving 
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 227,889 | 126,728 | 4‡ | 0 |
-| `api/operation` (70) | 176,095 | 53,500 | 0 | 0 |
-| `shader/execution` (239) | 468,980 | 375,489 | 117‡ | 0 |
-| `shader/validation` (207) | 500,375 | 166,767 | 0 | 0 |
-| **total** | **1,373,339** | **722,484** | **121‡** | **0** |
+| `api/validation` (126) | 235,547 | 119,070 | 4‡ | 0 |
+| `api/operation` (70) | 209,108 | 20,487 | 0 | 0 |
+| `shader/execution` (239) | 515,870 | 328,603 | 113‡ | 0 |
+| `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
+| **total** | **1,607,298** | **488,529** | **117‡** | **0** |
 
-‡ All **121** fails are **documented non-defects** — each cross-checked against a Dawn-Vulkan oracle on the
+‡ All **117** fails are **documented non-defects** — each cross-checked against a Dawn-Vulkan oracle on the
 **same** GPU and carried as `xfail` in `expectations/yawgpu-vulkan.txt`, so the suite exits `fail=0` once
-expectations are applied. Breakdown: **92** **F-085** (Vulkan per-sample `@interpolate(…,sample)` fragment
-builtins — `sample_mask`/`position`; spec-in-flux, gpuweb/gpuweb#5457 + #4777), **24** **F-129** (denormal
-`fwidth` acceptance-interval artifact — the Dawn-Vulkan oracle fails the same f32 cases identically), **2**
-**F-111** (yawgpu rejects `external_texture` on Vulkan by design), **2** `index_buffer_format_dirtying` (the
-same CTS port-oracle quirk that fails on Metal and Dawn), **1** **F-141** (NVIDIA memory-model weak behavior —
-Dawn-Vulkan fails identically). **No GPU freeze and no crash** across the full 147-batch sweep (the
-historical createView/shader-exec freeze was Mesa-ANV/Haswell, which lacks GPU reset — not yawgpu; NVIDIA TDR
-recovers). MoltenVK on macOS is non-authoritative coverage (artifacts **F-104**, **F-139**), green on native
-hardware.
+expectations are applied. Breakdown: **88** **F-085** (Vulkan per-sample `sample_mask` fragment builtin;
+spec-in-flux, gpuweb/gpuweb#5457 + #4777), **24** **F-129** (denormal `fwidth`/`fwidthFine`/`fwidthCoarse`
+f32 acceptance-interval — the Dawn-Vulkan oracle fails the same cases identically), **2** **F-111** (yawgpu
+rejects `external_texture` on Vulkan by design), **2** `index_buffer_format_dirtying` (a CTS port-oracle
+quirk that fails on Metal and Dawn too), **1** **F-141** (NVIDIA memory-model weak behavior — Dawn-Vulkan
+fails identically). **No GPU freeze and no crash** across the full sweep. MoltenVK on macOS is
+non-authoritative coverage (artifacts **F-104**, **F-139**), green on native hardware.
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
