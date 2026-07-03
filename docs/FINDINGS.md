@@ -138,6 +138,31 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
+## F-146 — harness: POSIX `--workers` fork-without-exec breaks concurrent Metal children (backend-independent fake fails) — OPEN
+
+- **Harness defect (ours), not a backend finding.** `--workers N` (N >= 2) on macOS
+  mass-fails cases that are serial-green, `--workers 1`-green, and green when the same
+  shard halves run as concurrently launched standalone processes. Every failure is the
+  downstream `queue submit cannot use an error command buffer`. Reproduced on **yawgpu
+  and the Dawn oracle identically** (yawgpu bisection: yawgpu `490743e` — `immediate`
+  252/252 under workers, `sample_mask` ~500–666, `texture_component_swizzle` 6.8k–9.3k
+  nondeterministic, `labels` ~8; all serial-green on both backends).
+- Isolation (yawgpu/Metal, `webgpu:api,operation,command_buffer,*`): fork workers
+  `--workers 2` → fail=314; standalone `--shard 0/2` → 85134/0; both shards standalone
+  **concurrent** → 0 fail. So neither ordering nor GPU contention — the delta is the
+  spawn mechanism.
+- Cause: `phaseW3-fork-worker-no-reenum.md` made POSIX workers `fork()` **without
+  exec**; its "parent never initializes WebGPU/Metal" safety precondition is invalid on
+  macOS (framework/ObjC state initialized at dyld load in the parent is inherited; >= 2
+  forked children doing concurrent Metal work misbehave; Apple does not support system
+  frameworks between fork and exec). One child (`--workers 1`) happens to work.
+- Consequence: all historical macOS `--workers >= 2` non-isolate fail counts (including
+  the compile-canary spec's "75k–92k fake fails under workers" measurements) are
+  dominated by this harness artifact; skip counts remain reliable.
+- Fix task: `specs/fix-posix-worker-fork-exec.md` — return POSIX workers to
+  fork+`execv` and reuse the phaseW4 `--case-plan` mechanism (already proven on
+  Windows, `e19b37d`) so the phaseW3 re-enumeration cost does not come back.
+
 ## F-145 — yawgpu: immediate-data set-state under-validated (`pipeline_immediate`) — native Vulkan (Dawn-confirmed real defect) — RESOLVED
 
 - **RESOLVED** (yawgpu `80bab07`, immediates required-slots + executeBundles-invalidation

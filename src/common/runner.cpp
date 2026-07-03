@@ -608,10 +608,12 @@ std::string quoteWindowsArg(const std::string& arg) {
     quoted.push_back('"');
     return quoted;
 }
+#endif
 
 class TemporaryCasePlan {
   public:
     explicit TemporaryCasePlan(const std::vector<CaseRun>& cases) {
+#if defined(_WIN32)
         char tempDir[MAX_PATH + 1]{};
         const DWORD tempDirLength = GetTempPathA(static_cast<DWORD>(sizeof(tempDir)), tempDir);
         if (tempDirLength == 0) {
@@ -634,6 +636,23 @@ class TemporaryCasePlan {
             path_.clear();
             throw;
         }
+#else
+        char tempPath[] = "/tmp/cts-case-plan-XXXXXX";
+        const int fd = mkstemp(tempPath);
+        if (fd < 0) {
+            throw std::runtime_error("mkstemp failed: " + std::string(std::strerror(errno)));
+        }
+        close(fd);
+        path_ = tempPath;
+
+        try {
+            serializeCasePlan(path_, cases);
+        } catch (...) {
+            (void)unlink(path_.c_str());
+            path_.clear();
+            throw;
+        }
+#endif
     }
 
     TemporaryCasePlan(const TemporaryCasePlan&) = delete;
@@ -641,7 +660,11 @@ class TemporaryCasePlan {
 
     ~TemporaryCasePlan() {
         if (!path_.empty()) {
+#if defined(_WIN32)
             (void)DeleteFileA(path_.c_str());
+#else
+            (void)unlink(path_.c_str());
+#endif
         }
     }
 
@@ -652,7 +675,6 @@ class TemporaryCasePlan {
   private:
     std::string path_;
 };
-#endif
 
 std::string signalMessage(int signal) {
 #if !defined(_WIN32)
@@ -1455,24 +1477,6 @@ void emitShardResults(const std::vector<SubcaseResult>& results) {
     }
 }
 
-#if !defined(_WIN32)
-void runForkedWorkerCases(
-    const std::vector<CaseRun>& cases,
-    const std::vector<size_t>& positions,
-    size_t next) {
-    setStdoutBinaryForResultProtocol();
-    try {
-        for (size_t i = next; i < positions.size(); ++i) {
-            const size_t position = positions[i];
-            emitShardResults(runCase(cases[position]));
-        }
-    } catch (...) {
-        _exit(1);
-    }
-    _exit(0);
-}
-#endif
-
 std::vector<SubcaseResult> collectShardResultRuns(
     const RunOptions& options,
     const std::vector<Query>& queries,
@@ -1523,7 +1527,7 @@ std::string shardArg(int shard, int workers) {
     return std::to_string(shard) + "/" + std::to_string(workers);
 }
 
-[[maybe_unused]] std::vector<std::string> workerArgs(
+std::vector<std::string> workerArgs(
     const RunOptions& options,
     const std::vector<std::string>& queryTexts,
     int shard,
@@ -1638,15 +1642,28 @@ WorkerState spawnWorker(
     worker.next = next;
     return worker;
 #else
+    (void)cases;
+    std::vector<std::string> args = workerArgs(options, queryTexts, shard, workers, positions, next);
+    std::vector<char*> argv;
+    argv.reserve(args.size() + 1);
+    for (std::string& arg : args) {
+        argv.push_back(arg.data());
+    }
+    argv.push_back(nullptr);
+
     std::array<int, 2> stdoutPipe{};
     if (pipe(stdoutPipe.data()) != 0) {
         throw std::runtime_error("pipe failed: " + std::string(std::strerror(errno)));
     }
 
+    const int devNull = open("/dev/null", O_WRONLY);
     pid_t pid = fork();
     if (pid < 0) {
         close(stdoutPipe[0]);
         close(stdoutPipe[1]);
+        if (devNull >= 0) {
+            close(devNull);
+        }
         throw std::runtime_error("fork failed: " + std::string(std::strerror(errno)));
     }
 
@@ -1656,19 +1673,19 @@ WorkerState spawnWorker(
             _exit(127);
         }
         close(stdoutPipe[1]);
-        const int devNull = open("/dev/null", O_WRONLY);
         if (devNull >= 0) {
             (void)dup2(devNull, STDERR_FILENO);
             close(devNull);
         }
 
-        runForkedWorkerCases(cases, positions, next);
+        execv(options.executablePath.c_str(), argv.data());
+        _exit(127);
     }
 
-    (void)queryTexts;
-    (void)options;
-    (void)workers;
     close(stdoutPipe[1]);
+    if (devNull >= 0) {
+        close(devNull);
+    }
     const int flags = fcntl(stdoutPipe[0], F_GETFL, 0);
     if (flags >= 0) {
         (void)fcntl(stdoutPipe[0], F_SETFL, flags | O_NONBLOCK);
@@ -1816,10 +1833,8 @@ std::vector<SubcaseResult> collectParallelRuns(
     std::vector<std::vector<SubcaseResult>> resultsByCase(cases.size());
     std::vector<std::string> queryTexts = options.queries;
     RunOptions workerOptions = options;
-#if defined(_WIN32)
     TemporaryCasePlan casePlan(cases);
     workerOptions.casePlanPath = casePlan.path();
-#endif
 
     std::vector<WorkerState> workers;
     for (int shard = 0; shard < options.workers; ++shard) {
