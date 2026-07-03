@@ -118,7 +118,7 @@ From [`../../docs/06-build-and-run.md`](../../docs/06-build-and-run.md):
 
 ```bash
 cmake -S . -B build -DCTS_BACKEND=wgpu-native -DCTS_WGPU_NATIVE_DIR=<dir>
-cmake --build build -j
+cmake --build build -j 1     # ALWAYS serial (-j 1): parallel compiles overload the dev machine
 build/cts_unittests                       # harness self-tests (no GPU)
 build/cts 'webgpu:api,validation,createBuffer:*'   # run a query
 ctest --test-dir build                    # if registered with CTest
@@ -137,7 +137,9 @@ output). It is **not** build/link time and **not** lock contention.
 
 **Rule:** in a codex handoff, any long-running or verbose command (test suites, full builds —
 `ctest`, `cmake --build`, `build/cts_unittests`, and the cargo gates on backend deps) must redirect
-output to a file and report the exit code, never stream to the console:
+output to a file and report the exit code, never stream to the console. Builds must also be
+**serial** — an explicit `-j 1` on every `cmake --build` / `cargo build` (parallel compiles
+overload the dev machine; this applies to Claude's own builds too):
 
 ```bash
 ctest --test-dir build > /tmp/out.log 2>&1; echo "EXIT=$?"; tail -n 40 /tmp/out.log

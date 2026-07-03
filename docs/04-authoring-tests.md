@@ -251,6 +251,6 @@ encoding (`usage=4`) follows the parity rules in [02-harness §2/§3](02-harness
    matching the file's location under `src/webgpu/`).
 3. For each test: `CTS_TEST(g, "name").desc(...).params([]{...}).fn([](GpuTest& t){...});`.
 4. Use `t.expectValidationError([&]{...}, shouldError)` / assertions; track created resources.
-5. Regenerate the listing (`cmake --build build --target gen_listings`) and run via query.
+5. Regenerate the listing (`cmake --build build --target gen_listings -j 1`) and run via query.
 
 See [05-porting-guide](05-porting-guide.md) for translating an upstream file near-mechanically.

@@ -32,6 +32,13 @@ Full detail: `specs/reference/workflow.md`.
   committed. The checked-in `src/webgpu/listing.json` test catalog is the
   deliberate exception (it is the suite catalog, like upstream's `listing.js`).
 
+## Tooling — builds
+
+- **Always compile serially: explicit `-j 1`** on every `cmake --build` and
+  `cargo build` (Claude, the coding agent, and docs/spec examples alike).
+  Parallel compiles overload the dev machine (CPU/memory). CTS *run*
+  parallelism (`--workers N`) is unaffected.
+
 ## Tooling — sandbox
 
 - **Avoid `dangerouslyDisableSandbox: true` whenever possible.** Prefer
