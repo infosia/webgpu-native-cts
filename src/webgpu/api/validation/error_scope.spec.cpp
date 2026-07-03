@@ -76,7 +76,7 @@ struct DeviceContext {
             t.fail("error_scope: failed to create WGPUInstance");
         }
 
-        AdapterResult ar = requestAdapterSync(ctx.instance, nullptr);
+        AdapterResult ar = requestAdapterSync(ctx.instance, adapterOptions());
         if (ar.status != WGPURequestAdapterStatus_Success || ar.adapter == nullptr) {
             wgpuInstanceRelease(ctx.instance);
             t.fail("error_scope: failed to request adapter: " + ar.message);
@@ -255,7 +255,7 @@ CTS_TEST(g, "simple")
             if (inst2 == nullptr) {
                 t.fail("simple/different: failed to create WGPUInstance");
             }
-            AdapterResult ar2 = requestAdapterSync(inst2, nullptr);
+            AdapterResult ar2 = requestAdapterSync(inst2, adapterOptions());
             if (ar2.status != WGPURequestAdapterStatus_Success || ar2.adapter == nullptr) {
                 wgpuInstanceRelease(inst2);
                 t.fail("simple/different: failed to request adapter: " + ar2.message);

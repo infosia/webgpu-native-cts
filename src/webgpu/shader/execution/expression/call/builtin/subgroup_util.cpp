@@ -344,7 +344,7 @@ SubgroupSizes getSubgroupSizes(SubgroupTest& t) {
     if (instance == nullptr) {
         t.fail("failed to create a WebGPU instance for the subgroup-size query");
     }
-    AdapterResult adapter = requestAdapterSync(instance, nullptr);
+    AdapterResult adapter = requestAdapterSync(instance, adapterOptions());
     if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
         wgpuInstanceRelease(instance);
         t.fail("failed to request an adapter for the subgroup-size query: " + adapter.message);

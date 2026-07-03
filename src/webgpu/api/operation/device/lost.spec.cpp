@@ -96,7 +96,7 @@ void createOwnedDevice(Fixture& t, OwnedDeviceContext& ctx, LostState& state) {
         t.fail("device/lost: failed to create WGPUInstance");
     }
 
-    AdapterResult adapter = requestAdapterSync(ctx.instance, nullptr);
+    AdapterResult adapter = requestAdapterSync(ctx.instance, adapterOptions());
     if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
         t.fail("device/lost: failed to request adapter: " + adapter.message);
     }

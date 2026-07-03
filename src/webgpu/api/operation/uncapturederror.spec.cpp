@@ -115,7 +115,7 @@ struct DeviceContext {
             t.fail("uncapturederror: failed to create WGPUInstance");
         }
 
-        AdapterResult ar = requestAdapterSync(ctx.instance, nullptr);
+        AdapterResult ar = requestAdapterSync(ctx.instance, adapterOptions());
         if (ar.status != WGPURequestAdapterStatus_Success || ar.adapter == nullptr) {
             wgpuInstanceRelease(ctx.instance);
             t.fail("uncapturederror: failed to request adapter: " + ar.message);

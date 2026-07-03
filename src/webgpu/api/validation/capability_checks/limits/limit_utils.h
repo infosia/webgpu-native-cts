@@ -331,7 +331,7 @@ class LimitTest : public GpuTest {
         if (instance_ == nullptr) {
             fail("failed to create WGPUInstance");
         }
-        AdapterResult adapterResult = requestAdapterSync(instance_, nullptr);
+        AdapterResult adapterResult = requestAdapterSync(instance_, adapterOptions());
         if (adapterResult.status != WGPURequestAdapterStatus_Success || adapterResult.adapter == nullptr) {
             fail("failed to request adapter: " + adapterResult.message);
         }

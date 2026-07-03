@@ -705,7 +705,7 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             if (tlInstance == nullptr) {
                 fail("failed to create WGPUInstance for shader validation");
             }
-            AdapterResult adapter = requestAdapterSync(tlInstance, nullptr);
+            AdapterResult adapter = requestAdapterSync(tlInstance, adapterOptions());
             if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
                 fail("failed to request adapter: " + adapter.message);
             }

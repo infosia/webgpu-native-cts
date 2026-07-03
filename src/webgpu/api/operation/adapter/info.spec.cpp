@@ -87,7 +87,7 @@ static void createProbeContext(AllFeaturesMaxLimitsGpuTest& t, ProbeContext& ctx
     if (ctx.instance == nullptr) {
         t.fail("adapter/info: failed to create a probe WGPUInstance");
     }
-    AdapterResult ar = requestAdapterSync(ctx.instance, nullptr);
+    AdapterResult ar = requestAdapterSync(ctx.instance, adapterOptions());
     if (ar.status != WGPURequestAdapterStatus_Success || ar.adapter == nullptr) {
         t.fail("adapter/info: failed to request probe adapter: " + ar.message);
     }

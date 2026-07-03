@@ -244,7 +244,7 @@ static void buildCompilationContext(
     if (ctx.instance == nullptr) {
         t.fail("failed to create WGPUInstance for compilation info");
     }
-    AdapterResult adapterResult = requestAdapterSync(ctx.instance, nullptr);
+    AdapterResult adapterResult = requestAdapterSync(ctx.instance, adapterOptions());
     if (adapterResult.status != WGPURequestAdapterStatus_Success ||
         adapterResult.adapter == nullptr) {
         t.fail("failed to request adapter: " + adapterResult.message);

@@ -98,7 +98,7 @@ changes to WebGPU do not break sites requesting everything.
             t.fail("failed to create WGPUInstance");
         }
 
-        AdapterResult adapter = requestAdapterSync(ctx.instance, nullptr);
+        AdapterResult adapter = requestAdapterSync(ctx.instance, adapterOptions());
         if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
             t.fail("failed to request adapter: " + adapter.message);
         }

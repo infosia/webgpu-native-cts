@@ -192,7 +192,7 @@ class FeatureGpuTest : public GpuTest {
         if (instance_ == nullptr) {
             fail("failed to create WGPUInstance");
         }
-        AdapterResult adapter = requestAdapterSync(instance_, nullptr);
+        AdapterResult adapter = requestAdapterSync(instance_, adapterOptions());
         if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
             fail("failed to request adapter: " + adapter.message);
         }

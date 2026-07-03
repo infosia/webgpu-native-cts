@@ -70,7 +70,7 @@ void createOwnedDevice(GpuTest& t, OwnedDeviceContext& ctx) {
     if (ctx.instance == nullptr) {
         t.fail("failed to create WGPUInstance");
     }
-    AdapterResult adapter = requestAdapterSync(ctx.instance, nullptr);
+    AdapterResult adapter = requestAdapterSync(ctx.instance, adapterOptions());
     if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
         t.fail("failed to request adapter: " + adapter.message);
     }
