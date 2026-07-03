@@ -2122,6 +2122,11 @@ int resolveWorkers(const RunOptions& options) {
     return options.workers;
 }
 
+bool shardConflictsWithParallelWorkers(const RunOptions& options, int workerCount) {
+    return !options.shardResults && options.crashListPath.empty() && !options.isolate &&
+           workerCount >= 2 && options.shardCount > 0;
+}
+
 bool caseBelongsToShard(size_t index, int shardIndex, int shardCount) {
     if (shardCount <= 0) {
         return true;
@@ -2216,6 +2221,13 @@ int runQueries(const RunOptions& options) {
             }
         }
         return 0;
+    }
+
+    if (shardConflictsWithParallelWorkers(options, workerCount)) {
+        std::cerr << "--shard is not supported with the plain --workers runner "
+                     "(it would be silently ignored); split the run by query, use "
+                     "--isolate --workers for a sharded per-case pool, or drop --shard\n";
+        return 1;
     }
 
     ExpectationSet expectations;

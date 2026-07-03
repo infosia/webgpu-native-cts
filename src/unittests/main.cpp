@@ -917,6 +917,29 @@ int main() {
             workerOptions.workers = cts::kDefaultMaxWorkers + 5;
             require(cts::resolveWorkers(workerOptions) == cts::kDefaultMaxWorkers + 5,
                     "resolveWorkers preserves explicit worker count");
+
+            cts::RunOptions shardWorkerOptions;
+            shardWorkerOptions.shardIndex = 0;
+            shardWorkerOptions.shardCount = 16;
+            require(cts::shardConflictsWithParallelWorkers(shardWorkerOptions, 8),
+                    "plain parallel workers reject outer shard");
+            require(!cts::shardConflictsWithParallelWorkers(shardWorkerOptions, 1),
+                    "serial workers allow outer shard");
+            shardWorkerOptions.isolate = true;
+            require(!cts::shardConflictsWithParallelWorkers(shardWorkerOptions, 8),
+                    "isolated parallel workers allow outer shard");
+            shardWorkerOptions.isolate = false;
+            shardWorkerOptions.crashListPath = "crash-list.txt";
+            require(!cts::shardConflictsWithParallelWorkers(shardWorkerOptions, 8),
+                    "crash-list runner allows outer shard");
+            shardWorkerOptions.crashListPath.clear();
+            shardWorkerOptions.shardResults = true;
+            require(!cts::shardConflictsWithParallelWorkers(shardWorkerOptions, 8),
+                    "internal shard-result worker allows outer shard");
+            shardWorkerOptions.shardResults = false;
+            shardWorkerOptions.shardCount = 0;
+            require(!cts::shardConflictsWithParallelWorkers(shardWorkerOptions, 8),
+                    "plain parallel workers without outer shard run normally");
         }
 
         require(cts::kTextureUsages.size() == 6, "texture usages count");

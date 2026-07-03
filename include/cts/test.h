@@ -231,6 +231,8 @@ BaselineDelta classifyDelta(
     const std::string& query);
 /// Resolves --workers auto/0 to the capped default, preserving explicit serial workers=1.
 int resolveWorkers(const RunOptions& options);
+/// True when the resolved run dispatch would use plain --workers while an outer --shard is set.
+bool shardConflictsWithParallelWorkers(const RunOptions& options, int workerCount);
 
 /// Creates a fresh fixture instance for a case.
 using FixtureFactory = std::function<std::unique_ptr<Fixture>()>;
