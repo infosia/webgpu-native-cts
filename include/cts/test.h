@@ -188,17 +188,11 @@ enum class TestStatus {
     Crash,
 };
 
-/// Result of running a single (sub)case: its query, status, any message, and attempt count.
+/// Result of running a single (sub)case: its query, status, and any message.
 struct SubcaseResult {
     std::string query;
     TestStatus status = TestStatus::Pass;
     std::string message;
-    int attempts = 1;
-};
-
-struct RetryOutcome {
-    size_t reportIndex = 0;
-    bool flaky = false;
 };
 
 /// A loaded expectations file: full case queries (`exact`) and query prefixes
@@ -237,8 +231,6 @@ BaselineDelta classifyDelta(
     const std::string& query);
 /// Resolves --workers auto/0 to the capped default, preserving explicit serial workers=1.
 int resolveWorkers(const RunOptions& options);
-/// Chooses the reported attempt for one isolated case retry sequence.
-RetryOutcome chooseRetryOutcome(const std::vector<TestStatus>& attempts);
 
 /// Creates a fresh fixture instance for a case.
 using FixtureFactory = std::function<std::unique_ptr<Fixture>()>;
@@ -368,7 +360,6 @@ struct RunOptions {
     bool isolate = false;          ///< Run each case in its own child process.
     bool sampleFormats = false;    ///< Sample a subset of format params instead of running all.
     int workers = 1;               ///< Parallel worker processes (0 = auto, 1 = serial).
-    int retries = 0;               ///< Extra per-case attempts on Fail/Crash (--isolate only).
     bool workersSpecified = false; ///< True when --workers was present on the CLI.
     long caseTimeoutMs = 0;        ///< Per isolated child watchdog in milliseconds (0 = off).
     int shardIndex = -1;           ///< This shard's index when sharding (0-based; -1 = no sharding).

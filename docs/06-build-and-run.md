@@ -334,8 +334,8 @@ build-yawgpu/Release/cts.exe --isolate --workers 8 \
 
 Validated on yawgpu/Vulkan (Windows, RTX 5060 Ti, 234 queries): **no OS freeze, `crash=0`, ~41 min**,
 and per-case isolation removes the cross-case degradation entirely (the only residual fails are a tiny
-flaky/probabilistic tail — e.g. `memory_model`, intermittent `HAL queue submission failed` — not the
-mass collateral that plagued plain `--workers`).
+probabilistic tail — e.g. `memory_model`, intermittent `HAL queue submission failed` — not the mass
+collateral that plagued plain `--workers`).
 
 **Triage flow (all native, no helper scripts):**
 - **Screen + record:** the `--isolate --workers 8 --output run.jsonl` run above is itself the

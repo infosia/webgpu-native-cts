@@ -64,13 +64,12 @@ const char* adapterTypeName(WGPUAdapterType type) {
 }
 
 void printUsage() {
-    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--workers N|auto] [--shard I/N] [--case-plan <file>] [--isolate] [--retries N] [--case-timeout-ms M] [--output <file>] [--baseline <file>] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
+    std::cout << "Usage: cts [--help] [--version] [--list|--list-cases] [--sample-formats] [--workers N|auto] [--shard I/N] [--case-plan <file>] [--isolate] [--case-timeout-ms M] [--output <file>] [--baseline <file>] [--crash-list <file>] [--emit-crash-list <file>] [--run-case <case>] [--expectations <file>] <query>...\n"
               << "\n"
               << "Without arguments, creates a WebGPU instance, requests an adapter,\n"
               << "prints adapter information, and exits.\n"
               << "\n"
-              << "--workers accepts a positive integer, 0, or auto; 0/auto uses a capped default.\n"
-              << "--retries accepts a non-negative integer and applies only with --isolate.\n";
+              << "--workers accepts a positive integer, 0, or auto; 0/auto uses a capped default.\n";
 }
 
 void printVersion() {
@@ -196,16 +195,6 @@ int main(int argc, char** argv) {
                     options.workers = 0;
                 } else if (!parseInt(value, &options.workers) || options.workers < 0) {
                     std::cerr << "invalid --workers value: " << value << "\n";
-                    return EXIT_FAILURE;
-                }
-            } else if (arg == "--retries") {
-                if (i + 1 >= argc) {
-                    std::cerr << "missing value for --retries\n";
-                    return EXIT_FAILURE;
-                }
-                const std::string value = argv[++i];
-                if (!parseInt(value, &options.retries) || options.retries < 0) {
-                    std::cerr << "invalid --retries value: " << value << "\n";
                     return EXIT_FAILURE;
                 }
             } else if (arg == "--case-timeout-ms") {

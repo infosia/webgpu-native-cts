@@ -74,14 +74,6 @@ std::optional<TestStatus> statusFromName(std::string_view status) {
     return std::nullopt;
 }
 
-bool isFailureStatus(TestStatus status) {
-    return status == TestStatus::Fail || status == TestStatus::Crash;
-}
-
-bool isFlakyResult(const SubcaseResult& result) {
-    return result.attempts > 1 && !isFailureStatus(result.status);
-}
-
 std::string sanitizeResultMessage(std::string message) {
     for (char& ch : message) {
         if (ch == '\t' || ch == '\r' || ch == '\n') {
@@ -239,21 +231,6 @@ bool isBadEffectiveStatus(const std::string& status) {
 
 } // namespace
 
-RetryOutcome chooseRetryOutcome(const std::vector<TestStatus>& attempts) {
-    if (attempts.empty()) {
-        return RetryOutcome{};
-    }
-
-    size_t reportIndex = attempts.size() - 1;
-    for (size_t i = 0; i < attempts.size(); ++i) {
-        if (!isFailureStatus(attempts[i])) {
-            reportIndex = i;
-            break;
-        }
-    }
-    return RetryOutcome{reportIndex, attempts.size() > 1 && !isFailureStatus(attempts[reportIndex])};
-}
-
 ExpectationSet loadExpectations(const std::string& path) {
     ExpectationSet expectations;
     if (path.empty()) {
@@ -318,11 +295,7 @@ std::string resultJsonLine(const SubcaseResult& r, bool expected) {
         << "\",\"status\":\"" << statusName(r.status)
         << "\",\"message\":\"" << jsonEscape(r.message)
         << "\",\"expected\":" << (expected ? "true" : "false")
-        << ",\"effective\":\"" << effectiveStatusName(r, expected) << "\""
-        << ",\"attempts\":" << r.attempts;
-    if (isFlakyResult(r)) {
-        out << ",\"flaky\":true";
-    }
+        << ",\"effective\":\"" << effectiveStatusName(r, expected) << "\"";
     out << "}";
     return out.str();
 }
@@ -1276,39 +1249,6 @@ SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& que
     return *result[0];
 }
 
-SubcaseResult finalizeRetryResult(const std::vector<SubcaseResult>& attempts) {
-    std::vector<TestStatus> statuses;
-    statuses.reserve(attempts.size());
-    for (const SubcaseResult& attempt : attempts) {
-        statuses.push_back(attempt.status);
-    }
-
-    const RetryOutcome outcome = chooseRetryOutcome(statuses);
-    SubcaseResult result = attempts[outcome.reportIndex];
-    result.attempts = static_cast<int>(attempts.size());
-    if (outcome.flaky) {
-        std::cerr << "flaky: " << result.query << " failed then passed on retry " << outcome.reportIndex << "\n";
-    }
-    return result;
-}
-
-bool shouldRetryIsolatedAttempt(const RunOptions& options, const std::vector<SubcaseResult>& attempts) {
-    if (options.retries <= 0 || attempts.empty() || !isFailureStatus(attempts.back().status)) {
-        return false;
-    }
-    return attempts.size() <= static_cast<size_t>(options.retries);
-}
-
-SubcaseResult runIsolatedChildWithRetries(const RunOptions& options, const std::string& query) {
-    std::vector<SubcaseResult> attempts;
-    while (true) {
-        attempts.push_back(runIsolatedChild(options, query));
-        if (!shouldRetryIsolatedAttempt(options, attempts)) {
-            return finalizeRetryResult(attempts);
-        }
-    }
-}
-
 std::vector<SubcaseResult> collectIsolatedRuns(
     const RunOptions& options,
     const std::vector<Query>& queries,
@@ -1319,7 +1259,7 @@ std::vector<SubcaseResult> collectIsolatedRuns(
         if (!caseSelectedByShard(i, options)) {
             continue;
         }
-        results.push_back(runIsolatedChildWithRetries(options, cases[i].query));
+        results.push_back(runIsolatedChild(options, cases[i].query));
     }
     return results;
 }
@@ -1344,27 +1284,17 @@ void startQueuedIsolatedChildren(
     }
 }
 
-void processCompletedIsolatedAttempts(
-    const RunOptions& options,
-    std::vector<size_t>& queue,
+void processCompletedIsolatedResults(
     std::vector<size_t>& completedPositions,
     std::vector<std::optional<SubcaseResult>>& completedByCase,
-    std::vector<std::vector<SubcaseResult>>& attemptsByCase,
     std::vector<std::optional<SubcaseResult>>& resultsByCase) {
     for (size_t position : completedPositions) {
         if (!completedByCase[position]) {
             continue;
         }
 
-        std::vector<SubcaseResult>& attempts = attemptsByCase[position];
-        attempts.push_back(std::move(*completedByCase[position]));
+        resultsByCase[position] = std::move(*completedByCase[position]);
         completedByCase[position].reset();
-
-        if (shouldRetryIsolatedAttempt(options, attempts)) {
-            queue.push_back(position);
-            continue;
-        }
-        resultsByCase[position] = finalizeRetryResult(attempts);
     }
     completedPositions.clear();
 }
@@ -1384,7 +1314,6 @@ std::vector<SubcaseResult> collectIsolatedParallelRuns(
 
     std::vector<std::optional<SubcaseResult>> resultsByCase(cases.size());
     std::vector<std::optional<SubcaseResult>> completedByCase(cases.size());
-    std::vector<std::vector<SubcaseResult>> attemptsByCase(cases.size());
     std::vector<size_t> completedPositions;
     std::vector<IsolatedChildState> children;
     size_t next = 0;
@@ -1403,12 +1332,9 @@ std::vector<SubcaseResult> collectIsolatedParallelRuns(
         if (!children.empty()) {
             pumpIsolatedChildren(options, children, completedByCase, &completedPositions);
         }
-        processCompletedIsolatedAttempts(
-            options,
-            queue,
+        processCompletedIsolatedResults(
             completedPositions,
             completedByCase,
-            attemptsByCase,
             resultsByCase);
     }
 
@@ -1418,11 +1344,7 @@ std::vector<SubcaseResult> collectIsolatedParallelRuns(
             continue;
         }
         if (!resultsByCase[i]) {
-            if (!attemptsByCase[i].empty()) {
-                merged.push_back(finalizeRetryResult(attemptsByCase[i]));
-            } else {
-                merged.push_back(SubcaseResult{cases[i].query, TestStatus::Crash, "isolated worker produced no result"});
-            }
+            merged.push_back(SubcaseResult{cases[i].query, TestStatus::Crash, "isolated worker produced no result"});
             continue;
         }
         merged.push_back(std::move(*resultsByCase[i]));
@@ -1993,7 +1915,6 @@ struct RunSummary {
     size_t crash = 0;
     size_t xfail = 0;
     size_t xpass = 0;
-    size_t flaky = 0;
 };
 
 void writeJsonOutput(
@@ -2020,7 +1941,6 @@ void writeJsonOutput(
         << ",\"crash\":" << summary.crash
         << ",\"xfail\":" << summary.xfail
         << ",\"xpass\":" << summary.xpass
-        << ",\"flaky\":" << summary.flaky
         << "}\n";
 }
 
@@ -2140,12 +2060,10 @@ int printRunResults(
         summary.warn += result.status == TestStatus::Warn ? 1 : 0;
         summary.fail += unexpectedFailure && result.status == TestStatus::Fail ? 1 : 0;
         summary.crash += unexpectedFailure && result.status == TestStatus::Crash ? 1 : 0;
-        summary.flaky += isFlakyResult(result) ? 1 : 0;
     }
     std::cout << "summary: pass=" << summary.pass << " skip=" << summary.skip << " warn=" << summary.warn
               << " fail=" << summary.fail << " crash=" << summary.crash
-              << " xfail=" << summary.xfail << " xpass=" << summary.xpass
-              << " flaky=" << summary.flaky << "\n";
+              << " xfail=" << summary.xfail << " xpass=" << summary.xpass << "\n";
 
     writeJsonOutput(options.outputPath, results, expectations, summary);
     if (!options.baselinePath.empty()) {
@@ -2246,10 +2164,6 @@ std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& result
 }
 
 int runQueries(const RunOptions& options) {
-    if (options.retries > 0 && !options.isolate) {
-        std::cerr << "--retries requires --isolate; ignoring --retries\n";
-    }
-
     if (!options.runCaseQuery.empty()) {
         setStdoutBinaryForResultProtocol();
         try {
@@ -2263,9 +2177,6 @@ int runQueries(const RunOptions& options) {
     const int workerCount = resolveWorkers(options);
     RunOptions runOptions = options;
     runOptions.workers = workerCount;
-    if (!runOptions.isolate) {
-        runOptions.retries = 0;
-    }
 
     if (options.workersSpecified && !options.crashListPath.empty()) {
         std::cerr << "--workers is incompatible with --crash-list\n";
