@@ -138,8 +138,17 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
-## F-146 — harness: POSIX `--workers` fork-without-exec breaks concurrent Metal children (backend-independent fake fails) — OPEN
+## F-146 — harness: POSIX `--workers` fork-without-exec breaks concurrent Metal children (backend-independent fake fails) — RESOLVED
 
+- **RESOLVED** (`401108c`, 2026-07-03): POSIX workers now `fork`+`execv` (mirroring the
+  `--isolate` child) and load the parent's ordered case plan (`--case-plan`, the phaseW4
+  mechanism) — no re-enumeration. Verified: `command_buffer,*` `--workers 2` =
+  170,202/0 (was fail=314); `immediate` `--workers 6` = 252/0 on yawgpu **and** Dawn;
+  `kill -9` of a worker mid-run → 1 contained case-level `crash`, respawned worker
+  completes the remainder. **Full yawgpu/Metal re-sweep at `--workers 6` (2026-07-03)
+  is clean across all four areas** — 1,991,818 pass / 104,493 skip / 2 fail (the known
+  port-oracle pair) / 0 crash, with zero `MTLCompilerService` incidents — so parallel
+  sweep numbers are authoritative again.
 - **Harness defect (ours), not a backend finding.** `--workers N` (N >= 2) on macOS
   mass-fails cases that are serial-green, `--workers 1`-green, and green when the same
   shard halves run as concurrently launched standalone processes. Every failure is the

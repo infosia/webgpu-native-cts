@@ -102,10 +102,10 @@ ported:** the entire **`api`** surface (`api/validation` + `api/operation`), **a
 
 **Conformance (current).** yawgpu's WGSL frontend is now **Tint** (Dawn's shader compiler), replacing the
 earlier naga frontend. With Tint, yawgpu's shader-compile behaviour is byte-equivalent to the Dawn oracle:
-`shader/execution` is **`fail=0 crash=0`** on both real-hardware paths (native macOS/Metal — 822,209 subcase
+`shader/execution` is **`fail=0 crash=0`** on both real-hardware paths (native macOS/Metal — 822,636 subcase
 passes — and native Windows/Vulkan, NVIDIA RTX 5060 Ti), and the whole suite runs **crash-free**. Reporting
 real Metal hardware limits and exposing `subgroups` brings yawgpu's Metal coverage up to Dawn's level (skip
-105,394 — Dawn is 104,942). On Metal the raw total is **1,990,542** subcase passes with **2** fails (the 2
+104,493 — Dawn is 104,942). On Metal the raw total is **1,991,818** subcase passes with **2** fails (the 2
 shared `index_buffer_format_dirtying` port-oracle non-defects); on Vulkan 1,607,298 passes, modulo a small
 set of known **non-defect** `xfail`s (spec-in-flux per-sample semantics, GPU-divergent external-texture
 SPIR-V, an NVIDIA denormal/memory-model artifact that Dawn reproduces identically on the same GPU). yawgpu's
@@ -157,8 +157,10 @@ added: [COVERAGE](docs/COVERAGE.md).
 
 Per-area `pass / skip / fail / crash` from a full sweep of all **642 ported files** — on
 **macOS / Apple Metal** (the three tables below) and on **Windows 11 / native Vulkan** (NVIDIA RTX 5060 Ti;
-the yawgpu-Vulkan table further down). The **yawgpu-Metal** and **wgpu-native-Metal** tables were **re-swept
-2026-07-02**; the Dawn-Metal and yawgpu-Vulkan tables are from the 2026-06-28 sweep. All three Metal backends
+the yawgpu-Vulkan table further down). The **yawgpu-Metal** table was **re-swept 2026-07-03** (`--workers 6`,
+post-F-146 — the worker-mode harness bug that used to fake-fail parallel Metal sweeps is fixed, so parallel
+numbers are authoritative again); the **wgpu-native-Metal** table is from 2026-07-02; the Dawn-Metal and
+yawgpu-Vulkan tables are from the 2026-06-28 sweep. All three Metal backends
 now run whole-suite **per-subcase** (`--workers`, no `--isolate`): yawgpu and Dawn never abort; wgpu-native is
 panic-heavy but the parallel runner contains each abort (records it as one `crash`, case-level, and continues
 via a fresh forked worker), so it no longer needs `--isolate`. Because wgpu-native runs many cases per worker
@@ -171,11 +173,11 @@ non-defects show in `fail` with a dagger note rather than being masked.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 292,960 | 61,655 | 2† | 0 |
-| `api/operation` (70) | 228,600 | 993 | 0 | 0 |
-| `shader/execution` (239) | 822,209 | 22,377 | 0 | 0 |
+| `api/validation` (126) | 293,557 | 61,433 | 2† | 0 |
+| `api/operation` (70) | 228,852 | 741 | 0 | 0 |
+| `shader/execution` (239) | 822,636 | 21,950 | 0 | 0 |
 | `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
-| **total** | **1,990,542** | **105,394** | **2†** | **0** |
+| **total** | **1,991,818** | **104,493** | **2†** | **0** |
 
 #### Dawn — native Metal (conformance oracle, Tint frontend), per-subcase
 
@@ -191,11 +193,13 @@ non-defects show in `fail` with a dagger note rather than being masked.
 dirtied-format draw to succeed, but **both** Dawn and yawgpu reject it (the render bundle becomes an error
 bundle). It fails identically on every backend — **not a yawgpu defect** — and is carried as `xfail`.
 
-Reporting real Metal hardware limits and exposing `subgroups` dropped yawgpu's skip count to Dawn's level
-(105,394 vs Dawn's 104,942), so this sweep exercises the same cases Dawn does — including the
+Reporting real Metal hardware limits and exposing `subgroups` dropped yawgpu's skip count to Dawn's level —
+now slightly **below** it (104,493 vs Dawn's 104,942, the Dawn table predating the pipeline-immediates
+un-stub) — so this sweep exercises at least the cases Dawn does, including the
 `requestDevice:limits,supported` real-limit cases and the `subgroups`-gated `shader/validation` trees
-(`parse,requires:wgsl_matches_api`, `uniformity:uniform_subgroup_ops`) — and yawgpu passes them all, matching
-Dawn's `fail=0`.
+(`parse,requires:wgsl_matches_api`, `uniformity:uniform_subgroup_ops`), and yawgpu passes them all, matching
+Dawn's `fail=0`. Both shader areas are **byte-identical** to the Dawn table (`shader/execution`
+822,636 / 21,950; `shader/validation` 646,773 / 20,369).
 
 #### wgpu-native — native Metal (bring-up reference, naga frontend), per-subcase
 
@@ -218,14 +222,15 @@ naga frontend/const-eval gap (**F-133**) that yawgpu no longer has after moving 
 backends.
 
 > **yawgpu matches Dawn's coverage on Metal.** Exposing `subgroups` and reporting real hardware limits, its
-> skip count is at Dawn's level (105,394 vs 104,942), so both backends run the same cases; shader
+> skip count is at Dawn's level (104,493 vs 104,942), so both backends run the same cases; shader
 > **execution** stays `fail=0` and the two fail profiles are **byte-identical** — both fail only the 2
 > `index_buffer_format_dirtying` port-oracle cases. The naga-lineage divergences (const-eval,
-> frontend-validation, `discard`-derivative) remain **wgpu-native-only**. The residual 452-subcase skip
-> delta in the tables above was subsequently root-caused: 427 were **F-144**, a *harness* artifact (three
-> `shader/execution` language-feature gates compiled out on non-Dawn builds) — fixed 2026-07-02 and
-> verified per-file to Dawn parity (`index` 226, `ptr_params` 121, `address_of_and_indirection` 780, all
-> `skip=0 fail=0`); the yawgpu-Metal table predates that fix.
+> frontend-validation, `discard`-derivative) remain **wgpu-native-only**. The former 452-subcase skip
+> delta is gone: 427 of it was **F-144**, a *harness* artifact (three `shader/execution`
+> language-feature gates compiled out on non-Dawn builds), and the current yawgpu-Metal table includes
+> that fix — both shader areas are now subcase-identical to Dawn's. The remaining head-to-head deltas
+> (`api/validation` −194 skips, `api/operation` −255 skips vs the Dawn table) are cases the older
+> Dawn-Metal sweep predates (pipeline-immediates un-stub); they will converge on the next Dawn re-sweep.
 
 #### yawgpu — native Vulkan (Windows 11 / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
 
