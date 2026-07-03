@@ -138,7 +138,7 @@ of the runner.
 
 ### Timeouts and hangs
 
-A default timeout (e.g. 5 s, configurable via `--future-timeout-ms`) guards against a backend
+A default timeout (5 s, fixed — a `--future-timeout-ms` flag was designed but never needed) guards against a backend
 that never resolves a future. On timeout the helper throws `cts::AsyncTimeout` (see the error
 contract above), which the runner turns into a clear "future did not resolve" case failure rather
 than hanging the run.
@@ -274,8 +274,9 @@ Design:
   GPU backend (Metal/Vulkan/GLES); **without the chain it returns a Noop instance**. The compiled-in
   backend is also gated by yawgpu's cargo features (`metal`/`vulkan`). The shim picks a **platform
   default** — `YAWGPU_INSTANCE_BACKEND_METAL` on Apple, `YAWGPU_INSTANCE_BACKEND_VULKAN` elsewhere
-  (Windows/Linux) — so yawgpu must be built with the matching feature. A runtime
-  `--yawgpu-backend metal|vulkan` option is deferred until more than one backend is compiled in.
+  (Windows/Linux) — so yawgpu must be built with the matching feature. Runtime override is the
+  `CTS_YAWGPU_BACKEND` env var (e.g. `vulkan` to drive yawgpu's Vulkan HAL via MoltenVK on macOS);
+  the once-planned `--yawgpu-backend` CLI flag was dropped in favor of it.
 
 ### Conformance philosophy regarding backend differences
 
@@ -290,7 +291,7 @@ recorded in the test (mirroring upstream `skipIf*`).
 
 ```cpp
 WGPUInstance instance = cts::createInstance();                  // §6
-auto a = cts::requestAdapterSync(instance, &opts);             // §2, honors --power-preference etc.
+auto a = cts::requestAdapterSync(instance, &opts);             // §2, uses cts::adapterOptions()
 // DevicePool lazily creates devices from a.adapter per requested feature/limit set
 ```
 

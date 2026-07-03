@@ -393,10 +393,12 @@ Loop:
 4. Aggregate and print: per-case status and a summary (`pass/skip/warn/fail`, timings).
 5. Exit non-zero if any case failed (skips/warns do not fail the run by default; configurable).
 
-Options to support early: backend is fixed at link time, but the runner exposes
-`--adapter-name`, `--power-preference`, `--force-fallback-adapter`, `--enable-feature`,
-`--verbose`, `--quiet`, and `--expectations <file>` for known-failures (so CI can track
-expected-fail lists like upstream).
+Options: backend is fixed at link time; the runner exposes `--expectations <file>` for
+known-failures (so CI can track expected-fail lists like upstream), `--workers`, and the
+triage/output flags — see [06 §Common options](06-build-and-run.md) for the complete set.
+Adapter-selection flags (`--adapter-name`, `--power-preference`, `--force-fallback-adapter`,
+`--enable-feature`) were designed here but never needed — the runner uses the backend's
+default adapter.
 
 ### Result / logging model
 

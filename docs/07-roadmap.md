@@ -72,14 +72,15 @@ assertions, the fixture lifecycle, and the runner — i.e. all the load-bearing 
 abstraction's rough edges are settled.
 
 - yawgpu backend shim (`backend_yawgpu.cpp`); `CTS_BACKEND=yawgpu` builds and runs the Phase 1
-  tests; `--yawgpu-backend metal|vulkan` selects the GPU backend.
+  tests; `--yawgpu-backend metal|vulkan` selects the GPU backend *(superseded: runtime selection
+  became the `CTS_YAWGPU_BACKEND` env var + per-backend build dirs; the flag was dropped)*.
 - Resolve WaitAny/timeout differences vs the wgpu-native bring-up; exercise the ProcessEvents
   fallback on both.
 - Skip-vs-fail policy validated where backends differ (optional features/limits); since yawgpu is
   young, expect more skips/fails — capture them in a yawgpu `--expectations` file so regressions
   are visible without failing the run.
 - `--expectations` file support; first per-backend known-failure lists.
-- `--format json` and merge-able results.
+- `--format json` and merge-able results *(landed as `--output` JSONL)*.
 
 **Exit:** Phase 1 tests run on yawgpu with results triaged (pass / explicit skip / tracked
 expected-fail); CI runs wgpu-native + yawgpu.

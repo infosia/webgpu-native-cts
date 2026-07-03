@@ -274,72 +274,65 @@ build/cts --list-cases 'webgpu:api,validation,createBuffer:*'
 | `--sample-formats` | opt-in fast-iteration mode for large texture-format sweeps; keeps only representative formats, prints a stderr notice/recap, and is not full conformance coverage |
 | `--workers N` \| `auto` | parallel runner: spawn `N` shard workers on one machine, merge their machine-readable results back into the same ordered text summary as a sequential run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess`. Workers load the parent's ordered case plan instead of re-enumerating cases. `N=1` is sequential; `auto` (or `0`) resolves to `min(hardware_concurrency, 8)` — capped low because GPU/VRAM pressure (not CPU) is the limiter and high counts can wedge the OS. **Composes with `--isolate`** (parallel per-case isolation pool — see that row); still incompatible with `--crash-list` |
 | `--shard I/N` | run or list only the deterministic round-robin shard where case index `idx % N == I`; works with `--list-cases` for partition checks and can be used directly in CI on any platform |
-| `--verbose` / `--quiet` | log level |
-| `--power-preference {low,high}` | adapter selection |
-| `--force-fallback-adapter` | request the fallback adapter |
 | `--expectations <file>` | known-failure list (case-query lines, `#` comments); matching fails/crashes → `xfail`, matching passes → `xpass`; run fails only on an unexpected fail/crash. A line ending in `:*` is a **prefix** match — it covers every case of a test in one line (used when a whole test crashes a backend, e.g. wgpu-native on `texture_usage`); a pass under such a prefix shows as `xpass`, flagging that the wildcard can be tightened |
-| `--isolate` | run **every** case in a child process (`--run-case`); a backend abort becomes a contained `crash` result instead of killing the run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess` (a Rust abort shows as a non-zero child exit, e.g. `0xC0000409`). Sequential by default; **add `--workers N` to run the per-case isolation as a bounded concurrent pool** (≤`N` children at once, results merged back into sequential order — same per-case classification as serial `--isolate` for any `N`, just faster). This makes per-case isolation practical at full-suite scale without the manual shard-then-isolate dance. For a fast *selective* run on a known-clean backend, `--crash-list` is still cheaper |
-| `--crash-list <file>` | **selective isolation** (fast): fork only the cases the file lists (same line format as `--expectations`: exact or `:*` prefix), run all others **in-process**. Produces the **same per-case classification** as full `--isolate` (in-process cases are aggregated per case), so summaries are interchangeable. A case that aborts but is **not** on the list takes down the in-process run — refresh the list with `--isolate --emit-crash-list`. Composable with `--expectations`. On a clean backend (no list match) nothing forks |
+| `--isolate` | **wgpu-native triage only.** yawgpu and Dawn are crash-free suite-wide, so they never need it; and it reports **per-case** (not per-subcase) counts, which must not be mixed into the per-subcase result tables. Runs **every** case in a child process (`--run-case`); a backend abort becomes a contained `crash` result instead of killing the run. POSIX uses `fork`+`exec`; Windows uses `CreateProcess` (a Rust abort shows as a non-zero child exit, e.g. `0xC0000409`). Much slower than plain `--workers` — use it only for **uninflated per-case crash classification** on wgpu-native (in plain worker mode an abort contaminates later cases in the same worker process, inflating `crash` ~4×). Sequential by default; **add `--workers N` to run the per-case isolation as a bounded concurrent pool** (≤`N` children at once, results merged back into sequential order — same per-case classification as serial `--isolate` for any `N`, just faster) |
+| `--crash-list <file>` | **selective isolation** (wgpu-native only, like `--isolate`): fork only the cases the file lists (same line format as `--expectations`: exact or `:*` prefix), run all others **in-process**. Produces the **same per-case classification** as full `--isolate` (in-process cases are aggregated per case), so summaries are interchangeable. A case that aborts but is **not** on the list takes down the in-process run — refresh the list with `--isolate --emit-crash-list`. Composable with `--expectations`. On a clean backend (no list match) nothing forks |
 | `--emit-crash-list <file>` | with `--isolate`, write every case that actually **crashed** (raw, before `--expectations` reclassification), sorted+unique, one query per line — directly reusable as a `--crash-list`. Workflow: run `--isolate --emit-crash-list expectations/<backend>.crash.txt` once per backend revision, then iterate with `--crash-list expectations/<backend>.crash.txt` |
 | `--run-case <case-query>` | (internal, used by `--isolate`/`--crash-list`) run exactly one case in-process and print `RESULT\t<status>\t<message>` |
-| `--case-timeout-ms M` | per-case wall-clock watchdog (only meaningful with `--isolate`): a child exceeding `M` ms is killed and recorded as a `crash` ("case timed out after M ms"), so a single wedged case cannot hang the whole run. POSIX kills with `SIGKILL`+`waitpid`; Windows uses `TerminateProcess`. `0` (default) disables it. Distinct from `--future-timeout-ms` (which bounds a single async-wait inside a case) |
+| `--shard-results` / `--shard-from K` / `--case-plan <file>` | (internal, the `--workers` worker protocol) a spawned shard worker emits machine-readable `RESULT` lines (`--shard-results`), resumes after a crash from case index `K` (`--shard-from`), and loads the parent's ordered case plan instead of re-enumerating (`--case-plan`). Never pass these by hand |
+| `--case-timeout-ms M` | per-case wall-clock watchdog (only meaningful with `--isolate`): a child exceeding `M` ms is killed and recorded as a `crash` ("case timed out after M ms"), so a single wedged case cannot hang the whole run. POSIX kills with `SIGKILL`+`waitpid`; Windows uses `TerminateProcess`. `0` (default) disables it |
 | `--output <file>` | also write machine-readable **JSONL** results: one `{"query","status","message","expected","effective"}` object per case (messages JSON-escaped), then a trailing `{"summary":true,…}` line with the counts. Works in every run mode; the human text + summary on stdout are unchanged. Makes cross-shard aggregation deterministic (no stdout re-parsing) |
 | `--baseline <file>` | after the run, diff the current results' *effective* statuses against a prior `--output` JSONL and print `Regressed`/`Fixed`/`New`/`Removed` query sets. With `--baseline` set, the **exit code reflects regressions only** (0 iff nothing got worse vs the baseline), independent of the absolute fail count — the CI-useful "did this change make anything worse" gate |
-| `--yawgpu-backend {metal,vulkan}` | (deferred — planned) select yawgpu's GPU backend at runtime once multiple are compiled in |
-| `--adapter-name <substr>` | pick an adapter by name substring |
-| `--enable-feature <name>` | request an optional feature for device creation |
-| `--future-timeout-ms <n>` | timeout for async-wait wrappers (default 5000) |
-| `--format {text,json}` | report format (json = one result object per line) |
-| `--seed <n>` | seed for any randomized helpers (kept deterministic by default) |
 
 Exit code: non-zero if any non-expected case fails. Skips/warns do not fail the run by default.
+With `--baseline` the exit code reflects regressions only (see that row).
+
+The table above is the **complete** flag set — anything else is rejected as `unknown option`.
+yawgpu's Metal/Vulkan HAL selection is not a flag: it is the `CTS_YAWGPU_BACKEND` env var plus a
+per-backend build dir (see §3).
 
 ### Large-suite runs & finding triage
 
-At the current suite size (~234 file-level queries / ~600k subcases) a single plain `--workers N`
-(in-process shards) run is unreliable for reading findings on one workstation: high concurrency (>~10
-simultaneous Vulkan devices) can freeze the whole OS, while low concurrency means each shard process
-runs so many cases **sharing one process-global device** (`src/common/harness.cpp`) that GPU state
-degrades and later cases fail en masse with `HAL queue submission failed: vulkan` (fake fails). Plain
-`--workers` ties shard count to concurrency, so it cannot avoid both.
+At the current suite size (**642 ported files / ~2.1M subcases**) the default full-suite mode on every
+robust backend (yawgpu, Dawn) is a single plain **`--workers 6`** run per area (or one `webgpu:*`) — the
+2026-07-03 README tables were produced exactly that way, `fail=0 crash=0` modulo the 2 known port-oracle
+cases, in well under an hour per backend. Since the F-146 fix (workers spawn via `fork`+`exec` and load
+the parent's case plan) parallel numbers on macOS are authoritative; no isolation, sharding dance, or
+serial re-run is needed for a clean backend.
 
-> **Worker count is the knob — and the two jobs need different tools.** The mass
-> `HAL queue submission failed: vulkan` degradation is driven by **too few workers**
-> (each process then runs more cases on one shared device). It is a **fake-fail
-> artifact, not a backend regression** — do not diagnose a HAL bug from it, and do
-> not reach for `--isolate` to "fix" it.
-> - **Per-subcase deliverable (the README / COVERAGE result tables):** use plain
->   **`--workers 8`, no `--isolate`**. This reports **per-subcase** counts and comes
->   out clean (e.g. `api,validation` = `pass≈227,885 fail=0`, 354,617 subcase
->   records). Dropping to `--workers 4` on the *same* query instead yields ~6,299
->   fake `HAL queue submission failed` fails — the fix is to *raise* the worker
->   count back to 8, never to switch isolation mode.
-> - **Per-case findings triage (crash classification, real-defect confirmation):**
->   use `--isolate --workers N` (below). This reports **per-case** counts (smaller,
->   different units — do not mix the two in one table) and is slower; use it to
->   *classify*, not to produce the per-subcase tables.
+Two situations still need different tools:
 
-**Use `--isolate --workers N` (the per-case isolation pool).** Each case runs in its own child
-process — so in-process degradation cannot accrue — and up to `N` run at once with a capped default
-(`min(cores, 8)`; GPU/VRAM pressure, not CPU, is the limiter), which stays under the OS-freeze
-ceiling. Results are **identical to serial `--isolate` for any `N`**. This decouples isolation from
-concurrency, replacing the old manual shard-then-isolate-then-recheck workflow:
+> - **Windows/Vulkan worker count.** On Vulkan a shard process runs many cases on **one process-global
+>   device**, and with **too few workers** GPU state can degrade until later cases fail en masse with
+>   `HAL queue submission failed: vulkan`. That is a **fake-fail artifact, not a backend regression** —
+>   the fix is to *raise* the worker count (8 was clean where 4 showed ~6.3k fake fails), never to
+>   switch isolation mode. Very high concurrency (>~10 simultaneous Vulkan devices) can freeze the OS;
+>   stay in the 6–8 band.
+> - **wgpu-native (panic-heavy) findings triage:** use `--isolate --workers N` (below). It reports
+>   **per-case** counts (different units — do not mix them into the per-subcase tables) and is far
+>   slower; use it to *classify* crashes accurately, not to produce the result tables. In plain worker
+>   mode an abort contaminates later cases in the same worker process (`crash` inflated ~4×), which is
+>   acceptable for the coarse wgpu-native table but not for per-defect counting.
+
+**The per-case isolation pool: `--isolate --workers N`.** Each case runs in its own child process — so
+in-process degradation cannot accrue — and up to `N` run at once with a capped default (`min(cores, 8)`;
+GPU/VRAM pressure, not CPU, is the limiter), which stays under the OS-freeze ceiling. Results are
+**identical to serial `--isolate` for any `N`**:
 
 ```bash
-# authoritative full-suite run on one workstation (derive the query list from the catalog):
-mapfile -t Q < <(grep -o '"path":"[^"]*"' src/webgpu/listing.json | sed 's/"path":"//;s/"//;s/^/webgpu:/;s/$/:*/')
-build-yawgpu/Release/cts.exe --isolate --workers 8 \
-    --expectations expectations/yawgpu-vulkan.txt --output run.jsonl "${Q[@]}"
+# wgpu-native per-case crash classification (the one remaining --isolate consumer):
+build/cts --isolate --workers 8 \
+    --expectations expectations/wgpu-native.txt --output run.jsonl 'webgpu:*'
 ```
 
-Validated on yawgpu/Vulkan (Windows, RTX 5060 Ti, 234 queries): **no OS freeze, `crash=0`, ~41 min**,
-and per-case isolation removes the cross-case degradation entirely (the only residual fails are a tiny
-probabilistic tail — e.g. `memory_model`, intermittent `HAL queue submission failed` — not the mass
-collateral that plagued plain `--workers`).
+(Historical validation: a full-suite isolate-pool run on yawgpu/Vulkan — Windows, RTX 5060 Ti, when the
+suite was 234 queries — completed with **no OS freeze, `crash=0`, ~41 min**; the only residual fails
+were a tiny probabilistic tail, e.g. `memory_model`. On today's crash-free yawgpu/Dawn, plain
+`--workers` replaces this entirely.)
 
 **Triage flow (all native, no helper scripts):**
-- **Screen + record:** the `--isolate --workers 8 --output run.jsonl` run above is itself the
-  authoritative pass — its `summary:` line and the JSONL are the verdict, not just a candidate list.
+- **Screen + record:** an `--isolate --workers 8 --output run.jsonl` run is itself the
+  authoritative per-case pass — its `summary:` line and the JSONL are the verdict, not just a candidate list.
 - **Confirm one suspect at finer grain:** a *single* case with a very large subcase count can still
   degrade in-process (its subcases share one process); re-run that test alone, or split it narrower,
   with `cts --isolate 'webgpu:<file>:<test>:*'` (optionally `--workers N`). `fail=0` ⇒ the suite-run
@@ -387,13 +380,14 @@ self-tests include the **param-stringification parity** table against upstream-d
   Windows/Linux).
 - Build, run `cts_unittests`, then run the suite with an `--expectations` file capturing known
   failures/skips per backend.
-- `--format json` output merged across shards (the result model is merge-able).
+- `--output` JSONL merged across shards (the result model is merge-able).
 - A listing-freshness check and a coverage-diff against the pinned upstream CTS revision
   (see [05-porting-guide §7](05-porting-guide.md)).
 
 Headless GPU in CI: depends on available adapters (software/fallback such as Vulkan SwiftShader
-or a Metal device on macOS runners). The runner's `--force-fallback-adapter` and adapter
-selection options exist to make CI deterministic where a software adapter is available.
+or a Metal device on macOS runners). Adapter selection is not exposed as CLI flags (the designed
+`--force-fallback-adapter`/`--adapter-name` options were never needed); the runner takes the
+backend's default adapter, so CI determinism comes from the runner environment.
 
 ---
 

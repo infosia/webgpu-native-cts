@@ -271,13 +271,6 @@ int main(int argc, char** argv) {
                     return EXIT_FAILURE;
                 }
                 options.emitCrashListPath = argv[++i];
-            } else if (arg == "--yawgpu-backend" || arg == "--future-timeout-ms") {
-                if (i + 1 >= argc) {
-                    std::cerr << "missing value for " << arg << "\n";
-                    return EXIT_FAILURE;
-                }
-                options.forwardedArgs.push_back(arg);
-                options.forwardedArgs.push_back(argv[++i]);
             } else if (arg.starts_with("--")) {
                 std::cerr << "unknown option: " << arg << "\n";
                 printUsage();

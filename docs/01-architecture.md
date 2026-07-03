@@ -95,7 +95,8 @@ single biggest design addition over a literal port and is specified in
 ## 4. Control flow of a run
 
 1. **Parse args**: a query (or list of queries) + options (backend already fixed at link time;
-   runtime options like `--list`, `--verbose`, adapter/power-preference, validation toggles).
+   runtime options like `--list`, `--workers`, `--expectations` — see
+   [06 §Common options](06-build-and-run.md) for the complete set).
 2. **Load listing**: the generated listing (catalog of files/tests). For an in-process build,
    the registry is also available directly (every linked `.spec.cpp` registered itself at
    static-init time).
