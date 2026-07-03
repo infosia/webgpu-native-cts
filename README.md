@@ -238,11 +238,16 @@ backends.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 235,547 | 119,070 | 4‡ | 0 |
-| `api/operation` (70) | 209,108 | 20,487 | 0 | 0 |
-| `shader/execution` (239) | 515,870 | 328,603 | 113‡ | 0 |
+| `api/validation` (126) | 236,140 | 118,848 | 4‡ | 0 |
+| `api/operation` (70) | 209,358 | 20,235 | 0 | 0 |
+| `shader/execution` (239) | 506,662 | 328,151 | 113‡ | 0 |
 | `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
-| **total** | **1,607,298** | **488,529** | **117‡** | **0** |
+| **total** | **1,598,933** | **487,603** | **117‡** | **0** |
+
+Re-swept **2026-07-03 raw** — single-day query-batched `--workers 8` run (no `--isolate`, no per-file
+reconciliation) on yawgpu `472d304` (post submit-retention fix `404bc1a`+`4086f68`) / CTS `5f5d13b`.
+The raw `fail` column now equals the documented non-defect profile exactly; the former stochastic
+`HAL queue submission failed` degradation that forced per-file reconciliation is gone.
 
 ‡ All **117** fails are **documented non-defects** — each cross-checked against a Dawn-Vulkan oracle on the
 **same** GPU and carried as `xfail` in `expectations/yawgpu-vulkan.txt`, so the suite exits `fail=0` once
