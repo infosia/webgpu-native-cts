@@ -22,7 +22,7 @@ Dawn/Windows.
 
 Replace the `nullptr` options argument with `cts::adapterOptions()` at every
 self-adapter-request site **except one** (see exclusion). Sites to change
-(16 total; line numbers at CTS `67631c2`):
+(16 total; line numbers at CTS `e618ca5`, the pre-fix revision):
 
 - `src/webgpu/api/operation/adapter/info.spec.cpp:90`
 - `src/webgpu/api/operation/buffers/map.spec.cpp:325`

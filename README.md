@@ -245,7 +245,7 @@ backends.
 | **total** | **1,598,933** | **487,603** | **117‡** | **0** |
 
 Re-swept **2026-07-03 raw** — single-day query-batched `--workers 8` run (no `--isolate`, no per-file
-reconciliation) on yawgpu `472d304` (post submit-retention fix `404bc1a`+`4086f68`) / CTS `5f5d13b`.
+reconciliation) on yawgpu `95bbf28` (post submit-retention fix `2446989`+`0195613`) / CTS `04a0236`.
 The raw `fail` column now equals the documented non-defect profile exactly; the former stochastic
 `HAL queue submission failed` degradation that forced per-file reconciliation is gone.
 
