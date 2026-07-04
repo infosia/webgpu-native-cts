@@ -76,7 +76,7 @@ the runner, no `flaky`/`attempts` in any output.
 
 ## References
 
-- `specs/phaseH3b-isolation-retry.md` — the feature being removed.
+- `specs/phaseH3b-isolation-retry.md` — the feature being removed (historical phase spec, since purged from the repo; name kept for context only).
 - `include/cts/test.h:365` (`RunOptions`, `retries` at :371);
   `src/common/runner.cpp` retry helpers ~lines 1279–1310, pool merge ~1393–1408,
   warning ~2249; `src/unittests/main.cpp` ~849–900.

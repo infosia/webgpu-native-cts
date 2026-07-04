@@ -112,7 +112,7 @@ Expected: summaries with `fail=0 crash=0`; totals match the serial baseline.
 
 ## References
 
-- `specs/phaseW3-fork-worker-no-reenum.md` — the change this partially reverts (its
+- `specs/phaseW3-fork-worker-no-reenum.md` (historical phase spec, since purged from the repo) — the change this partially reverts (its
   "no GPU state inherited" precondition is invalid on macOS).
 - `specs/phaseW4-windows-case-plan.md` + commit `e19b37d` — the case-plan mechanism
   this task reuses; proves `--case-plan` + `collectShardResultRunsFromPlan` end-to-end.

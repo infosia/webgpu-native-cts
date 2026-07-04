@@ -88,4 +88,4 @@ const WGPURequestAdapterOptions* adapterOptions();   // NEW; may return nullptr
 
 - `docs/06-build-and-run.md` (Dawn build/run recipe; runtime DLLs).
 - `src/common/webgpu/backend_yawgpu.cpp` (the `CTS_YAWGPU_BACKEND` pattern this mirrors).
-- `specs/phase2b-dawn-backend.md` (original Dawn wiring).
+- `specs/phase2b-dawn-backend.md` (original Dawn wiring; historical phase spec, since purged from the repo — name kept for context only).

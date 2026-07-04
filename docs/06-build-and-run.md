@@ -77,7 +77,7 @@ The CMake glue resolves the canonical header as
 `find_library(WGPU_NATIVE_LIB wgpu_native PATHS ${CTS_WGPU_NATIVE_DIR}/lib)`, links it, and — for a
 shared lib — sets an rpath / copies the dylib next to `build/cts`. (wgpu-native's own build output
 dir layout differs slightly between `make` and `cargo`; the exact `CTS_WGPU_NATIVE_DIR` to pass for
-the local checkout is pinned in the Phase 0 task spec, `specs/phase0-build-skeleton.md`.)
+the pinned upstream revision is recorded in `docs/UPSTREAM.md`.)
 
 **yawgpu** (added right after the slice; the primary conformance subject). yawgpu
 ([github.com/infosia/yawgpu](https://github.com/infosia/yawgpu)) is a Rust crate

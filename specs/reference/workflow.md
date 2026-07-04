@@ -15,7 +15,7 @@ The authoritative description of how work flows between **Claude** (planner/orch
 
 - **`docs/`** — design & architecture (durable, committed).
 - **`specs/`** — task specs + acceptance criteria (durable, committed). One spec per bounded unit
-  of work, e.g. `specs/phase0-build-skeleton.md`.
+  of work, e.g. `specs/fix-textureload-unorm-tolerance.md`.
 - **`specs/reference/`** — process references (this file, `task-template.md`).
 - **`HANDOFF.md`** (repo root, git-ignored) — the *current* task handoff Claude writes for the
   coding agent: which spec, the bounded scope, files expected to change, acceptance criteria,
