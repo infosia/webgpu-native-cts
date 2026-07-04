@@ -1,8 +1,16 @@
-# yawgpu VULKAN-only expectations — apply ONLY to Vulkan-backend runs
-# (native Windows/Vulkan or Mac MoltenVK via CTS_YAWGPU_BACKEND=vulkan).
-# Metal runs use expectations/yawgpu.txt (no expected failures); applying this
-# file on Metal would report these entries as xpass.
-# One full case query per line (# comments allowed; a line ending ':*' is a test-prefix match).
+# yawgpu Vulkan expectations for the LINUX / INTEL IRIS 5100 (Haswell, Mesa ANV) host.
+# Derived from expectations/yawgpu-vulkan.txt (the NVIDIA/Windows native-Vulkan host file)
+# minus the entries that are NVIDIA-hardware-specific and PASS on ANV (verified xpass on the
+# 2026-07-04 full sweep):
+#   - F-129 fwidth/fwidthFine/fwidthCoarse :f32:* (NVIDIA denormal acceptance-interval artifact)
+#   - F-141 memory_model,coherence:corr atomic_storage/intra_workgroup (RTX 5060 Ti memory-model
+#     relaxation; not observed on ANV)
+# Keep the two files in sync for every non-host-specific entry. The runner takes a single
+# --expectations file, so host selection happens at invocation time (the Intel sweep driver
+# passes this file).
+
+# Vulkan-backend-only, like the parent file. One full case query per line
+# (# comments allowed; a line ending ':*' is a test-prefix match).
 
 # F-085: sample_mask fragment builtin under Vulkan per-sample dispatch (@interpolate(...,sample)
 # at sampleCount=4) — the sample_mask input is the current sample's single bit (Vulkan
@@ -42,21 +50,6 @@ webgpu:api,validation,render_pipeline,misc:external_texture:isAsync=true
 # backend defect; also listed in expectations/yawgpu.txt (Metal). See docs/FINDINGS.md.
 webgpu:api,validation,encoding,cmds,render,draw:index_buffer_format_dirtying:*
 
-# F-129 (CLOSED): denormal fwidth value mismatch on native Vulkan — NOT a yawgpu defect.
-# fwidth/fwidthFine/fwidthCoarse f32 fail near the denormal boundary, e.g.
-# inputs=(-10, -FLT_MIN, …) → expected[3]=[3.52648e-38, 4.70198e-38]; got 4.70198e-38 (the got value is
-# the acceptance interval's own upper endpoint — the CTS-computed interval is marginally too tight for the
-# NVIDIA Vulkan denormal result). The Dawn-Vulkan oracle (same GPU + API, built this host) fails all 8
-# f32 cases with the byte-identical value, so this is a CTS acceptance-interval / NVIDIA-denormal artifact
-# (F-104/F-090-class), not a yawgpu/naga defect. The separate `discard`+derivative SPIR-V gap (sub-cause 1)
-# was a real defect and is FIXED in yawgpu's naga fork (demote-to-helper), so it is not listed here.
-# Drop these if the upstream gpuweb/cts fwidth acceptance interval is widened for denormals.
-# NVIDIA-host-specific: these PASS on Intel/ANV (xpass confirmed 2026-07-04), so the Intel host
-# file expectations/yawgpu-vulkan-intel-anv.txt omits them.
-webgpu:shader,execution,expression,call,builtin,fwidth:f32:*
-webgpu:shader,execution,expression,call,builtin,fwidthFine:f32:*
-webgpu:shader,execution,expression,call,builtin,fwidthCoarse:f32:*
-
 # F-139: depth_clip_clamp (depth_test_input_clamped:unclippedDepth=false and
 # depth_clamp_and_clip:writeDepth=true) fails ONLY through MoltenVK, and PASSES on native Vulkan,
 # so it is intentionally NOT xfail'd here (listing it would xpass on the authoritative native run).
@@ -65,14 +58,3 @@ webgpu:shader,execution,expression,call,builtin,fwidthCoarse:f32:*
 # shader [[depth]] only to [0,1] and collapses depthClampEnable to MTLDepthClipMode.Clamp). Per
 # docs/06-build-and-run.md, MoltenVK is non-authoritative Vulkan coverage. See memory f045-frag-depth-clamp.
 
-# F-141: memory_model,coherence:corr (atomic_storage, intra_workgroup) -- NOT a yawgpu defect.
-# This NVIDIA RTX 5060 Ti reliably (4/4) exhibits a storage-atomic intra-workgroup memory-ordering
-# relaxation that WebGPU's memory model disallows ("disallowed weak behavior observed",
-# testResults[3] != 0). Dawn -- the reference impl -- fails the SAME case identically on the SAME GPU
-# (statistical test, so counts differ, but both reliably observe it), so this is a hardware/driver
-# memory-model property, not yawgpu and not a CTS-port oracle bug. Distinct from F-112 (atomic_workgroup
-# corr, a real yawgpu defect, RESOLVED). Unchanged by yawgpu bd21cfb's VK_KHR_vulkan_memory_model.
-# Drop if the NVIDIA driver or the upstream CTS corr tuning changes (would xpass). See docs/FINDINGS.md F-141.
-# NVIDIA-host-specific: passes on Intel/ANV (xpass confirmed 2026-07-04); omitted from
-# expectations/yawgpu-vulkan-intel-anv.txt.
-webgpu:shader,execution,memory_model,coherence:corr:memType="atomic_storage";testType="intra_workgroup"
