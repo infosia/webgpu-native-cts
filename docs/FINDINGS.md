@@ -505,8 +505,11 @@ ANV-Haswell wedge covers indirect zero-dim dispatches too. Consequences:
   indirect args and wrap the dispatch in a conditional block, so a zero-dim indirect dispatch is
   culled before reaching the broken hardware path. Whether the predicate cull happens early enough
   on hasvk to dodge the wedge is unverified (testing it is itself a freeze-risk supervised run).
-  Tracked in yawgpu `specs/tracking/cts-full-sweep-0704-native-vulkan.md`; not yet implemented —
-  weigh the complexity (predicate pipeline + barriers + quirk gating) against one EOL GPU.
+  Tracked in yawgpu `specs/tracking/cts-full-sweep-0704-native-vulkan.md`. **Decision
+  (2026-07-05): not implemented — permanent quarantine.** The complexity plus the freeze-risk
+  verification run were judged not worth it for one EOL GPU (Mesa labels Haswell Vulkan support
+  incomplete). F-137 is closed as a permanent host limitation; the two files stay quarantined in
+  every sweep on this host.
 
 **Linux freeze landscape (so a future sweep stays survivable — both are host/driver, not yawgpu):**
 - **F-137 compute_pass zero-dim dispatch** — *immediate*, deterministic, no DMAR. Quarantined.
