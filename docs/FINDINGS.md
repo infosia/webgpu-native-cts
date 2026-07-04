@@ -138,6 +138,94 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
+## F-150 — hasvk: vertex-stage read-only storage-texture loads return 0/garbage — driver defect, NOT yawgpu
+
+- **Backend/host:** yawgpu native Vulkan, Linux / Intel Iris 5100 (Haswell GT3, Mesa hasvk).
+  Deterministic. Found on the 2026-07-04 full sweep; triaged 2026-07-05.
+- Every `shader,execution,...,builtin,textureLoad:storage_textures_*` case with `stage="v"`
+  fails (146 case queries, ~2,300 fail records at `--workers 1` in the 2026-07-05 re-runs) —
+  vertex-stage loads from read-only storage textures return 0 (or garbage for some
+  metadata queries). Deterministic at `--workers 1`; under worker concurrency individual
+  subcases occasionally pass (the flake direction is fail-at-w1 → sometimes-pass-at-w4).
+  The same subcase class also accounts for the per-stage-mixed fails in
+  `textureDimensions:storage` / `textureNumLayers` (~585 records, 13 vertex-stage subcases
+  per case), where the stage is a subcase parameter.
+- **yawgpu is API-clean**: under `VK_LAYER_KHRONOS_validation` on native ANV the repro
+  emits zero VUID / validation lines (`rerun-0705-swizzle/diag-vtxstorage.log`). Tint
+  correctly decorates the read-only storage variables `NonWritable`, so
+  `vertexPipelineStoresAndAtomics=false` (which hasvk reports) does not apply — NonWritable
+  vertex-stage storage-image *reads* are spec-legal without that feature
+  (VUID-RuntimeSpirv-NonWritable-06341 governs writes, and it does not fire).
+- All cases pass on lavapipe with the identical yawgpu build; pre-existing across yawgpu fix
+  rounds (identical set on the pre-round-2 HAL). Attribution: hasvk vertex-stage
+  storage-image read defect (consistent with the GL-era Haswell
+  `GL_MAX_VERTEX_IMAGE_UNIFORMS=0` hardware posture, which core Vulkan cannot express).
+- **Expectations:** the failing subcase set is **nondeterministic run-to-run** (an
+  exact-set xfail list flipped between fail and xpass across consecutive `--workers 1`
+  runs), so `expectations/yawgpu-vulkan-intel-anv.txt` lists the **complete
+  `textureLoad:storage_textures_*` `stage="v"` class** (160 case queries, from
+  `--list-cases`): whichever subcases fail on a given run stay xfail and the rest
+  surface as xpass (benign — xpass does not affect the runner exit code; ~740 xpass at
+  `--workers 4`, fewer at `--workers 1`). Verified: the full textureLoad cluster is
+  deterministically `fail=0 rc=0` with this file while out-of-class regressions stay
+  visible. A future mass-xpass here means hasvk got fixed — then remove the block. The
+  stage-mixed cases (`textureDimensions:storage`, `textureNumLayers:storage`, ... —
+  the stage is a subcase parameter there) are NOT xfail'd — subcase granularity would
+  xpass the passing fragment/compute-stage subcases (F-145 precedent); they stay
+  visible (~585 fail records).
+
+## F-149 — hasvk: alpha-to-coverage yields nonzero coverage at alpha <= 0 — driver-suspect, NOT yawgpu
+
+- **Backend/host:** yawgpu native Vulkan, Linux / Intel Haswell (hasvk). Deterministic.
+- `api,operation,render_pipeline,sample_mask:alpha_to_coverage_mask:*` — 90 fail records /
+  30 fully-failing case queries ("alpha <= 0 result did not match zero coverage"). This is
+  the residual after yawgpu's 2026-07-04 MSAA fix rounds took the sample_mask cluster from
+  1,398 to 90; the `fragment_output_mask` subtree is fully green.
+- **yawgpu is API-clean** (zero validation-layer lines on native ANV,
+  `rerun-0705-swizzle/diag-alpha2cov.log`); passes on lavapipe. Haswell hardware
+  alpha-to-coverage behavior suspected. A Dawn-oracle run on this host would finalize the
+  attribution but Dawn is not built here yet.
+- **Expectations:** all 30 case queries xfail'd in `expectations/yawgpu-vulkan-intel-anv.txt`.
+
+## F-148 — hasvk: textureGather on rg32float/rg32uint/rg32sint selects wrong texels — driver-suspect, NOT yawgpu
+
+- **Backend/host:** yawgpu native Vulkan, Linux / Intel Haswell (hasvk). Deterministic.
+- All rg32* (8-byte texel) `textureGather` cases mismatch with plausible-but-wrong texel
+  values (a different texel gets selected, not garbage): 621 fail records in
+  `builtin,textureGather` plus 201 in `texture_view,texture_component_swizzle` — 822
+  records over 129 case queries, every one of them subcase-mixed (sibling offsets/components
+  pass). No other format width is affected.
+- **yawgpu is API-clean** (zero validation-layer lines, `rerun-0705-swizzle/diag-rg32gather.log`);
+  passes on lavapipe. Consistent with a Haswell 64-bit-texel gather selection quirk.
+  Dawn-oracle comparison on this host pending (Dawn not built here).
+- **Expectations:** NOT xfail'd — all 129 case queries are subcase-mixed, so case-level
+  entries would generate hundreds of xpass records (F-145 precedent). Stays visible in
+  sweeps until a Dawn oracle or raw-Vulkan repro finalizes attribution.
+
+## F-147 — yawgpu created multisampled integer textures without a capability check (UB on hasvk); Haswell cannot do integer MSAA — yawgpu RESOLVED, cases remain host-limited
+
+- **Backend/host:** yawgpu native Vulkan, Linux / Intel Haswell (hasvk). Deterministic.
+  This is the 2026-07-04 sweep's "finding 4" (multisampled sint `textureLoad` → `queue
+  submit cannot use an error command buffer`, exclusively r8/rg8/rgba8/r16/rg16/rgba16 sint).
+- **Root cause (two layers):**
+  1. **Hardware:** hasvk reports `sampledImageIntegerSampleCounts = SAMPLE_COUNT_1_BIT` —
+     Haswell cannot sample multisampled integer images at all. WebGPU mandates
+     `sampleCount=4` support for these formats, so the cases are unimplementable on this
+     host (lavapipe supports 1|4, which is why they pass there).
+  2. **yawgpu defect (RESOLVED):** yawgpu called `vkCreateImage` with `samples=4` anyway —
+     invalid API usage (24× `VUID-VkImageCreateInfo-samples-02258` on the repro under the
+     validation layer). Fixed in yawgpu `37f6a70` (2026-07-05): texture creation now queries
+     `vkGetPhysicalDeviceImageFormatProperties` for the exact (format, type, tiling, usage,
+     flags) and returns a clean `HalError` naming the format and sample count. Re-verified
+     on native ANV: zero VUID lines; the cases now fail via a clean creation-time device
+     error instead of UB.
+- **Expectations:** the 24 fully-failing case queries (`textureLoad:multisampled` sint ×
+  stages, `textureDimensions` sint MSAA) are xfail'd in
+  `expectations/yawgpu-vulkan-intel-anv.txt` as a host hardware limitation. The 6
+  `texture_component_swizzle:read_swizzle` sint×textureLoad cases carry the same signature
+  but only their `texture_multisampled_2d` input subcases fail (57 of 114 per case) — NOT
+  xfail'd (subcase granularity, F-145 precedent).
+
 ## F-146 — harness: POSIX `--workers` fork-without-exec breaks concurrent Metal children (backend-independent fake fails) — RESOLVED
 
 - **RESOLVED** (`401108c`, 2026-07-03): POSIX workers now `fork`+`execv` (mirroring the
