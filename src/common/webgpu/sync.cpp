@@ -94,6 +94,9 @@ bool pumpUntil(WGPUInstance instance, uint64_t timeoutNs, const std::function<bo
     const auto timeout = std::chrono::nanoseconds(timeoutNs);
     while (!done() && std::chrono::steady_clock::now() - start < timeout) {
         wgpuInstanceProcessEvents(instance);
+        if (done()) {
+            return true;
+        }
         std::this_thread::sleep_for(std::chrono::nanoseconds(kPollIntervalNs));
     }
     return done();
