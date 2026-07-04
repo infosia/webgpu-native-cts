@@ -123,6 +123,26 @@ uint32_t numberToFloatBits(double value, uint32_t signedBit, uint32_t exponentBi
     return (sign << (exponentBits + mantissaBits)) | (static_cast<uint32_t>(biased) << mantissaBits) | mantissa;
 }
 
+// Port of upstream conversion.ts `floatBitsToNormalULPFromZero`: the signed distance of
+// a float bit pattern from zero, counting steps between normal numbers. Subnormal values
+// flush to 0 (so 0 is one ULP from the minimum normal number); +0 and -0 are both 0.
+// Upstream asserts on infinity/NaN bit patterns; here they map monotonically past the
+// maximum finite value instead, so callers must reject non-finite values themselves.
+int64_t floatBitsToNormalULPFromZero(uint32_t bits, uint32_t signedBit, uint32_t exponentBits, uint32_t mantissaBits) {
+    const uint32_t maskSign = signedBit << (exponentBits + mantissaBits);
+    const uint32_t maskExpt = ((1u << exponentBits) - 1u) << mantissaBits;
+    const uint32_t maskMant = (1u << mantissaBits) - 1u;
+    const int64_t sign = (bits & maskSign) != 0 ? -1 : 1;
+    const uint32_t rest = bits & (maskExpt | maskMant);
+    const bool subnormalOrZero = (bits & maskExpt) == 0;
+    // The first normal number is maskMant+1, so subtract maskMant to make
+    // minNormal - zero = 1 ULP.
+    const int64_t absUlpFromZero = subnormalOrZero
+        ? 0
+        : static_cast<int64_t>(rest) - static_cast<int64_t>(maskMant);
+    return sign * absUlpFromZero;
+}
+
 double rgb9e5BitsToNumber(uint32_t bits) {
     const uint32_t exponent = bits >> 9;
     const uint32_t mantissa = bits & 0x1ffu;
@@ -401,6 +421,48 @@ TexelBits TexelRepresentation::numberToBits(const TexelComponents& numbers) cons
         }
     }
     return bits;
+}
+
+int64_t TexelRepresentation::ulpFromZero(uint32_t index, double value) const {
+    const uint32_t bitLength = bitLengths[index];
+    switch (dataTypes[index]) {
+        case ComponentDataType::Uint:
+            // numberToBits is the masked integer value; bitsToULPFromZero is identity.
+            return static_cast<int64_t>(static_cast<uint32_t>(static_cast<int64_t>(value)) & bitMask(bitLength));
+        case ComponentDataType::Sint:
+            // numberToBits masks; bitsToULPFromZero sign-extends back.
+            return signExtend(static_cast<uint32_t>(static_cast<int64_t>(value)) & bitMask(bitLength), bitLength);
+        case ComponentDataType::Unorm: {
+            double v = value;
+            if ((format == WGPUTextureFormat_RGBA8UnormSrgb || format == WGPUTextureFormat_BGRA8UnormSrgb)
+                && index != componentIndex(TexelComponent::A)) {
+                v = gammaCompress(v);
+            }
+            // Unsigned-normalized ULP space is the encoded integer itself.
+            return floatAsNormalizedInteger(v, bitLength, false);
+        }
+        case ComponentDataType::Snorm: {
+            // Signed-normalized: sign-extend and clamp -max-1 to -max (both encode -1.0).
+            const int64_t maxValue = (1 << (bitLength - 1)) - 1;
+            const uint32_t bits = floatAsNormalizedInteger(value, bitLength, true);
+            return std::max<int64_t>(-maxValue, signExtend(bits, bitLength));
+        }
+        case ComponentDataType::Float:
+            return bitLength == 16
+                ? floatBitsToNormalULPFromZero(numberToFloatBits(value, 1, 5, 10, 15), 1, 5, 10)
+                : floatBitsToNormalULPFromZero(f32ToBits(value), 1, 8, 23);
+        case ComponentDataType::Ufloat:
+            if (format == WGPUTextureFormat_RG11B10Ufloat) {
+                return bitLength == 11
+                    ? floatBitsToNormalULPFromZero(numberToFloatBits(value, 0, 5, 6, 15), 0, 5, 6)
+                    : floatBitsToNormalULPFromZero(numberToFloatBits(value, 0, 5, 5, 15), 0, 5, 5);
+            }
+            // rgb9e5ufloat: upstream numberToBits encodes each component independently as
+            // a 5-exponent/9-mantissa ufloat (no shared exponent), so mirror that here
+            // rather than reusing this struct's shared-exponent numberToBits().
+            return floatBitsToNormalULPFromZero(numberToFloatBits(value, 0, 5, 9, 15), 0, 5, 9);
+    }
+    return 0;
 }
 
 const TexelRepresentation& texelRepresentation(WGPUTextureFormat format) {

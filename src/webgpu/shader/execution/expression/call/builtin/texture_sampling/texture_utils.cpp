@@ -2780,6 +2780,25 @@ std::array<uint32_t, 4> expectedLoadBits(std::array<double, 4> values, WGPUTextu
     return out;
 }
 
+// Comparison representation for a textureLoad result. Upstream compares against the
+// software texture's texel-view format: unencodable depth formats are represented as
+// depth32float (upstream texture_utils.ts:1140), and depth16unorm/depth32float have the
+// same single-component encodings as r16unorm/r32float (upstream texel_data.ts:920-921,
+// which this port's texelRepresentation table does not carry depth entries for).
+WGPUTextureFormat loadComparisonRepFormat(WGPUTextureFormat format) {
+    switch (format) {
+        case WGPUTextureFormat_Depth16Unorm:
+            return WGPUTextureFormat_R16Unorm;
+        case WGPUTextureFormat_Depth24Plus:
+        case WGPUTextureFormat_Depth24PlusStencil8:
+        case WGPUTextureFormat_Depth32Float:
+        case WGPUTextureFormat_Depth32FloatStencil8:
+            return WGPUTextureFormat_R32Float;
+        default:
+            return format;
+    }
+}
+
 bool textureLoadBitsMatch(
     WGPUTextureFormat format,
     LoadReturnKind kind,
@@ -2789,15 +2808,32 @@ bool textureLoadBitsMatch(
     if (expected == got) {
         return true;
     }
-    if ((kind == LoadReturnKind::Float || kind == LoadReturnKind::Depth)
-        && format == WGPUTextureFormat_Depth16Unorm) {
-        return std::fabs(floatFromBits(expected) - floatFromBits(got)) <= (1.0f / 65535.0f);
+    if (kind != LoadReturnKind::Float && kind != LoadReturnKind::Depth) {
+        // Integer results (uint/sint, stencil) must match exactly.
+        return false;
     }
-    if (kind == LoadReturnKind::Float && baseFormat(format) != format && component < 3u) {
-        // sRGB textureLoad may be decoded by fixed-function hardware with 8 fractional bits.
-        return std::fabs(floatFromBits(expected) - floatFromBits(got)) <= (1.0f / 256.0f);
+    const float e = floatFromBits(expected);
+    const float g = floatFromBits(got);
+    if (!std::isfinite(e) || !std::isfinite(g)) {
+        // Non-finite values have no encoded-ULP representation (upstream asserts on
+        // them); identical bit patterns were already accepted above.
+        return false;
     }
-    return false;
+    // Upstream rule (texture_utils.ts:2637-2644): fail iff ulpDiff > 3 && absDiff >
+    // maxFractionalDiff. textureLoad has no sampler, so maxFractionalDiff == 0
+    // (texture_utils.ts:2479-2484) and this reduces to: pass iff the values re-encoded
+    // through the format's per-component encoding are within 3 encoding steps
+    // ("ULP from zero") of each other.
+    const TexelRepresentation& rep = texelRepresentation(loadComparisonRepFormat(format));
+    if (rep.bitLengths[component] == 0) {
+        // Component absent from the encoding (e.g. G/B/A of r8unorm, non-depth lanes of
+        // a depth result): the shader returns exact 0/1 fill values, so exact bits only.
+        return false;
+    }
+    const int64_t eULP = rep.ulpFromZero(component, e);
+    const int64_t gULP = rep.ulpFromZero(component, g);
+    const int64_t ulpDiff = eULP >= gULP ? eULP - gULP : gULP - eULP;
+    return ulpDiff <= 3;
 }
 
 uint32_t pseudoRandomU32(uint32_t i, uint32_t salt, uint32_t limit) {
