@@ -489,6 +489,25 @@ survives; (b) an *optional* yawgpu/wgpu-level workaround would be to skip submis
 dimension is 0 (semantically a no-op), sidestepping the ANV-Haswell wedge. Repro artifacts (git-ignored):
 `run-linux-vulkan/{cp_repro.c,cp_repro.comp,cp_repro_build.sh,cp-bisect.sh}`.
 
+**2026-07-05 update — direct dispatches fixed, INDIRECT zero-dim still wedges.** yawgpu `dfcf93a`
+implemented mitigation (b) for *direct* dispatches (CPU-side early-out on any zero workgroup count;
+indirect dispatches were deliberately left untouched — their dims live in a GPU buffer and cannot be
+pre-checked on the CPU). A supervised re-try of the quarantined `compute_pass` file froze the box
+immediately (rebooted; empty `rerun-0705-zerodim/`). `compute_pass:dispatch_sizes` combines
+`dispatchType ∈ {direct, indirect}` over the same zero-dim sizes, so with direct dispatches now
+skipped the first executed **`vkCmdDispatchIndirect` with a zero dimension** is the trigger — the
+ANV-Haswell wedge covers indirect zero-dim dispatches too. Consequences:
+- **Both files stay quarantined on this host** (`compute_pass`, `pipeline_bind_group_compat` — the
+  latter's `doCall()` also runs an indirect variant), and so does any future file that submits an
+  indirect zero-dim dispatch.
+- A durable yawgpu-side avenue exists: hasvk exposes `VK_EXT_conditional_rendering` (rev 2), which
+  predicates `vkCmdDispatchIndirect` — a tiny pre-pass could write `pred = (x && y && z)` from the
+  indirect args and wrap the dispatch in a conditional block, so a zero-dim indirect dispatch is
+  culled before reaching the broken hardware path. Whether the predicate cull happens early enough
+  on hasvk to dodge the wedge is unverified (testing it is itself a freeze-risk supervised run).
+  Tracked in yawgpu `specs/tracking/cts-full-sweep-0704-native-vulkan.md`; not yet implemented —
+  weigh the complexity (predicate pipeline + barriers + quirk gating) against one EOL GPU.
+
 **Linux freeze landscape (so a future sweep stays survivable — both are host/driver, not yawgpu):**
 - **F-137 compute_pass zero-dim dispatch** — *immediate*, deterministic, no DMAR. Quarantined.
 - **F-126 copy OOB DMA write** — *load-dependent*: `copyTextureToTexture`+`image_copy` run clean cold
