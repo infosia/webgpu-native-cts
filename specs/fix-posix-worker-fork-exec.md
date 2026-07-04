@@ -114,8 +114,9 @@ Expected: summaries with `fail=0 crash=0`; totals match the serial baseline.
 
 - `specs/phaseW3-fork-worker-no-reenum.md` (historical phase spec, since purged from the repo) — the change this partially reverts (its
   "no GPU state inherited" precondition is invalid on macOS).
-- `specs/phaseW4-windows-case-plan.md` + commit `e19b37d` — the case-plan mechanism
-  this task reuses; proves `--case-plan` + `collectShardResultRunsFromPlan` end-to-end.
+- `specs/phaseW4-windows-case-plan.md` (historical phase spec, since purged from the repo) +
+  commit `e19b37d` — the case-plan mechanism this task reuses; proves `--case-plan` +
+  `collectShardResultRunsFromPlan` end-to-end.
 - `src/common/runner.cpp:805-832` — the `--isolate` fork+execv child to mirror.
 - yawgpu `specs/tracking/shader-compile-cache-block95.md` (yawgpu `490743e`) — the
   cross-backend bisection that identified the harness as the culprit.
