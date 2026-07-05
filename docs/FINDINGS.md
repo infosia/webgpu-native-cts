@@ -203,7 +203,12 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
   pass). No other format width is affected.
 - **yawgpu is API-clean** (zero validation-layer lines, `rerun-0705-swizzle/diag-rg32gather.log`);
   passes on lavapipe. Consistent with a Haswell 64-bit-texel gather selection quirk.
-  Dawn-oracle comparison on this host pending (Dawn not built here).
+  **Decision (2026-07-05): no further investigation on this host.** A Dawn-oracle gather run
+  was attempted but the Dawn build froze the machine at the start of the `builtin,textureGather`
+  cluster (a Dawn-on-hasvk hazard of its own; yawgpu runs the same cluster without freezing),
+  and the ANV host is not worth further freeze-risk digging. Attribution rests on the
+  validation-clean + lavapipe-pass evidence; the F-149 precedent (Dawn confirmed an identical
+  driver defect on this host) supports the driver attribution class.
 - **Expectations:** NOT xfail'd — all 129 case queries are subcase-mixed, so case-level
   entries would generate hundreds of xpass records (F-145 precedent). Stays visible in
   sweeps until a Dawn oracle or raw-Vulkan repro finalizes attribution.
