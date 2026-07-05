@@ -140,312 +140,61 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ## F-150 — hasvk: vertex-stage read-only storage-texture loads return 0/garbage — driver defect, NOT yawgpu
 
-- **Backend/host:** yawgpu native Vulkan, Linux / Intel Iris 5100 (Haswell GT3, Mesa hasvk).
-  Deterministic. Found on the 2026-07-04 full sweep; triaged 2026-07-05.
-- Every `shader,execution,...,builtin,textureLoad:storage_textures_*` case with `stage="v"`
-  fails (146 case queries, ~2,300 fail records at `--workers 1` in the 2026-07-05 re-runs) —
-  vertex-stage loads from read-only storage textures return 0 (or garbage for some
-  metadata queries). Deterministic at `--workers 1`; under worker concurrency individual
-  subcases occasionally pass (the flake direction is fail-at-w1 → sometimes-pass-at-w4).
-  The same subcase class also accounts for the per-stage-mixed fails in
-  `textureDimensions:storage` / `textureNumLayers` (~585 records, 13 vertex-stage subcases
-  per case), where the stage is a subcase parameter.
-- **yawgpu is API-clean**: under `VK_LAYER_KHRONOS_validation` on native ANV the repro
-  emits zero VUID / validation lines (`rerun-0705-swizzle/diag-vtxstorage.log`). Tint
-  correctly decorates the read-only storage variables `NonWritable`, so
-  `vertexPipelineStoresAndAtomics=false` (which hasvk reports) does not apply — NonWritable
-  vertex-stage storage-image *reads* are spec-legal without that feature
-  (VUID-RuntimeSpirv-NonWritable-06341 governs writes, and it does not fire).
-- All cases pass on lavapipe with the identical yawgpu build; pre-existing across yawgpu fix
-  rounds (identical set on the pre-round-2 HAL). Attribution: hasvk vertex-stage
-  storage-image read defect (consistent with the GL-era Haswell
-  `GL_MAX_VERTEX_IMAGE_UNIFORMS=0` hardware posture, which core Vulkan cannot express).
-- **Expectations:** the failing subcase set is **nondeterministic run-to-run** (an
-  exact-set xfail list flipped between fail and xpass across consecutive `--workers 1`
-  runs), so `expectations/yawgpu-vulkan-intel-anv.txt` lists the **complete
-  `textureLoad:storage_textures_*` `stage="v"` class** (160 case queries, from
-  `--list-cases`): whichever subcases fail on a given run stay xfail and the rest
-  surface as xpass (benign — xpass does not affect the runner exit code; ~740 xpass at
-  `--workers 4`, fewer at `--workers 1`). Verified: the full textureLoad cluster is
-  deterministically `fail=0 rc=0` with this file while out-of-class regressions stay
-  visible. A future mass-xpass here means hasvk got fixed — then remove the block. The
-  stage-mixed cases (`textureDimensions:storage`, `textureNumLayers:storage`, ... —
-  the stage is a subcase parameter there) are NOT xfail'd — subcase granularity would
-  xpass the passing fragment/compute-stage subcases (F-145 precedent); they stay
-  visible (~585 fail records).
+**DRIVER DEFECT — NOT yawgpu** (hasvk / Intel Haswell, native Vulkan; found 2026-07-04, triaged 2026-07-05) — every `shader,execution,...,builtin,textureLoad:storage_textures_*` case with `stage="v"` fails (146 case queries, ~2,300 records at `--workers 1`): vertex-stage read-only storage-texture loads return 0/garbage; the same subcase class drives the per-stage-mixed `textureDimensions:storage`/`textureNumLayers` fails (~585 records). yawgpu is API-clean (zero VUID/validation lines on native ANV; Tint decorates the variables `NonWritable`, so hasvk's `vertexPipelineStoresAndAtomics=false` does not apply — NonWritable vertex-stage reads are spec-legal without it), and all cases pass on lavapipe. Attribution: hasvk vertex-stage storage-image read defect (consistent with Haswell's GL-era `GL_MAX_VERTEX_IMAGE_UNIFORMS=0`). The complete `textureLoad:storage_textures_*` `stage="v"` class (160 case queries) is xfail'd in `expectations/yawgpu-vulkan-intel-anv.txt` — the failing set is run-to-run nondeterministic so surviving members xpass benignly; the stage-mixed cases stay visible (subcase granularity, F-145 precedent).
+
+---
 
 ## F-149 — hasvk: alpha-to-coverage yields nonzero coverage at alpha <= 0 — Dawn-CONFIRMED driver/HW defect, NOT yawgpu
 
-- **Backend/host:** yawgpu native Vulkan, Linux / Intel Haswell (hasvk). Deterministic.
-- `api,operation,render_pipeline,sample_mask:alpha_to_coverage_mask:*` — 90 fail records /
-  30 fully-failing case queries ("alpha <= 0 result did not match zero coverage"). This is
-  the residual after yawgpu's 2026-07-04 MSAA fix rounds took the sample_mask cluster from
-  1,398 to 90; the `fragment_output_mask` subtree is fully green.
-- **yawgpu is API-clean** (zero validation-layer lines on native ANV,
-  `rerun-0705-swizzle/diag-alpha2cov.log`); passes on lavapipe.
-- **Dawn oracle CONFIRMS (2026-07-05):** the same CTS built against Dawn (`feature/tiled`
-  fork of upstream, `d25c666dec`, monolithic `libwebgpu_dawn.so`, Vulkan backend) on the
-  same host fails the **exact same 30 case queries with the exact same 90 fail records
-  and the identical message** — 0 yawgpu-only, 0 Dawn-only differences
-  (`rerun-0705-dawn-oracle/sample_mask.jsonl` vs `rerun-0705-clusters/sample_mask.jsonl`).
-  Two independent WebGPU implementations agreeing pins the defect to the shared layer:
-  Mesa hasvk / Haswell alpha-to-coverage hardware behavior. yawgpu exonerated; finding
-  closed as a host limitation.
-- **Expectations:** all 30 case queries xfail'd in `expectations/yawgpu-vulkan-intel-anv.txt`.
+**DRIVER/HW DEFECT — Dawn-CONFIRMED, NOT yawgpu** (hasvk / Intel Haswell, native Vulkan) — `api,operation,render_pipeline,sample_mask:alpha_to_coverage_mask:*` fails 90 records / 30 case queries ("alpha <= 0 result did not match zero coverage"; the residual after yawgpu's 2026-07-04 MSAA fix rounds took the cluster 1,398→90, `fragment_output_mask` fully green). yawgpu is API-clean and passes on lavapipe; the same CTS built against Dawn (Vulkan) on the same host fails the exact same 30 cases / 90 records with the identical message (0 yawgpu-only, 0 Dawn-only) — two independent implementations agreeing pins it to Mesa hasvk / Haswell alpha-to-coverage hardware. All 30 case queries xfail'd in `expectations/yawgpu-vulkan-intel-anv.txt`.
+
+---
 
 ## F-148 — hasvk: textureGather on rg32float/rg32uint/rg32sint selects wrong texels — driver-suspect, NOT yawgpu
 
-- **Backend/host:** yawgpu native Vulkan, Linux / Intel Haswell (hasvk). Deterministic.
-- All rg32* (8-byte texel) `textureGather` cases mismatch with plausible-but-wrong texel
-  values (a different texel gets selected, not garbage): 621 fail records in
-  `builtin,textureGather` plus 201 in `texture_view,texture_component_swizzle` — 822
-  records over 129 case queries, every one of them subcase-mixed (sibling offsets/components
-  pass). No other format width is affected.
-- **yawgpu is API-clean** (zero validation-layer lines, `rerun-0705-swizzle/diag-rg32gather.log`);
-  passes on lavapipe. Consistent with a Haswell 64-bit-texel gather selection quirk.
-  **Decision (2026-07-05): no further investigation on this host.** A Dawn-oracle gather run
-  was attempted but the Dawn build froze the machine at the start of the `builtin,textureGather`
-  cluster (a Dawn-on-hasvk hazard of its own; yawgpu runs the same cluster without freezing),
-  and the ANV host is not worth further freeze-risk digging. Attribution rests on the
-  validation-clean + lavapipe-pass evidence; the F-149 precedent (Dawn confirmed an identical
-  driver defect on this host) supports the driver attribution class.
-- **Expectations:** NOT xfail'd — all 129 case queries are subcase-mixed, so case-level
-  entries would generate hundreds of xpass records (F-145 precedent). Stays visible in
-  sweeps until a Dawn oracle or raw-Vulkan repro finalizes attribution.
+**DRIVER-SUSPECT — NOT yawgpu** (hasvk / Intel Haswell, native Vulkan) — all rg32* (8-byte texel) `textureGather` cases select a wrong-but-plausible texel: 621 records in `builtin,textureGather` + 201 in `texture_view,texture_component_swizzle` = 822 records / 129 case queries, every one subcase-mixed (sibling offsets/components pass); no other format width affected. yawgpu is API-clean and passes on lavapipe — consistent with a Haswell 64-bit-texel gather selection quirk. Decision (2026-07-05): no further investigation on this host (a Dawn-oracle gather run froze the machine at the `builtin,textureGather` cluster; attribution rests on validation-clean + lavapipe-pass evidence and the F-149 precedent). NOT xfail'd — all 129 cases are subcase-mixed (case-level entries → hundreds of xpass, F-145 precedent); stays visible until a Dawn/raw-Vulkan repro finalizes attribution.
+
+---
 
 ## F-147 — yawgpu created multisampled integer textures without a capability check (UB on hasvk); Haswell cannot do integer MSAA — yawgpu RESOLVED, cases remain host-limited
 
-- **Backend/host:** yawgpu native Vulkan, Linux / Intel Haswell (hasvk). Deterministic.
-  This is the 2026-07-04 sweep's "finding 4" (multisampled sint `textureLoad` → `queue
-  submit cannot use an error command buffer`, exclusively r8/rg8/rgba8/r16/rg16/rgba16 sint).
-- **Root cause (two layers):**
-  1. **Hardware:** hasvk reports `sampledImageIntegerSampleCounts = SAMPLE_COUNT_1_BIT` —
-     Haswell cannot sample multisampled integer images at all. WebGPU mandates
-     `sampleCount=4` support for these formats, so the cases are unimplementable on this
-     host (lavapipe supports 1|4, which is why they pass there).
-  2. **yawgpu defect (RESOLVED):** yawgpu called `vkCreateImage` with `samples=4` anyway —
-     invalid API usage (24× `VUID-VkImageCreateInfo-samples-02258` on the repro under the
-     validation layer). Fixed in yawgpu `37f6a70` (2026-07-05): texture creation now queries
-     `vkGetPhysicalDeviceImageFormatProperties` for the exact (format, type, tiling, usage,
-     flags) and returns a clean `HalError` naming the format and sample count. Re-verified
-     on native ANV: zero VUID lines; the cases now fail via a clean creation-time device
-     error instead of UB.
-- **Expectations:** the 24 fully-failing case queries (`textureLoad:multisampled` sint ×
-  stages, `textureDimensions` sint MSAA) are xfail'd in
-  `expectations/yawgpu-vulkan-intel-anv.txt` as a host hardware limitation. The 6
-  `texture_component_swizzle:read_swizzle` sint×textureLoad cases carry the same signature
-  but only their `texture_multisampled_2d` input subcases fail (57 of 114 per case) — NOT
-  xfail'd (subcase granularity, F-145 precedent).
+**RESOLVED in yawgpu (`37f6a70`, 2026-07-05); cases remain host-limited** (hasvk / Intel Haswell, native Vulkan) — multisampled sint `textureLoad` errored `queue submit cannot use an error command buffer` (r8/rg8/rgba8/r16/rg16/rgba16 sint). Two layers: (1) hasvk reports `sampledImageIntegerSampleCounts=SAMPLE_COUNT_1_BIT` — Haswell cannot sample multisampled integer images, so the cases are unimplementable on this host (lavapipe supports 1|4, hence passes); (2) yawgpu called `vkCreateImage` with `samples=4` anyway (24× `VUID-VkImageCreateInfo-samples-02258`) — now fixed: texture creation queries `vkGetPhysicalDeviceImageFormatProperties` and returns a clean `HalError` instead of UB. The 24 fully-failing case queries are xfail'd in `expectations/yawgpu-vulkan-intel-anv.txt` (host HW limitation); the 6 `texture_component_swizzle:read_swizzle` sint×textureLoad cases are subcase-mixed → NOT xfail'd (F-145 precedent).
+
+---
 
 ## F-146 — harness: POSIX `--workers` fork-without-exec breaks concurrent Metal children (backend-independent fake fails) — RESOLVED
 
-- **RESOLVED** (`401108c`, 2026-07-03): POSIX workers now `fork`+`execv` (mirroring the
-  `--isolate` child) and load the parent's ordered case plan (`--case-plan`, the phaseW4
-  mechanism) — no re-enumeration. Verified: `command_buffer,*` `--workers 2` =
-  170,202/0 (was fail=314); `immediate` `--workers 6` = 252/0 on yawgpu **and** Dawn;
-  `kill -9` of a worker mid-run → 1 contained case-level `crash`, respawned worker
-  completes the remainder. **Full yawgpu/Metal re-sweep at `--workers 6` (2026-07-03)
-  is clean across all four areas** — 1,991,818 pass / 104,493 skip / 2 fail (the known
-  port-oracle pair) / 0 crash, with zero `MTLCompilerService` incidents — so parallel
-  sweep numbers are authoritative again.
-- **Harness defect (ours), not a backend finding.** `--workers N` (N >= 2) on macOS
-  mass-fails cases that are serial-green, `--workers 1`-green, and green when the same
-  shard halves run as concurrently launched standalone processes. Every failure is the
-  downstream `queue submit cannot use an error command buffer`. Reproduced on **yawgpu
-  and the Dawn oracle identically** (yawgpu bisection: yawgpu `490743e` — `immediate`
-  252/252 under workers, `sample_mask` ~500–666, `texture_component_swizzle` 6.8k–9.3k
-  nondeterministic, `labels` ~8; all serial-green on both backends).
-- Isolation (yawgpu/Metal, `webgpu:api,operation,command_buffer,*`): fork workers
-  `--workers 2` → fail=314; standalone `--shard 0/2` → 85134/0; both shards standalone
-  **concurrent** → 0 fail. So neither ordering nor GPU contention — the delta is the
-  spawn mechanism.
-- Cause: `phaseW3-fork-worker-no-reenum.md` made POSIX workers `fork()` **without
-  exec**; its "parent never initializes WebGPU/Metal" safety precondition is invalid on
-  macOS (framework/ObjC state initialized at dyld load in the parent is inherited; >= 2
-  forked children doing concurrent Metal work misbehave; Apple does not support system
-  frameworks between fork and exec). One child (`--workers 1`) happens to work.
-- Consequence: all historical macOS `--workers >= 2` non-isolate fail counts (including
-  the compile-canary spec's "75k–92k fake fails under workers" measurements) are
-  dominated by this harness artifact; skip counts remain reliable.
-- Fix task: `specs/fix-posix-worker-fork-exec.md` — return POSIX workers to
-  fork+`execv` and reuse the phaseW4 `--case-plan` mechanism (already proven on
-  Windows, `e19b37d`) so the phaseW3 re-enumeration cost does not come back.
+**RESOLVED** (`401108c`, 2026-07-03) — harness defect (ours), not a backend finding. POSIX `--workers N` (N>=2) on macOS mass-failed serial-green / `--workers 1`-green cases because `phaseW3` made workers `fork()` **without exec** — Apple frameworks/ObjC state initialized at dyld load in the parent misbehaves across >=2 concurrent forked Metal children (reproduced on yawgpu **and** the Dawn oracle identically; every failure the downstream `queue submit cannot use an error command buffer`). Fix returns POSIX workers to `fork`+`execv` and loads the parent's ordered `--case-plan` (no re-enumeration, proven on Windows `e19b37d`). Full yawgpu/Metal re-sweep at `--workers 6` is clean (1,991,818 pass / 104,493 skip / 2 known port-oracle fail / 0 crash, zero `MTLCompilerService` incidents) — parallel sweep numbers authoritative again. All historical macOS `--workers>=2` non-isolate fail counts were dominated by this artifact; skip counts were always reliable.
+
+---
 
 ## F-145 — yawgpu: immediate-data set-state under-validated (`pipeline_immediate`) — native Vulkan (Dawn-confirmed real defect) — RESOLVED
 
-- **RESOLVED** (yawgpu `80bab07`, immediates required-slots + executeBundles-invalidation
-  fix, 2026-07-03; verified Windows / NVIDIA RTX 5060 Ti). The fix reflects the pipeline's
-  statically-used immediate words as a per-4-byte-word REQUIRED mask (via Tint's
-  `GetImmediateBlockInfo`, excluding struct padding), stores it on the render/compute
-  pipeline, checks `(written & required) == required` at draw/dispatch (encoder-
-  invalidating validation error on shortfall), and clears the pass's immediate
-  written-state on `executeBundles`. Re-run:
-  `webgpu:api,validation,encoding,programmable,pipeline_immediate:*` on yawgpu native
-  Vulkan = **181/181 (fail=0 crash=0)**, byte-identical to the Dawn oracle. No
-  regression: `setImmediates` 378/0, operation `immediate` 252/0, `pipeline,immediates`
-  30/0, `api,operation,render_pass` 70/0, `encoding,render_bundle` 113/0. yawgpu-core
-  unit tests 439/0 (new required-slots / unused-variable / padding-excluded /
-  executeBundles-invalidation coverage).
-
-- **Was** (surfaced 2026-07-03 on Windows / NVIDIA RTX 5060 Ti after un-stubbing
-  `api,validation,encoding,programmable,pipeline_immediate` — the port was stubbed
-  when no backend exported `wgpuXxxSetImmediates`; yawgpu Block 94 now does, so the
-  stub was lifted). yawgpu's brand-new immediate-data (push-constant) implementation
-  **accepts encoder state the WebGPU spec requires be rejected**. Two sub-behaviors,
-  both "expected validation error, got none":
-  - **`required_slots_set` / `usage="partial"` (42 subcases)** — when a pipeline
-    statically uses an immediate-data variable, every required 4-byte slot must be
-    set via `setImmediates` before draw/dispatch. yawgpu does not enforce
-    completeness: a partial set (missing required bytes) is wrongly accepted at
-    finish/submit. All encoderTypes (compute pass / render pass / render bundle),
-    all scenarios (scalar, vector, struct_padding, dynamic_indexing, mixed_types,
-    multiple_variables), all stages.
-  - **`render_bundle_execution_state_invalidation` (1 case, the `resetImmediates=false`
-    subcase)** — `executeBundles` must invalidate the render pass's current
-    immediate-data state; yawgpu leaves it valid, so a draw after `executeBundles`
-    without re-setting immediates is wrongly accepted.
-- **Dawn oracle confirms it is a real yawgpu defect, not a CTS port-oracle bug.**
-  The same un-stubbed spec rebuilt against Dawn passes the full test **181/181
-  (fail=0)**, including every `usage="partial"` case and both
-  `render_bundle_execution_state_invalidation` subcases. yawgpu = `pass=138 fail=43
-  crash=0`. Since Dawn (the reference impl) rejects exactly what yawgpu accepts, the
-  port is correct and the gap is in yawgpu's immediate-data validation layer (not
-  naga/Tint — this is set-state validation, distinct from the resolved F-064 which
-  was WGSL frontend errors on immediate-data modules).
-- **Fix is in yawgpu** (add the required-slots-complete check + the executeBundles
-  immediate-state invalidation). Not yet `xfail`'d in
-  `expectations/yawgpu-vulkan.txt`: the 42 `partial` cases are cleanly xfailable
-  (one case each), but `render_bundle_execution_state_invalidation` runs both
-  subcases under a single `:*` case query (subcase-granularity), so xfailing it
-  would xpass the passing `resetImmediates=true` subcase — hence fixing yawgpu is the
-  clean resolution rather than masking. The un-stub itself is correct and stays.
+**RESOLVED** (yawgpu `80bab07`, 2026-07-03; Windows / NVIDIA RTX 5060 Ti) — real yawgpu immediate-data (push-constant) set-state under-validation, Dawn-confirmed. After un-stubbing `api,validation,encoding,programmable,pipeline_immediate` (yawgpu Block 94 now exports `SetImmediates`), yawgpu accepted encoder state the spec requires be rejected: (1) `required_slots_set`/`usage="partial"` (42 subcases) — a partial immediate set missing required 4-byte slots was wrongly accepted at finish/submit; (2) `render_bundle_execution_state_invalidation` (1) — `executeBundles` didn't invalidate the pass's immediate state. Dawn passed the un-stubbed spec 181/181 (yawgpu was 138/43), confirming a real yawgpu gap not a port-oracle bug. Fix reflects the pipeline's statically-used immediate words as a per-word REQUIRED mask (Tint `GetImmediateBlockInfo`), checks `(written & required)==required` at draw/dispatch, and clears immediate state on `executeBundles`: re-run 181/181 byte-identical to Dawn, no regression (yawgpu-core unit tests 439/0).
 
 ---
 
 ## F-144 — CTS-harness gap: three `shader/execution` language-feature gates compiled out on non-Dawn builds (427 subcases skipped vs Dawn) — RESOLVED, not a yawgpu defect
 
-- **Backend/host:** yawgpu native **Metal**, Apple M2 (macOS). Deterministic (skip-vs-run divergence,
-  not a fail). Found 2026-07-02 while attributing the residual whole-suite skip delta vs Dawn
-  (105,394 vs 104,942): per-area, `shader/execution` accounted for 427 of the 452 subcases.
-- **What:** three exec spec files query a WGSL language feature to decide whether their gated cases
-  run, but wrapped the query in `#if defined(CTS_BACKEND_DAWN)` with a hard `return false` fallback,
-  on the (stale) premise that only Dawn's lib exports `wgpuInstanceHasWGSLLanguageFeature` / defines
-  the enum values. yawgpu exports the query and its `webgpu-headers/webgpu.h` defines the needed
-  values, and it advertises all three features — so the gated cases skipped on yawgpu while Dawn ran
-  them:
-  - `expression/access/array/index.spec.cpp` — `uniform_buffer_standard_layout` (12 subcases)
-  - `expression/call/user/ptr_params.spec.cpp` — `unrestricted_pointer_parameters` (85 subcases)
-  - `expression/unary/address_of_and_indirection.spec.cpp` — `pointer_composite_access` (330 subcases)
-- **Fix (harness):** gate on `#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)` so both
-  robust backends query the real instance-level answer; wgpu-native (which genuinely lacks the
-  export) keeps the unsupported fallback. Same class as **F-143** (harness under-modeled yawgpu's
-  language-feature surface; yawgpu itself was correct and unchanged).
-- **Verification (real Metal, post-fix):** yawgpu `index` 226/0, `ptr_params` 121/0,
-  `address_of_and_indirection` 780/0 — pass counts and skip=0 **byte-identical to the Dawn build**
-  (re-run same day); `fail=0 crash=0` on all newly-unskipped subcases. `parse,requires` stays 26/0.
-  `statement/swizzle_assignment` (kept gated: the feature is unsafe-experimental in Tint and yawgpu's
-  header has no enum value) skips 162 on **both** backends — no delta.
-- **Not fixed here (both-backend skips, no Dawn delta):** `memory_layout` / `memory_model` runtime-skip
-  their `uniform_buffer_standard_layout` subcases on Dawn too; `compute_builtins`
-  `subgroup_size_attribute` needs Dawn-only `WGPUFeatureName_SubgroupSizeControl`. The remaining
-  whole-suite delta (`api/validation` net 28 Dawn-more, `api/operation` net 3 yawgpu-more) is
-  unattributed pending a case-level diff; the whole-suite tables predate this fix.
-- **Status:** RESOLVED (CTS-harness gap, not a yawgpu defect), 2026-07-02.
+**RESOLVED** (CTS-harness gap, not a yawgpu defect; 2026-07-02) — yawgpu native Metal, Apple M2. Three `shader/execution` spec files gated a WGSL language-feature query behind `#if defined(CTS_BACKEND_DAWN)` with a hard `return false` fallback, so their cases skipped on yawgpu while Dawn ran them (427 subcases: `array/index` uniform_buffer_standard_layout 12, `ptr_params` unrestricted_pointer_parameters 85, `address_of_and_indirection` pointer_composite_access 330) — yawgpu actually exports the query and advertises all three features. Fix gates on `CTS_BACKEND_DAWN || CTS_BACKEND_YAWGPU` (wgpu-native keeps the fallback); post-fix pass counts byte-identical to Dawn with `fail=0` on all newly-unskipped subcases. Same class as F-143 (harness under-modeled yawgpu's language-feature surface; yawgpu unchanged).
 
 ---
 
 ## F-143 — CTS-harness gap: non-Dawn `hasLanguageFeature` lacked a subgroup probe (14 cases) — RESOLVED, not a yawgpu defect
 
-- **Backend/host:** yawgpu native **Metal**, Apple M2 (macOS), yawgpu `3a30443`. Reliable (validation,
-  deterministic), not flaky. Sweep 2026-07-02.
-- **Newly exposed:** these cases only run now that yawgpu **exposes the `subgroups` feature** (the recent
-  real-limits/subgroups update). Under the earlier baseline they were skipped, so the suite reported
-  `fail=0`; the wider coverage surfaced the gap. yawgpu shares Dawn's **Tint** frontend, so the shader
-  compiles identically — the divergence is in how yawgpu drives Tint's validation.
-- **Found by (14 fails, all "expected a validation error for invalid shader, got none"):**
-  - `shader,validation,parse,requires:wgsl_matches_api` — `feature="subgroup_id"`, `feature="subgroup_uniformity"`
-    (2). A `requires subgroup_id;` / `requires subgroup_uniformity;` directive for a feature the API has
-    **not** enabled must be a validation error; yawgpu raises none.
-  - `shader,validation,uniformity,uniformity:uniform_subgroup_ops` `scope="subgroup"` (12) — a subgroup
-    builtin (`subgroupAdd`, `subgroupMul`, `subgroupMax`, `subgroupMin`, `subgroupAll`, `subgroupAny`,
-    `subgroupAnd`, `subgroupOr`, `subgroupXor`, `subgroupBallot`, `subgroupBroadcast`,
-    `subgroupBroadcastFirst`) reached under **non-uniform** control flow must be a uniformity validation
-    error; yawgpu accepts it.
-- **Re-attribution (2026-07-02): NOT a yawgpu defect — a CTS-harness gap.** The "Dawn passes / yawgpu
-  fails" split is a harness code-path artifact, not a real divergence. This suite's
-  `ShaderValidationTest::hasLanguageFeature` (`src/webgpu/shader/validation/shader_validation_test.h`)
-  sets the *expected* compile result and has two paths: the Dawn build queries the real
-  `wgpuInstanceHasWGSLLanguageFeature` (→ true for `subgroup_id`/`subgroup_uniformity`), while the
-  **non-Dawn (yawgpu) path behaviorally trial-compiles a canonical snippet per feature — and had NO
-  case for `subgroup_id`/`subgroup_uniformity`, so it hit the `else` and returned `false`.** That false
-  turned both tests' expectations upside down: `requires:wgsl_matches_api` expected `requires subgroup_*;`
-  to fail (yawgpu correctly compiles it → "got none"), and `uniform_subgroup_ops` computed
-  `isUniform=false` so it expected an error on a shader yawgpu correctly accepts. yawgpu reports both WGSL
-  language features unconditionally and drives Tint's uniformity analysis **identically to Dawn** (same
-  compiler) — it is correct.
-- **Disposition:** **RESOLVED in the harness** (yawgpu unchanged). Added `subgroup_id` /
-  `subgroup_uniformity` `requires`-directive probes to the non-Dawn `hasLanguageFeature` path (mirroring
-  the existing `linear_indexing` / `texture_formats_tier1` probes). After rebuild: `requires:wgsl_matches_api`
-  11/0 (was 9/2), `uniform_subgroup_ops` 52/0 (was 40/12); whole `uniformity` tree 181031/0, whole
-  `parse,requires` 26/0 — no regression. yawgpu-Metal returns to byte-identical-to-Dawn on these trees.
-- **Status:** RESOLVED (CTS-harness gap, not a yawgpu defect), 2026-07-02.
+**RESOLVED** (CTS-harness gap, not a yawgpu defect; 2026-07-02) — yawgpu native Metal, Apple M2. Newly exposed once yawgpu exposed the `subgroups` feature: 14 cases failed "expected a validation error, got none" (`parse,requires:wgsl_matches_api` subgroup_id/subgroup_uniformity 2; `uniformity:uniform_subgroup_ops` scope="subgroup" 12). Root cause was the suite's non-Dawn `hasLanguageFeature` probe having **no case for `subgroup_id`/`subgroup_uniformity`** → returned false → inverted both tests' expected results; yawgpu drives Tint's uniformity analysis identically to Dawn and is correct. Fix adds the missing probes to the non-Dawn path: `requires:wgsl_matches_api` 11/0, `uniform_subgroup_ops` 52/0, no regression; yawgpu unchanged.
 
 ---
 
 ## F-142 — yawgpu Metal advertises supported limits it then rejects on `requestDevice` (5 cases)
 
-- **Backend/host:** yawgpu native **Metal**, Apple M2 (macOS), yawgpu `3a30443`. Reliable (validation,
-  deterministic), not flaky. Sweep 2026-07-02.
-- **Newly exposed:** introduced by yawgpu's recent **real hardware-limit reporting** (Block 92). The
-  adapter now advertises real Metal maxima, but requesting one of them at `requestDevice` time fails an
-  internal cross-limit check.
-- **Found by (5 fails, `api,operation,adapter,requestDevice:limits,supported:limit="…"`, each *"requestDevice
-  should succeed"* but errored):**
-  - `maxUniformBufferBindingSize` — *"required max_uniform_buffer_binding_size exceeds max_buffer_size"*
-  - `maxStorageBufferBindingSize` — *"required max_storage_buffer_binding_size exceeds max_buffer_size"*
-  - `maxComputeWorkgroupSizeX` / `…Y` / `…Z` — *"required max_compute_workgroup_size_{x,y,z} exceeds
-    max_compute_invocations_per_workgroup"*
-- **Root cause (hypothesis):** the `limits,supported` case requests a device requiring a single limit at
-  its **advertised supported (adapter-max)** value with the other limits left at default. yawgpu's
-  device-creation validation then compares that value against a *default* companion limit
-  (`maxBufferSize`, `maxComputeInvocationsPerWorkgroup`) rather than the adapter-supported one and rejects
-  a set it advertised as supported — the advertised maxima are mutually inconsistent under yawgpu's own
-  validation.
-- **Cross-check (attribution):** **Dawn passes all 5 on the same M2** (`fail=0` — verified this sweep). ⇒
-  **real yawgpu defect**, not a CTS-port-oracle quirk.
-- **Disposition:** **RESOLVED in yawgpu** (commit `e7eba41`). Root cause was real: yawgpu's
-  `validate_required_limit_relationships` rejected a singly-raised supported limit against a *default*
-  companion. `maxUniform/StorageBufferBindingSize` vs `maxBufferSize` and `maxComputeWorkgroupSize{X,Y,Z}`
-  vs `maxComputeInvocationsPerWorkgroup` are NOT requestDevice constraints in WebGPU (buffer-fit is a
-  per-binding bind-time check; the per-axis/product workgroup rule is enforced at `createComputePipeline`).
-  Dropped the 5 rejection branches; the device now reports the requested (adapter-validated) values verbatim.
-  After fix: `requestDevice:limits,supported` 105/0 (was 5 fail), full `requestDevice` 289/0,
-  `capability_checks,limits` unchanged 9290/1795/0.
-- **Status:** RESOLVED in yawgpu (`e7eba41`), 2026-07-02.
+**RESOLVED in yawgpu** (`e7eba41`, 2026-07-02) — real yawgpu defect (Dawn-confirmed), native Metal / Apple M2. Introduced by yawgpu's real hardware-limit reporting: the adapter advertised real Metal maxima but `requestDevice:limits,supported` rejected 5 of them (`maxUniform/StorageBufferBindingSize` vs `maxBufferSize`, `maxComputeWorkgroupSize{X,Y,Z}` vs `maxComputeInvocationsPerWorkgroup`) — `validate_required_limit_relationships` compared a singly-raised supported limit against a *default* companion. These are not requestDevice constraints in WebGPU (buffer-fit is a bind-time check; the workgroup rule is enforced at `createComputePipeline`); Dawn passed all 5 on the same M2. Fix drops the 5 rejection branches: `requestDevice:limits,supported` 105/0.
 
 ---
 
 ## F-141 — `memory_model,coherence:corr` (atomic_storage, intra_workgroup) — NVIDIA HW weak behavior, NOT yawgpu
 
-- **Backend/host:** yawgpu native Vulkan **and Dawn**, NVIDIA RTX 5060 Ti (Windows). Reliable (4/4 on
-  each), not flaky.
-- **Found by:** `shader,execution,memory_model,coherence:corr` — **1 fail**,
-  `memType="atomic_storage";testType="intra_workgroup"`: *"memory model test failed … (disallowed weak
-  behavior observed)"* — `testResults[3] != 0` (e.g. yawgpu behaviors `[951,6897,0,2136]`, Dawn
-  `[263,9587,0,134]`). The other 5 `corr` cases pass.
-- **Cross-check (attribution):** **Dawn (the reference impl) fails the SAME case identically on the SAME
-  GPU** (the counts differ because it is a statistical stress test, but both reliably observe the
-  disallowed weak behavior). ⇒ **NOT a yawgpu defect** and **not** a CTS-port oracle bug — this NVIDIA
-  GPU/driver reliably exhibits a storage-atomic intra-workgroup memory-ordering relaxation that WebGPU's
-  memory model disallows. Same posture as F-085/F-139 (config-level, all impls agree).
-- **Distinct from F-112** (`atomic_WORKGROUP` corr — a real yawgpu `Restrict`-bounds defect, RESOLVED
-  `b602ff2`). This is `atomic_STORAGE`, and yawgpu == Dawn.
-- **Not changed by yawgpu `bd21cfb`** (the `VK_KHR_vulkan_memory_model` enablement): failed before and
-  after — it is a hardware/driver memory-model property, not a robustness/memory-model-output toggle.
-- **Disposition:** `xfail` on yawgpu-vulkan with rationale (likely a known NVIDIA memory-model stress
-  sensitivity / driver conformance gap). Revisit if the upstream CTS `corr` tuning or the NVIDIA driver
-  changes; drop the entry if it starts passing (xpass).
-- **Status:** xfail — not a yawgpu defect (Dawn-confirmed), 2026-06-28.
+**xfail — NOT a yawgpu defect (Dawn-confirmed), 2026-06-28** — NVIDIA RTX 5060 Ti (Windows), yawgpu native Vulkan and Dawn. `shader,execution,memory_model,coherence:corr` — 1 fail, `memType="atomic_storage";testType="intra_workgroup"` ("disallowed weak behavior observed", `testResults[3]!=0`). Dawn (the reference impl) fails the same case identically on the same GPU (counts differ — it's a statistical stress test), so this is an NVIDIA storage-atomic intra-workgroup memory-ordering relaxation that WebGPU disallows, not a yawgpu or port-oracle bug (distinct from F-112's resolved `atomic_workgroup` `Restrict`-bounds defect; unchanged by yawgpu `bd21cfb`). `xfail` on yawgpu-vulkan; drop if it starts passing (xpass).
 
 ---
 
@@ -469,66 +218,7 @@ Skipped — never assigned. The sequence runs F-138 → F-139 → **F-141**; no 
 
 ## F-137 — zero-dimension compute dispatch hard-wedges ANV-Haswell (whole-machine freeze; NOT yawgpu)
 
-**Backend/host:** Linux, Intel Iris 5100 / **Haswell GT3**, Mesa ANV (`MESA-INTEL: warning: Haswell
-Vulkan support is incomplete`), VT-d on. **Found by:** `api,validation,encoding,cmds,compute_pass`
-during the 2026-06-25 Linux/Vulkan full sweep — the box froze *immediately* on that file (file 129),
-twice, with **no DMAR fault and no kernel log** (a clean GPU wedge, unlike F-126's IOMMU DMA-write).
-
-**Root cause (confirmed in pure Vulkan, yawgpu EXONERATED):** a `vkCmdDispatch` whose workgroup
-count has a **zero in any dimension** — e.g. `(1,0,0)` — hard-wedges the Haswell GPU. Haswell has no
-working GPU reset, so the hang is unrecoverable → whole-machine freeze (manual reboot). A normal
-`(1,1,1)` dispatch is fine.
-
-- **CTS path:** `compute_pass:dispatch_sizes` expands subcases over `smallDimValue ∈ {0,1}`, so its
-  first executed dispatch is always zero-dim (`(1,0,0)`, `(0,1,0)`, …). Per-case bisection
-  (`cp-bisect.sh`) froze on the first `dispatch_sizes` dispatch every time, on *different* `lv_*`
-  params — i.e. it is the zero dimension, not a specific size, and `shader,execution,zero_init`
-  (a normal `(1,1,1)` dispatch) passes immediately before it.
-- **Standalone proof (`cp_repro.c`, hand-written no-op SPIR-V, no yawgpu/naga):** `cp_repro 1 1 1`
-  completes cleanly; **`cp_repro 1 0 0` freezes the box at `vkQueueWaitIdle`** (last sync'd line on
-  disk). Pure-Vulkan reproduction ⇒ the defect is **Mesa ANV / Haswell**, not yawgpu. Per the Vulkan
-  spec a zero-dim dispatch is valid and a no-op; ANV-Haswell mishandles it.
-- **Cross-host control (Windows / NVIDIA RTX 5060 Ti, yawgpu Vulkan, 2026-06-26):** the same
-  `compute_pass:dispatch_sizes:*` (incl. the zero-dim `lv_mult=0;lv_add=0` subcases that wedge Haswell)
-  runs `--isolate` `pass=12 fail=0 crash=0` with **no freeze** — the zero-dim dispatch is handled as a
-  correct no-op. Confirms the wedge is **Mesa ANV/Haswell-specific**, not yawgpu and not zero-dim
-  dispatch in general (a GPU with working reset/TDR is unaffected).
-
-**Status:** driver/HW defect — not fixable in yawgpu or the CTS (the test is legitimate). Mitigations:
-(a) quarantine `compute_pass` on this host (`run-linux-vulkan/full-0625/quarantine.txt`) so the sweep
-survives; (b) an *optional* yawgpu/wgpu-level workaround would be to skip submission when any dispatch
-dimension is 0 (semantically a no-op), sidestepping the ANV-Haswell wedge. Repro artifacts (git-ignored):
-`run-linux-vulkan/{cp_repro.c,cp_repro.comp,cp_repro_build.sh,cp-bisect.sh}`.
-
-**2026-07-05 update — direct dispatches fixed, INDIRECT zero-dim still wedges.** yawgpu `dfcf93a`
-implemented mitigation (b) for *direct* dispatches (CPU-side early-out on any zero workgroup count;
-indirect dispatches were deliberately left untouched — their dims live in a GPU buffer and cannot be
-pre-checked on the CPU). A supervised re-try of the quarantined `compute_pass` file froze the box
-immediately (rebooted; empty `rerun-0705-zerodim/`). `compute_pass:dispatch_sizes` combines
-`dispatchType ∈ {direct, indirect}` over the same zero-dim sizes, so with direct dispatches now
-skipped the first executed **`vkCmdDispatchIndirect` with a zero dimension** is the trigger — the
-ANV-Haswell wedge covers indirect zero-dim dispatches too. Consequences:
-- **Both files stay quarantined on this host** (`compute_pass`, `pipeline_bind_group_compat` — the
-  latter's `doCall()` also runs an indirect variant), and so does any future file that submits an
-  indirect zero-dim dispatch.
-- A durable yawgpu-side avenue exists: hasvk exposes `VK_EXT_conditional_rendering` (rev 2), which
-  predicates `vkCmdDispatchIndirect` — a tiny pre-pass could write `pred = (x && y && z)` from the
-  indirect args and wrap the dispatch in a conditional block, so a zero-dim indirect dispatch is
-  culled before reaching the broken hardware path. Whether the predicate cull happens early enough
-  on hasvk to dodge the wedge is unverified (testing it is itself a freeze-risk supervised run).
-  Tracked in yawgpu `specs/tracking/cts-full-sweep-0704-native-vulkan.md`. **Decision
-  (2026-07-05): not implemented — permanent quarantine.** The complexity plus the freeze-risk
-  verification run were judged not worth it for one EOL GPU (Mesa labels Haswell Vulkan support
-  incomplete). F-137 is closed as a permanent host limitation; the two files stay quarantined in
-  every sweep on this host.
-
-**Linux freeze landscape (so a future sweep stays survivable — both are host/driver, not yawgpu):**
-- **F-137 compute_pass zero-dim dispatch** — *immediate*, deterministic, no DMAR. Quarantined.
-- **F-126 copy OOB DMA write** — *load-dependent*: `copyTextureToTexture`+`image_copy` run clean cold
-  even at workers 1–8 (verified 2026-06-25: `image_copy` ×5, 692k subcases, only 3 survivable DMAR
-  faults), but a long *warm* session accumulates i915/IOMMU state until `image_copy` storms (~8 DMAR
-  faults in ~40 s) and freezes. Quarantined for warm sweeps; cold results are clean
-  (`copyTextureToTexture pass=31126 fail=0`, `image_copy pass=138408 fail=0`).
+**DRIVER/HW DEFECT — NOT yawgpu; permanent quarantine (closed 2026-07-05)** — Linux / Intel Iris 5100 (Haswell GT3), Mesa ANV. A `vkCmdDispatch` with a zero in any workgroup dimension (e.g. `(1,0,0)`) hard-wedges the Haswell GPU (no working GPU reset → unrecoverable whole-machine freeze); a standalone hand-written-SPIR-V repro (`cp_repro 1 0 0` freezes at `vkQueueWaitIdle`, `1 1 1` clean) proves it's Mesa ANV/Haswell, not yawgpu/naga (a zero-dim dispatch is spec-valid and a no-op; Windows/NVIDIA handles it fine). `compute_pass:dispatch_sizes` always issues a zero-dim dispatch first, so the file froze the box on the 2026-06-25 sweep. yawgpu `dfcf93a` added a CPU-side early-out for *direct* zero-dim dispatches, but the 2026-07-05 re-try still froze — the first executed *indirect* zero-dim `vkCmdDispatchIndirect` (dims live in a GPU buffer, un-pre-checkable) wedges too. Decision (2026-07-05): the `VK_EXT_conditional_rendering` predication workaround plus its freeze-risk verification aren't worth it for one EOL GPU (Mesa labels Haswell Vulkan support incomplete) — F-137 closed as a permanent host limitation; `compute_pass` and `pipeline_bind_group_compat` stay quarantined in every sweep on this host. (Separate load-dependent warm-session freeze on this host: F-126 copy OOB DMA write, also quarantined for warm sweeps; cold results clean.)
 
 ---
 
