@@ -174,7 +174,7 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
   xpass the passing fragment/compute-stage subcases (F-145 precedent); they stay
   visible (~585 fail records).
 
-## F-149 — hasvk: alpha-to-coverage yields nonzero coverage at alpha <= 0 — driver-suspect, NOT yawgpu
+## F-149 — hasvk: alpha-to-coverage yields nonzero coverage at alpha <= 0 — Dawn-CONFIRMED driver/HW defect, NOT yawgpu
 
 - **Backend/host:** yawgpu native Vulkan, Linux / Intel Haswell (hasvk). Deterministic.
 - `api,operation,render_pipeline,sample_mask:alpha_to_coverage_mask:*` — 90 fail records /
@@ -182,9 +182,15 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
   the residual after yawgpu's 2026-07-04 MSAA fix rounds took the sample_mask cluster from
   1,398 to 90; the `fragment_output_mask` subtree is fully green.
 - **yawgpu is API-clean** (zero validation-layer lines on native ANV,
-  `rerun-0705-swizzle/diag-alpha2cov.log`); passes on lavapipe. Haswell hardware
-  alpha-to-coverage behavior suspected. A Dawn-oracle run on this host would finalize the
-  attribution but Dawn is not built here yet.
+  `rerun-0705-swizzle/diag-alpha2cov.log`); passes on lavapipe.
+- **Dawn oracle CONFIRMS (2026-07-05):** the same CTS built against Dawn (`feature/tiled`
+  fork of upstream, `d25c666dec`, monolithic `libwebgpu_dawn.so`, Vulkan backend) on the
+  same host fails the **exact same 30 case queries with the exact same 90 fail records
+  and the identical message** — 0 yawgpu-only, 0 Dawn-only differences
+  (`rerun-0705-dawn-oracle/sample_mask.jsonl` vs `rerun-0705-clusters/sample_mask.jsonl`).
+  Two independent WebGPU implementations agreeing pins the defect to the shared layer:
+  Mesa hasvk / Haswell alpha-to-coverage hardware behavior. yawgpu exonerated; finding
+  closed as a host limitation.
 - **Expectations:** all 30 case queries xfail'd in `expectations/yawgpu-vulkan-intel-anv.txt`.
 
 ## F-148 — hasvk: textureGather on rg32float/rg32uint/rg32sint selects wrong texels — driver-suspect, NOT yawgpu
