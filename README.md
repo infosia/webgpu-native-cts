@@ -268,33 +268,29 @@ non-authoritative coverage (artifacts **F-104**, **F-139**), green on native har
 > the Metal/Vulkan tables above. Run raw (no `--expectations`) on `crocus` — Mesa's **native** GLES driver
 > for Haswell (native ES, closer to an Android device than to ANGLE's ES→D3D/Vulkan translation).
 
-| area | pass | skip | fail | crash |
-|------|------:|-----:|-----:|------:|
-| `api/validation` (124§) | 194,805 | 157,163 | 347 | 0 |
-| `api/operation` (67) | 132,831 | 76,698 | 19,932 | 0 |
-| `shader/execution` (239) | 217,273 | 516,424 | 100,965 | 2¶ |
-| `shader/validation` (207) | 369,753 | 297,389 | 0 | 0 |
-| **total** | **914,662** | **1,047,674** | **121,244** | **2¶** |
+| area | pass | skip | fail | crash | swept on |
+|------|------:|-----:|-----:|------:|:--------:|
+| `api/validation` (124§) | 194,805 | 157,163 | 347 | 0 | `a94ab06` |
+| `api/operation` (67) | 132,831 | 76,698 | 19,932 | 0 | `a94ab06` |
+| `shader/execution` (239) | 308,373 | 516,424 | **10,129** | 0 | **`15a9ddb`** |
+| `shader/validation` (207) | 369,753 | 297,389 | 0 | 0 | `a94ab06` |
+| **total** | **1,005,762** | **1,047,674** | **30,408** | **0** | |
 
-Swept 2026-07-06 on yawgpu `a94ab06` (`--workers 2`, one process at a time — the host is a thermally
-constrained Haswell laptop). `shader/validation` is **fully clean** (`fail=0`): the WGSL→GLSL-ES path is
-Tint, the same compiler as the Dawn oracle, so validation matches by construction. `api/validation` is at
-**347** (down from **24,553** at the start of the GLES CTS campaign) after reporting truthful GL-queried
-adapter limits + only backable features, mapping the GLES-3.1 renderable/storage format sets, and
-implementing multiple bind groups, MSAA, storage textures, and copy-correctness; the residual is catalogued
-Tier-2 gaps (cube-array, stencil readback, `>1` bind-group edge cases). `api/operation` (19,932) and
-`shader/execution` (100,965) are the active bring-up front — dominated by texture-sampling value correctness
-(`textureGather`/`textureSampleLevel`) and remaining copy edge cases; see
-[yawgpu `specs/blocks/67-gles-backend.md`](https://github.com/infosia/yawgpu) mapping matrix and its
+`shader/execution` re-swept 2026-07-06 on yawgpu `15a9ddb`; the other three areas are from the earlier
+`a94ab06` sweep. `--workers 2`, one process at a time. `shader/validation` is fully clean (the WGSL→GLSL-ES
+path is Tint, the same compiler as the Dawn oracle). The remaining `shader/execution` residual is dominated
+by catalogued Tier-2 boundaries — raw (non-comparison) depth-texture reads and GLES hardware/spec limits
+(vertex-stage storage images, `rg32` storage formats, no native 1D textures) — see
+[yawgpu `specs/blocks/67-gles-backend.md`](https://github.com/infosia/yawgpu) and its
 `specs/tracking/cts-gles-sweep-0705.md` ledger for the per-cluster disposition.
 
 § **2** `api/validation` files are **quarantined** (excluded from the run), not failing: `encoding,cmds,compute_pass`
 and `encoding,programmable,pipeline_bind_group_compat` issue a **zero-dimension indirect dispatch** that
 hard-wedges this Haswell GPU machine-wide (a Mesa/ANV-class driver defect, **F-126**; permanent quarantine on
-this host). ¶ The **2** crashes are a suspected Mesa/`crocus` driver segfault in `textureSize()` on a
-stencil-mode packed depth/stencil texture (`textureDimensions` on a `stencil-only` aspect view) — `texelFetch`
-on the same texture works, so yawgpu cannot guard it at bind time without breaking the working path; catalogued
-in yawgpu block-67, not a yawgpu defect. Real-GPU verification here is Linux/Mesa (the spec'd Tier-2 target is
+this host). The `a94ab06` sweep saw **2** `shader/execution` crashes — a suspected Mesa/`crocus` driver
+segfault in `textureSize()` on a stencil-mode packed depth/stencil texture (`textureDimensions` on a
+`stencil-only` aspect view) — which the `15a9ddb` re-sweep no longer reproduces (`crash=0`); catalogued in
+yawgpu block-67, not a yawgpu defect. Real-GPU verification here is Linux/Mesa (the spec'd Tier-2 target is
 Windows ANGLE); numbers and feature set may change without SemVer guarantees.
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
