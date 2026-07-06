@@ -298,6 +298,19 @@ bool deviceHasFeature(WGPUDevice device, WGPUFeatureName feature) {
     return feature == WGPUFeatureName_Force32 || wgpuDeviceHasFeature(device, feature) != 0;
 }
 
+bool isFormatUsableAsStorageOnDevice(WGPUDevice device, WGPUTextureFormat format) {
+    if (textureFormatInList(format, kStorageTextureFormats)) {
+        return true;
+    }
+    if (textureFormatInList(format, kTextureFormatsTier1EnablesStorageReadOnlyWriteOnly)) {
+        return deviceHasFeature(device, WGPUFeatureName_TextureFormatsTier1);
+    }
+    if (textureFormatInList(format, kTextureFormatsTier2EnablesStorageReadWrite)) {
+        return deviceHasFeature(device, WGPUFeatureName_TextureFormatsTier2);
+    }
+    return false;
+}
+
 void skipIfFormatNotSupported(Fixture& t, WGPUDevice device, WGPUTextureFormat format) {
     const TextureFormatInfo& info = textureFormatInfo(format);
     if (!deviceHasFeature(device, info.requiredFeature)) {
@@ -666,6 +679,10 @@ CTS_TEST(g, "createTexture,2d,uncompressed_format")
         const bool awaitLost = t.param<bool>("awaitLost");
         executeAfterDestroy(t, awaitLost, [&](OwnedDeviceContext& ctx) {
             skipIfFormatNotSupported(t, ctx.device, format);
+            if (usageType == "storage" && !isFormatUsableAsStorageOnDevice(ctx.device, format)) {
+                t.skip(std::string(textureFormatIdentifier(format)) + " storage usage not supported");
+                return;
+            }
             const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
             createTexture(ctx, format, textureUsageType(usageType) | textureUsageCopy(usageCopy), info.blockWidth, info.blockHeight);
         });
@@ -692,6 +709,10 @@ CTS_TEST(g, "createTexture,2d,compressed_format")
         const bool awaitLost = t.param<bool>("awaitLost");
         executeAfterDestroy(t, awaitLost, [&](OwnedDeviceContext& ctx) {
             skipIfFormatNotSupported(t, ctx.device, format);
+            if (usageType == "storage" && !isFormatUsableAsStorageOnDevice(ctx.device, format)) {
+                t.skip(std::string(textureFormatIdentifier(format)) + " storage usage not supported");
+                return;
+            }
             const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
             createTexture(ctx, format, textureUsageType(usageType) | textureUsageCopy(usageCopy), info.blockWidth, info.blockHeight);
         });
@@ -718,6 +739,10 @@ CTS_TEST(g, "createView,2d,uncompressed_format")
         const bool awaitLost = t.param<bool>("awaitLost");
         executeAfterDestroy(t, awaitLost, [&](OwnedDeviceContext& ctx) {
             skipIfFormatNotSupported(t, ctx.device, format);
+            if (usageType == "storage" && !isFormatUsableAsStorageOnDevice(ctx.device, format)) {
+                t.skip(std::string(textureFormatIdentifier(format)) + " storage usage not supported");
+                return;
+            }
             const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
             WGPUTexture texture = createTexture(ctx, format, textureUsageType(usageType) | textureUsageCopy(usageCopy), info.blockWidth, info.blockHeight);
             createView(ctx, texture, format);
@@ -747,6 +772,10 @@ CTS_TEST(g, "createView,2d,compressed_format")
         const bool awaitLost = t.param<bool>("awaitLost");
         executeAfterDestroy(t, awaitLost, [&](OwnedDeviceContext& ctx) {
             skipIfFormatNotSupported(t, ctx.device, format);
+            if (usageType == "storage" && !isFormatUsableAsStorageOnDevice(ctx.device, format)) {
+                t.skip(std::string(textureFormatIdentifier(format)) + " storage usage not supported");
+                return;
+            }
             const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
             WGPUTexture texture = createTexture(ctx, format, textureUsageType(usageType) | textureUsageCopy(usageCopy), info.blockWidth, info.blockHeight);
             createView(ctx, texture, format);
