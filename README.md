@@ -156,8 +156,10 @@ added: [COVERAGE](docs/COVERAGE.md).
 ### Test results
 
 Per-area `pass / skip / fail / crash` from a full sweep of all **642 ported files** — on
-**macOS / Apple Metal** (the three tables below) and on **Windows 11 / native Vulkan** (NVIDIA RTX 5060 Ti;
-the yawgpu-Vulkan table further down). The **yawgpu-Metal** and **Dawn-Metal** tables were both **re-swept
+**macOS / Apple Metal** (the three tables below), on **Windows 11 / native Vulkan** (NVIDIA RTX 5060 Ti;
+the yawgpu-Vulkan table further down), and on **Linux / Mesa native GLES** (the Tier-2 experimental
+yawgpu-GLES bring-up table at the end — a work-in-progress snapshot, not a conformance result). The
+**yawgpu-Metal** and **Dawn-Metal** tables were both **re-swept
 2026-07-03** (`--workers 6`, post-F-146 — the worker-mode harness bug that used to fake-fail parallel Metal
 sweeps is fixed, so parallel numbers are authoritative again); the **wgpu-native-Metal** table is from
 2026-07-02; the yawgpu-Vulkan table is from the 2026-06-28 sweep. All three Metal backends
@@ -258,6 +260,42 @@ rejects `external_texture` on Vulkan by design), **2** `index_buffer_format_dirt
 quirk that fails on Metal and Dawn too), **1** **F-141** (NVIDIA memory-model weak behavior — Dawn-Vulkan
 fails identically). **No GPU freeze and no crash** across the full sweep. MoltenVK on macOS is
 non-authoritative coverage (artifacts **F-104**, **F-139**), green on native hardware.
+
+#### yawgpu — GLES / Tier 2 experimental (Linux / Mesa `crocus` on Intel Haswell, Tint frontend), per-subcase
+
+> **This is not a conformance table.** GLES is yawgpu's **Tier 2 / experimental** backend (opt-in `gles`
+> cargo feature), and this row is a **bring-up progress snapshot**, not a `fail≈0` conformance result like
+> the Metal/Vulkan tables above. Run raw (no `--expectations`) on `crocus` — Mesa's **native** GLES driver
+> for Haswell (native ES, closer to an Android device than to ANGLE's ES→D3D/Vulkan translation).
+
+| area | pass | skip | fail | crash |
+|------|------:|-----:|-----:|------:|
+| `api/validation` (124§) | 194,805 | 157,163 | 347 | 0 |
+| `api/operation` (67) | 132,831 | 76,698 | 19,932 | 0 |
+| `shader/execution` (239) | 217,273 | 516,424 | 100,965 | 2¶ |
+| `shader/validation` (207) | 369,753 | 297,389 | 0 | 0 |
+| **total** | **914,662** | **1,047,674** | **121,244** | **2¶** |
+
+Swept 2026-07-06 on yawgpu `a94ab06` (`--workers 2`, one process at a time — the host is a thermally
+constrained Haswell laptop). `shader/validation` is **fully clean** (`fail=0`): the WGSL→GLSL-ES path is
+Tint, the same compiler as the Dawn oracle, so validation matches by construction. `api/validation` is at
+**347** (down from **24,553** at the start of the GLES CTS campaign) after reporting truthful GL-queried
+adapter limits + only backable features, mapping the GLES-3.1 renderable/storage format sets, and
+implementing multiple bind groups, MSAA, storage textures, and copy-correctness; the residual is catalogued
+Tier-2 gaps (cube-array, stencil readback, `>1` bind-group edge cases). `api/operation` (19,932) and
+`shader/execution` (100,965) are the active bring-up front — dominated by texture-sampling value correctness
+(`textureGather`/`textureSampleLevel`) and remaining copy edge cases; see
+[yawgpu `specs/blocks/67-gles-backend.md`](https://github.com/infosia/yawgpu) mapping matrix and its
+`specs/tracking/cts-gles-sweep-0705.md` ledger for the per-cluster disposition.
+
+§ **2** `api/validation` files are **quarantined** (excluded from the run), not failing: `encoding,cmds,compute_pass`
+and `encoding,programmable,pipeline_bind_group_compat` issue a **zero-dimension indirect dispatch** that
+hard-wedges this Haswell GPU machine-wide (a Mesa/ANV-class driver defect, **F-126**; permanent quarantine on
+this host). ¶ The **2** crashes are a suspected Mesa/`crocus` driver segfault in `textureSize()` on a
+stencil-mode packed depth/stencil texture (`textureDimensions` on a `stencil-only` aspect view) — `texelFetch`
+on the same texture works, so yawgpu cannot guard it at bind time without breaking the working path; catalogued
+in yawgpu block-67, not a yawgpu defect. Real-GPU verification here is Linux/Mesa (the spec'd Tier-2 target is
+Windows ANGLE); numbers and feature set may change without SemVer guarantees.
 
 Design and roadmap live in [`docs/`](docs/) — start with [`docs/00-overview.md`](docs/00-overview.md)
 and [`docs/07-roadmap.md`](docs/07-roadmap.md).
