@@ -272,9 +272,9 @@ non-authoritative coverage (artifacts **F-104**, **F-139**), green on native har
 |------|------:|-----:|-----:|------:|
 | `api/validation` (124§) | 194,827 | 157,163 | 325 | 0 |
 | `api/operation` (67) | 149,727 | 76,698 | **3,036** | 0 |
-| `shader/execution` (239) | 314,971 | 516,424 | **3,531** | 0 |
+| `shader/execution` (239) | 315,602 | 516,424 | **2,900** | 0 |
 | `shader/validation` (207) | 369,753 | 297,389 | 0 | 0 |
-| **total** | **1,029,278** | **1,047,674** | **6,892** | **0** |
+| **total** | **1,029,909** | **1,047,674** | **6,261** | **0** |
 
 `--workers 2`, one process at a time. `shader/validation` is fully clean (the WGSL→GLSL-ES path is Tint,
 the same compiler as the Dawn oracle). Raw (non-comparison) depth-texture reads — previously the largest
