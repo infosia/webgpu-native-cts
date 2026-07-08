@@ -272,14 +272,16 @@ non-authoritative coverage (artifacts **F-104**, **F-139**), green on native har
 |------|------:|-----:|-----:|------:|
 | `api/validation` (124§) | 194,827 | 157,163 | 325 | 0 |
 | `api/operation` (67) | 132,829 | 76,698 | 19,934 | 0 |
-| `shader/execution` (239) | 308,373 | 516,424 | **10,129** | 0 |
+| `shader/execution` (239) | 314,971 | 516,424 | **3,531** | 0 |
 | `shader/validation` (207) | 369,753 | 297,389 | 0 | 0 |
-| **total** | **1,005,782** | **1,047,674** | **30,388** | **0** |
+| **total** | **1,012,380** | **1,047,674** | **23,790** | **0** |
 
 `--workers 2`, one process at a time. `shader/validation` is fully clean (the WGSL→GLSL-ES path is Tint,
-the same compiler as the Dawn oracle). The remaining `shader/execution` residual is dominated by catalogued
-Tier-2 boundaries — raw (non-comparison) depth-texture reads and GLES hardware/spec limits (vertex-stage
-storage images, `rg32` storage formats, no native 1D textures) — see
+the same compiler as the Dawn oracle). Raw (non-comparison) depth-texture reads — previously the largest
+`shader/execution` cluster — are now handled by a shim-side Core-IR transform (~6.6k FAIL→PASS), so the
+remaining `shader/execution` residual is dominated by other catalogued Tier-2 boundaries — GLES hardware/spec
+limits (vertex-stage storage images, `rg32` storage formats, no native 1D textures), storage-texture value
+cases, and `depth24plus` textureLoad precision — see
 [yawgpu `specs/blocks/67-gles-backend.md`](https://github.com/infosia/yawgpu) for the per-cluster disposition.
 
 § **2** `api/validation` files are **quarantined** (excluded from the run), not failing:
