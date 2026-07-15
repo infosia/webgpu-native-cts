@@ -1189,9 +1189,9 @@ Skipped — never assigned. The sequence runs F-138 → F-139 → **F-141**; no 
 > **Scope note (TRANSIENT_ATTACHMENT).** T11's three `texture_view_usage` tests include one
 > `TRANSIENT_ATTACHMENT` case. `TRANSIENT_ATTACHMENT` is a non-standard native extension; upstream gates
 > every transient case behind `skipIfTransientAttachmentNotSupported` (skipped in standard environments).
-> This port treats it as **out of conformance scope** — `skipIfTransientAttachmentNotSupported()` skips
-> it on all backends — so it is not asserted cross-backend. (It is why the otherwise-clean run shows one
-> `skip` in `texture_view_usage_of_multiple_usages`.)
+> This port treats it as **Dawn-arbitrated native-extension conformance**: the case runs on Dawn + yawgpu,
+> while `skipIfTransientAttachmentNotSupported()` skips only on wgpu-native because its F-007 eager-abort
+> is uncatchable.
 
 ---
 

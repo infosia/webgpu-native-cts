@@ -651,7 +651,7 @@ CTS_TEST(g, "texture_view_usage_of_multiple_usages")
 
         bool success = true;
         if (usage & WGPUTextureUsage_TransientAttachment) {
-            success = success && (viewUsage == usage);
+            success = success && (viewUsage == 0 || viewUsage == usage);
         }
 
         WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;

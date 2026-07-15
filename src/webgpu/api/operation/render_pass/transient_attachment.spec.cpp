@@ -1,5 +1,6 @@
 // Ported from gpuweb/cts src/webgpu/api/operation/render_pass/transient_attachment.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -24,7 +25,9 @@ CTS_TEST(g, "increasing_attachments_count")
 
         WGPULimits limits = WGPU_LIMITS_INIT;
         wgpuDeviceGetLimits(t.device(), &limits);
-        const uint32_t maxAttachments = limits.maxColorAttachments;
+        const uint32_t kRgba8UnormByteCost = 8;  // WebGPU color-attachment byte cost of RGBA8Unorm
+        const uint32_t maxByBytes = limits.maxColorAttachmentBytesPerSample / kRgba8UnormByteCost;
+        const uint32_t maxAttachments = std::min(limits.maxColorAttachments, maxByBytes);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
 

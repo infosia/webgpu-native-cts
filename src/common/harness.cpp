@@ -980,9 +980,12 @@ void GpuTest::expectMapAsync(WGPUBuffer buffer, WGPUMapMode mode, bool expectSuc
 }
 
 void GpuTest::skipIfTransientAttachmentNotSupported() {
-    // TRANSIENT_ATTACHMENT is a non-standard native extension, outside the conformance scope.
-    // Upstream skips these cases in standard environments; do the same here.
-    skip("TRANSIENT_ATTACHMENT is not supported");
+    // TransientAttachment (0x20) is a native webgpu.h usage bit that Dawn and yawgpu
+    // implement and validate. wgpu-native eager-aborts on it (expectations F-007) and the
+    // abort is uncatchable, so it stays skipped there only — everywhere else the cases run.
+    if (std::strcmp(cts::backendName(), "wgpu-native") == 0) {
+        skip("TRANSIENT_ATTACHMENT is not supported on wgpu-native");
+    }
 }
 
 void GpuTest::skipIfTextureFormatNotSupported(WGPUTextureFormat format) {
