@@ -5,7 +5,7 @@ The audit (REPORT.md) flagged `render_pipeline/sample_mask.spec.cpp` as a non-fa
 `and_of_all`, `none`) instead of upstream's two tests, and only covers a `sampleCount=4` / flat-shading
 sub-slice of `fragment_output_mask` with no `alpha_to_coverage_mask`. Re-port it faithfully under the
 upstream query identity and full param matrix. Pin `b507bd117e53db86f2fb52d0d858d3ae7d684a85`. Upstream:
-`../webgpu-cts/src/webgpu/api/operation/render_pipeline/sample_mask.spec.ts` (808 lines).
+`<upstream-cts-checkout>/src/webgpu/api/operation/render_pipeline/sample_mask.spec.ts` (808 lines).
 
 REPLACE the current file's invented tests with the two upstream tests:
 

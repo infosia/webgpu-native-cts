@@ -4,7 +4,7 @@ The audit flagged `texture_view/write.spec.cpp` as a non-faithful slice: it prom
 test's `method` param into three invented TEST names (`storage-write-compute`, `storage-write-fragment`,
 `render-pass-store`) and covered only `rgba8unorm` / `sampleCount=1` / `viewUsageMethod=inherit`. Re-port
 faithfully under the upstream query identity. Pin `b507bd117e53db86f2fb52d0d858d3ae7d684a85`. Upstream:
-`../webgpu-cts/src/webgpu/api/operation/texture_view/write.spec.ts` (421 lines).
+`<upstream-cts-checkout>/src/webgpu/api/operation/texture_view/write.spec.ts` (421 lines).
 
 REPLACE the three invented tests with the upstream identities:
 

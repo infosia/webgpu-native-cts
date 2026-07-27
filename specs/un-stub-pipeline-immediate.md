@@ -16,8 +16,8 @@ cmds) and `command_buffer/programmable/immediate.spec.cpp` (operation).
 
 `<upstream-cts-checkout>/src/webgpu/api/validation/encoding/programmable/pipeline_immediate.spec.ts`
 — this checkout matches our pin `b507bd1` (see `docs/UPSTREAM.md`). Port it
-faithfully. Do **not** use the newer Dawn-tree copy (`C/dawn/third_party/...`),
-which is a different revision.
+faithfully. Do **not** use the newer Dawn-tree copy
+(`<dawn-checkout>/third_party/...`), which is a different revision.
 
 ## Reference implementations (already merged — copy their patterns)
 
