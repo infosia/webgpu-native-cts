@@ -437,5 +437,8 @@ backend's default adapter, so CI determinism comes from the runner environment.
     automatically (see [03 §6](03-webgpu-c-abstraction.md)).
   - The build compiles with `/utf-8` so MSVC accepts the UTF-8 backend headers under `/WX` regardless
     of the system code page (otherwise C4819).
+  - The build passes `/MP` to enable parallel compilation within a project. With the Visual Studio
+    generator, `cmake --build -j N` only parallelizes across projects (MSBuild `/m`); `cts` is a
+    single project, so without `/MP` all spec translation units compile through one `cl.exe`.
   - `--isolate` uses `CreateProcess` on Windows (see §4), so per-case crash isolation works here too.
 - **Linux**: same CMake flow; backend libraries differ (yawgpu via its `vulkan` feature).
