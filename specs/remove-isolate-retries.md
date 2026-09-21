@@ -68,8 +68,8 @@ the runner, no `flaky`/`attempts` in any output.
 - [ ] `cts --retries 2 <query>` exits non-zero with `unknown option: --retries`.
 - [ ] Text summary line no longer contains `flaky=`; JSONL lines no longer
       contain `"attempts"`/`"flaky"`.
-- [ ] `cmake --build build-yawgpu --target cts cts_unittests -j 1` and
-      `cmake --build build-dawn --target cts -j 1` succeed; `cts_unittests`
+- [ ] `cmake --build build-yawgpu --target cts cts_unittests -j 8` and
+      `cmake --build build-dawn --target cts -j 8` succeed; `cts_unittests`
       exits 0.
 - [ ] GPU spot-check (Claude): `--isolate --workers 4` on a small query still
       passes and classifies identically to before.

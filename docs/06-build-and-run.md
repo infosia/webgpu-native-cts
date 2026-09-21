@@ -65,7 +65,7 @@ $CTS_WGPU_NATIVE_DIR/
 ```
 
 ```bash
-# Build wgpu-native first (in your wgpu-native checkout): `cargo build --release -j 1` (or `make`),
+# Build wgpu-native first (in your wgpu-native checkout): `cargo build --release -j 8` (or `make`),
 # then point CTS at a dir laid out as above (header dir + lib dir).
 cmake -S . -B build \
       -DCTS_BACKEND=wgpu-native \
@@ -96,7 +96,7 @@ $CTS_YAWGPU_DIR/                       # yawgpu checkout root
 
 ```bash
 # In the yawgpu checkout (macOS → metal; Windows/Linux → vulkan):
-cargo build --release --features metal -j 1   # produces target/release/libyawgpu.{a,dylib}
+cargo build --release --features metal -j 8   # produces target/release/libyawgpu.{a,dylib}
 #   (Windows/Linux: --features vulkan; e.g. --target-dir target-vulkan → target-vulkan/release/)
 # Point CTS at the checkout root:
 cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=<yawgpu>
@@ -110,12 +110,12 @@ cmake -S . -B build -DCTS_BACKEND=yawgpu -DCTS_YAWGPU_DIR=<yawgpu>
 > the shim via `@rpath`) and put the shim build dir on the loader path at runtime:
 >
 > ```bash
-> cargo build --release -p yawgpu --features metal -j 1   # also builds out/build/libtint_shim.dylib
+> cargo build --release -p yawgpu --features metal -j 8   # also builds out/build/libtint_shim.dylib
 > SHIM_DIR=<yawgpu>/target/release/build/yawgpu-tint-*/out/build
 > cmake -S . -B build-yawgpu -DCTS_BACKEND=yawgpu \
 >       -DCTS_YAWGPU_DIR=<yawgpu> \
 >       -DCTS_YAWGPU_LIB=<yawgpu>/target/release/libyawgpu.dylib
-> cmake --build build-yawgpu --target cts -j 1
+> cmake --build build-yawgpu --target cts -j 8
 > DYLD_LIBRARY_PATH=$SHIM_DIR build-yawgpu/cts --isolate --workers 6 \
 >       --expectations expectations/yawgpu.txt '<query>'
 > ```
@@ -135,13 +135,13 @@ target dir and point CTS at that exact archive:
 
 ```bash
 CARGO_TARGET_DIR=<yawgpu>/target-vulkan \
-  cargo build --release -p yawgpu --features vulkan -j 1
+  cargo build --release -p yawgpu --features vulkan -j 8
 
 cmake -S . -B build-yawgpu-vulkan \
       -DCTS_BACKEND=yawgpu \
       -DCTS_YAWGPU_DIR=<yawgpu> \
       -DCTS_YAWGPU_LIB=<yawgpu>/target-vulkan/release/libyawgpu.a
-cmake --build build-yawgpu-vulkan --target cts -j 1
+cmake --build build-yawgpu-vulkan --target cts -j 8
 ```
 
 Run with the Vulkan backend override and MoltenVK loader environment:
@@ -175,7 +175,7 @@ cmake -S <dawn> -B <dawn>/out/Release -G "Visual Studio 17 2022" -A x64 \
       -DDAWN_ENABLE_INSTALL=ON -DDAWN_FETCH_DEPENDENCIES=ON \
       -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_TESTS=OFF \
       -DTINT_BUILD_TESTS=OFF -DTINT_BUILD_CMD_TOOLS=OFF
-cmake --build <dawn>/out/Release --config Release --target webgpu_dawn -j 1
+cmake --build <dawn>/out/Release --config Release --target webgpu_dawn -j 8
 #   produces: out/Release/Release/webgpu_dawn.dll
 #             out/Release/src/dawn/native/Release/webgpu_dawn.lib
 ```
@@ -192,7 +192,7 @@ cmake -S . -B build-dawn -G "Visual Studio 17 2022" -A x64 \
       -DCTS_DAWN_DIR=<dawn> \
       -DCTS_DAWN_BUILD_DIR=<dawn>/out/Release \
       -DCTS_DAWN_LIB=<dawn>/out/Release/src/dawn/native/Release/webgpu_dawn.lib
-cmake --build build-dawn --config Release --target cts -j 1
+cmake --build build-dawn --config Release --target cts -j 8
 ```
 
 **Backend selection.** Like yawgpu, the Dawn shim requests a specific adapter backend rather than
@@ -227,9 +227,9 @@ cmake -S . -B build \
       -DCTS_WGPU_NATIVE_DIR=/abs/path/to/wgpu-native/dist
 
 # Build everything.
-# Convention: build SERIALLY (-j 1) — parallel compiles overload the dev machine
-# (CPU/memory); this applies to every cmake/cargo build command in this repo.
-cmake --build build -j 1
+# Convention: build in parallel (-j 8). The constraint in this repo is run-time
+# memory, not compilation — see CLAUDE.md for the cgroup cap on cts runs.
+cmake --build build -j 8
 
 # Targets:
 #   build/cts              the runner
@@ -350,7 +350,7 @@ a run across CI machines (each machine runs and judges its own shard).
 ## 5. Regenerating the listing
 
 ```bash
-cmake --build build --target gen_listings -j 1
+cmake --build build --target gen_listings -j 8
 # emits src/webgpu/listing.json (and/or listing.inc consumed by the runner)
 ```
 

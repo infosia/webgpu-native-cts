@@ -80,8 +80,8 @@ got Y, ...`) unchanged; optionally append the computed encoded-ULP distance to a
 
 ## Acceptance criteria
 
-- [ ] `cmake --build build-yawgpu-release --target cts -j 1` succeeds (serial build, `-j 1` — hard rule).
-- [ ] `build-yawgpu-release/cts_unittests` still exits 0 (rebuild it with `-j 1` if the target exists in this build dir).
+- [ ] `cmake --build build-yawgpu-release --target cts -j 8` succeeds.
+- [ ] `build-yawgpu-release/cts_unittests` still exits 0 (rebuild it if the target exists in this build dir).
 - [ ] Claude-run (not the coding agent): on lavapipe,
       `cts --workers 4 'webgpu:shader,execution,expression,call,builtin,textureLoad:*'`
       goes from fail=3548 to **fail=0** (pass+skip only).
@@ -91,7 +91,7 @@ got Y, ...`) unchanged; optionally append the computed encoded-ULP distance to a
 
 ## Verification
 
-Coding agent: build serially and run `cts_unittests`; do not run GPU CTS. Then Claude runs:
+Coding agent: build and run `cts_unittests`; do not run GPU CTS. Then Claude runs:
 
 ```sh
 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json   # lavapipe

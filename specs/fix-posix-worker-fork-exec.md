@@ -84,7 +84,7 @@ are unchanged; a respawned worker also execs (it already goes through `spawnWork
 
 ## Acceptance criteria
 
-- [ ] `cmake --build build-yawgpu -j 1` (and `build-dawn`, also `-j 1`) succeed; `cts_unittests` exits 0.
+- [ ] `cmake --build build-yawgpu -j 8` (and `build-dawn`) succeed; `cts_unittests` exits 0.
 - [ ] No `runForkedWorkerCases` symbol remains; POSIX `spawnWorker` child calls `execv`.
 - [ ] `TemporaryCasePlan` is created on all platforms in `collectParallelRuns`.
 - [ ] Regression probe (run by Claude, real GPU):

@@ -86,7 +86,7 @@ condition that selects `collectParallelRuns`), not on flag presence alone.
    --case-plan …`, without `--workers`) are unaffected — a plain `--workers`
    run completes normally end-to-end.
 7. Unit test for the factored guard helper passes; both configs compile
-   serially (`cmake --build build-dawn --config Release -j 1`, same for
+   (`cmake --build build-dawn --config Release -j 8`, same for
    build-yawgpu — note build-yawgpu may be deferred by Claude while a sweep is
    holding its cts.exe).
 8. Docs updated as described.

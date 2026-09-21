@@ -46,8 +46,8 @@ the fix is a general latency win, not just for error_scope.
 
 ## Acceptance criteria
 
-- [ ] `cmake --build build-yawgpu-release --target cts -j 1` succeeds (serial build — hard rule).
-- [ ] `build-yawgpu-release/cts_unittests` still exits 0 (rebuild with `-j 1` if present).
+- [ ] `cmake --build build-yawgpu-release --target cts -j 8` succeeds.
+- [ ] `build-yawgpu-release/cts_unittests` still exits 0 (rebuild if present).
 - [ ] Diff touches only `src/common/webgpu/sync.cpp`.
 - [ ] Claude-run (not the coding agent): on native ANV,
       `cts --isolate --workers 1 --case-timeout-ms 20000 'webgpu:api,validation,error_scope:*'`
@@ -56,7 +56,7 @@ the fix is a general latency win, not just for error_scope.
 
 ## Verification
 
-Coding agent: build serially, run `cts_unittests`, do NOT run GPU CTS. Claude verifies the
+Coding agent: build, run `cts_unittests`, do NOT run GPU CTS. Claude verifies the
 error_scope run afterwards.
 
 ## Verification result (2026-07-04, post-implementation)

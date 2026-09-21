@@ -32,5 +32,5 @@ forwarded); no docs edits (Claude handles those); no other flags.
       exit non-zero with `unknown option: ...`.
 - [ ] `grep -rn "yawgpu-backend\|future-timeout" src include` → only the
       `CTS_YAWGPU_BACKEND` env-var code in `backend_yawgpu.cpp` remains.
-- [ ] `cmake --build build-yawgpu --target cts cts_unittests -j 1` succeeds;
+- [ ] `cmake --build build-yawgpu --target cts cts_unittests -j 8` succeeds;
       `cts_unittests` exits 0.

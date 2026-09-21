@@ -75,8 +75,8 @@ those backends and only affects Dawn adapter selection.
    site is unchanged (still `nullptr`).
 2. `grep -rn "requestAdapterSync(.*nullptr)" src/webgpu/` returns exactly the one
    excluded site.
-3. Both configs compile: `cmake --build build-dawn --config Release -j 1` and
-   `cmake --build build-yawgpu --config Release -j 1` (serial, per CLAUDE.md).
+3. Both configs compile: `cmake --build build-dawn --config Release -j 8` and
+   `cmake --build build-yawgpu --config Release -j 8`.
 4. `--list-cases webgpu:api,validation,*` count unchanged (39,724).
 5. Behavior check (run by Claude post-merge): with `CTS_DAWN_BACKEND=vulkan`,
    `build-dawn/Release/cts.exe --workers 4
