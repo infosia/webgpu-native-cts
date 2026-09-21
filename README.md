@@ -227,8 +227,8 @@ Swept **2026-09-21 raw** — four per-area `--workers 4` runs on yawgpu `2807ed3
 NVIDIA driver 595.91, Vulkan 1.4.329: 52 minutes, `crash=0` across 2,096,318 subcases. Same GPU as
 the Windows table on a different OS, and the two agree on `shader/execution`.
 
-§ **116** are documented non-defects carried as `xfail`; the remaining **2** are open and
-untriaged.
+§ **117** are documented non-defects carried as `xfail`; the remaining **1** is an open backend
+defect, deliberately not masked.
 
 #### yawgpu — GLES / Tier 2 experimental (Linux / Mesa `crocus` on Intel Haswell, Tint frontend), per-subcase
 

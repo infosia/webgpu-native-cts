@@ -195,6 +195,34 @@ cmake -S . -B build-dawn -G "Visual Studio 17 2022" -A x64 \
 cmake --build build-dawn --config Release --target cts -j 8
 ```
 
+**Linux.** Same flow, single-config generator, and the windowing integrations must be off — the
+monolithic library needs no surface, and GLFW otherwise demands `wayland-scanner`. If
+`third_party/` holds only Dawn's own wrappers (each dependency's `src/` empty), populate it first;
+the script needs no `depot_tools`:
+
+```bash
+python3 <dawn>/tools/fetch_dawn_dependencies.py --shallow
+
+cmake -S <dawn> -B <dawn>/out/Release -DCMAKE_BUILD_TYPE=Release \
+      -DDAWN_BUILD_MONOLITHIC_LIBRARY=SHARED -DBUILD_SHARED_LIBS=OFF \
+      -DDAWN_ENABLE_INSTALL=ON -DDAWN_FETCH_DEPENDENCIES=OFF \
+      -DDAWN_BUILD_SAMPLES=OFF -DDAWN_BUILD_TESTS=OFF \
+      -DTINT_BUILD_TESTS=OFF -DTINT_BUILD_CMD_TOOLS=OFF \
+      -DDAWN_USE_GLFW=OFF -DDAWN_USE_WAYLAND=OFF -DDAWN_USE_X11=OFF
+cmake --build <dawn>/out/Release --target webgpu_dawn -j 8
+#   produces: out/Release/src/dawn/native/libwebgpu_dawn.so
+
+cmake -S . -B build-dawn -DCMAKE_BUILD_TYPE=Release \
+      -DCTS_BACKEND=dawn \
+      -DCTS_DAWN_DIR=<dawn> \
+      -DCTS_DAWN_BUILD_DIR=<dawn>/out/Release \
+      -DCTS_DAWN_LIB=<dawn>/out/Release/src/dawn/native/libwebgpu_dawn.so
+cmake --build build-dawn --target cts -j 8
+```
+
+The `.so` sits next to the binary's `RUNPATH`, so no DLL-copying step is needed; a bare
+`build-dawn/cts` prints the selected adapter and is the smoke test.
+
 **Backend selection.** Like yawgpu, the Dawn shim requests a specific adapter backend rather than
 Dawn's platform default: **Vulkan** on non-Apple (Metal on Apple), overridable at runtime with
 `CTS_DAWN_BACKEND=vulkan|d3d12|d3d11|metal|opengl|opengles|null` (the shim sets

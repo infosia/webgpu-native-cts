@@ -138,21 +138,21 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
-## F-152 — yawgpu Vulkan: `memory_model,coherence:corr` fails on the opposite `memType` from the Windows host — UNTRIAGED
+## F-152 — NVIDIA/Linux: `memory_model,coherence:corr` weak behavior on `atomic_workgroup` — Dawn-CONFIRMED driver/HW property, NOT yawgpu
 
-**OPEN, host-differential, not yet attributed** (Linux / NVIDIA RTX 5060 Ti, driver 595.91, native Vulkan; found 2026-09-21, full sweep on yawgpu `2807ed3` / CTS `7894f08`) — `shader,execution,memory_model,coherence:corr:testType="intra_workgroup"` fails on `memType="atomic_workgroup"` ("testResults[3] == 305, expected == 0 (disallowed weak behavior observed)") while `memType="atomic_storage"` passes. That is the **inverse** of the Windows/NVIDIA host on the same GPU model, where `atomic_storage` is the xfail'd entry (**F-141**) and `atomic_workgroup` passes — `expectations/yawgpu-vulkan.txt` lists only the storage variant, so this sweep records the workgroup variant as `fail` and the storage variant as `xpass`.
+**DRIVER/HW PROPERTY — Dawn-CONFIRMED, NOT yawgpu** (Linux / NVIDIA RTX 5060 Ti, driver 595.91, native Vulkan; found and triaged 2026-09-21) — `shader,execution,memory_model,coherence:corr:testType="intra_workgroup"` fails on `memType="atomic_workgroup"` ("testResults[3] == 305, expected == 0, disallowed weak behavior observed") and passes on `memType="atomic_storage"`. That is the mirror image of the Windows/NVIDIA host, where the storage variant is the xfail'd one (**F-141**) and workgroup passes.
 
-What is established: the failure is **deterministic here (5/5 runs)**, not the statistical tail F-141 describes; it reproduces on **three yawgpu builds** (`9f0fba0e`, `9691745f`, `dcc0658a`), so it is not a regression from the 2026-09-21 pass-encoder work; and it reproduces on a CTS binary built from **`efc9edd`, before the harness fix in `0f6f6a0`**, so it is not an artifact of that change either.
+The same CTS built against **Dawn** on the same GPU and driver fails `atomic_workgroup` and passes `atomic_storage` **identically** — two independent implementations agreeing pins this to the NVIDIA/Linux memory model, not to yawgpu. Supporting evidence gathered before the Dawn oracle existed: deterministic here (5/5 runs, unlike the statistical tail F-141 describes), reproduces on three yawgpu builds (`9f0fba0e`, `9691745f`, `dcc0658a`), and reproduces on a CTS binary built before the pass-encoder fix `0f6f6a0`. **Not a regression of F-112** (the historical `atomic_workgroup` yawgpu defect), which stays resolved.
 
-What is **not** established: whether this is a yawgpu defect or, like F-141, an NVIDIA/OS memory-model property. Note `expectations/yawgpu-vulkan.txt` records the workgroup variant as **F-112, "a real yawgpu defect, RESOLVED"**, so an F-112 regression is not excluded. No Dawn oracle has been built on this host; **running the same case through `CTS_BACKEND=dawn` here is the discriminator** and is the next step. Until then neither variant should be added to or removed from the expectations file.
+Which of the two memTypes fires is host-dependent, so `expectations/yawgpu-vulkan.txt` now carries **both** — the one that does not fire on a given host xpasses benignly.
 
 ---
 
-## F-151 — yawgpu: `TransientAttachment` resolve target accepted where the spec requires rejection — UNTRIAGED
+## F-151 — yawgpu: `TransientAttachment` resolve target accepted where the spec requires rejection — Dawn-CONFIRMED yawgpu defect
 
-**OPEN, not yet Dawn-triaged** (found 2026-09-21, Linux / NVIDIA RTX 5060 Ti, native Vulkan, yawgpu `2807ed3`) — `api,validation,render_pass,resolve:resolve_attachment:resolveTargetUsage_transient=true;_valid=false` reports `expected validation error, got none`: a resolve target created with `RenderAttachment | TransientAttachment` is accepted, where the case expects `beginRenderPass` to reject it. 1 subcase, reproducible, `fail=1` for the whole `api/validation` area.
+**OPEN yawgpu DEFECT — Dawn-CONFIRMED** (found and triaged 2026-09-21, Linux / NVIDIA RTX 5060 Ti, native Vulkan, yawgpu `2807ed3`) — `api,validation,render_pass,resolve:resolve_attachment:resolveTargetUsage_transient=true;_valid=false` reports `expected validation error, got none`: a resolve target created with `RenderAttachment | TransientAttachment` is accepted, where `beginRenderPass` must reject it. The same CTS built against **Dawn** on the same host **passes** the case — Dawn rejects it — so this is a yawgpu validation gap, not a port-oracle artifact.
 
-It is **new to the sweep, not new to the backend**: `52b21c9` ("run TRANSIENT_ATTACHMENT conformance on Dawn + yawgpu, skip only wgpu-native") enabled this case for yawgpu after the 2026-06-28 Windows sweep, so no prior yawgpu run covered it. Nothing host-specific is implied — expect it on Windows/Vulkan and Metal too. Not in any expectations file, deliberately: it looks like a real validation gap rather than a port-oracle artifact, but that needs the Dawn oracle to confirm (Dawn passes this case upstream, which is why the harness un-skipped it). If Dawn on the same host also accepts it, re-file as a port/oracle issue instead.
+It surfaced now rather than earlier because `52b21c9` enabled this conformance for yawgpu after the 2026-06-28 Windows sweep; nothing host-specific is implied, so expect it on Windows/Vulkan and Metal too. **Deliberately not xfail'd** — it is a real defect, and findings are reported, not masked. 1 subcase; it is the whole `fail` column of `api/validation` on the Linux sweep.
 
 ---
 

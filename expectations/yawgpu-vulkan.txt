@@ -76,3 +76,11 @@ webgpu:shader,execution,expression,call,builtin,fwidthCoarse:f32:*
 # NVIDIA-host-specific: passes on Intel/ANV (xpass confirmed 2026-07-04); omitted from
 # expectations/yawgpu-vulkan-intel-anv.txt.
 webgpu:shader,execution,memory_model,coherence:corr:memType="atomic_storage";testType="intra_workgroup"
+# F-152: the same corr test on the WORKGROUP memType -- NOT a yawgpu defect. On the Linux /
+# NVIDIA RTX 5060 Ti host (driver 595.91) this variant reliably observes the disallowed weak
+# behavior (5/5) while atomic_storage passes -- the mirror image of the Windows host. Dawn built
+# against the same GPU and driver fails and passes the two variants identically, so it is a
+# hardware/driver memory-model property, not yawgpu and not a regression of F-112. Which of the
+# two variants fires is host-dependent, so both are listed and the one that does not fire xpasses
+# benignly. See docs/FINDINGS.md F-152.
+webgpu:shader,execution,memory_model,coherence:corr:memType="atomic_workgroup";testType="intra_workgroup"
