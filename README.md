@@ -246,8 +246,6 @@ Swept **2026-09-21 raw** — `--workers 2` on yawgpu `80219df` built `--features
 via `EGL_PLATFORM_DEVICE_EXT` (headless), driver 595.91.07; 10 minutes. `shader/validation` is
 byte-identical to the Haswell table below — the WGSL→GLSL-ES path is Tint, so it is driver-independent.
 Nothing is excluded here: the 2 files quarantined on the Haswell host run clean on this driver.
-Note the process segfaults during device teardown after printing its summary, so a GLES run always
-exits non-zero and `--isolate` is unusable on this backend.
 
 #### yawgpu — GLES / Tier 2 experimental (Linux / Mesa `crocus` on Intel Haswell, Tint frontend), per-subcase
 

@@ -138,27 +138,15 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
-## F-153 — yawgpu GLES: SIGSEGV in device teardown at process exit — OPEN
+## F-153 — yawgpu GLES: SIGSEGV in device teardown at process exit — RESOLVED
 
-**OPEN yawgpu DEFECT** (Tier 2 / GLES; Linux / NVIDIA RTX 5060 Ti, driver 595.91.07, OpenGL ES 3.2 via `EGL_PLATFORM_DEVICE_EXT`; found 2026-09-21, yawgpu `80219df` built `--features gles`) — **every** GLES run segfaults while tearing the device down at exit, whatever the query. The results are already streamed by then, so a plain run prints a correct summary and then dies with exit 139.
+**RESOLVED** (yawgpu `0ddc929`, 2026-09-21; found and fixed the same day on Linux / NVIDIA RTX 5060 Ti, driver 595.91.07, OpenGL ES 3.2 via `EGL_PLATFORM_DEVICE_EXT`) — every GLES run segfaulted while tearing the device down at exit, whatever the query: the results printed correctly and the process then died with 139, through `DeviceCache::~DeviceCache` -> `wgpuDeviceRelease` -> `Device::lose` -> `Queue::wait_idle` -> `EglDeviceState::with_current_context`. Vulkan on the same host exited 0.
 
-```
-DeviceCache::~DeviceCache  (CTS, atexit)
-  -> wgpuDeviceRelease
-  -> WGPUDeviceImpl::schedule_device_lost
-  -> yawgpu_core::device::Device::lose
-  -> yawgpu_core::queue::Queue::wait_idle
-  -> yawgpu_hal::HalQueue::wait_idle
-  -> yawgpu_hal::gles::device::EglDeviceState::with_current_context
-       :: gles::queue::GlesQueue::wait_idle::{closure#0}
-  -> SIGSEGV in the driver frame below it
-```
+Root cause: the vendor EGL driver registers its own exit handler when `eglInitialize` `dlopen`s it, which is **after** the executable's static-init registrations. Exit handlers run last-registered-first, so the driver `dlclose`s `libnvidia-eglcore` **before** a consumer's static destructor releases its last device — leaving every GL entry point resolvable but pointing into unmapped memory. A C++ consumer holding its device in a namespace-scope static (the CTS `DeviceCache` is one) hits this every time.
 
-`wait_idle` runs a GL call through `with_current_context` during teardown; the fault is in the frame beneath it, which suggests the EGL context or display is already gone (or never current on this thread) by the time `Device::lose` asks the queue to drain. Vulkan on the same host exits 0.
+Fix arms an `atexit` guard at EGL **device creation**, which by the same LIFO rule lands after the driver's handler and therefore observes teardown before the driver performs it. Once it fires, `with_current_context` returns a clean `HalError` instead of jumping into the unmapped implementation, and `EglDeviceState::drop` skips its GL and EGL teardown — the process is exiting and the driver has already dropped what it owns, so nothing observable leaks.
 
-**This makes `--isolate` unusable on GLES**: it runs every case in its own child process, so every case hits the exit fault and is recorded as a `crash` — 36/36 on `createTexture:usage`, 17/17 and 200/200 on the two files below. Those counts measure this defect, not the cases. Plain `--workers` runs are unaffected in their reported numbers.
-
-**Corrects an earlier reading of this finding.** It was first filed as "all 217 cases of `encoding,cmds,compute_pass` and `encoding,programmable,pipeline_bind_group_compat` segfault", the two files quarantined under **F-126** on Mesa/Haswell. That attribution was wrong: run normally on this host both files are **completely clean** — 157/157 and 2,520/2,520, `fail=0 crash=0`, no GPU wedge — and the `--isolate` crash counts were this teardown fault. F-126's quarantine is Haswell-specific and does not apply here; the GLES table includes all 126 `api/validation` files.
+**Consequence for reading GLES results.** While this was open, `--isolate` gave every case its own child process, so every case hit the exit fault and was recorded as a `crash` — which is what made the two files quarantined under **F-126** look catastrophic. They are clean here: 17/17 and 200/200 pass, under `--isolate` as well as plain, so F-126's quarantine is Haswell-specific. Post-fix a GLES run exits 0, `--isolate` reports real per-case results, and a full re-sweep is byte-identical to the pre-fix one (pass 1,023,776 / skip 1,042,822 / fail 29,715 / crash 0) — the defect never touched the reported numbers.
 
 ---
 
