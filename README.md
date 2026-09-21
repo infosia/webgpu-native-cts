@@ -156,13 +156,15 @@ added: [COVERAGE](docs/COVERAGE.md).
 ### Test results
 
 Per-area `pass / skip / fail / crash` from a full sweep of all **642 ported files** — on
-**macOS / Apple Metal** (the three tables below), on **Windows 11 / native Vulkan** (NVIDIA RTX 5060 Ti;
-the yawgpu-Vulkan table further down), and on **Linux / Mesa native GLES** (the Tier-2 experimental
-yawgpu-GLES bring-up table at the end — a work-in-progress snapshot, not a conformance result). The
+**macOS / Apple Metal** (the three tables below), on **Windows 11 / native Vulkan** and on
+**Linux / native Vulkan** (both NVIDIA RTX 5060 Ti; the two yawgpu-Vulkan tables further down), and on
+**Linux / Mesa native GLES** (the Tier-2 experimental yawgpu-GLES bring-up table at the end — a
+work-in-progress snapshot, not a conformance result). The
 **yawgpu-Metal** and **Dawn-Metal** tables were both **re-swept
 2026-07-03** (`--workers 6`, post-F-146 — the worker-mode harness bug that used to fake-fail parallel Metal
 sweeps is fixed, so parallel numbers are authoritative again); the **wgpu-native-Metal** table is from
-2026-07-02; the yawgpu-Vulkan table is from the 2026-06-28 sweep. All three Metal backends
+2026-07-02; the Windows yawgpu-Vulkan table is from the 2026-06-28 sweep and the Linux one from
+2026-09-21. All three Metal backends
 now run whole-suite **per-subcase** (`--workers`, no `--isolate`): yawgpu and Dawn never abort; wgpu-native is
 panic-heavy but the parallel runner contains each abort (records it as one `crash`, case-level, and continues
 via a fresh forked worker), so it no longer needs `--isolate`. Because wgpu-native runs many cases per worker
@@ -260,6 +262,34 @@ rejects `external_texture` on Vulkan by design), **2** `index_buffer_format_dirt
 quirk that fails on Metal and Dawn too), **1** **F-141** (NVIDIA memory-model weak behavior — Dawn-Vulkan
 fails identically). **No GPU freeze and no crash** across the full sweep. MoltenVK on macOS is
 non-authoritative coverage (artifacts **F-104**, **F-139**), green on native hardware.
+
+#### yawgpu — native Vulkan (Linux / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
+
+| area | pass | skip | fail | crash |
+|------|------:|-----:|-----:|------:|
+| `api/validation` (126) | 244,675 | 110,316 | 5§ | 0 |
+| `api/operation` (70) | 209,360 | 20,233 | 0 | 0 |
+| `shader/execution` (239) | 531,304 | 313,170 | 113§ | 0 |
+| `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
+| **total** | **1,632,112** | **464,088** | **118§** | **0** |
+
+Swept **2026-09-21 raw** — four per-area `--workers 4` runs on yawgpu `2807ed3`
+(`libyawgpu.so` md5 `dcc0658a…`) / CTS `7894f08`, NVIDIA driver 595.91, Vulkan 1.4.329.
+**52 minutes** for the whole suite, `crash=0` across 2,096,318 subcases. This is the same GPU as
+the Windows table above on a different OS, and the two agree: `shader/execution` fails the **same
+113**, and `api/validation` differs by exactly the one new entry noted below.
+
+§ **117 of the 118** are the documented non-defect profile, identical to the Windows-host sweep:
+**88** **F-085**, **24** **F-129**, **2** **F-111**, **2** `index_buffer_format_dirtying`, and **1**
+`memory_model,coherence:corr`. The **118th** is **F-151** (`render_pass,resolve` accepts a
+`TransientAttachment` resolve target that the spec requires be rejected) — new here only because
+`52b21c9` enabled that conformance on yawgpu after the Windows sweep; it is host-independent and not
+yet Dawn-triaged. The `memory_model` failure lands on the **opposite** `memType` from the Windows
+host — see **F-152**.
+
+This host also carries the harness fix in `0f6f6a0`: before it, `shader/execution` could not be
+swept at all here (a single process grew ~45 MB/s and was OOM-killed at a 10 GB cap; `--workers 4`
+froze the machine). It now peaks at 1.8 GB and finishes in 21.6 minutes.
 
 #### yawgpu — GLES / Tier 2 experimental (Linux / Mesa `crocus` on Intel Haswell, Tint frontend), per-subcase
 

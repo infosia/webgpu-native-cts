@@ -138,6 +138,24 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
+## F-152 — yawgpu Vulkan: `memory_model,coherence:corr` fails on the opposite `memType` from the Windows host — UNTRIAGED
+
+**OPEN, host-differential, not yet attributed** (Linux / NVIDIA RTX 5060 Ti, driver 595.91, native Vulkan; found 2026-09-21, full sweep on yawgpu `2807ed3` / CTS `7894f08`) — `shader,execution,memory_model,coherence:corr:testType="intra_workgroup"` fails on `memType="atomic_workgroup"` ("testResults[3] == 305, expected == 0 (disallowed weak behavior observed)") while `memType="atomic_storage"` passes. That is the **inverse** of the Windows/NVIDIA host on the same GPU model, where `atomic_storage` is the xfail'd entry (**F-141**) and `atomic_workgroup` passes — `expectations/yawgpu-vulkan.txt` lists only the storage variant, so this sweep records the workgroup variant as `fail` and the storage variant as `xpass`.
+
+What is established: the failure is **deterministic here (5/5 runs)**, not the statistical tail F-141 describes; it reproduces on **three yawgpu builds** (`9f0fba0e`, `9691745f`, `dcc0658a`), so it is not a regression from the 2026-09-21 pass-encoder work; and it reproduces on a CTS binary built from **`efc9edd`, before the harness fix in `0f6f6a0`**, so it is not an artifact of that change either.
+
+What is **not** established: whether this is a yawgpu defect or, like F-141, an NVIDIA/OS memory-model property. Note `expectations/yawgpu-vulkan.txt` records the workgroup variant as **F-112, "a real yawgpu defect, RESOLVED"**, so an F-112 regression is not excluded. No Dawn oracle has been built on this host; **running the same case through `CTS_BACKEND=dawn` here is the discriminator** and is the next step. Until then neither variant should be added to or removed from the expectations file.
+
+---
+
+## F-151 — yawgpu: `TransientAttachment` resolve target accepted where the spec requires rejection — UNTRIAGED
+
+**OPEN, not yet Dawn-triaged** (found 2026-09-21, Linux / NVIDIA RTX 5060 Ti, native Vulkan, yawgpu `2807ed3`) — `api,validation,render_pass,resolve:resolve_attachment:resolveTargetUsage_transient=true;_valid=false` reports `expected validation error, got none`: a resolve target created with `RenderAttachment | TransientAttachment` is accepted, where the case expects `beginRenderPass` to reject it. 1 subcase, reproducible, `fail=1` for the whole `api/validation` area.
+
+It is **new to the sweep, not new to the backend**: `52b21c9` ("run TRANSIENT_ATTACHMENT conformance on Dawn + yawgpu, skip only wgpu-native") enabled this case for yawgpu after the 2026-06-28 Windows sweep, so no prior yawgpu run covered it. Nothing host-specific is implied — expect it on Windows/Vulkan and Metal too. Not in any expectations file, deliberately: it looks like a real validation gap rather than a port-oracle artifact, but that needs the Dawn oracle to confirm (Dawn passes this case upstream, which is why the harness un-skipped it). If Dawn on the same host also accepts it, re-file as a port/oracle issue instead.
+
+---
+
 ## F-150 — hasvk: vertex-stage read-only storage-texture loads return 0/garbage — driver defect, NOT yawgpu
 
 **DRIVER DEFECT — NOT yawgpu** (hasvk / Intel Haswell, native Vulkan; found 2026-07-04, triaged 2026-07-05) — every `shader,execution,...,builtin,textureLoad:storage_textures_*` case with `stage="v"` fails (146 case queries, ~2,300 records at `--workers 1`): vertex-stage read-only storage-texture loads return 0/garbage; the same subcase class drives the per-stage-mixed `textureDimensions:storage`/`textureNumLayers` fails (~585 records). yawgpu is API-clean (zero VUID/validation lines on native ANV; Tint decorates the variables `NonWritable`, so hasvk's `vertexPipelineStoresAndAtomics=false` does not apply — NonWritable vertex-stage reads are spec-legal without it), and all cases pass on lavapipe. Attribution: hasvk vertex-stage storage-image read defect (consistent with Haswell's GL-era `GL_MAX_VERTEX_IMAGE_UNIFORMS=0`). The complete `textureLoad:storage_textures_*` `stage="v"` class (160 case queries) is xfail'd in `expectations/yawgpu-vulkan-intel-anv.txt` — the failing set is run-to-run nondeterministic so surviving members xpass benignly; the stage-mixed cases stay visible (subcase granularity, F-145 precedent).
