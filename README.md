@@ -202,13 +202,14 @@ run-mode-sensitive, not a like-for-like comparison to yawgpu/Dawn.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 236,140 | 118,848 | 4‡ | 0 |
-| `api/operation` (70) | 209,358 | 20,235 | 0 | 0 |
-| `shader/execution` (239) | 506,662 | 328,151 | 113‡ | 0 |
+| `api/validation` (126) | 244,672 | 110,316 | 4‡ | 0 |
+| `api/operation` (70) | 209,360 | 20,233 | 0 | 0 |
+| `shader/execution` (239) | 531,303 | 313,170 | 113‡ | 0 |
 | `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
-| **total** | **1,598,933** | **487,603** | **117‡** | **0** |
+| **total** | **1,632,108** | **464,088** | **117‡** | **0** |
 
-Swept **2026-07-03 raw** — `--workers 8` on yawgpu `95bbf28` / CTS `04a0236`.
+Swept **2026-09-21 raw** — four per-area `--workers 8` runs on yawgpu `35684de` / CTS `134a1cf`,
+NVIDIA driver 610.62: 25 minutes, `crash=0` across 2,096,313 subcases.
 
 ‡ Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`; the suite exits
 `fail=0` once expectations are applied.
@@ -225,7 +226,8 @@ Swept **2026-07-03 raw** — `--workers 8` on yawgpu `95bbf28` / CTS `04a0236`.
 
 Swept **2026-09-21 raw** — four per-area `--workers 4` runs on yawgpu `80219df` / CTS `df58708`,
 NVIDIA driver 595.91, Vulkan 1.4.329: 53 minutes, `crash=0` across 2,096,318 subcases. Same GPU as
-the Windows table on a different OS, and the two agree on `shader/execution`.
+the Windows table on a different OS: skip and fail counts are identical in every area, and pass
+counts agree to within 5 subcases.
 
 § Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`; the suite exits
 `fail=0` once expectations are applied.
