@@ -138,20 +138,27 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
-## F-153 — yawgpu GLES: every `dispatch_sizes` / `pipeline_bind_group_compat` case segfaults on NVIDIA ES — OPEN
+## F-153 — yawgpu GLES: SIGSEGV in device teardown at process exit — OPEN
 
-**OPEN yawgpu DEFECT** (Tier 2 / GLES; Linux / NVIDIA RTX 5060 Ti, driver 595.91.07, OpenGL ES 3.2 via `EGL_PLATFORM_DEVICE_EXT`; found 2026-09-21, yawgpu `80219df` built `--features gles`) — the two files quarantined on the Haswell host crash the process here instead of wedging the GPU:
+**OPEN yawgpu DEFECT** (Tier 2 / GLES; Linux / NVIDIA RTX 5060 Ti, driver 595.91.07, OpenGL ES 3.2 via `EGL_PLATFORM_DEVICE_EXT`; found 2026-09-21, yawgpu `80219df` built `--features gles`) — **every** GLES run segfaults while tearing the device down at exit, whatever the query. The results are already streamed by then, so a plain run prints a correct summary and then dies with exit 139.
 
-| file | cases | result |
-|---|---:|---|
-| `api,validation,encoding,cmds,compute_pass` (`dispatch_sizes`) | 17 | **17 × signal 11 (SIGSEGV)** |
-| `api,validation,encoding,programmable,pipeline_bind_group_compat` | 200 | **200 × signal 11 (SIGSEGV)** |
+```
+DeviceCache::~DeviceCache  (CTS, atexit)
+  -> wgpuDeviceRelease
+  -> WGPUDeviceImpl::schedule_device_lost
+  -> yawgpu_core::device::Device::lose
+  -> yawgpu_core::queue::Queue::wait_idle
+  -> yawgpu_hal::HalQueue::wait_idle
+  -> yawgpu_hal::gles::device::EglDeviceState::with_current_context
+       :: gles::queue::GlesQueue::wait_idle::{closure#0}
+  -> SIGSEGV in the driver frame below it
+```
 
-Every case, both `dispatchType="direct"` and `"indirect"`, across the whole `lv_mult`/`lv_add` grid. **No timeouts** (`--case-timeout-ms 20000`, 0 timed out), so this is a memory fault in the library, not a hang, and the machine stays healthy — the GPU returns to idle and no reboot was needed.
+`wait_idle` runs a GL call through `with_current_context` during teardown; the fault is in the frame beneath it, which suggests the EGL context or display is already gone (or never current on this thread) by the time `Device::lose` asks the queue to drain. Vulkan on the same host exits 0.
 
-Same two files, different failure mode from **F-126** on Mesa/Haswell, where a zero-dimension indirect dispatch wedges the GPU machine-wide. The common thread is that dispatch-size boundary handling on the GLES path is not safe; on this driver it faults in-process. They are excluded from the GLES sweep table for the same reason F-126 excludes them there, and `--isolate` contains each fault, which is how these counts were obtained.
+**This makes `--isolate` unusable on GLES**: it runs every case in its own child process, so every case hits the exit fault and is recorded as a `crash` — 36/36 on `createTexture:usage`, 17/17 and 200/200 on the two files below. Those counts measure this defect, not the cases. Plain `--workers` runs are unaffected in their reported numbers.
 
-A segfault is stricter than the "no panics in library code" rule yawgpu's own CLAUDE.md sets, so this is a defect regardless of tier.
+**Corrects an earlier reading of this finding.** It was first filed as "all 217 cases of `encoding,cmds,compute_pass` and `encoding,programmable,pipeline_bind_group_compat` segfault", the two files quarantined under **F-126** on Mesa/Haswell. That attribution was wrong: run normally on this host both files are **completely clean** — 157/157 and 2,520/2,520, `fail=0 crash=0`, no GPU wedge — and the `--isolate` crash counts were this teardown fault. F-126's quarantine is Haswell-specific and does not apply here; the GLES table includes all 126 `api/validation` files.
 
 ---
 
