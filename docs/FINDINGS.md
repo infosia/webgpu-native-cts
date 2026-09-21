@@ -138,6 +138,23 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
+## F-153 — yawgpu GLES: every `dispatch_sizes` / `pipeline_bind_group_compat` case segfaults on NVIDIA ES — OPEN
+
+**OPEN yawgpu DEFECT** (Tier 2 / GLES; Linux / NVIDIA RTX 5060 Ti, driver 595.91.07, OpenGL ES 3.2 via `EGL_PLATFORM_DEVICE_EXT`; found 2026-09-21, yawgpu `80219df` built `--features gles`) — the two files quarantined on the Haswell host crash the process here instead of wedging the GPU:
+
+| file | cases | result |
+|---|---:|---|
+| `api,validation,encoding,cmds,compute_pass` (`dispatch_sizes`) | 17 | **17 × signal 11 (SIGSEGV)** |
+| `api,validation,encoding,programmable,pipeline_bind_group_compat` | 200 | **200 × signal 11 (SIGSEGV)** |
+
+Every case, both `dispatchType="direct"` and `"indirect"`, across the whole `lv_mult`/`lv_add` grid. **No timeouts** (`--case-timeout-ms 20000`, 0 timed out), so this is a memory fault in the library, not a hang, and the machine stays healthy — the GPU returns to idle and no reboot was needed.
+
+Same two files, different failure mode from **F-126** on Mesa/Haswell, where a zero-dimension indirect dispatch wedges the GPU machine-wide. The common thread is that dispatch-size boundary handling on the GLES path is not safe; on this driver it faults in-process. They are excluded from the GLES sweep table for the same reason F-126 excludes them there, and `--isolate` contains each fault, which is how these counts were obtained.
+
+A segfault is stricter than the "no panics in library code" rule yawgpu's own CLAUDE.md sets, so this is a defect regardless of tier.
+
+---
+
 ## F-152 — NVIDIA/Linux: `memory_model,coherence:corr` weak behavior on `atomic_workgroup` — Dawn-CONFIRMED driver/HW property, NOT yawgpu
 
 **DRIVER/HW PROPERTY — Dawn-CONFIRMED, NOT yawgpu** (Linux / NVIDIA RTX 5060 Ti, driver 595.91, native Vulkan; found and triaged 2026-09-21) — `shader,execution,memory_model,coherence:corr:testType="intra_workgroup"` fails on `memType="atomic_workgroup"` ("testResults[3] == 305, expected == 0, disallowed weak behavior observed") and passes on `memType="atomic_storage"`. That is the mirror image of the Windows/NVIDIA host, where the storage variant is the xfail'd one (**F-141**) and workgroup passes.

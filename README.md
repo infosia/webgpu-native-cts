@@ -150,8 +150,8 @@ added: [COVERAGE](docs/COVERAGE.md).
 ### Test results
 
 Per-area `pass / skip / fail / crash` from a full sweep of all **642 ported files**: on **macOS /
-Apple Metal**, on **Windows and Linux / native Vulkan** (NVIDIA RTX 5060 Ti), and on **Linux / Mesa
-native GLES** (Tier-2 experimental — a bring-up snapshot, not a conformance result). Every backend
+Apple Metal**, on **Windows and Linux / native Vulkan** (NVIDIA RTX 5060 Ti), and on **GLES**
+(Tier-2 experimental — bring-up snapshots, not conformance results). Every backend
 runs whole-suite **per-subcase** (`--workers`, no `--isolate`). All tables are **raw** (no
 `--expectations`), so documented non-defects show in `fail` rather than being masked; each table
 carries its own sweep date, run mode and backend revision. Per-finding detail is in
@@ -217,18 +217,38 @@ Swept **2026-07-03 raw** — `--workers 8` on yawgpu `95bbf28` / CTS `04a0236`.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 244,675 | 110,316 | 5§ | 0 |
+| `api/validation` (126) | 244,676 | 110,316 | 4§ | 0 |
 | `api/operation` (70) | 209,360 | 20,233 | 0 | 0 |
 | `shader/execution` (239) | 531,304 | 313,170 | 113§ | 0 |
 | `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
-| **total** | **1,632,112** | **464,088** | **118§** | **0** |
+| **total** | **1,632,113** | **464,088** | **117§** | **0** |
 
-Swept **2026-09-21 raw** — four per-area `--workers 4` runs on yawgpu `2807ed3` / CTS `7894f08`,
-NVIDIA driver 595.91, Vulkan 1.4.329: 52 minutes, `crash=0` across 2,096,318 subcases. Same GPU as
+Swept **2026-09-21 raw** — four per-area `--workers 4` runs on yawgpu `80219df` / CTS `df58708`,
+NVIDIA driver 595.91, Vulkan 1.4.329: 53 minutes, `crash=0` across 2,096,318 subcases. Same GPU as
 the Windows table on a different OS, and the two agree on `shader/execution`.
 
-§ **117** are documented non-defects carried as `xfail`; the remaining **1** is an open backend
-defect, deliberately not masked.
+§ Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`; the suite exits
+`fail=0` once expectations are applied.
+
+#### yawgpu — GLES / Tier 2 experimental (Linux / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
+
+> **This is not a conformance table** — see the Tier-2 note under the Haswell table below.
+
+| area | pass | skip | fail | crash |
+|------|------:|-----:|-----:|------:|
+| `api/validation` (124¶) | 200,735 | 151,323 | 257 | 0 |
+| `api/operation` (70) | 141,076 | 76,704 | **11,813** | 0 |
+| `shader/execution` (239) | 309,535 | 517,406 | **17,645** | 0 |
+| `shader/validation` (207) | 369,753 | 297,389 | 0 | 0 |
+| **total** | **1,021,099** | **1,042,822** | **29,715** | **0** |
+
+Swept **2026-09-21 raw** — `--workers 2` on yawgpu `80219df` built `--features gles`, OpenGL ES 3.2
+via `EGL_PLATFORM_DEVICE_EXT` (headless), driver 595.91.07; 10 minutes. `shader/validation` is
+byte-identical to the Haswell table below — the WGSL→GLSL-ES path is Tint, so it is driver-independent.
+
+¶ **2** `api/validation` files are **excluded** (`encoding,cmds,compute_pass` and
+`encoding,programmable,pipeline_bind_group_compat`): all 217 of their cases fault in-process on this
+driver.
 
 #### yawgpu — GLES / Tier 2 experimental (Linux / Mesa `crocus` on Intel Haswell, Tint frontend), per-subcase
 
