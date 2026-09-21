@@ -34,10 +34,21 @@ Full detail: `specs/reference/workflow.md`.
 
 ## Tooling — builds
 
-- **Always compile serially: explicit `-j 1`** on every `cmake --build` and
-  `cargo build` (Claude, the coding agent, and docs/spec examples alike).
-  Parallel compiles overload the dev machine (CPU/memory). CTS *run*
-  parallelism (`--workers N`) is unaffected.
+- **Compile in parallel: `-j 8`** on `cmake --build` and `cargo build`. The
+  former `-j 1` rule was written for a weaker dev machine and no longer
+  applies. (A full `cts` build — 642 spec TUs — takes ~3 min at `-j 8`.)
+- **Memory is the constraint at *run* time, not build time.** A `cts` run can
+  grow to many GB per process, and `--workers N` multiplies it by N; two
+  whole-machine freezes have been caused this way. Cap every exploratory or
+  full-area run so a runaway kills the process, not the host:
+
+  ```bash
+  systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 --collect \
+    /usr/bin/time -f 'peakRSS=%MKB elapsed=%es' build-yawgpu/cts --workers 1 '<query>'
+  ```
+
+  Raise `--workers` only after a single-process run of the same query is known
+  to fit well inside the host's RAM divided by N.
 
 ## Tooling — sandbox
 
