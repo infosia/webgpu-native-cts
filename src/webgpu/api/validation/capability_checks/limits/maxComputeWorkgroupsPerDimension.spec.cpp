@@ -55,11 +55,10 @@ CTS_TEST(testGroup, "dispatchWorkgroups,at_over")
 
                 WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
                 WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-                WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+                WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
                 wgpuComputePassEncoderSetPipeline(pass, pipeline);
                 wgpuComputePassEncoderDispatchWorkgroups(pass, counts[0], counts[1], counts[2]);
                 wgpuComputePassEncoderEnd(pass);
-                wgpuComputePassEncoderRelease(pass);
 
                 t.expectValidationErrorOnLimitDevice([&] {
                     t.finishTracked(encoder);

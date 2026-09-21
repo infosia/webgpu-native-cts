@@ -310,7 +310,7 @@ CTS_TEST(g, "max_storage_buffer_texture_frag_outputs")
         passDesc.depthStencilAttachment = &dsAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup0, 0, nullptr);
         wgpuRenderPassEncoderSetBindGroup(pass, 1, bindGroup1, 0, nullptr);

@@ -169,7 +169,7 @@ void submit(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder) {
     wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
 }
 
-WGPURenderPassEncoder beginRenderPass(
+WGPURenderPassEncoder beginRenderPass(GpuTest& t, 
     WGPUCommandEncoder encoder,
     WGPUTextureView view,
     WGPULoadOp loadOp = WGPULoadOp_Clear,
@@ -183,7 +183,7 @@ WGPURenderPassEncoder beginRenderPass(
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAttachment;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 void drawFullscreen(
@@ -205,7 +205,7 @@ void renderColor(
     WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
     WGPUTextureView view = t.createViewTracked(texture, viewDesc);
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = beginRenderPass(encoder, view, loadOp);
+    WGPURenderPassEncoder pass = beginRenderPass(t, encoder, view, loadOp);
     if (blendConstant) {
         wgpuRenderPassEncoderSetBlendConstant(pass, &*blendConstant);
     }

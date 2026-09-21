@@ -287,7 +287,7 @@ CTS_TEST(testGroup, "non_const_index")
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, group, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);

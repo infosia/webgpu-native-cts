@@ -139,9 +139,8 @@ CTS_TEST(g, "color_attachments,device_mismatch")
         passDesc.colorAttachments     = colorAttachments;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);
@@ -203,9 +202,8 @@ CTS_TEST(g, "depth_stencil_attachment,device_mismatch")
         passDesc.depthStencilAttachment    = &dsAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);
@@ -254,9 +252,8 @@ CTS_TEST(g, "occlusion_query_set,device_mismatch")
         passDesc.occlusionQuerySet    = occlusionQuerySet;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);
@@ -319,9 +316,8 @@ CTS_TEST(g, "timestamp_query_set,device_mismatch")
         passDesc.timestampWrites      = &tw;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);

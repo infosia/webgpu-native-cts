@@ -306,7 +306,7 @@ static void drawPassthrough(AllFeaturesMaxLimitsGpuTest& t, const std::string& c
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
 
     {
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         // slot 0: scalar u32, offset=0, size=12 (3 verts × 4 bytes)
         wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vertexBuffer, 0, 12);

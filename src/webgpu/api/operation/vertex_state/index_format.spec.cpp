@@ -220,7 +220,7 @@ void runIndexFormatTest(
     passDesc.colorAttachments = &colorAttachment;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderSetIndexBuffer(pass, indexBuffer, format, indexOffset, WGPU_WHOLE_SIZE);
     wgpuRenderPassEncoderDrawIndexed(pass, indexCount, 1, 0, 0, 0);

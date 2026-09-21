@@ -371,7 +371,7 @@ static void testBeginRenderPass(AllFeaturesMaxLimitsGpuTest& t, const std::strin
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAttachment;
 
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     t.expect(pass != nullptr, "beginRenderPass with label returned null");
     // Upstream: t.expect(renderPass.label === label) — no GetLabel in C API.
     wgpuRenderPassEncoderEnd(pass);
@@ -395,7 +395,7 @@ static void testBeginComputePass(AllFeaturesMaxLimitsGpuTest& t, const std::stri
 
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
     passDesc.label = sv(label);
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     t.expect(pass != nullptr, "beginComputePass with label returned null");
     // Upstream: t.expect(computePass.label === label) — no GetLabel in C API.
     wgpuComputePassEncoderEnd(pass);

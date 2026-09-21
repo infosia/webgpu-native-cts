@@ -149,7 +149,7 @@ CTS_TEST(g, "storeOp_controls_whether_1x1_drawn_quad_is_stored")
         passDesc.colorAttachments = &colorAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);

@@ -155,7 +155,7 @@ CTS_TEST(g, "buffer_binding_resource")
         {
             WGPUComputePassDescriptor cpDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &cpDesc);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &cpDesc);
             wgpuComputePassEncoderSetPipeline(pass, pipeline);
             wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
             wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);

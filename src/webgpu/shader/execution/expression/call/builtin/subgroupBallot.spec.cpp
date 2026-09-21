@@ -288,7 +288,7 @@ void runTest(
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
@@ -680,7 +680,7 @@ CTS_TEST(g, "fragment")
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = colorAtts.size();
         passDesc.colorAttachments = colorAtts.data();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);

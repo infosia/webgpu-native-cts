@@ -57,7 +57,7 @@ static WGPURenderPassEncoder beginRenderPassWithQuerySet(
     passDesc.colorAttachments     = &colorAttachment;
     passDesc.occlusionQuerySet    = occlusionQuerySet;
 
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,6 @@ CTS_TEST(g, "occlusion_query,begin_end_balance")
         }
 
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         // Mismatch between begin and end counts is a finish-time error.
         const bool shouldError = (begin != end);
@@ -180,7 +179,6 @@ CTS_TEST(g, "occlusion_query,begin_end_invalid_nesting")
         }
 
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         // Validation is deferred to finish().
         t.expectValidationError([&] {
@@ -222,17 +220,14 @@ CTS_TEST(g, "occlusion_query,disjoint_queries_with_same_query_index")
             wgpuRenderPassEncoderBeginOcclusionQuery(pass, 0);
             wgpuRenderPassEncoderEndOcclusionQuery(pass);
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
         } else {
             // Use a second render pass with the same query index — valid.
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
 
             WGPURenderPassEncoder otherPass = beginRenderPassWithQuerySet(t, encoder, querySet);
             wgpuRenderPassEncoderBeginOcclusionQuery(otherPass, 0);
             wgpuRenderPassEncoderEndOcclusionQuery(otherPass);
             wgpuRenderPassEncoderEnd(otherPass);
-            wgpuRenderPassEncoderRelease(otherPass);
         }
 
         // Validation is deferred to finish().

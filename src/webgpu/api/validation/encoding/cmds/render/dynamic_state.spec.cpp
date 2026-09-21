@@ -34,7 +34,7 @@ static WGPUTexture createRenderAttachmentTexture(
 }
 
 // Begin a minimal single-color-attachment render pass (loadOp=load, storeOp=store).
-static WGPURenderPassEncoder beginRenderPass(
+static WGPURenderPassEncoder beginRenderPass(GpuTest& t, 
     WGPUCommandEncoder cmdEnc,
     WGPUTextureView    view)
 {
@@ -46,7 +46,7 @@ static WGPURenderPassEncoder beginRenderPass(
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments     = &colorAttach;
-    return wgpuCommandEncoderBeginRenderPass(cmdEnc, &passDesc);
+    return t.beginRenderPassTracked(cmdEnc, &passDesc);
 }
 
 // nextAfterF32(val, 'positive'/'negative', 'no-flush'):
@@ -79,10 +79,9 @@ static void testViewportCall(
     WGPUTextureView view = t.createViewTracked(attachment, vDesc);
 
     WGPUCommandEncoder cmdEnc = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = beginRenderPass(cmdEnc, view);
+    WGPURenderPassEncoder pass = beginRenderPass(t, cmdEnc, view);
     wgpuRenderPassEncoderSetViewport(pass, x, y, w, h, minDepth, maxDepth);
     wgpuRenderPassEncoderEnd(pass);
-    wgpuRenderPassEncoderRelease(pass);
 
     t.expectValidationError([&] {
         t.finishTracked(cmdEnc);
@@ -111,10 +110,9 @@ static void testScissorCall(
     WGPUTextureView view = t.createViewTracked(attachment, vDesc);
 
     WGPUCommandEncoder cmdEnc = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = beginRenderPass(cmdEnc, view);
+    WGPURenderPassEncoder pass = beginRenderPass(t, cmdEnc, view);
     wgpuRenderPassEncoderSetScissorRect(pass, x, y, w, h);
     wgpuRenderPassEncoderEnd(pass);
-    wgpuRenderPassEncoderRelease(pass);
 
     t.expectValidationError([&] {
         t.finishTracked(cmdEnc);
@@ -135,7 +133,7 @@ static DummyRenderPassEncoders createDummyRenderPassEncoder(AllFeaturesMaxLimits
     WGPUTextureView view = t.createViewTracked(attachment, vDesc);
 
     WGPUCommandEncoder cmdEnc = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = beginRenderPass(cmdEnc, view);
+    WGPURenderPassEncoder pass = beginRenderPass(t, cmdEnc, view);
     return DummyRenderPassEncoders{cmdEnc, pass};
 }
 
@@ -454,7 +452,6 @@ CTS_TEST(g, "setBlendConstant")
         WGPUColor color = WGPUColor{red, green, blue, alpha};
         wgpuRenderPassEncoderSetBlendConstant(encoders.pass, &color);
         wgpuRenderPassEncoderEnd(encoders.pass);
-        wgpuRenderPassEncoderRelease(encoders.pass);
         // setBlendConstant is always valid; finish() must succeed.
         t.finishTracked(encoders.encoder);
     });
@@ -481,7 +478,6 @@ CTS_TEST(g, "setStencilReference")
         DummyRenderPassEncoders encoders = createDummyRenderPassEncoder(t);
         wgpuRenderPassEncoderSetStencilReference(encoders.pass, value);
         wgpuRenderPassEncoderEnd(encoders.pass);
-        wgpuRenderPassEncoderRelease(encoders.pass);
         // setStencilReference is always valid; finish() must succeed.
         t.finishTracked(encoders.encoder);
     });

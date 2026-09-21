@@ -140,7 +140,7 @@ CTS_TEST(grp, "outputs,clip_distances")
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAttachment;
-        WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder renderPass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(renderPass, renderPipeline);
         wgpuRenderPassEncoderDraw(renderPass, 6, 1, 0, 0);
         wgpuRenderPassEncoderEnd(renderPass);

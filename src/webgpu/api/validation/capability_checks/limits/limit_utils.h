@@ -858,13 +858,12 @@ class LimitTest : public GpuTest {
             WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
             passDesc.colorAttachmentCount = 1;
             passDesc.colorAttachments = &attachment;
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = beginRenderPassTracked(encoder, &passDesc);
             BindingCommandContext ctx;
             ctx.renderPass = pass;
             ctx.bindGroup = bindGroup;
             fn(ctx);
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
             expectValidationErrorOnLimitDevice([&] { finishTracked(encoder); }, shouldError, msg);
             return;
         }
@@ -924,13 +923,12 @@ class LimitTest : public GpuTest {
         WGPUBindGroup bindGroup = createBindGroupTracked(bgDesc);
         WGPUCommandEncoder encoder = createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = beginComputePassTracked(encoder, &passDesc);
         BindingCommandContext ctx;
         ctx.computePass = pass;
         ctx.bindGroup = bindGroup;
         fn(ctx);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
         expectValidationErrorOnLimitDevice([&] { finishTracked(encoder); }, shouldError, msg);
     }
 

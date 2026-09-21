@@ -783,7 +783,7 @@ class OperationContextHelper {
                     std::abort();
                 }
                 WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-                computePassEncoder = wgpuCommandEncoderBeginComputePass(commandEncoder, &passDesc);
+                computePassEncoder = t_.beginComputePassTracked(commandEncoder, &passDesc);
                 break;
             }
             case OpContext::RenderPassEncoder:
@@ -884,7 +884,7 @@ class OperationContextHelper {
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAttachment;
-        renderPassEncoder = wgpuCommandEncoderBeginRenderPass(commandEncoder, &passDesc);
+        renderPassEncoder = t_.beginRenderPassTracked(commandEncoder, &passDesc);
     }
 
     void popContext() {
@@ -1315,7 +1315,7 @@ WGPURenderPassEncoder beginSimpleRenderPass(BufferSyncTest& t, WGPUCommandEncode
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAttachment;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 WGPURenderBundleEncoder createRenderBundleEncoder(BufferSyncTest& t) {
@@ -1605,7 +1605,7 @@ CTS_TEST(g, "multiple_pairs_of_dispatches_in_one_compute_pass")
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
 
         std::vector<WGPUBuffer> buffers;
         for (uint32_t b = 0; b < kBufferCount; ++b) {

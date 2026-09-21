@@ -582,7 +582,7 @@ static void runShaderTest(
     {
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
 
         if (hasDynamicOffset && testBuffer != nullptr) {

@@ -434,7 +434,7 @@ CTS_TEST(g, "texture_intra_invocation_coherence")
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bg0, 0, nullptr);
         wgpuComputePassEncoderSetBindGroup(pass, 1, bg1, 0, nullptr);

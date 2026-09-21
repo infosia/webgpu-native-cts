@@ -158,7 +158,7 @@ WGPURenderPassEncoder beginSimpleRenderPass(AllFeaturesMaxLimitsGpuTest& t,
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &color;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 std::string vertexShaderFor(uint32_t vertexBufferCount) {
@@ -335,7 +335,7 @@ bindGroup, dynamicOffsets), do not contribute directly to a usage scope.)")
 
         t.expectValidationError([&] {
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
             WGPUBindGroup bindGroup0 = createBindGroupForTest(t, buffer, 0, usage0, visibility0);
             wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup0, 0, nullptr);
             const uint64_t offset1 = hasOverlap ? 0 : kBoundBufferSize;
@@ -409,7 +409,7 @@ have tests covered (https://github.com/gpuweb/cts/issues/2232)
 
         t.expectValidationError([&] {
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
             if (usage0 == "indirect") {
                 WGPUComputePipeline pipeline = createNoOpComputePipeline(t);
                 wgpuComputePassEncoderSetPipeline(pass, pipeline);
@@ -485,7 +485,7 @@ dispatch calls refer to different usage scopes.)")
 
         t.expectValidationError([&] {
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
             useBufferOnComputePassEncoder(t, pass, buffer, usage0, 0);
             const uint64_t offset1 = hasOverlap ? 0 : kBoundBufferSize;
             if (inSamePass) {
@@ -493,7 +493,7 @@ dispatch calls refer to different usage scopes.)")
                 wgpuComputePassEncoderEnd(pass);
             } else {
                 wgpuComputePassEncoderEnd(pass);
-                WGPUComputePassEncoder anotherPass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+                WGPUComputePassEncoder anotherPass = t.beginComputePassTracked(encoder, nullptr);
                 useBufferOnComputePassEncoder(t, anotherPass, buffer, usage1, offset1);
                 wgpuComputePassEncoderEnd(anotherPass);
             }

@@ -84,7 +84,7 @@ fn main() {
         // Encode: begin compute pass, dispatch 1 workgroup.
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
@@ -187,7 +187,7 @@ fn frag_main() -> @location(0) vec4f {
         passDesc.depthStencilAttachment = nullptr;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);

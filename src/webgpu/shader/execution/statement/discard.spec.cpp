@@ -278,12 +278,11 @@ void drawFullScreen(
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAttachment;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuRenderPassEncoderDraw(pass, 24, 1, 0, 0);
     wgpuRenderPassEncoderEnd(pass);
-    wgpuRenderPassEncoderRelease(pass);
 
     t.copyTextureToBuffer(
         encoder, framebuffer, fbBuffer, kWidth * kBytesPerWord * 2, WGPUExtent3D{kWidth, kHeight, 1});

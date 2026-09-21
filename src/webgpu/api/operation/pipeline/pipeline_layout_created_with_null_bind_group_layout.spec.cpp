@@ -204,7 +204,7 @@ CTS_TEST(g, "pipeline_layout_with_null_bind_group_layout,rendering")
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAttachment;
 
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(commandEncoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(commandEncoder, &passDesc);
         for (size_t i = 0; i < bindGroups.size(); ++i) {
             wgpuRenderPassEncoderSetBindGroup(pass, static_cast<uint32_t>(i), bindGroups[i], 0, nullptr);
         }
@@ -416,7 +416,7 @@ CTS_TEST(g, "pipeline_layout_with_null_bind_group_layout,compute")
 
         WGPUCommandEncoder commandEncoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(commandEncoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(commandEncoder, &passDesc);
         for (size_t i = 0; i < bindGroups.size(); ++i) {
             wgpuComputePassEncoderSetBindGroup(pass, static_cast<uint32_t>(i), bindGroups[i], 0, nullptr);
         }

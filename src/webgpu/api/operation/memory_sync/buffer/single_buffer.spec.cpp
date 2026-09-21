@@ -266,7 +266,7 @@ void encodeWriteOp(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder, s
         WGPUBindGroup bindGroup = createStorageWriteBindGroup(t, bindGroupLayout, buffer);
 
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
@@ -291,7 +291,7 @@ void encodeReadOp(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder, st
         WGPUBindGroup bindGroup = createStorageReadBindGroup(t, bindGroupLayout, src, dst);
 
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
@@ -376,7 +376,7 @@ WGPURenderPassEncoder beginSimpleRenderPass(AllFeaturesMaxLimitsGpuTest& t, WGPU
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAttachment;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 WGPURenderBundleEncoder createRenderBundleEncoder(AllFeaturesMaxLimitsGpuTest& t) {
@@ -509,7 +509,7 @@ CTS_TEST(g, "two_dispatches_in_the_same_compute_pass")
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, firstPipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);

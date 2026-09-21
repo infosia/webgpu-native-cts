@@ -494,7 +494,7 @@ std::string getProvokingVertexForFlatInterpolationEitherSampling(AllFeaturesMaxL
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAttachment;
 
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);
@@ -758,7 +758,7 @@ WGPUBuffer renderFragmentShaderInputsTo4Textures(
         passDesc.colorAttachments = colorAttachments;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderSetViewport(
@@ -849,7 +849,7 @@ WGPUBuffer renderFragmentShaderInputsTo4Textures(
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, copyPipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, o.width * o.sampleCount, o.height, 1);
@@ -1492,7 +1492,7 @@ fn vsMain(@builtin(vertex_index) index : u32) -> @builtin(position) vec4f {
             passDesc.colorAttachmentCount = 1;
             passDesc.colorAttachments = &colorAttachment;
 
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderSetPipeline(pass, pipeline);
             // Draw the upper-left triangle (vertices 0-2) or the lower-right
             // triangle (vertices 3-5).
@@ -1938,7 +1938,7 @@ void runPrimitiveIndexTest(AllFeaturesMaxLimitsGpuTest& t, const PrimitiveIndexT
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAttachment;
 
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         if (vertexBuffer != nullptr) {
             wgpuRenderPassEncoderSetVertexBuffer(

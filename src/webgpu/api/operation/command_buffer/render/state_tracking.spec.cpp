@@ -194,7 +194,7 @@ CTS_TEST(g, "set_index_buffer_without_changing_buffer")
         passDesc.depthStencilAttachment = nullptr;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vertexBuffer, 0, WGPU_WHOLE_SIZE);
@@ -353,7 +353,7 @@ CTS_TEST(g, "set_vertex_buffer_without_changing_buffer")
         passDesc.depthStencilAttachment = nullptr;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
 
@@ -502,7 +502,7 @@ CTS_TEST(g, "change_pipeline_before_and_after_vertex_buffer")
         passDesc.depthStencilAttachment = nullptr;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
         // Update pipeline before setVertexBuffer → stride = 2*kVertexAttributeSize.
         // Verts at byte 0 and 16 = kPositions[0], kPositions[2] → pixels 0, 2.
@@ -757,7 +757,7 @@ CTS_TEST(g, "set_vertex_buffer_but_not_used_in_draw")
         passDesc.depthStencilAttachment = nullptr;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
         // Draw 1: p1 uses both colorBuffer (slot 0) and positionBuffer (slot 1).
         // positions -0.75,-0.25 → pixels 0,1; colors kColors[0..3], kColors[4..7].
@@ -896,7 +896,7 @@ CTS_TEST(g, "set_index_buffer_before_non_indexed_draw")
         passDesc.depthStencilAttachment = nullptr;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
         // Draw 1: indexed — indices {2,3} → vertices 2,3 → pixels 2,3.
         wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vb, 0, WGPU_WHOLE_SIZE);

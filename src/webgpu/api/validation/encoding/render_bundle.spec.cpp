@@ -76,11 +76,10 @@ CTS_TEST(g, "empty_bundle_list")
         passDesc.colorAttachments     = &colorAtt;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         // Execute an empty list of bundles — valid per spec
         wgpuRenderPassEncoderExecuteBundles(pass, 0, nullptr);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         // Should succeed
         t.expectValidationError([&] {
@@ -149,12 +148,11 @@ CTS_TEST(g, "device_mismatch")
         passDesc.colorAttachments     = &colorAtt;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
         WGPURenderBundle bundles[2] = {bundle0, bundle1};
         wgpuRenderPassEncoderExecuteBundles(pass, 2, bundles);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);
@@ -263,10 +261,9 @@ CTS_TEST(g, "color_formats_mismatch")
         passDesc.colorAttachments     = colorAtts.data();
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);
@@ -342,10 +339,9 @@ CTS_TEST(g, "depth_stencil_formats_mismatch")
         passDesc.depthStencilAttachment = &dsAtt;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);
@@ -442,10 +438,9 @@ CTS_TEST(g, "depth_stencil_readonly_mismatch")
         passDesc.depthStencilAttachment = &dsAtt;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);
@@ -522,10 +517,9 @@ CTS_TEST(g, "sample_count_mismatch")
         passDesc.colorAttachments     = &colorAtt;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         t.expectValidationError([&] {
             t.finishTracked(encoder);

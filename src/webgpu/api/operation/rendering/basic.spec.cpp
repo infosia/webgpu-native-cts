@@ -49,7 +49,7 @@ WGPUTexture createColorAttachment(AllFeaturesMaxLimitsGpuTest& t) {
     return t.createTextureTracked(desc);
 }
 
-WGPURenderPassEncoder beginColorRenderPass(
+WGPURenderPassEncoder beginColorRenderPass(GpuTest& t, 
     WGPUCommandEncoder encoder,
     WGPUTextureView view,
     WGPUColor clearValue) {
@@ -63,7 +63,7 @@ WGPURenderPassEncoder beginColorRenderPass(
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAttachment;
     passDesc.depthStencilAttachment = nullptr;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 void copyColorToBuffer(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder, WGPUTexture color, WGPUBuffer dst) {
@@ -114,7 +114,7 @@ CTS_TEST(g, "clear")
         WGPUTextureView view = t.createViewTracked(color, viewDesc);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginColorRenderPass(encoder, view, WGPUColor{0.0, 1.0, 0.0, 1.0});
+        WGPURenderPassEncoder pass = beginColorRenderPass(t, encoder, view, WGPUColor{0.0, 1.0, 0.0, 1.0});
         wgpuRenderPassEncoderEnd(pass);
         copyColorToBuffer(t, encoder, color, dst);
         submit(t, encoder);
@@ -131,7 +131,7 @@ CTS_TEST(g, "fullscreen_quad")
         WGPURenderPipeline pipeline = createFullscreenQuadPipeline(t);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginColorRenderPass(encoder, view, WGPUColor{1.0, 0.0, 0.0, 1.0});
+        WGPURenderPassEncoder pass = beginColorRenderPass(t, encoder, view, WGPUColor{1.0, 0.0, 0.0, 1.0});
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);

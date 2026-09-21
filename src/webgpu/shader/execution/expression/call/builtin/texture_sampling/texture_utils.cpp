@@ -1482,12 +1482,11 @@ MipMixWeights queryMipLevelMixWeightsForDevice(AllFeaturesMaxLimitsGpuTest& t) {
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, kMipLevelWeightSteps + 1u, 1, 1);
     wgpuComputePassEncoderEnd(pass);
-    wgpuComputePassEncoderRelease(pass);
     submit(t, encoder);
 
     MipMixWeights weights;
@@ -1670,7 +1669,7 @@ std::vector<MipData> materializeCompressedTexels(AllFeaturesMaxLimitsGpuTest& t,
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(
@@ -1679,7 +1678,6 @@ std::vector<MipData> materializeCompressedTexels(AllFeaturesMaxLimitsGpuTest& t,
             (std::max(1u, mipData.size.height) + 3u) / 4u,
             std::max(1u, mipData.size.depthOrArrayLayers));
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
         submit(t, encoder);
 
         t.expectGPUBufferValuesPassCheck(
@@ -1727,9 +1725,8 @@ void initializeDepthTexture(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture,
             }
             WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
             passDesc.depthStencilAttachment = &ds;
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
         }
     }
     submit(t, encoder);
@@ -1870,12 +1867,11 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     if (c.stage == "compute") {
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipelineBundle.computePipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, static_cast<uint32_t>(calls.size()), 1, 1);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
     } else {
         WGPUTextureDescriptor targetDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
         targetDesc.size = WGPUExtent3D{static_cast<uint32_t>(calls.size()), 1, 1};
@@ -1898,12 +1894,11 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &attachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipelineBundle.renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, static_cast<uint32_t>(calls.size()), 0, 0);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
         t.copyTextureToBuffer(encoder, target, outputBuffer, renderBytesPerRow, targetDesc.size);
     }
     submit(t, encoder);
@@ -2537,13 +2532,12 @@ void executeMetadataQuery(AllFeaturesMaxLimitsGpuTest& t, const MetadataQueryCas
         WGPUBindGroup resultBindGroup = t.createBindGroupTracked(resultBindGroupDesc);
 
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, textureBindGroup, 0, nullptr);
         wgpuComputePassEncoderSetBindGroup(pass, 1, resultBindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
     } else {
         WGPUTextureDescriptor targetDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
         targetDesc.size = WGPUExtent3D{1, 1, 1};
@@ -2566,12 +2560,11 @@ void executeMetadataQuery(AllFeaturesMaxLimitsGpuTest& t, const MetadataQueryCas
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &attachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline.renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, textureBindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
         t.copyTextureToBuffer(encoder, target, resultBuffer, 256, targetDesc.size);
     }
     submit(t, encoder);
@@ -3146,9 +3139,8 @@ void clearMultisampledTextureForLoad(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture
         }
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.depthStencilAttachment = &ds;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
     } else if (stencilAttachment) {
         WGPURenderPassDepthStencilAttachment ds = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
         ds.view = view;
@@ -3158,9 +3150,8 @@ void clearMultisampledTextureForLoad(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture
         ds.stencilClearValue = 0;
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.depthStencilAttachment = &ds;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
     } else {
         WGPURenderPassColorAttachment attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
         attachment.view = view;
@@ -3170,9 +3161,8 @@ void clearMultisampledTextureForLoad(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &attachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
     }
     submit(t, encoder);
     if (depthAttachment) {
@@ -3360,12 +3350,11 @@ void executeTextureLoadCase(AllFeaturesMaxLimitsGpuTest& t, TextureLoadCase c) {
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     if (c.stage == "compute") {
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, static_cast<uint32_t>(calls.size()), 1, 1);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
     } else {
         WGPUTextureDescriptor targetDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
         targetDesc.size = WGPUExtent3D{static_cast<uint32_t>(calls.size()), 1, 1};
@@ -3387,12 +3376,11 @@ void executeTextureLoadCase(AllFeaturesMaxLimitsGpuTest& t, TextureLoadCase c) {
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &attachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline.renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, static_cast<uint32_t>(calls.size()), 0, 0);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
         t.copyTextureToBuffer(encoder, target, outputBuffer, renderBytesPerRow, targetDesc.size);
     }
     submit(t, encoder);
@@ -3776,9 +3764,8 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
             ds.stencilClearValue = 0;
             WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
             passDesc.depthStencilAttachment = &ds;
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(stencilEncoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(stencilEncoder, &passDesc);
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
         }
         submit(t, stencilEncoder);
     } else if (isCompressedTextureFormat(c.format)) {
@@ -3905,12 +3892,11 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     if (c.stage == "compute") {
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipelineBundle.computePipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, static_cast<uint32_t>(calls.size()), 1, 1);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
     } else {
         WGPUTextureDescriptor targetDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
         targetDesc.size = WGPUExtent3D{static_cast<uint32_t>(calls.size()), 1, 1};
@@ -3933,12 +3919,11 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &attachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipelineBundle.renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, static_cast<uint32_t>(calls.size()), 0, 0);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
         t.copyTextureToBuffer(encoder, target, outputBuffer, renderBytesPerRow, targetDesc.size);
     }
     submit(t, encoder);
@@ -5683,14 +5668,13 @@ void executeTextureStoreTexelFormats(AllFeaturesMaxLimitsGpuTest& t) {
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     if (isCompute) {
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, testMipLevelSize.width,
                                                  testMipLevelSize.height,
                                                  testMipLevelSize.depthOrArrayLayers);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
     } else {
         WGPUTextureDescriptor renderDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
         renderDesc.size = WGPUExtent3D{testMipLevelSize.width, testMipLevelSize.height, 1};
@@ -5708,12 +5692,11 @@ void executeTextureStoreTexelFormats(AllFeaturesMaxLimitsGpuTest& t) {
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &attachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline.renderPipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, testMipLevelSize.depthOrArrayLayers, 0, 0);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
     }
     submit(t, encoder);
 
@@ -5854,12 +5837,11 @@ void executeTextureStoreBgra8unormSwizzle(AllFeaturesMaxLimitsGpuTest& t) {
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
     wgpuComputePassEncoderEnd(pass);
-    wgpuComputePassEncoderRelease(pass);
     submit(t, encoder);
 
     const std::vector<uint8_t> got =
@@ -6038,12 +6020,11 @@ void executeTextureStoreOutOfBounds(AllFeaturesMaxLimitsGpuTest& t) {
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, numWgsX, 1, 1);
     wgpuComputePassEncoderEnd(pass);
-    wgpuComputePassEncoderRelease(pass);
     submit(t, encoder);
 
     for (uint32_t m = 0; m < mipCount; ++m) {
@@ -6172,12 +6153,11 @@ void executeTextureStoreOutOfBoundsArray(AllFeaturesMaxLimitsGpuTest& t) {
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline.computePipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, numWgsX, 1, 1);
     wgpuComputePassEncoderEnd(pass);
-    wgpuComputePassEncoderRelease(pass);
     submit(t, encoder);
 
     const std::vector<uint8_t> got =
@@ -6747,12 +6727,11 @@ StageWeights queryMipLevelMixWeightsForDeviceStage(AllFeaturesMaxLimitsGpuTest& 
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, kWeightSteps + 1u, 1, 1);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
         submit(t, encoder);
 
         t.expectGPUBufferValuesPassCheck(
@@ -6813,7 +6792,7 @@ StageWeights queryMipLevelMixWeightsForDeviceStage(AllFeaturesMaxLimitsGpuTest& 
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAttachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         for (uint32_t x = 0; x <= kWeightSteps; ++x) {
@@ -6821,7 +6800,6 @@ StageWeights queryMipLevelMixWeightsForDeviceStage(AllFeaturesMaxLimitsGpuTest& 
             wgpuRenderPassEncoderDraw(pass, 3, 1, 0, x);
         }
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         const uint32_t bytesPerRow = alignToU32((kWeightSteps + 1u) * 16u, kBytesPerRowAlignment);
         WGPUBufferDescriptor readDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
@@ -7159,12 +7137,11 @@ std::vector<MipTexels> readTextureToTexelViews(
         WGPUBindGroup bindGroup = t.createBindGroupTracked(bgDesc);
 
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, size.width * sampleCount, size.height, size.depthOrArrayLayers);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
     }
     submit(t, encoder);
 
@@ -7384,12 +7361,11 @@ CreatedTexture createColorTextureWithRandomData(
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAttachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
         submit(t, encoder);
 
         created.texels.push_back(std::move(mt));
@@ -7581,12 +7557,11 @@ WGPUTexture fillDepthStencilTexture(
                 }
                 WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
                 passDesc.depthStencilAttachment = &dsAttach;
-                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+                WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
                 wgpuRenderPassEncoderSetPipeline(pass, pipeline);
                 wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
                 wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
                 wgpuRenderPassEncoderEnd(pass);
-                wgpuRenderPassEncoderRelease(pass);
                 submit(t, encoder);
             }
         }

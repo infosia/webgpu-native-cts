@@ -217,7 +217,7 @@ void runDepthBiasTest(AllFeaturesMaxLimitsGpuTest& t) {
     passDesc.depthStencilAttachment = &depthAttachment;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
     wgpuRenderPassEncoderEnd(pass);
@@ -348,7 +348,7 @@ void runDepthBiasTestFor24BitFormat(AllFeaturesMaxLimitsGpuTest& t) {
     passDesc.depthStencilAttachment = &depthAttachment;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
     wgpuRenderPassEncoderEnd(pass);

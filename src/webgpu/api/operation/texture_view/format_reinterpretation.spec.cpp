@@ -400,7 +400,7 @@ CTS_TEST(g, "texture_binding")
             // write out to the rgba8unorm texture.
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
             WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
             wgpuComputePassEncoderSetPipeline(pass, pipeline);
             wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
             wgpuComputePassEncoderDispatchWorkgroups(pass, kTextureSize, kTextureSize, 1);
@@ -522,7 +522,7 @@ CTS_TEST(g, "render_and_resolve_attachment")
                 passDesc.colorAttachmentCount = 1;
                 passDesc.colorAttachments = &colorAttachment;
 
-                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+                WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
                 wgpuRenderPassEncoderSetPipeline(pass, pipeline);
                 wgpuRenderPassEncoderSetBindGroup(pass, 0, blitBindGroup, 0, nullptr);
                 wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
@@ -569,7 +569,7 @@ CTS_TEST(g, "render_and_resolve_attachment")
                 passDesc.colorAttachmentCount = 1;
                 passDesc.colorAttachments = &colorAttachment;
 
-                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+                WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
                 wgpuRenderPassEncoderSetPipeline(pass, resolvePipeline);
                 wgpuRenderPassEncoderSetBindGroup(pass, 0, resolveBindGroup, 0, nullptr);
                 wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);

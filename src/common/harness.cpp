@@ -386,6 +386,17 @@ void GpuTest::init() {
 }
 
 void GpuTest::finalize() {
+    // Pass encoders first: they are children of the command encoders released
+    // below, and on some backends a live pass encoder pins its bound pipeline
+    // (and through it a compiled shader) for as long as it is alive.
+    for (WGPUComputePassEncoder pass : computePassEncoders_) {
+        wgpuComputePassEncoderRelease(pass);
+    }
+    computePassEncoders_.clear();
+    for (WGPURenderPassEncoder pass : renderPassEncoders_) {
+        wgpuRenderPassEncoderRelease(pass);
+    }
+    renderPassEncoders_.clear();
     for (WGPUCommandBuffer commandBuffer : commandBuffers_) {
         wgpuCommandBufferRelease(commandBuffer);
     }
@@ -931,6 +942,24 @@ WGPUCommandEncoder GpuTest::createCommandEncoderTracked() {
         encoders_.push_back(encoder);
     }
     return encoder;
+}
+
+WGPUComputePassEncoder GpuTest::beginComputePassTracked(WGPUCommandEncoder encoder,
+                                                        const WGPUComputePassDescriptor* desc) {
+    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, desc);
+    if (pass != nullptr) {
+        computePassEncoders_.push_back(pass);
+    }
+    return pass;
+}
+
+WGPURenderPassEncoder GpuTest::beginRenderPassTracked(WGPUCommandEncoder encoder,
+                                                      const WGPURenderPassDescriptor* desc) {
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, desc);
+    if (pass != nullptr) {
+        renderPassEncoders_.push_back(pass);
+    }
+    return pass;
 }
 
 WGPUCommandBuffer GpuTest::finishTracked(WGPUCommandEncoder encoder) {

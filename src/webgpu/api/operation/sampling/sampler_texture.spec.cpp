@@ -525,7 +525,7 @@ or storage texture.
         passDesc.colorAttachments     = &colorAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         for (size_t i = 0; i < bindGroups.size(); ++i) {
             wgpuRenderPassEncoderSetBindGroup(

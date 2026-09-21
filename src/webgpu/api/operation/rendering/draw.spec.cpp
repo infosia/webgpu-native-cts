@@ -310,7 +310,7 @@ void checkTriangleDraw(AllFeaturesMaxLimitsGpuTest& t, const DrawOptions& opts) 
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAttachment;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
 

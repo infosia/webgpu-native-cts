@@ -166,7 +166,7 @@ CTS_TEST(g, "depth_test_input_clamped")
             initPassDesc.depthStencilAttachment = &initDsAttach;
 
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &initPassDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &initPassDesc);
             wgpuRenderPassEncoderSetPipeline(pass, initPipeline);
             wgpuRenderPassEncoderDraw(pass, kNumDepthValues, 1, 0, 0);
             wgpuRenderPassEncoderEnd(pass);
@@ -219,7 +219,7 @@ CTS_TEST(g, "depth_test_input_clamped")
             testPassDesc.depthStencilAttachment = &testDsAttach;
 
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &testPassDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &testPassDesc);
             wgpuRenderPassEncoderSetPipeline(pass, testPipeline);
             // Viewport depth range [0.25, 0.75]: frag_depth gets clamped to [vpMin, vpMax].
             wgpuRenderPassEncoderSetViewport(pass, 0.0f, 0.0f,
@@ -686,7 +686,7 @@ writeDepth in {false, true} = 2 cases.
             testPassDesc.colorAttachments = nullptr;
             testPassDesc.depthStencilAttachment = &testDsAttach;
 
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &testPassDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &testPassDesc);
             wgpuRenderPassEncoderSetPipeline(pass, testPipeline);
             wgpuRenderPassEncoderSetBindGroup(pass, 0, testBindGroup, 0, nullptr);
             wgpuRenderPassEncoderSetViewport(pass, 0.0f, 0.0f,
@@ -708,7 +708,7 @@ writeDepth in {false, true} = 2 cases.
             checkPassDesc.colorAttachments = &checkColorAttach;
             checkPassDesc.depthStencilAttachment = nullptr;
 
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &checkPassDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &checkPassDesc);
             wgpuRenderPassEncoderSetPipeline(pass, checkPipeline);
             wgpuRenderPassEncoderSetBindGroup(pass, 0, checkBindGroup, 0, nullptr);
             wgpuRenderPassEncoderSetViewport(pass, 0.0f, 0.0f,

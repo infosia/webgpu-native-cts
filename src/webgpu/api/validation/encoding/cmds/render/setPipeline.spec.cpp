@@ -213,7 +213,7 @@ static RenderEncoderContext makeRenderEncoderContext(
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments     = &colorAttach;
-        ctx.renderPass = wgpuCommandEncoderBeginRenderPass(ctx.cmdEnc, &passDesc);
+        ctx.renderPass = t.beginRenderPassTracked(ctx.cmdEnc, &passDesc);
     } else {
         // render bundle
         WGPUTextureFormat colorFmt = WGPUTextureFormat_RGBA8Unorm;
@@ -262,13 +262,12 @@ static WGPUCommandBuffer finishRenderEncoderContext(
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments     = &colorAttach;
 
-        WGPURenderPassEncoder execPass = wgpuCommandEncoderBeginRenderPass(ctx.cmdEnc, &passDesc);
+        WGPURenderPassEncoder execPass = t.beginRenderPassTracked(ctx.cmdEnc, &passDesc);
         if (bundle != nullptr) {
             wgpuRenderPassEncoderExecuteBundles(execPass, 1, &bundle);
             wgpuRenderBundleRelease(bundle);
         }
         wgpuRenderPassEncoderEnd(execPass);
-        wgpuRenderPassEncoderRelease(execPass);
     }
     return t.finishTracked(ctx.cmdEnc);
 }

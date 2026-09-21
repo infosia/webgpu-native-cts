@@ -205,7 +205,7 @@ class AnisotropyTest : public AllFeaturesMaxLimitsGpuTest {
         passDesc.colorAttachments = &passColorAttachment;
 
         WGPUCommandEncoder encoder = createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline_);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);

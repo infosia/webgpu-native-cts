@@ -32,9 +32,8 @@ static void tryComputePass(
     WGPUComputePassDescriptor& descriptor)
 {
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &descriptor);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &descriptor);
     wgpuComputePassEncoderEnd(pass);
-    wgpuComputePassEncoderRelease(pass);
 
     t.expectValidationError([&] {
         t.finishTracked(encoder);

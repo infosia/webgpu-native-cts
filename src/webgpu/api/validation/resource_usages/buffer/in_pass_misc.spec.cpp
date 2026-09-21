@@ -213,7 +213,7 @@ WGPURenderPassEncoder beginSimpleRenderPass(AllFeaturesMaxLimitsGpuTest& t,
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &color;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 WGPURenderPipeline createNoOpRenderPipeline(AllFeaturesMaxLimitsGpuTest& t) {
@@ -244,7 +244,7 @@ do not contribute directly to any usage scope in a compute pass.)")
             WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, bindGroupLayouts);
             WGPUComputePipeline computePipeline = createNoOpComputePipeline(t, pipelineLayout);
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
             wgpuComputePassEncoderSetPipeline(pass, computePipeline);
 
             WGPUBindGroup bindGroup0 = createBindGroupForTest(t, buffer, 0, usage0, "compute");
@@ -390,7 +390,7 @@ CTS_TEST(testGroup, "subresources,buffer_usages_in_copy_and_pass")
                     wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
                     wgpuRenderPassEncoderEnd(pass);
                 } else {
-                    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+                    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
                     WGPUBindGroup bindGroup = createBindGroupForTest(t, buffer, 0, usage, "compute");
                     wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
                     wgpuComputePassEncoderEnd(pass);
@@ -411,7 +411,7 @@ CTS_TEST(testGroup, "subresources,buffer_usages_in_copy_and_pass")
                     wgpuRenderPassEncoderDrawIndirect(pass, buffer, 0);
                     wgpuRenderPassEncoderEnd(pass);
                 } else {
-                    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+                    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
                     WGPUComputePipeline computePipeline = createNoOpComputePipeline(t);
                     wgpuComputePassEncoderSetPipeline(pass, computePipeline);
                     wgpuComputePassEncoderDispatchWorkgroupsIndirect(pass, buffer, 0);

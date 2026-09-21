@@ -187,7 +187,7 @@ void runStencilClearValueTest(
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
 
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderSetStencilReference(pass, stencilReference);
     wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);

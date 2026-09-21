@@ -69,10 +69,9 @@ CTS_TEST(testGroup, "timestamp")
             WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
             passDesc.timestampWrites = &writes;
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
             if (pass != nullptr) {
                 wgpuComputePassEncoderEnd(pass);
-                wgpuComputePassEncoderRelease(pass);
             }
             expectValidationError(t, [&] { t.finishTracked(encoder); }, !feature);
         }
@@ -96,10 +95,9 @@ CTS_TEST(testGroup, "timestamp")
             passDesc.timestampWrites = &writes;
 
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             if (pass != nullptr) {
                 wgpuRenderPassEncoderEnd(pass);
-                wgpuRenderPassEncoderRelease(pass);
             }
             expectValidationError(t, [&] { t.finishTracked(encoder); }, !feature);
         }

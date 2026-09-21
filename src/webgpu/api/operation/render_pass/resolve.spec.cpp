@@ -191,7 +191,7 @@ std::array<WGPURenderPassColorAttachment, kNumColorAttachments> colorAttachments
     return attachments;
 }
 
-void encodePass(
+void encodePass(GpuTest& t, 
     WGPUCommandEncoder encoder,
     const ResolveResources& resources,
     WGPURenderPipeline pipeline,
@@ -203,7 +203,7 @@ void encodePass(
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = attachments.size();
     passDesc.colorAttachments = attachments.data();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     if (draw) {
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
@@ -285,10 +285,10 @@ CTS_TEST(g, "render_pass_resolve")
         WGPURenderPipeline pipeline = createResolvePipeline(t);
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         if (separateResolvePass) {
-            encodePass(encoder, resources, pipeline, WGPULoadOp_Clear, WGPUStoreOp_Store, false, true);
-            encodePass(encoder, resources, pipeline, WGPULoadOp_Load, storeOp, true, false);
+            encodePass(t, encoder, resources, pipeline, WGPULoadOp_Clear, WGPUStoreOp_Store, false, true);
+            encodePass(t, encoder, resources, pipeline, WGPULoadOp_Load, storeOp, true, false);
         } else {
-            encodePass(encoder, resources, pipeline, WGPULoadOp_Clear, storeOp, true, true);
+            encodePass(t, encoder, resources, pipeline, WGPULoadOp_Clear, storeOp, true, true);
         }
         submit(t, encoder);
 

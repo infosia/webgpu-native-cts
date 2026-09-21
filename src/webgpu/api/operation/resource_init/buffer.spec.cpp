@@ -243,7 +243,7 @@ static void testBufferZeroInitInBindGroup(
     {
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor cpDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder cp = wgpuCommandEncoderBeginComputePass(encoder, &cpDesc);
+        WGPUComputePassEncoder cp = t.beginComputePassTracked(encoder, &cpDesc);
         wgpuComputePassEncoderSetPipeline(cp, pipeline);
         wgpuComputePassEncoderSetBindGroup(cp, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(cp, 1, 1, 1);
@@ -442,7 +442,7 @@ CTS_TEST(g, "vertex_buffer")
             passDesc.depthStencilAttachment = nullptr;
 
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderSetPipeline(pass, pipeline);
             wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vertexBuffer, 0, WGPU_WHOLE_SIZE);
             wgpuRenderPassEncoderDraw(pass, 1, 1, 0, 0);
@@ -502,7 +502,7 @@ CTS_TEST(g, "index_buffer")
             passDesc.depthStencilAttachment = nullptr;
 
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderSetPipeline(pass, pipeline);
             wgpuRenderPassEncoderSetIndexBuffer(pass, indexBuffer, WGPUIndexFormat_Uint16, 0, 4);
             wgpuRenderPassEncoderDrawIndexed(pass, 1, 1, 0, 0, 0);

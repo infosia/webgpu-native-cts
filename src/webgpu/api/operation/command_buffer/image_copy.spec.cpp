@@ -793,7 +793,7 @@ void initializeDepthAspectWithRendering(
         passDesc.colorAttachmentCount = 0;
         passDesc.colorAttachments = nullptr;
         passDesc.depthStencilAttachment = &attachment;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);

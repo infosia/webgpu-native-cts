@@ -182,7 +182,7 @@ CTS_TEST(grp, "shared_with_buffer")
         // Run the shader.
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, numGroupsX, numGroupsY, numGroupsZ);
@@ -350,7 +350,7 @@ CTS_TEST(grp, "shared_between_stages")
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments     = &colorAttachment;
 
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);
@@ -517,7 +517,7 @@ CTS_TEST(grp, "shared_with_non_entry_point_function")
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments     = &colorAttachment;
 
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vertexBuffer, 0, sizeof(vertexColorData));
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);

@@ -137,7 +137,7 @@ static WGPURenderPassEncoder beginRenderPass(
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments     = &colorAttach;
 
-    return wgpuCommandEncoderBeginRenderPass(cmdEnc, &passDesc);
+    return t.beginRenderPassTracked(cmdEnc, &passDesc);
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +183,6 @@ CTS_TEST(g, "vertex_buffers_inherit_from_previous_pipeline")
             wgpuRenderPassEncoderSetPipeline(renderPass, pipeline1);
             wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
             wgpuRenderPassEncoderEnd(renderPass);
-            wgpuRenderPassEncoderRelease(renderPass);
 
             t.expectValidationError([&] {
                 t.finishTracked(cmdEnc);
@@ -201,7 +200,6 @@ CTS_TEST(g, "vertex_buffers_inherit_from_previous_pipeline")
             wgpuRenderPassEncoderSetPipeline(renderPass, pipeline1);
             wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
             wgpuRenderPassEncoderEnd(renderPass);
-            wgpuRenderPassEncoderRelease(renderPass);
 
             WGPUCommandBuffer cb = t.finishTracked(cmdEnc);
             t.expectValidationError([&] {
@@ -232,7 +230,6 @@ CTS_TEST(g, "vertex_buffers_do_not_inherit_between_render_passes")
                 wgpuRenderPassEncoderSetVertexBuffer(renderPass, 1, vertexBuffer2, 0, WGPU_WHOLE_SIZE);
                 wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
                 wgpuRenderPassEncoderEnd(renderPass);
-                wgpuRenderPassEncoderRelease(renderPass);
             }
             {
                 WGPURenderPassEncoder renderPass = beginRenderPass(t, cmdEnc);
@@ -240,7 +237,6 @@ CTS_TEST(g, "vertex_buffers_do_not_inherit_between_render_passes")
                 wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, vertexBuffer1, 0, WGPU_WHOLE_SIZE);
                 wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
                 wgpuRenderPassEncoderEnd(renderPass);
-                wgpuRenderPassEncoderRelease(renderPass);
             }
             WGPUCommandBuffer cb = t.finishTracked(cmdEnc);
             t.expectValidationError([&] {
@@ -258,7 +254,6 @@ CTS_TEST(g, "vertex_buffers_do_not_inherit_between_render_passes")
                 wgpuRenderPassEncoderSetVertexBuffer(renderPass, 1, vertexBuffer2, 0, WGPU_WHOLE_SIZE);
                 wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
                 wgpuRenderPassEncoderEnd(renderPass);
-                wgpuRenderPassEncoderRelease(renderPass);
             }
             {
                 WGPURenderPassEncoder renderPass = beginRenderPass(t, cmdEnc);
@@ -266,7 +261,6 @@ CTS_TEST(g, "vertex_buffers_do_not_inherit_between_render_passes")
                 // vertex buffer NOT set — should error
                 wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
                 wgpuRenderPassEncoderEnd(renderPass);
-                wgpuRenderPassEncoderRelease(renderPass);
             }
 
             t.expectValidationError([&] {

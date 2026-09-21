@@ -48,7 +48,7 @@ static WGPUTexture createSmallRenderTarget(AllFeaturesMaxLimitsGpuTest& t) {
 }
 
 // Begin a minimal single-color-attachment render pass.
-static WGPURenderPassEncoder beginSimpleRenderPass(
+static WGPURenderPassEncoder beginSimpleRenderPass(GpuTest& t, 
     WGPUCommandEncoder cmdEnc,
     WGPUTextureView    view)
 {
@@ -61,7 +61,7 @@ static WGPURenderPassEncoder beginSimpleRenderPass(
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments     = &colorAttach;
-    return wgpuCommandEncoderBeginRenderPass(cmdEnc, &passDesc);
+    return t.beginRenderPassTracked(cmdEnc, &passDesc);
 }
 
 static RenderEncoderContext makeRenderEncoderContext(
@@ -77,7 +77,7 @@ static RenderEncoderContext makeRenderEncoderContext(
     ctx.renderView = t.createViewTracked(ctx.renderTex, vDesc);
 
     if (encoderType == "render pass") {
-        ctx.renderPass = beginSimpleRenderPass(ctx.cmdEnc, ctx.renderView);
+        ctx.renderPass = beginSimpleRenderPass(t, ctx.cmdEnc, ctx.renderView);
     } else {
         // render bundle: open bundle encoder + a pass that executes it
         WGPUTextureFormat colorFmt = WGPUTextureFormat_RGBA8Unorm;
@@ -86,7 +86,7 @@ static RenderEncoderContext makeRenderEncoderContext(
         bDesc.colorFormats     = &colorFmt;
         bDesc.sampleCount      = 1;
         ctx.bundleEnc  = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bDesc);
-        ctx.bundlePass = beginSimpleRenderPass(ctx.cmdEnc, ctx.renderView);
+        ctx.bundlePass = beginSimpleRenderPass(t, ctx.cmdEnc, ctx.renderView);
     }
     return ctx;
 }

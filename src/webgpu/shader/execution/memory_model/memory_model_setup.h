@@ -784,7 +784,7 @@ class MemoryModelTester {
             }
 
             WGPUComputePassDescriptor testPassDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-            WGPUComputePassEncoder testPass = wgpuCommandEncoderBeginComputePass(encoder, &testPassDesc);
+            WGPUComputePassEncoder testPass = test_.beginComputePassTracked(encoder, &testPassDesc);
             wgpuComputePassEncoderSetPipeline(testPass, testPipeline_);
             wgpuComputePassEncoderSetBindGroup(testPass, 0, testBindGroup_, 0, nullptr);
             if (useTexture_) {
@@ -795,7 +795,7 @@ class MemoryModelTester {
 
             WGPUComputePassDescriptor resultPassDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
             WGPUComputePassEncoder resultPass =
-                wgpuCommandEncoderBeginComputePass(encoder, &resultPassDesc);
+                test_.beginComputePassTracked(encoder, &resultPassDesc);
             wgpuComputePassEncoderSetPipeline(resultPass, resultPipeline_);
             wgpuComputePassEncoderSetBindGroup(resultPass, 0, resultBindGroup_, 0, nullptr);
             wgpuComputePassEncoderDispatchWorkgroups(resultPass, params_.testingWorkgroups, 1, 1);

@@ -62,7 +62,7 @@ static WGPUTexture createSmallRenderTarget(AllFeaturesMaxLimitsGpuTest& t) {
 }
 
 // Begin a minimal single-color-attachment render pass.
-static WGPURenderPassEncoder beginSimpleRenderPass(
+static WGPURenderPassEncoder beginSimpleRenderPass(GpuTest& t, 
     WGPUCommandEncoder cmdEnc,
     WGPUTextureView    view)
 {
@@ -75,7 +75,7 @@ static WGPURenderPassEncoder beginSimpleRenderPass(
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments     = &colorAttach;
-    return wgpuCommandEncoderBeginRenderPass(cmdEnc, &passDesc);
+    return t.beginRenderPassTracked(cmdEnc, &passDesc);
 }
 
 static ProgrammableEncoderContext makeProgrammableEncoderContext(
@@ -88,7 +88,7 @@ static ProgrammableEncoderContext makeProgrammableEncoderContext(
 
     if (encoderType == "compute pass") {
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        ctx.computePass = wgpuCommandEncoderBeginComputePass(ctx.cmdEnc, &passDesc);
+        ctx.computePass = t.beginComputePassTracked(ctx.cmdEnc, &passDesc);
     } else {
         // render pass or render bundle: need a render target
         ctx.renderTex  = createSmallRenderTarget(t);
@@ -96,7 +96,7 @@ static ProgrammableEncoderContext makeProgrammableEncoderContext(
         ctx.renderView = t.createViewTracked(ctx.renderTex, vDesc);
 
         if (encoderType == "render pass") {
-            ctx.renderPass = beginSimpleRenderPass(ctx.cmdEnc, ctx.renderView);
+            ctx.renderPass = beginSimpleRenderPass(t, ctx.cmdEnc, ctx.renderView);
         } else {
             // render bundle: open bundle encoder + a pass that executes it
             WGPUTextureFormat colorFmt = WGPUTextureFormat_RGBA8Unorm;
@@ -105,7 +105,7 @@ static ProgrammableEncoderContext makeProgrammableEncoderContext(
             bDesc.colorFormats     = &colorFmt;
             bDesc.sampleCount      = 1;
             ctx.bundleEnc  = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bDesc);
-            ctx.bundlePass = beginSimpleRenderPass(ctx.cmdEnc, ctx.renderView);
+            ctx.bundlePass = beginSimpleRenderPass(t, ctx.cmdEnc, ctx.renderView);
         }
     }
     return ctx;
@@ -138,7 +138,6 @@ static WGPUCommandBuffer ctxFinish(
 {
     if (ctx.encoderType == "compute pass") {
         wgpuComputePassEncoderEnd(ctx.computePass);
-        wgpuComputePassEncoderRelease(ctx.computePass);
         ctx.computePass = nullptr;
     } else if (ctx.encoderType == "render pass") {
         wgpuRenderPassEncoderEnd(ctx.renderPass);

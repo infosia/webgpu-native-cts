@@ -620,7 +620,7 @@ CTS_TEST(g, "compute,zero_init")
 
             WGPUCommandEncoder fillEncoder = t.createCommandEncoderTracked();
             WGPUComputePassDescriptor fillPassDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-            WGPUComputePassEncoder fillPass = wgpuCommandEncoderBeginComputePass(fillEncoder, &fillPassDesc);
+            WGPUComputePassEncoder fillPass = t.beginComputePassTracked(fillEncoder, &fillPassDesc);
             wgpuComputePassEncoderSetPipeline(fillPass, fillPipeline);
             wgpuComputePassEncoderSetBindGroup(fillPass, 0, fillBindGroup, 0, nullptr);
             wgpuComputePassEncoderDispatchWorkgroups(fillPass, 1, 1, 1);
@@ -672,7 +672,7 @@ CTS_TEST(g, "compute,zero_init")
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);

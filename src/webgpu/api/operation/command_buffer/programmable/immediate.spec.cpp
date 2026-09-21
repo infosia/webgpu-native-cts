@@ -304,10 +304,9 @@ EncodedPass encodeForPassType(
         Pass pass;
         pass.encoderType = encoderType;
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        pass.computePass = wgpuCommandEncoderBeginComputePass(cmdEnc, &passDesc);
+        pass.computePass = t.beginComputePassTracked(cmdEnc, &passDesc);
         fn(pass);
         wgpuComputePassEncoderEnd(pass.computePass);
-        wgpuComputePassEncoderRelease(pass.computePass);
         return EncodedPass{};
     }
 
@@ -336,7 +335,7 @@ EncodedPass encodeForPassType(
     if (encoderType == "render pass") {
         Pass pass;
         pass.encoderType = encoderType;
-        pass.renderPass  = wgpuCommandEncoderBeginRenderPass(cmdEnc, &rpDesc);
+        pass.renderPass  = t.beginRenderPassTracked(cmdEnc, &rpDesc);
         fn(pass);
         wgpuRenderPassEncoderEnd(pass.renderPass);
     } else {
@@ -351,7 +350,7 @@ EncodedPass encodeForPassType(
         fn(pass);
         WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(pass.bundleEnc, nullptr);
 
-        WGPURenderPassEncoder outerPass = wgpuCommandEncoderBeginRenderPass(cmdEnc, &rpDesc);
+        WGPURenderPassEncoder outerPass = t.beginRenderPassTracked(cmdEnc, &rpDesc);
         wgpuRenderPassEncoderExecuteBundles(outerPass, 1, &bundle);
         wgpuRenderBundleRelease(bundle);
         wgpuRenderBundleEncoderRelease(pass.bundleEnc);
@@ -1147,7 +1146,7 @@ CTS_TEST(g, "render_pass_and_bundle_mix")
         WGPURenderPassDescriptor rpDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         rpDesc.colorAttachmentCount = 1;
         rpDesc.colorAttachments     = &color;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(cmdEnc, &rpDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(cmdEnc, &rpDesc);
 
         // Execute Bundle
         wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
@@ -1259,7 +1258,7 @@ CTS_TEST(g, "render_bundle_isolation")
         WGPURenderPassDescriptor rpDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         rpDesc.colorAttachmentCount = 1;
         rpDesc.colorAttachments     = &color;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(cmdEnc, &rpDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(cmdEnc, &rpDesc);
 
         // Execute Bundles
         WGPURenderBundle bundles[2] = {bundleA, bundleB};

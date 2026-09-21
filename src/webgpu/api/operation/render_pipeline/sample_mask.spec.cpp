@@ -253,7 +253,7 @@ WGPUBuffer readTextureToBuffer(
     wgpuBindGroupLayoutRelease(bgl);
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
@@ -359,7 +359,7 @@ RenderResult drawTarget(
     passDesc.colorAttachments = colorAttachments.data();
     passDesc.depthStencilAttachment = &dsAttachment;
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuRenderPassEncoderSetStencilReference(pass, kStencilReferenceValue);

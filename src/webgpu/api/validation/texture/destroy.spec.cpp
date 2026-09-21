@@ -176,9 +176,8 @@ that was destroyed {before, after} encoding finishes.
         passDesc.colorAttachments = &colorAttachment;
         passDesc.depthStencilAttachment = &depthStencilAttachment;
 
-        WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder renderPass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(renderPass);
-        wgpuRenderPassEncoderRelease(renderPass);
         wgpuTextureViewRelease(colorView);
         wgpuTextureViewRelease(dsView);
 

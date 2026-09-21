@@ -166,14 +166,14 @@ WGPURenderPassColorAttachment colorAttachment(WGPUTextureView view) {
     return color;
 }
 
-WGPURenderPassEncoder beginRenderPass(WGPUCommandEncoder encoder,
+WGPURenderPassEncoder beginRenderPass(GpuTest& t, WGPUCommandEncoder encoder,
                                       const std::vector<WGPURenderPassColorAttachment>& colors,
                                       const WGPURenderPassDepthStencilAttachment* ds = nullptr) {
     WGPURenderPassDescriptor desc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     desc.colorAttachmentCount = colors.size();
     desc.colorAttachments = colors.empty() ? nullptr : colors.data();
     desc.depthStencilAttachment = ds;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+    return t.beginRenderPassTracked(encoder, &desc);
 }
 
 WGPUBindGroupLayout createBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t,
@@ -278,12 +278,12 @@ ScopeObjects testValidationScope(AllFeaturesMaxLimitsGpuTest& t, bool compute, c
     o.bindGroup1 = createBindGroup(t, 0, view, usage2, WGPUTextureViewDimension_2D);
     o.encoder = t.createCommandEncoderTracked();
     if (compute) {
-        o.computePass = wgpuCommandEncoderBeginComputePass(o.encoder, nullptr);
+        o.computePass = t.beginComputePassTracked(o.encoder, nullptr);
     } else {
         WGPUTexture color = createTexture(t);
         WGPURenderPassColorAttachment ca = colorAttachment(createView(t, color));
         std::vector<WGPURenderPassColorAttachment> colors = {ca};
-        o.renderPass = beginRenderPass(o.encoder, colors);
+        o.renderPass = beginRenderPass(t, o.encoder, colors);
     }
     return o;
 }
@@ -447,7 +447,7 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_color")
             WGPURenderPassColorAttachment a0 = colorAttachment(view0);
             WGPURenderPassColorAttachment a1 = colorAttachment(view1);
             std::vector<WGPURenderPassColorAttachment> colors = {a0, a1};
-            WGPURenderPassEncoder pass = beginRenderPass(encoder, colors);
+            WGPURenderPassEncoder pass = beginRenderPass(t, encoder, colors);
             wgpuRenderPassEncoderEnd(pass);
         } else if (compute) {
             std::vector<WGPUBindGroupLayout> layouts;
@@ -459,7 +459,7 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_color")
                 bg1 = createBindGroup(t, 1, view1, type1, dim1);
             }
             WGPUComputePipeline pipe = computePipeline(t, pipelineLayout(t, layouts));
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
             wgpuComputePassEncoderSetBindGroup(pass, 0, bg0, 0, nullptr);
             if (bg1) wgpuComputePassEncoderSetBindGroup(pass, 1, bg1, 0, nullptr);
             wgpuComputePassEncoderSetPipeline(pass, pipe);
@@ -470,7 +470,7 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_color")
             WGPUTextureView passView = type1 == "render-target" ? view1 : createView(t, passTexture);
             WGPURenderPassColorAttachment ca = colorAttachment(passView);
             std::vector<WGPURenderPassColorAttachment> colors = {ca};
-            WGPURenderPassEncoder pass = beginRenderPass(encoder, colors);
+            WGPURenderPassEncoder pass = beginRenderPass(t, encoder, colors);
             WGPUBindGroup bg0 = createBindGroup(t, 0, view0, type0, dim0);
             WGPUBindGroup bg1 = nullptr;
             if (type1 != "render-target") bg1 = createBindGroup(t, 1, view1, type1, dim1);
@@ -601,7 +601,7 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_aspect")
         WGPUComputePassEncoder cp = nullptr;
         WGPURenderPassEncoder rp = nullptr;
         if (compute) {
-            cp = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            cp = t.beginComputePassTracked(encoder, nullptr);
         } else {
             std::vector<WGPURenderPassColorAttachment> colors;
             WGPURenderPassDepthStencilAttachment ds = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
@@ -620,7 +620,7 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_aspect")
             }
             WGPUTexture color = createTexture(t, WGPUTextureFormat_R32Float, WGPUTextureUsage_RenderAttachment, 1, 1, 1, kSize >> baseLevel);
             colors.push_back(colorAttachment(createView(t, color)));
-            rp = beginRenderPass(encoder, colors, dsPtr);
+            rp = beginRenderPass(t, encoder, colors, dsPtr);
         }
         const std::string sample0 = sampleTypeNameForAspect(format, aspect0);
         WGPUBindGroup bg0 = createBindGroup(t, 0, view0, "sampled-texture", WGPUTextureViewDimension_2D,
@@ -721,7 +721,7 @@ CTS_TEST(testGroup, "shader_stages_and_visibility,storage_write")
         WGPUBindGroup bg = t.createBindGroupTracked(bgDesc);
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         if (compute) {
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
             wgpuComputePassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
             wgpuComputePassEncoderSetPipeline(pass, computePipeline(t, pipelineLayout(t, {bgl})));
             wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
@@ -730,7 +730,7 @@ CTS_TEST(testGroup, "shader_stages_and_visibility,storage_write")
             WGPUTexture color = createTexture(t);
             WGPURenderPassColorAttachment ca = colorAttachment(createView(t, color));
             std::vector<WGPURenderPassColorAttachment> colors = {ca};
-            WGPURenderPassEncoder pass = beginRenderPass(encoder, colors);
+            WGPURenderPassEncoder pass = beginRenderPass(t, encoder, colors);
             wgpuRenderPassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
             wgpuRenderPassEncoderEnd(pass);
         }
@@ -761,7 +761,7 @@ CTS_TEST(testGroup, "shader_stages_and_visibility,attachment_write")
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPURenderPassColorAttachment ca = colorAttachment(view2);
         std::vector<WGPURenderPassColorAttachment> colors = {ca};
-        WGPURenderPassEncoder pass = beginRenderPass(encoder, colors);
+        WGPURenderPassEncoder pass = beginRenderPass(t, encoder, colors);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
         wgpuRenderPassEncoderEnd(pass);
         t.expectValidationError([&] { t.finishTracked(encoder); }, conflicts);
@@ -819,7 +819,7 @@ CTS_TEST(testGroup, "replaced_binding")
         WGPUBindGroup bg1 = createBindGroup(t, 0, storageView, "sampled-texture", WGPUTextureViewDimension_2D);
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         if (compute) {
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
             wgpuComputePassEncoderSetBindGroup(pass, 0, bg0, 0, nullptr);
             if (call) {
                 wgpuComputePassEncoderSetPipeline(pass, computePipeline(t));
@@ -831,7 +831,7 @@ CTS_TEST(testGroup, "replaced_binding")
             WGPUTexture color = createTexture(t);
             WGPURenderPassColorAttachment ca = colorAttachment(createView(t, color));
             std::vector<WGPURenderPassColorAttachment> colors = {ca};
-            WGPURenderPassEncoder pass = beginRenderPass(encoder, colors);
+            WGPURenderPassEncoder pass = beginRenderPass(t, encoder, colors);
             wgpuRenderPassEncoderSetBindGroup(pass, 0, bg0, 0, nullptr);
             if (call) {
                 wgpuRenderPassEncoderSetPipeline(pass, renderPipeline(t));
@@ -891,7 +891,7 @@ CTS_TEST(testGroup, "bindings_in_bundle")
         WGPUTexture passTexture = (type0 == "render-target" || type1 == "render-target") ? texture : createTexture(t);
         WGPURenderPassColorAttachment ca = colorAttachment((type0 == "render-target" || type1 == "render-target") ? view : createView(t, passTexture));
         std::vector<WGPURenderPassColorAttachment> colors = {ca};
-        WGPURenderPassEncoder pass = beginRenderPass(encoder, colors);
+        WGPURenderPassEncoder pass = beginRenderPass(t, encoder, colors);
         WGPUBindGroup groups[2] = {bg0, bg1};
         bool inBundle[2] = {b0, b1};
         for (uint32_t i = 0; i < 2; ++i) {
@@ -941,7 +941,7 @@ CTS_TEST(testGroup, "unused_bindings_in_pipeline")
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         if (compute) {
             WGPUComputePipeline pipe = computePipeline(t);
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
             const uint32_t i0 = order == "common" ? 0u : 1u;
             const uint32_t i1 = order == "common" ? 1u : 0u;
             if (setPipe == "before") wgpuComputePassEncoderSetPipeline(pass, pipe);
@@ -956,7 +956,7 @@ CTS_TEST(testGroup, "unused_bindings_in_pipeline")
             WGPUTexture color = createTexture(t);
             WGPURenderPassColorAttachment ca = colorAttachment(createView(t, color));
             std::vector<WGPURenderPassColorAttachment> colors = {ca};
-            WGPURenderPassEncoder pass = beginRenderPass(encoder, colors);
+            WGPURenderPassEncoder pass = beginRenderPass(t, encoder, colors);
             const uint32_t i0 = order == "common" ? 0u : 1u;
             const uint32_t i1 = order == "common" ? 1u : 0u;
             if (setPipe == "before") wgpuRenderPassEncoderSetPipeline(pass, pipe);
@@ -1052,7 +1052,7 @@ CTS_TEST(testGroup, "scope,pass_boundary,compute")
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
         if (split) {
             wgpuComputePassEncoderEnd(pass);
-            pass = wgpuCommandEncoderBeginComputePass(o.encoder, nullptr);
+            pass = t.beginComputePassTracked(o.encoder, nullptr);
         }
         wgpuComputePassEncoderSetPipeline(pass, pipe1);
         wgpuComputePassEncoderSetBindGroup(pass, 0, o.bindGroup1, 0, nullptr);
@@ -1086,7 +1086,7 @@ CTS_TEST(testGroup, "scope,pass_boundary,render")
             WGPUTexture color = createTexture(t);
             WGPURenderPassColorAttachment ca = colorAttachment(createView(t, color));
             std::vector<WGPURenderPassColorAttachment> colors = {ca};
-            pass = beginRenderPass(o.encoder, colors);
+            pass = beginRenderPass(t, o.encoder, colors);
         }
         wgpuRenderPassEncoderSetPipeline(pass, pipe1);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, o.bindGroup1, 0, nullptr);

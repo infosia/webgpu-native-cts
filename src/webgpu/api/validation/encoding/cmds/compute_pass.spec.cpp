@@ -108,7 +108,7 @@ static ComputePassContext makeComputePassContext(AllFeaturesMaxLimitsGpuTest& t)
     ComputePassContext ctx;
     ctx.cmdEnc = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    ctx.passEnc = wgpuCommandEncoderBeginComputePass(ctx.cmdEnc, &passDesc);
+    ctx.passEnc = t.beginComputePassTracked(ctx.cmdEnc, &passDesc);
     return ctx;
 }
 
@@ -118,7 +118,6 @@ static WGPUCommandBuffer computePassFinish(
     ComputePassContext& ctx)
 {
     wgpuComputePassEncoderEnd(ctx.passEnc);
-    wgpuComputePassEncoderRelease(ctx.passEnc);
     ctx.passEnc = nullptr;
     return t.finishTracked(ctx.cmdEnc);
 }

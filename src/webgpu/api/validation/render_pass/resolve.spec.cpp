@@ -306,9 +306,8 @@ CTS_TEST(g, "resolve_attachment")
             passDesc.colorAttachments     = colorAttachments.data();
 
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
 
             // Validation of render pass attachments is deferred to encoder finish().
             t.expectValidationError([&] {

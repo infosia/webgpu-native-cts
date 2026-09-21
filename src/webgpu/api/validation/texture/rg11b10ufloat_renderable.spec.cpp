@@ -88,9 +88,8 @@ iff rg11b10ufloat-renderable feature is enabled. Single sampled case.
         passDesc.colorAttachments     = &colorAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
         t.finishTracked(encoder);
     });
 
@@ -140,9 +139,8 @@ iff rg11b10ufloat-renderable feature is enabled. MSAA and resolve case.
         passDesc.colorAttachments     = &colorAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
         t.finishTracked(encoder);
     });
 

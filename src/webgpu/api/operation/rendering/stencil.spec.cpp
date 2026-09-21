@@ -396,14 +396,14 @@ void runStencilStateTest(
     passDesc.depthStencilAttachment = &dsAttachment;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     if (isSingleEncoderMultiplePass) {
         wgpuRenderPassEncoderEnd(pass);
     }
 
     for (const TestState& state : testStates) {
         if (isSingleEncoderMultiplePass) {
-            pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            pass = t.beginRenderPassTracked(encoder, &passDesc);
         }
         drawState(pass, t, state);
         if (isSingleEncoderMultiplePass) {

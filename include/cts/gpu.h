@@ -175,6 +175,12 @@ class GpuTest : public Fixture {
     WGPUComputePipeline createComputePipelineTracked(const WGPUComputePipelineDescriptor& desc);
     /// Creates a command encoder and tracks it for release.
     WGPUCommandEncoder createCommandEncoderTracked();
+    /// Begins a compute pass and tracks the encoder for release in `finalize`.
+    WGPUComputePassEncoder beginComputePassTracked(WGPUCommandEncoder encoder,
+                                                   const WGPUComputePassDescriptor* desc);
+    /// Begins a render pass and tracks the encoder for release in `finalize`.
+    WGPURenderPassEncoder beginRenderPassTracked(WGPUCommandEncoder encoder,
+                                                 const WGPURenderPassDescriptor* desc);
     /// Finishes `encoder` into a command buffer and tracks it for release.
     WGPUCommandBuffer finishTracked(WGPUCommandEncoder encoder);
     /// Runs `body` inside an error scope and asserts an error did/didn't occur per `shouldError`.
@@ -226,6 +232,8 @@ class GpuTest : public Fixture {
     std::vector<WGPUPipelineLayout> pipelineLayouts_;
     std::vector<WGPURenderPipeline> renderPipelines_;
     std::vector<WGPUComputePipeline> computePipelines_;
+    std::vector<WGPUComputePassEncoder> computePassEncoders_;
+    std::vector<WGPURenderPassEncoder> renderPassEncoders_;
     std::vector<WGPUCommandEncoder> encoders_;
     std::vector<WGPUCommandBuffer> commandBuffers_;
     std::vector<WGPUBuffer> mismatchedDeviceBuffers_;

@@ -587,7 +587,7 @@ void fillDepthViaRender(
     passDesc.depthStencilAttachment = &dsAttachment;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
     wgpuRenderPassEncoderEnd(pass);
@@ -615,7 +615,7 @@ void clearStencilViaPass(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture) {
     passDesc.depthStencilAttachment = &dsAttachment;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderEnd(pass);
     WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
     wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
@@ -685,7 +685,7 @@ void fillMultisampledColorViaRender(
     passDesc.colorAttachments = &colorAttachment;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
     wgpuRenderPassEncoderEnd(pass);
@@ -780,7 +780,7 @@ std::array<Color, 4> readSourceTexels(
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
@@ -1301,7 +1301,7 @@ CTS_TEST(g, "read_swizzle")
         passDesc.colorAttachments = &colorAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup0, 0, nullptr);
         wgpuRenderPassEncoderSetBindGroup(pass, 1, bindGroup1, 0, nullptr);

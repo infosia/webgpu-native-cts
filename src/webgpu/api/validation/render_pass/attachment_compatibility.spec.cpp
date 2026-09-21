@@ -204,10 +204,9 @@ void executeBundleInPass(
     passDesc.colorAttachments = colors.empty() ? nullptr : colors.data();
     passDesc.depthStencilAttachment = ds;
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
     wgpuRenderPassEncoderEnd(pass);
-    wgpuRenderPassEncoderRelease(pass);
     t.expectValidationError([&] { t.finishTracked(encoder); }, !success);
 }
 
@@ -356,7 +355,7 @@ EncoderCase makeEncoderCase(
         passDesc.colorAttachments = colors.empty() ? nullptr : colors.data();
         passDesc.depthStencilAttachment = ds;
         c.commandEncoder = t.createCommandEncoderTracked();
-        c.pass = wgpuCommandEncoderBeginRenderPass(c.commandEncoder, &passDesc);
+        c.pass = t.beginRenderPassTracked(c.commandEncoder, &passDesc);
     } else {
         WGPURenderBundleEncoderDescriptor desc = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
         desc.colorFormatCount = bundleFormats.size();
@@ -378,7 +377,6 @@ void setPipelineAndValidate(
     if (c.pass != nullptr) {
         wgpuRenderPassEncoderSetPipeline(c.pass, pipeline);
         wgpuRenderPassEncoderEnd(c.pass);
-        wgpuRenderPassEncoderRelease(c.pass);
         t.expectValidationError([&] { t.finishTracked(c.commandEncoder); }, !success);
     } else {
         wgpuRenderBundleEncoderSetPipeline(c.bundle, pipeline);

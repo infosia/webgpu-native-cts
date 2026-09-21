@@ -69,7 +69,7 @@ CTS_TEST(g, "increasing_attachments_count")
             passDesc.colorAttachmentCount = count;
             passDesc.colorAttachments = colorAttachments.data();
 
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderEnd(pass);
         }
 
@@ -128,7 +128,7 @@ CTS_TEST(g, "overlapping_transient_attachments")
             passDesc.colorAttachmentCount = 2;
             passDesc.colorAttachments = colorAttachments;
 
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderEnd(pass);
         }
 

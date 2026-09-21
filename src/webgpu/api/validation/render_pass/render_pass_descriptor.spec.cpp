@@ -229,9 +229,8 @@ void tryRenderPass(
     desc.timestampWrites = timestampWrites;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &desc);
     wgpuRenderPassEncoderEnd(pass);
-    wgpuRenderPassEncoderRelease(pass);
 
     // Native validation for render-pass attachment compatibility is deferred to finish().
     t.expectValidationError([&] { t.finishTracked(encoder); }, !success);
@@ -447,17 +446,15 @@ CTS_TEST(g, "color_attachments,depthSlice,overlaps,same_miplevel")
             WGPURenderPassDescriptor desc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
             desc.colorAttachmentCount = colors.size();
             desc.colorAttachments = colors.data();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &desc);
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
         } else {
             for (WGPURenderPassColorAttachment& color : colors) {
                 WGPURenderPassDescriptor desc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
                 desc.colorAttachmentCount = 1;
                 desc.colorAttachments = &color;
-                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+                WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &desc);
                 wgpuRenderPassEncoderEnd(pass);
-                wgpuRenderPassEncoderRelease(pass);
             }
         }
         t.expectValidationError([&] { t.finishTracked(encoder); }, sameDepthSlice && sameTexture && samePass);
@@ -869,10 +866,9 @@ CTS_TEST(g, "timestampWrite,query_index")
         desc.timestampWrites = &writes;
         t.expectValidationError([&] {
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &desc);
             if (pass != nullptr) {
                 wgpuRenderPassEncoderEnd(pass);
-                wgpuRenderPassEncoderRelease(pass);
             }
             t.finishTracked(encoder);
         }, !valid);

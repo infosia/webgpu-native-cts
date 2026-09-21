@@ -192,10 +192,9 @@ CTS_TEST(testGroup, "no_render_no_resolve_no_storage")
                 ds.stencilClearValue = 0;
                 WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
                 passDesc.depthStencilAttachment = &ds;
-                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+                WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
                 if (pass != nullptr) {
                     wgpuRenderPassEncoderEnd(pass);
-                    wgpuRenderPassEncoderRelease(pass);
                 }
             } else {
                 WGPUTextureDescriptor msaaDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
@@ -216,10 +215,9 @@ CTS_TEST(testGroup, "no_render_no_resolve_no_storage")
                 WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
                 passDesc.colorAttachmentCount = 1;
                 passDesc.colorAttachments = &color;
-                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+                WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
                 if (pass != nullptr) {
                     wgpuRenderPassEncoderEnd(pass);
-                    wgpuRenderPassEncoderRelease(pass);
                 }
             }
             t.finishTracked(encoder);
@@ -310,13 +308,12 @@ CTS_TEST(testGroup, "compatibility_mode")
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
             if (pipelineType == "compute") {
                 WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-                WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+                WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
                 wgpuComputePassEncoderSetPipeline(pass, computePipeline);
                 wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup0, 0, nullptr);
                 wgpuComputePassEncoderSetBindGroup(pass, 1, bindGroup1, 0, nullptr);
                 wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
                 wgpuComputePassEncoderEnd(pass);
-                wgpuComputePassEncoderRelease(pass);
             } else {
                 WGPUTextureDescriptor colorDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
                 colorDesc.size = {1, 1, 1};
@@ -332,13 +329,12 @@ CTS_TEST(testGroup, "compatibility_mode")
                 WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
                 passDesc.colorAttachmentCount = 1;
                 passDesc.colorAttachments = &color;
-                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+                WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
                 wgpuRenderPassEncoderSetPipeline(pass, renderPipeline);
                 wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup0, 0, nullptr);
                 wgpuRenderPassEncoderSetBindGroup(pass, 1, bindGroup1, 0, nullptr);
                 wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
                 wgpuRenderPassEncoderEnd(pass);
-                wgpuRenderPassEncoderRelease(pass);
             }
             t.finishTracked(encoder);
         }, false);

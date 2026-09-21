@@ -37,7 +37,7 @@ WGPUTextureView createRenderView(AllFeaturesMaxLimitsGpuTest& t) {
     return t.createViewTracked(texture, viewDesc);
 }
 
-WGPURenderPassEncoder beginRenderPass(WGPUCommandEncoder encoder, WGPUTextureView view, WGPUQuerySet querySet = nullptr) {
+WGPURenderPassEncoder beginRenderPass(GpuTest& t, WGPUCommandEncoder encoder, WGPUTextureView view, WGPUQuerySet querySet = nullptr) {
     WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
     color.view = view;
     color.loadOp = WGPULoadOp_Clear;
@@ -48,7 +48,7 @@ WGPURenderPassEncoder beginRenderPass(WGPUCommandEncoder encoder, WGPUTextureVie
     desc.colorAttachmentCount = 1;
     desc.colorAttachments = &color;
     desc.occlusionQuerySet = querySet;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+    return t.beginRenderPassTracked(encoder, &desc);
 }
 
 WGPURenderPipeline createRenderPipeline(AllFeaturesMaxLimitsGpuTest& t) {
@@ -222,16 +222,14 @@ void encodeCommandEncoderCommand(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEnco
     WGPUQuerySet querySet = createOcclusionQuerySet(t);
 
     if (command == "beginComputePass") {
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
         if (pass != nullptr) {
             wgpuComputePassEncoderEnd(pass);
-            wgpuComputePassEncoderRelease(pass);
         }
     } else if (command == "beginRenderPass") {
-        WGPURenderPassEncoder pass = beginRenderPass(encoder, createRenderView(t));
+        WGPURenderPassEncoder pass = beginRenderPass(t, encoder, createRenderView(t));
         if (pass != nullptr) {
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
         }
     } else if (command == "clearBuffer") {
         wgpuCommandEncoderClearBuffer(encoder, dstBuffer, 0, 16);
@@ -443,7 +441,7 @@ CTS_TEST(testGroup, "render_pass_commands")
 
         WGPUQuerySet querySet = createOcclusionQuerySet(t);
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginRenderPass(encoder, createRenderView(t), querySet);
+        WGPURenderPassEncoder pass = beginRenderPass(t, encoder, createRenderView(t), querySet);
 
         if (finishBeforeCommand != "no") {
             wgpuRenderPassEncoderEnd(pass);
@@ -468,7 +466,6 @@ CTS_TEST(testGroup, "render_pass_commands")
                 encodeRenderPassCommand(t, pass, command);
             }, true);
         }
-        wgpuRenderPassEncoderRelease(pass);
         wgpuQuerySetRelease(querySet);
     });
 
@@ -528,7 +525,7 @@ CTS_TEST(testGroup, "compute_pass_commands")
         }
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
         if (finishBeforeCommand != "no") {
             wgpuComputePassEncoderEnd(pass);
         }
@@ -552,7 +549,6 @@ CTS_TEST(testGroup, "compute_pass_commands")
                 encodeComputePassCommand(t, pass, command);
             }, true);
         }
-        wgpuComputePassEncoderRelease(pass);
     });
 
 } // namespace

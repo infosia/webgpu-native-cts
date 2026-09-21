@@ -114,7 +114,7 @@ static WGPURenderPassEncoder beginRenderPass(AllFeaturesMaxLimitsGpuTest& t,
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments     = &colorAttach;
 
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 // ---------------------------------------------------------------------------

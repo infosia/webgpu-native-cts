@@ -346,7 +346,7 @@ void runDepthStateTest(
     passDesc.depthStencilAttachment = &dsAttachment;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     for (const TestState& state : testStates) {
         drawState(pass, t, state);
     }
@@ -489,7 +489,7 @@ CTS_TEST(g, "depth_compare_func")
         passDesc.depthStencilAttachment = &dsAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline.pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 1, 1, 0, 0);
@@ -579,7 +579,7 @@ struct VertexOut {
         passDesc.depthStencilAttachment = &dsAttachment;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderDraw(pass, 1, 4, 0, 0);
         wgpuRenderPassEncoderEnd(pass);

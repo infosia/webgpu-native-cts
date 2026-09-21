@@ -87,7 +87,7 @@ CTS_TEST(g, "beginOcclusionQuery")
         passDesc.occlusionQuerySet = occlusionQuerySet;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderBeginOcclusionQuery(pass, 0);
         wgpuRenderPassEncoderEndOcclusionQuery(pass);
         wgpuRenderPassEncoderEnd(pass);
@@ -123,7 +123,7 @@ CTS_TEST(g, "unusedOcclusionQuery")
         passDesc.occlusionQuerySet = occlusionQuerySet;
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
 
         validateFinishAndSubmitGivenState(t, encoder, querySetState);
@@ -160,7 +160,7 @@ CTS_TEST(g, "timestamps")
             passDesc.timestampWrites = &tw;
 
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
             wgpuComputePassEncoderEnd(pass);
 
             validateFinishAndSubmitGivenState(t, encoder, querySetState);
@@ -186,7 +186,7 @@ CTS_TEST(g, "timestamps")
             passDesc.timestampWrites = &tw;
 
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderEnd(pass);
 
             validateFinishAndSubmitGivenState(t, encoder, querySetState);

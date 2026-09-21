@@ -13,8 +13,8 @@ namespace {
 // Helpers mirroring the upstream F helper class
 // ---------------------------------------------------------------------------
 
-// beginRenderPass: mirrors F.beginRenderPass(commandEncoder, view).
-static WGPURenderPassEncoder beginRenderPass(
+// beginRenderPass: mirrors F.beginRenderPass(t, commandEncoder, view).
+static WGPURenderPassEncoder beginRenderPass(GpuTest& t, 
     AllFeaturesMaxLimitsGpuTest& /*t*/,
     WGPUCommandEncoder encoder,
     WGPUTextureView view)
@@ -29,7 +29,7 @@ static WGPURenderPassEncoder beginRenderPass(
     desc.colorAttachmentCount = 1;
     desc.colorAttachments     = &colorAttachment;
 
-    return wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+    return t.beginRenderPassTracked(encoder, &desc);
 }
 
 // createAttachmentTextureView: mirrors F.createAttachmentTextureView().
@@ -98,13 +98,11 @@ CTS_TEST(g, "call_after_successful_finish")
         // Optionally run a pre-pass before finishing.
         if (prePassType != "no-op") {
             if (prePassType == "compute") {
-                WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+                WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, nullptr);
                 wgpuComputePassEncoderEnd(pass);
-                wgpuComputePassEncoderRelease(pass);
             } else {
-                WGPURenderPassEncoder pass = beginRenderPass(t, encoder, view);
+                WGPURenderPassEncoder pass = beginRenderPass(t, t, encoder, view);
                 wgpuRenderPassEncoderEnd(pass);
-                wgpuRenderPassEncoderRelease(pass);
             }
         }
 
@@ -120,12 +118,11 @@ CTS_TEST(g, "call_after_successful_finish")
         if (callCmd == "beginComputePass") {
             WGPUComputePassEncoder pass = nullptr;
             t.expectValidationError([&] {
-                pass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+                pass = t.beginComputePassTracked(encoder, nullptr);
             }, IsEncoderFinished);
             t.expectValidationError([&] {
                 wgpuComputePassEncoderEnd(pass);
             }, IsEncoderFinished);
-            if (pass != nullptr) wgpuComputePassEncoderRelease(pass);
             if (buffer != nullptr) {
                 WGPUCommandBuffer cmds[1] = {buffer};
                 wgpuQueueSubmit(t.queue(), 1, cmds);
@@ -135,12 +132,11 @@ CTS_TEST(g, "call_after_successful_finish")
         } else if (callCmd == "beginRenderPass") {
             WGPURenderPassEncoder pass = nullptr;
             t.expectValidationError([&] {
-                pass = beginRenderPass(t, encoder, view);
+                pass = beginRenderPass(t, t, encoder, view);
             }, IsEncoderFinished);
             t.expectValidationError([&] {
                 wgpuRenderPassEncoderEnd(pass);
             }, IsEncoderFinished);
-            if (pass != nullptr) wgpuRenderPassEncoderRelease(pass);
             if (buffer != nullptr) {
                 WGPUCommandBuffer cmds[1] = {buffer};
                 wgpuQueueSubmit(t.queue(), 1, cmds);
@@ -236,9 +232,9 @@ CTS_TEST(g, "pass_end_none")
         WGPURenderPassEncoder  renderPass  = nullptr;
         WGPUComputePassEncoder computePass = nullptr;
         if (passType == "compute") {
-            computePass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            computePass = t.beginComputePassTracked(encoder, nullptr);
         } else {
-            renderPass = beginRenderPass(t, encoder, view);
+            renderPass = beginRenderPass(t, t, encoder, view);
         }
 
         for (int i = 0; i < endCount; ++i) {
@@ -257,8 +253,6 @@ CTS_TEST(g, "pass_end_none")
             }
         }, endCount == 0);
 
-        if (computePass != nullptr) wgpuComputePassEncoderRelease(computePass);
-        if (renderPass  != nullptr) wgpuRenderPassEncoderRelease(renderPass);
         // view is tracked by createViewTracked; no manual release needed.
     });
 
@@ -302,9 +296,9 @@ CTS_TEST(g, "pass_end_twice,basic")
         WGPURenderPassEncoder  renderPass  = nullptr;
         WGPUComputePassEncoder computePass = nullptr;
         if (passType == "compute") {
-            computePass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            computePass = t.beginComputePassTracked(encoder, nullptr);
         } else {
-            renderPass = beginRenderPass(t, encoder, view);
+            renderPass = beginRenderPass(t, t, encoder, view);
         }
 
         // First end (always valid).
@@ -321,9 +315,9 @@ CTS_TEST(g, "pass_end_twice,basic")
             WGPURenderPassEncoder  pass1Render  = nullptr;
             WGPUComputePassEncoder pass1Compute = nullptr;
             if (secondEndInAnotherPass == "compute") {
-                pass1Compute = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+                pass1Compute = t.beginComputePassTracked(encoder, nullptr);
             } else {
-                pass1Render = beginRenderPass(t, encoder, view);
+                pass1Render = beginRenderPass(t, t, encoder, view);
             }
 
             // End the original pass a second time — should always error.
@@ -342,8 +336,6 @@ CTS_TEST(g, "pass_end_twice,basic")
                 wgpuRenderPassEncoderEnd(pass1Render);
             }
 
-            if (pass1Compute != nullptr) wgpuComputePassEncoderRelease(pass1Compute);
-            if (pass1Render  != nullptr) wgpuRenderPassEncoderRelease(pass1Render);
         } else {
             // No other pass open; optionally call end a second time.
             if (endTwice) {
@@ -361,8 +353,6 @@ CTS_TEST(g, "pass_end_twice,basic")
         // and the second end, if any, only generated an error that invalidates the pass).
         t.finishTracked(encoder);
 
-        if (computePass != nullptr) wgpuComputePassEncoderRelease(computePass);
-        if (renderPass  != nullptr) wgpuRenderPassEncoderRelease(renderPass);
         // view is tracked by createViewTracked; no manual release needed.
     });
 
@@ -386,11 +376,11 @@ CTS_TEST(g, "pass_end_twice,render_pass_invalid")
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
 
         // Pass encoder creation will fail because both color and depth/stencil
-        // attachments are empty (mirrors upstream: beginRenderPass({ colorAttachments: [] })).
+        // attachments are empty (mirrors upstream: beginRenderPass(t, { colorAttachments: [] })).
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 0;
         passDesc.colorAttachments     = nullptr;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
         wgpuRenderPassEncoderEnd(pass);
 
@@ -409,7 +399,6 @@ CTS_TEST(g, "pass_end_twice,render_pass_invalid")
             }
         }, true);
 
-        if (pass != nullptr) wgpuRenderPassEncoderRelease(pass);
     });
 
 // ---------------------------------------------------------------------------
@@ -437,9 +426,9 @@ CTS_TEST(g, "pass_begin_invalid_encoder")
         WGPURenderPassEncoder  firstRenderPass  = nullptr;
         WGPUComputePassEncoder firstComputePass = nullptr;
         if (pass0Type == "compute") {
-            firstComputePass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            firstComputePass = t.beginComputePassTracked(encoder, nullptr);
         } else {
-            firstRenderPass = beginRenderPass(t, encoder, view);
+            firstRenderPass = beginRenderPass(t, t, encoder, view);
         }
 
         if (firstPassInvalid) {
@@ -462,9 +451,9 @@ CTS_TEST(g, "pass_begin_invalid_encoder")
         WGPURenderPassEncoder  secondRenderPass  = nullptr;
         WGPUComputePassEncoder secondComputePass = nullptr;
         if (pass1Type == "compute") {
-            secondComputePass = wgpuCommandEncoderBeginComputePass(encoder, nullptr);
+            secondComputePass = t.beginComputePassTracked(encoder, nullptr);
         } else {
-            secondRenderPass = beginRenderPass(t, encoder, view);
+            secondRenderPass = beginRenderPass(t, t, encoder, view);
         }
 
         if (pass1Type == "compute") {
@@ -481,10 +470,6 @@ CTS_TEST(g, "pass_begin_invalid_encoder")
             }
         }, firstPassInvalid);
 
-        if (firstComputePass  != nullptr) wgpuComputePassEncoderRelease(firstComputePass);
-        if (firstRenderPass   != nullptr) wgpuRenderPassEncoderRelease(firstRenderPass);
-        if (secondComputePass != nullptr) wgpuComputePassEncoderRelease(secondComputePass);
-        if (secondRenderPass  != nullptr) wgpuRenderPassEncoderRelease(secondRenderPass);
         // view is tracked by createViewTracked; no manual release needed.
     });
 

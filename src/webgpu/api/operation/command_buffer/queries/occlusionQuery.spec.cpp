@@ -259,7 +259,7 @@ void runOcclusionQueryTest(AllFeaturesMaxLimitsGpuTest& t, bool draw) {
     passDesc.occlusionQuerySet = querySet;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
     wgpuRenderPassEncoderBeginOcclusionQuery(pass, 0);
     if (draw) {
@@ -351,7 +351,7 @@ void runDepthOcclusionQueryTest(AllFeaturesMaxLimitsGpuTest& t) {
     WGPURenderPipeline pipelinePass = createDepthPipeline(t, 0.1);
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
     // Query 0: z=0.9, 0.9 < 0.5 is false → depth fails → 0 samples counted.
     wgpuRenderPassEncoderBeginOcclusionQuery(pass, 0);
@@ -423,7 +423,7 @@ void runStencilOcclusionQueryTest(AllFeaturesMaxLimitsGpuTest& t) {
     WGPURenderPipeline pipeline = createStencilPipeline(t);
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
 
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
 

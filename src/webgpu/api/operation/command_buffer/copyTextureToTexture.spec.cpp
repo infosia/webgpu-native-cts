@@ -638,7 +638,7 @@ WGPURenderPipeline createDepthCopyPipeline(
     return t.createRenderPipelineTracked(desc);
 }
 
-void encodeDepthDrawPass(
+void encodeDepthDrawPass(GpuTest& t, 
     WGPUCommandEncoder encoder,
     WGPURenderPipeline pipeline,
     WGPUBindGroup bindGroup,
@@ -661,7 +661,7 @@ void encodeDepthDrawPass(
     passDesc.colorAttachmentCount = colorAttachment == nullptr ? 0 : 1;
     passDesc.colorAttachments = colorAttachment;
     passDesc.depthStencilAttachment = &depthStencilAttachment;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     const uint32_t dynamicOffset = layer * kDynamicUniformStride;
     wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 1, &dynamicOffset);
@@ -686,7 +686,7 @@ void initializeDepthAspect(
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     for (uint32_t layer = 0; layer < copySize.depthOrArrayLayers; ++layer) {
         WGPUTextureView view = createLayerView(t, texture, format, mipLevel, baseArrayLayer + layer);
-        encodeDepthDrawPass(encoder, pipeline, bindGroup, view, format, nullptr, true, layer);
+        encodeDepthDrawPass(t, encoder, pipeline, bindGroup, view, format, nullptr, true, layer);
     }
     submit(t, encoder);
 }
@@ -773,7 +773,7 @@ void verifyDepthAspect(
         colorAttachment.storeOp = WGPUStoreOp_Store;
         colorAttachment.clearValue = WGPUColor{1.0, 0.0, 0.0, 1.0};
         WGPUTextureView depthView = createLayerView(t, texture, format, mipLevel, baseArrayLayer + layer);
-        encodeDepthDrawPass(encoder, pipeline, bindGroup, depthView, format, &colorAttachment, false, layer);
+        encodeDepthDrawPass(t, encoder, pipeline, bindGroup, depthView, format, &colorAttachment, false, layer);
     }
     submit(t, encoder);
     expectSingleColor(t, output, copySize);

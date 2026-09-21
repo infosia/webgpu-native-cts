@@ -115,11 +115,10 @@ void runSetBindGroupTest(MinStorageBufferOffsetAlignmentTest& t) {
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         const uint32_t dynamicOffset = static_cast<uint32_t>(inputs.testValue);
         wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 1, &dynamicOffset);
         wgpuComputePassEncoderEnd(pass);
-        wgpuComputePassEncoderRelease(pass);
         t.expectValidationErrorOnLimitDevice([&] { t.finishTracked(encoder); }, inputs.shouldError);
     });
 }

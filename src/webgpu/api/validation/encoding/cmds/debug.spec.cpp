@@ -61,7 +61,7 @@ static WGPUTexture createSmallRenderTarget(AllFeaturesMaxLimitsGpuTest& t) {
 }
 
 // Begin a single-color-attachment render pass (no depth/stencil).
-static WGPURenderPassEncoder beginSimpleRenderPass(WGPUCommandEncoder cmdEnc, WGPUTextureView view) {
+static WGPURenderPassEncoder beginSimpleRenderPass(GpuTest& t, WGPUCommandEncoder cmdEnc, WGPUTextureView view) {
     WGPURenderPassColorAttachment colorAttach = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
     colorAttach.view        = view;
     colorAttach.loadOp      = WGPULoadOp_Clear;
@@ -71,7 +71,7 @@ static WGPURenderPassEncoder beginSimpleRenderPass(WGPUCommandEncoder cmdEnc, WG
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments     = &colorAttach;
-    return wgpuCommandEncoderBeginRenderPass(cmdEnc, &passDesc);
+    return t.beginRenderPassTracked(cmdEnc, &passDesc);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,12 +172,12 @@ static EncoderContext makeEncoderContext(AllFeaturesMaxLimitsGpuTest& t, const s
         // nothing more needed
     } else if (encoderType == "compute pass") {
         WGPUComputePassDescriptor cpDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        ctx.computePass = wgpuCommandEncoderBeginComputePass(ctx.cmdEnc, &cpDesc);
+        ctx.computePass = t.beginComputePassTracked(ctx.cmdEnc, &cpDesc);
     } else if (encoderType == "render pass") {
         ctx.renderTex  = createSmallRenderTarget(t);
         WGPUTextureViewDescriptor vDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
         ctx.renderView = t.createViewTracked(ctx.renderTex, vDesc);
-        ctx.renderPass = beginSimpleRenderPass(ctx.cmdEnc, ctx.renderView);
+        ctx.renderPass = beginSimpleRenderPass(t, ctx.cmdEnc, ctx.renderView);
     } else {
         // render bundle: open a bundle encoder + a render pass to execute it
         ctx.renderTex  = createSmallRenderTarget(t);
@@ -193,7 +193,7 @@ static EncoderContext makeEncoderContext(AllFeaturesMaxLimitsGpuTest& t, const s
 
         // The render pass that will execute the bundle is also opened here;
         // it is ended (and the bundle executed) during finish().
-        ctx.bundlePass = beginSimpleRenderPass(ctx.cmdEnc, ctx.renderView);
+        ctx.bundlePass = beginSimpleRenderPass(t, ctx.cmdEnc, ctx.renderView);
     }
     return ctx;
 }

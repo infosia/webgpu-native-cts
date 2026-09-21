@@ -138,7 +138,7 @@ WGPURenderPipeline makeRenderPipeline(
 }
 
 // Begin a render pass on a 4×4 texture, clearing to (0,0,0,0).
-WGPURenderPassEncoder beginRenderPass(
+WGPURenderPassEncoder beginRenderPass(GpuTest& t, 
     WGPUCommandEncoder encoder,
     WGPUTextureView view) {
     WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
@@ -150,7 +150,7 @@ WGPURenderPassEncoder beginRenderPass(
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments     = &colorAttachment;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 // Create a render bundle encoder for rgba8unorm.
@@ -246,7 +246,7 @@ CTS_TEST(g, "basic")
         WGPUTextureView view = t.createViewTracked(target, viewDesc);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginRenderPass(encoder, view);
+        WGPURenderPassEncoder pass = beginRenderPass(t, encoder, view);
         wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
         wgpuRenderPassEncoderEnd(pass);
         submitEncoder(t, encoder);
@@ -292,7 +292,7 @@ CTS_TEST(g, "two_bundles")
         WGPUTextureView view = t.createViewTracked(target, viewDesc);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginRenderPass(encoder, view);
+        WGPURenderPassEncoder pass = beginRenderPass(t, encoder, view);
         std::array<WGPURenderBundle, 2> bundles = {{bundle1, bundle2}};
         wgpuRenderPassEncoderExecuteBundles(pass, 2, bundles.data());
         wgpuRenderPassEncoderEnd(pass);
@@ -335,7 +335,7 @@ CTS_TEST(g, "one_bundle_used_multiple_times")
         WGPUTextureView view = t.createViewTracked(target, viewDesc);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginRenderPass(encoder, view);
+        WGPURenderPassEncoder pass = beginRenderPass(t, encoder, view);
 
         // 4 viewport calls, each covering a 1×1 pixel region.
         constexpr std::array<std::array<float, 2>, 4> kViewports = {{
@@ -402,7 +402,7 @@ CTS_TEST(g, "one_bundle_used_multiple_times_same_executeBundles")
         WGPUTextureView view = t.createViewTracked(target, viewDesc);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginRenderPass(encoder, view);
+        WGPURenderPassEncoder pass = beginRenderPass(t, encoder, view);
         // Execute the same bundle 3 times in a single executeBundles call.
         std::array<WGPURenderBundle, 3> bundles = {{bundle, bundle, bundle}};
         wgpuRenderPassEncoderExecuteBundles(pass, 3, bundles.data());

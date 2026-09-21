@@ -224,7 +224,7 @@ void runColorAttachmentOnly(AllFeaturesMaxLimitsGpuTest& t) {
 
     // Empty render pass: no pipeline, no draw.
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderEnd(pass);
     submit(t, encoder);
 
@@ -348,7 +348,7 @@ void runColorWithDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
 
     // Empty render pass: no pipeline, no draw.
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderEnd(pass);
     submit(t, encoder);
 
@@ -407,7 +407,7 @@ void runMultipleColorAttachments(AllFeaturesMaxLimitsGpuTest& t) {
 
     // Empty render pass: no pipeline, no draw.
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderEnd(pass);
     submit(t, encoder);
 
@@ -471,7 +471,7 @@ void runDepthStencilAttachmentOnly(AllFeaturesMaxLimitsGpuTest& t) {
 
     // Empty render pass: no pipeline, no draw.
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderEnd(pass);
     submit(t, encoder);
 

@@ -148,7 +148,7 @@ CTS_TEST(g, "bind_group_indices")
         // Encode the compute pass: set pipeline, set all bind groups, dispatch.
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, pipeline);
         wgpuComputePassEncoderSetBindGroup(pass, groupA,   bgA,   0, nullptr);
         wgpuComputePassEncoderSetBindGroup(pass, groupB,   bgB,   0, nullptr);

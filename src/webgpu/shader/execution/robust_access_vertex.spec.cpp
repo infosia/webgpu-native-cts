@@ -512,7 +512,7 @@ void doTest(AllFeaturesMaxLimitsGpuTest& t,
     passDesc.depthStencilAttachment = nullptr;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
 
     // Run the draw variant

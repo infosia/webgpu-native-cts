@@ -407,7 +407,7 @@ void runComputeTest(
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
@@ -534,7 +534,7 @@ fn vsMain(@builtin(vertex_index) index : u32) -> @builtin(position) vec4f {
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAtt;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
     wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
@@ -700,7 +700,7 @@ void runAccuracyTest(
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bg, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);

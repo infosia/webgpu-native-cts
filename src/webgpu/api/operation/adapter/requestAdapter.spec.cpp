@@ -184,6 +184,7 @@ void testAdapter(Fixture& t, OwnedDeviceContext& ctx) {
     wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, kNumElements, 1, 1);
     wgpuComputePassEncoderEnd(pass);
+    wgpuComputePassEncoderRelease(pass);
 
     wgpuCommandEncoderCopyBufferToBuffer(encoder, buffer, 0, resultBuffer, 0, kBufferSize);
 
@@ -223,7 +224,6 @@ void testAdapter(Fixture& t, OwnedDeviceContext& ctx) {
     wgpuQueueRelease(queue);
     wgpuCommandBufferRelease(commandBuffer);
     wgpuCommandEncoderRelease(encoder);
-    wgpuComputePassEncoderRelease(pass);
     // ctx.device is released by OwnedDeviceContext's destructor.
 }
 

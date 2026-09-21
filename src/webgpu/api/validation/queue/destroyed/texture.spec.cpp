@@ -20,7 +20,7 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpu
 // ---------------------------------------------------------------------------
 
 // Open a single-color-attachment render pass with no depth/stencil.
-static WGPURenderPassEncoder beginSimpleRenderPass(
+static WGPURenderPassEncoder beginSimpleRenderPass(GpuTest& t, 
     WGPUCommandEncoder cmdEnc,
     WGPUTextureView    view)
 {
@@ -33,7 +33,7 @@ static WGPURenderPassEncoder beginSimpleRenderPass(
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments     = &colorAttach;
-    return wgpuCommandEncoderBeginRenderPass(cmdEnc, &passDesc);
+    return t.beginRenderPassTracked(cmdEnc, &passDesc);
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ static EncoderContext makeEncoderContext(
 
     if (encoderType == "compute pass") {
         WGPUComputePassDescriptor cpDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        ctx.computePass = wgpuCommandEncoderBeginComputePass(ctx.cmdEnc, &cpDesc);
+        ctx.computePass = t.beginComputePassTracked(ctx.cmdEnc, &cpDesc);
     } else {
         // render pass or render bundle: need a small render target
         WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
@@ -83,7 +83,7 @@ static EncoderContext makeEncoderContext(
         ctx.renderView = t.createViewTracked(ctx.renderTex, vDesc);
 
         if (encoderType == "render pass") {
-            ctx.renderPass = beginSimpleRenderPass(ctx.cmdEnc, ctx.renderView);
+            ctx.renderPass = beginSimpleRenderPass(t, ctx.cmdEnc, ctx.renderView);
         } else {
             // render bundle
             WGPUTextureFormat colorFmt = WGPUTextureFormat_RGBA8Unorm;
@@ -92,7 +92,7 @@ static EncoderContext makeEncoderContext(
             bDesc.colorFormats     = &colorFmt;
             bDesc.sampleCount      = 1;
             ctx.bundleEnc  = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bDesc);
-            ctx.bundlePass = beginSimpleRenderPass(ctx.cmdEnc, ctx.renderView);
+            ctx.bundlePass = beginSimpleRenderPass(t, ctx.cmdEnc, ctx.renderView);
         }
     }
     return ctx;
@@ -507,7 +507,7 @@ CTS_TEST(g, "beginRenderPass")
 
         // Record and finish the render pass before destroying anything.
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderEnd(pass);
         WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
 

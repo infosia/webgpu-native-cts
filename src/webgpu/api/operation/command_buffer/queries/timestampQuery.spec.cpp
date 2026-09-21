@@ -67,7 +67,7 @@ CTS_TEST(g, "resolve_unused_slots")
                 WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
                 passDesc.timestampWrites = &tw;
                 WGPUComputePassEncoder pass =
-                    wgpuCommandEncoderBeginComputePass(usedEncoder, &passDesc);
+                    t.beginComputePassTracked(usedEncoder, &passDesc);
                 wgpuComputePassEncoderEnd(pass);
             } else {
                 // render: empty pass with a 1x1 color attachment (loadOp Load, storeOp Store).
@@ -82,7 +82,7 @@ CTS_TEST(g, "resolve_unused_slots")
                 passDesc.colorAttachments = &colorAttachment;
                 passDesc.timestampWrites = &tw;
                 WGPURenderPassEncoder pass =
-                    wgpuCommandEncoderBeginRenderPass(usedEncoder, &passDesc);
+                    t.beginRenderPassTracked(usedEncoder, &passDesc);
                 wgpuRenderPassEncoderEnd(pass);
             }
 

@@ -39,7 +39,7 @@ static WGPURenderPassEncoder beginRenderPass(GpuTest& t, WGPUCommandEncoder enco
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &colorAttachment;
 
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 TestGroup<GpuTest> g = MakeTestGroup<GpuTest>(
@@ -99,7 +99,7 @@ CTS_TEST(g, "push_pop_call_count_unbalance,render_compute_pass")
 
         if (passType == "compute") {
             WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
 
             for (int i = 0; i < pushCount; ++i) {
                 wgpuComputePassEncoderPushDebugGroup(pass, sv("EventStart"));

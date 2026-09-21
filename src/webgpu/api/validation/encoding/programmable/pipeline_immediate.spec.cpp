@@ -127,7 +127,7 @@ WGPURenderPipeline makeRenderPipeline(AllFeaturesMaxLimitsGpuTest& t,
     return t.createRenderPipelineTracked(desc);
 }
 
-WGPURenderPassEncoder beginRenderPass(WGPUCommandEncoder commandEncoder,
+WGPURenderPassEncoder beginRenderPass(GpuTest& t, WGPUCommandEncoder commandEncoder,
                                       WGPUTextureView view) {
     WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
     color.view = view;
@@ -137,7 +137,7 @@ WGPURenderPassEncoder beginRenderPass(WGPUCommandEncoder commandEncoder,
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     passDesc.colorAttachmentCount = 1;
     passDesc.colorAttachments = &color;
-    return wgpuCommandEncoderBeginRenderPass(commandEncoder, &passDesc);
+    return t.beginRenderPassTracked(commandEncoder, &passDesc);
 }
 
 struct ProgrammableEncoderContext {
@@ -159,11 +159,11 @@ makeProgrammableEncoderContext(AllFeaturesMaxLimitsGpuTest& t,
     if (encoderType == "compute pass") {
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
         ctx.computePass =
-            wgpuCommandEncoderBeginComputePass(ctx.commandEncoder, &passDesc);
+            t.beginComputePassTracked(ctx.commandEncoder, &passDesc);
     } else {
         WGPUTextureView view = makeRenderView(t);
         if (encoderType == "render pass") {
-            ctx.renderPass = beginRenderPass(ctx.commandEncoder, view);
+            ctx.renderPass = beginRenderPass(t, ctx.commandEncoder, view);
         } else {
             WGPUTextureFormat format = WGPUTextureFormat_RGBA8Unorm;
             WGPURenderBundleEncoderDescriptor bundleDesc =
@@ -173,7 +173,7 @@ makeProgrammableEncoderContext(AllFeaturesMaxLimitsGpuTest& t,
             bundleDesc.sampleCount = 1;
             ctx.bundleEncoder =
                 wgpuDeviceCreateRenderBundleEncoder(t.device(), &bundleDesc);
-            ctx.bundlePass = beginRenderPass(ctx.commandEncoder, view);
+            ctx.bundlePass = beginRenderPass(t, ctx.commandEncoder, view);
         }
     }
 
@@ -221,7 +221,6 @@ WGPUCommandBuffer ctxFinish(AllFeaturesMaxLimitsGpuTest& t,
                             ProgrammableEncoderContext& ctx) {
     if (ctx.encoderType == "compute pass") {
         wgpuComputePassEncoderEnd(ctx.computePass);
-        wgpuComputePassEncoderRelease(ctx.computePass);
         ctx.computePass = nullptr;
     } else if (ctx.encoderType == "render pass") {
         wgpuRenderPassEncoderEnd(ctx.renderPass);

@@ -54,7 +54,7 @@ WGPUTextureView makeRenderView(AllFeaturesMaxLimitsGpuTest& t) {
     return t.createViewTracked(texture, viewDesc);
 }
 
-WGPURenderPassEncoder beginRenderPass(WGPUCommandEncoder encoder, WGPUTextureView view) {
+WGPURenderPassEncoder beginRenderPass(GpuTest& t, WGPUCommandEncoder encoder, WGPUTextureView view) {
     WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
     color.view = view;
     color.loadOp = WGPULoadOp_Clear;
@@ -62,7 +62,7 @@ WGPURenderPassEncoder beginRenderPass(WGPUCommandEncoder encoder, WGPUTextureVie
     WGPURenderPassDescriptor desc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
     desc.colorAttachmentCount = 1;
     desc.colorAttachments = &color;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+    return t.beginRenderPassTracked(encoder, &desc);
 }
 
 Context makeContext(AllFeaturesMaxLimitsGpuTest& t, const std::string& encoderType) {
@@ -70,10 +70,10 @@ Context makeContext(AllFeaturesMaxLimitsGpuTest& t, const std::string& encoderTy
     ctx.encoderType = encoderType;
     ctx.commandEncoder = t.createCommandEncoderTracked();
     if (encoderType == "compute pass") {
-        ctx.computePass = wgpuCommandEncoderBeginComputePass(ctx.commandEncoder, nullptr);
+        ctx.computePass = t.beginComputePassTracked(ctx.commandEncoder, nullptr);
     } else {
         WGPUTextureView view = makeRenderView(t);
-        ctx.renderPass = beginRenderPass(ctx.commandEncoder, view);
+        ctx.renderPass = beginRenderPass(t, ctx.commandEncoder, view);
         if (encoderType == "render bundle") {
             WGPUTextureFormat format = WGPUTextureFormat_RGBA8Unorm;
             WGPURenderBundleEncoderDescriptor desc = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;

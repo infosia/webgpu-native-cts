@@ -166,10 +166,9 @@ CTS_TEST(testGroup, "beginRenderPass,at_over")
                 WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
                 passDesc.colorAttachmentCount = attachments.size();
                 passDesc.colorAttachments = attachments.data();
-                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+                WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
                 if (pass != nullptr) {
                     wgpuRenderPassEncoderEnd(pass);
-                    wgpuRenderPassEncoderRelease(pass);
                 }
                 t.expectValidationErrorOnLimitDevice([&] { t.finishTracked(encoder); }, inputs.shouldError);
             }, extraLimits);

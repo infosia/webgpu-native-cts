@@ -435,7 +435,7 @@ void runDerivativeTest(
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAtt;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, group, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, static_cast<uint32_t>(quad));
@@ -698,7 +698,7 @@ void runFWidthTest(
         WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
         passDesc.colorAttachmentCount = 1;
         passDesc.colorAttachments = &colorAtt;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         wgpuRenderPassEncoderSetBindGroup(pass, 0, group, 0, nullptr);
         wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);

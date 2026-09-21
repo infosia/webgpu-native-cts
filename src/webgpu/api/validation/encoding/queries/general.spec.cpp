@@ -89,7 +89,7 @@ static WGPURenderPassEncoder beginRenderPassWithQuerySet(
     passDesc.colorAttachments     = &colorAttach;
     passDesc.occlusionQuerySet    = querySet;
 
-    return wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    return t.beginRenderPassTracked(encoder, &passDesc);
 }
 
 // validateFinishAndSubmitGivenState: mirrors
@@ -179,7 +179,6 @@ CTS_TEST(g, "occlusion_query,query_type")
         wgpuRenderPassEncoderBeginOcclusionQuery(pass, 0);
         wgpuRenderPassEncoderEndOcclusionQuery(pass);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         // Valid only when type == 'occlusion'.
         const bool shouldSucceed = (!isUndef && typeStr == "occlusion");
@@ -223,7 +222,6 @@ CTS_TEST(g, "occlusion_query,invalid_query_set")
         wgpuRenderPassEncoderBeginOcclusionQuery(pass, 0);
         wgpuRenderPassEncoderEndOcclusionQuery(pass);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         validateFinishAndSubmitGivenState(t, encoder, state);
 
@@ -259,7 +257,6 @@ CTS_TEST(g, "occlusion_query,query_index")
         wgpuRenderPassEncoderBeginOcclusionQuery(pass, queryIndex);
         wgpuRenderPassEncoderEndOcclusionQuery(pass);
         wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
 
         // queryIndex < 2 is valid; queryIndex == 2 is out of range.
         const bool shouldSucceed = (queryIndex < 2);

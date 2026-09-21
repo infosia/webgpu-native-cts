@@ -193,9 +193,8 @@ CTS_TEST(testGroup, "render_pass,resolvable")
         passDesc.colorAttachments = &color;
         expectValidationError(t, [&] {
             WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderEnd(pass);
-            wgpuRenderPassEncoderRelease(pass);
             t.finishTracked(encoder);
         }, false);
     });

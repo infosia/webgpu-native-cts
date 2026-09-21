@@ -326,7 +326,7 @@ static void runSamplingWhileTesting(AllFeaturesMaxLimitsGpuTest& t,
             initPassDesc.depthStencilAttachment = &initDsAtt;
 
             WGPURenderPassEncoder initPass =
-                wgpuCommandEncoderBeginRenderPass(encoder, &initPassDesc);
+                t.beginRenderPassTracked(encoder, &initPassDesc);
             wgpuRenderPassEncoderSetPipeline(initPass, initPipeline);
             // Draw 3 columns (X = 0,1,2), each as instance i; 3 points (Y=0,1,2).
             for (uint32_t i = 0; i < 3; ++i) {
@@ -370,7 +370,7 @@ static void runSamplingWhileTesting(AllFeaturesMaxLimitsGpuTest& t,
             testPassDesc.depthStencilAttachment = &testDsAtt;
 
             WGPURenderPassEncoder testPass =
-                wgpuCommandEncoderBeginRenderPass(encoder, &testPassDesc);
+                t.beginRenderPassTracked(encoder, &testPassDesc);
             wgpuRenderPassEncoderSetPipeline(testPass, testPipeline);
             wgpuRenderPassEncoderSetStencilReference(testPass, 2);
             wgpuRenderPassEncoderSetBindGroup(testPass, 0, testBindGroup, 0, nullptr);
@@ -394,7 +394,7 @@ static void runSamplingWhileTesting(AllFeaturesMaxLimitsGpuTest& t,
             checkPassDesc.depthStencilAttachment = nullptr;
 
             WGPURenderPassEncoder checkPass =
-                wgpuCommandEncoderBeginRenderPass(encoder, &checkPassDesc);
+                t.beginRenderPassTracked(encoder, &checkPassDesc);
             wgpuRenderPassEncoderSetPipeline(checkPass, checkPipeline);
             wgpuRenderPassEncoderSetBindGroup(checkPass, 0, checkBindGroup, 0, nullptr);
             wgpuRenderPassEncoderDraw(checkPass, 3, 1, 0, 0);

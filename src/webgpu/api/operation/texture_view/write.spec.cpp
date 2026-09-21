@@ -303,7 +303,7 @@ void writeTextureWithCompute(AllFeaturesMaxLimitsGpuTest& t, WGPUTextureView vie
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+    WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
     wgpuComputePassEncoderSetPipeline(pass, pipeline);
     wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuComputePassEncoderDispatchWorkgroups(pass, kTextureSize, kTextureSize, 1);
@@ -367,7 +367,7 @@ void writeTextureWithFragmentStorage(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture
     passDesc.colorAttachments = &color;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
     wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
@@ -440,7 +440,7 @@ void writeTextureWithRenderPass(
     passDesc.colorAttachments = &color;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderSetPipeline(pass, pipeline);
     wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
     wgpuRenderPassEncoderEnd(pass);

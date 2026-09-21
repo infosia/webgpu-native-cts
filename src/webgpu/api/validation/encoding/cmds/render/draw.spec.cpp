@@ -49,7 +49,7 @@ WGPUTextureView makeView(AllFeaturesMaxLimitsGpuTest& t) {
     return t.createViewTracked(texture, viewDesc);
 }
 
-WGPURenderPassEncoder beginPass(WGPUCommandEncoder encoder, WGPUTextureView view, uint64_t maxDrawCount = WGPU_LIMIT_U64_UNDEFINED) {
+WGPURenderPassEncoder beginPass(GpuTest& t, WGPUCommandEncoder encoder, WGPUTextureView view, uint64_t maxDrawCount = WGPU_LIMIT_U64_UNDEFINED) {
     WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
     color.view = view;
     color.loadOp = WGPULoadOp_Clear;
@@ -62,7 +62,7 @@ WGPURenderPassEncoder beginPass(WGPUCommandEncoder encoder, WGPUTextureView view
     }
     desc.colorAttachmentCount = 1;
     desc.colorAttachments = &color;
-    return wgpuCommandEncoderBeginRenderPass(encoder, &desc);
+    return t.beginRenderPassTracked(encoder, &desc);
 }
 
 RenderContext makeContext(AllFeaturesMaxLimitsGpuTest& t, const std::string& encoderType, uint64_t maxDrawCount = WGPU_LIMIT_U64_UNDEFINED) {
@@ -71,14 +71,14 @@ RenderContext makeContext(AllFeaturesMaxLimitsGpuTest& t, const std::string& enc
     ctx.commandEncoder = t.createCommandEncoderTracked();
     ctx.view = makeView(t);
     if (encoderType == "render pass") {
-        ctx.pass = beginPass(ctx.commandEncoder, ctx.view, maxDrawCount);
+        ctx.pass = beginPass(t, ctx.commandEncoder, ctx.view, maxDrawCount);
     } else {
         WGPUTextureFormat colorFormat = WGPUTextureFormat_RGBA8Unorm;
         WGPURenderBundleEncoderDescriptor desc = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
         desc.colorFormatCount = 1;
         desc.colorFormats = &colorFormat;
         ctx.bundle = wgpuDeviceCreateRenderBundleEncoder(t.device(), &desc);
-        ctx.pass = beginPass(ctx.commandEncoder, ctx.view, maxDrawCount);
+        ctx.pass = beginPass(t, ctx.commandEncoder, ctx.view, maxDrawCount);
     }
     return ctx;
 }
@@ -650,7 +650,7 @@ CTS_TEST(testGroup, "max_draw_count")
         const int drawCount = t.param<int>("drawCount");
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUTextureView view = makeView(t);
-        WGPURenderPassEncoder pass = beginPass(encoder, view, maxDrawCount);
+        WGPURenderPassEncoder pass = beginPass(t, encoder, view, maxDrawCount);
         WGPUTextureFormat colorFormat = WGPUTextureFormat_RGBA8Unorm;
         WGPURenderBundleEncoderDescriptor bundleDesc = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
         bundleDesc.colorFormatCount = 1;

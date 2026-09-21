@@ -561,7 +561,7 @@ CTS_TEST(g, "bind_group_layouts,set_pipeline_with_null_bind_group_layouts")
             WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
             passDesc.colorAttachmentCount = 1;
             passDesc.colorAttachments = &colorAttachment;
-            WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
             setBindGroups(pass, bindGroups, emptyIndex, setEmptyIndex);
             wgpuRenderPassEncoderSetPipeline(pass, pipeline);
             wgpuRenderPassEncoderDraw(pass, 1, 1, 0, 0);
@@ -570,7 +570,7 @@ CTS_TEST(g, "bind_group_layouts,set_pipeline_with_null_bind_group_layouts")
             WGPUComputePipeline pipeline = createComputePipeline(t, layout, shaderModule);
 
             WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-            WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &passDesc);
+            WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
             setBindGroups(pass, bindGroups, emptyIndex, setEmptyIndex);
             wgpuComputePassEncoderSetPipeline(pass, pipeline);
             wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
