@@ -148,11 +148,13 @@ Which of the two memTypes fires is host-dependent, so `expectations/yawgpu-vulka
 
 ---
 
-## F-151 — yawgpu: `TransientAttachment` resolve target accepted where the spec requires rejection — Dawn-CONFIRMED yawgpu defect
+## F-151 — yawgpu: `TransientAttachment` resolve target accepted where the spec requires rejection — RESOLVED
 
-**OPEN yawgpu DEFECT — Dawn-CONFIRMED** (found and triaged 2026-09-21, Linux / NVIDIA RTX 5060 Ti, native Vulkan, yawgpu `2807ed3`) — `api,validation,render_pass,resolve:resolve_attachment:resolveTargetUsage_transient=true;_valid=false` reports `expected validation error, got none`: a resolve target created with `RenderAttachment | TransientAttachment` is accepted, where `beginRenderPass` must reject it. The same CTS built against **Dawn** on the same host **passes** the case — Dawn rejects it — so this is a yawgpu validation gap, not a port-oracle artifact.
+**RESOLVED** (yawgpu `fa82b73`, 2026-09-21; found and Dawn-triaged the same day on Linux / NVIDIA RTX 5060 Ti, native Vulkan) — `api,validation,render_pass,resolve:resolve_attachment:resolveTargetUsage_transient=true;_valid=false` reported `expected validation error, got none`: a resolve target created with `RenderAttachment | TransientAttachment` was accepted, where `beginRenderPass` must reject it. A resolve writes the resolved contents out of the pass, and a transient attachment has no memory to write to, so the two usages are mutually exclusive.
 
-It surfaced now rather than earlier because `52b21c9` enabled this conformance for yawgpu after the 2026-06-28 Windows sweep; nothing host-specific is implied, so expect it on Windows/Vulkan and Metal too. **Deliberately not xfail'd** — it is a real defect, and findings are reported, not masked. 1 subcase; it is the whole `fail` column of `api/validation` on the Linux sweep.
+Attribution was settled by building **Dawn** on the same host and running the same case through it: Dawn rejected it and passed, yawgpu accepted it and failed — a yawgpu validation gap, not a port-oracle artifact. It surfaced only now because `52b21c9` enabled this conformance for yawgpu after the 2026-06-28 Windows sweep; it was never host-specific.
+
+Fix adds the usage check to `validate_resolve_target` beside the existing `RENDER_ATTACHMENT` one, which covers both of its callers — `beginRenderPass` and the `tiled`-feature subpass walk — where a check in the `beginRenderPass` attachment walk alone would have left the subpass path accepting it. Re-verified on hardware: the case passes, the whole `render_pass,resolve` file is 23/23 `fail=0`, and `api,validation,render_pass`, `api,operation,render_pass`, `createTexture`, `createView` and `api,operation,rendering` are unchanged. yawgpu has no depth-stencil resolve path, so the rule has no sibling gap.
 
 ---
 
