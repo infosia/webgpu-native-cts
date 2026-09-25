@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -626,7 +627,7 @@ inline std::string_view textureFormatIdentifier(WGPUTextureFormat format) {
     return textureFormatInfo(format).identifier;
 }
 
-inline WGPUTextureFormat parseTextureFormat(std::string_view identifier) {
+inline std::optional<WGPUTextureFormat> tryParseTextureFormat(std::string_view identifier) {
     for (const TextureFormatInfo& info : kUncompressedTextureFormatInfos) {
         if (info.identifier == identifier) {
             return info.format;
@@ -636,6 +637,13 @@ inline WGPUTextureFormat parseTextureFormat(std::string_view identifier) {
         if (info.identifier == identifier) {
             return info.format;
         }
+    }
+    return std::nullopt;
+}
+
+inline WGPUTextureFormat parseTextureFormat(std::string_view identifier) {
+    if (const std::optional<WGPUTextureFormat> format = tryParseTextureFormat(identifier)) {
+        return *format;
     }
     std::abort();
 }

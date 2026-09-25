@@ -536,6 +536,15 @@ std::size_t representativeColorFormatCount() {
     return count;
 }
 
+void testTryParseTextureFormat() {
+    require(cts::tryParseTextureFormat("rgba8unorm") == WGPUTextureFormat_RGBA8Unorm,
+            "tryParseTextureFormat parses texture format");
+    require(cts::tryParseTextureFormat("uint8x2") == std::nullopt,
+            "tryParseTextureFormat rejects vertex format");
+    require(cts::tryParseTextureFormat("") == std::nullopt,
+            "tryParseTextureFormat rejects empty identifier");
+}
+
 int deviceScopedConstructed = 0;
 int deviceScopedDestroyed = 0;
 std::vector<int> deviceScopedDestructionOrder;
@@ -704,6 +713,7 @@ int main() {
         require(!cts::isRepresentativeTextureFormat(WGPUTextureFormat_RG16Snorm),
                 "rg16snorm is not representative");
         require(representativeColorFormatCount() == 8, "representative color format count");
+        testTryParseTextureFormat();
 
         {
             cts::FormatSampleStats stats;

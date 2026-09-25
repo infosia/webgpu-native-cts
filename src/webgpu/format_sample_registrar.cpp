@@ -15,7 +15,11 @@ const bool kRegistered = [] {
         if (key == "format" || key == "textureFormat" || key == "viewFormat"
             || key == "srcFormat" || key == "dstFormat") {
             if (const auto* identifier = std::get_if<std::string>(&value.data())) {
-                return cts::isRepresentativeTextureFormat(cts::parseTextureFormat(*identifier));
+                const std::optional<WGPUTextureFormat> format = cts::tryParseTextureFormat(*identifier);
+                if (!format.has_value()) {
+                    return std::nullopt;
+                }
+                return cts::isRepresentativeTextureFormat(*format);
             }
             if (const auto* numeric = std::get_if<int64_t>(&value.data())) {
                 return cts::isRepresentativeTextureFormat(static_cast<WGPUTextureFormat>(*numeric));
