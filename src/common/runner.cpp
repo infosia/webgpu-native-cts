@@ -18,6 +18,7 @@
 #include "common/case_plan.h"
 #include "common/query.h"
 #include "cts/format_sample.h"
+#include "cts/gpu.h"
 
 #if !defined(_WIN32)
 #include <array>
@@ -449,6 +450,14 @@ std::vector<CaseRun> collectCases(
 }
 
 std::vector<SubcaseResult> runCase(const CaseRun& c) {
+    static std::optional<std::string> previousFile;
+    if (!c.file.empty()) {
+        if (previousFile && *previousFile != c.file) {
+            releaseDeviceScopedObjects();
+        }
+        previousFile = c.file;
+    }
+
     std::vector<SubcaseResult> results;
     if (c.subcases.empty()) {
         results.push_back(runOne(c.query, *c.test, c.params));

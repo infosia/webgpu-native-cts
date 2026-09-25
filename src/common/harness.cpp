@@ -333,6 +333,10 @@ DeviceScopedObject& deviceScopedObject(
     return *rawObject;
 }
 
+void releaseDeviceScopedObjects() {
+    cache().clearDeviceScopedObjects();
+}
+
 void teardownCachedDevicesForTest() {
     teardownDevices(cache());
 }

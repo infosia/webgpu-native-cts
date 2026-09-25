@@ -527,20 +527,28 @@ void testDeviceScopedObjects() {
     require(deviceScopedConstructed == 1, "deviceScoped constructs once");
     require(deviceScopedDestroyed == 0, "deviceScoped object remains alive before teardown");
 
+    cts::releaseDeviceScopedObjects();
+    require(deviceScopedDestroyed == 1, "release destroys deviceScoped object");
+
+    CountingDeviceScopedObject& released = cts::deviceScoped<CountingDeviceScopedObject>();
+    require(released.serial == 2, "deviceScoped recreates object after release");
+    require(deviceScopedConstructed == 2, "deviceScoped construction count after release recreate");
+    require(deviceScopedDestroyed == 1, "recreated deviceScoped object remains alive before teardown");
+
     cts::teardownCachedDevicesForTest();
-    require(deviceScopedDestroyed == 1, "teardown destroys deviceScoped object");
+    require(deviceScopedDestroyed == 2, "teardown destroys recreated deviceScoped object");
 
     CountingDeviceScopedObject& third = cts::deviceScoped<CountingDeviceScopedObject>();
-    require(third.serial == 2, "deviceScoped recreates object after teardown");
-    require(deviceScopedConstructed == 2, "deviceScoped construction count after recreate");
+    require(third.serial == 3, "deviceScoped recreates object after teardown");
+    require(deviceScopedConstructed == 3, "deviceScoped construction count after teardown recreate");
     cts::teardownCachedDevicesForTest();
-    require(deviceScopedDestroyed == 2, "second teardown destroys recreated object");
+    require(deviceScopedDestroyed == 3, "second teardown destroys recreated object");
 
     (void)cts::deviceScoped<FirstOrderedDeviceScopedObject>();
     (void)cts::deviceScoped<SecondOrderedDeviceScopedObject>();
-    cts::teardownCachedDevicesForTest();
+    cts::releaseDeviceScopedObjects();
     require(deviceScopedDestructionOrder == std::vector<int>({2, 1}),
-            "deviceScoped destroys distinct slots in reverse creation order");
+            "release destroys distinct slots in reverse creation order");
 }
 
 } // namespace

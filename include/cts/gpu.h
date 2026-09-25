@@ -29,6 +29,9 @@ DeviceScopedObject& deviceScopedObject(
     const void* tag,
     const std::function<std::unique_ptr<DeviceScopedObject>()>& make);
 
+/// Releases device-scoped objects while leaving cached devices/adapters/instance intact.
+void releaseDeviceScopedObjects();
+
 /// Typed convenience; one slot per T.
 template <typename T>
 T& deviceScoped() {

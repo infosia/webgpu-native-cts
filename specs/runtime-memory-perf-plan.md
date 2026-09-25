@@ -74,8 +74,9 @@ design for result order, JSON, baselines, and expectations.
 - Steps 1 + 6 — done: [`runner-result-retention.md`](runner-result-retention.md).
 - Step 2 — done: [`per-shard-case-plans.md`](per-shard-case-plans.md). `--workers 6 'webgpu:*'`
   startup: worker physical footprint ~585 MB → ~111 MB each; plan 262 MB → ~43 MB per shard.
-- Step 3 (ownership/lifetime) — done: [`device-scoped-pipeline-caches.md`](device-scoped-pipeline-caches.md).
-  Cache policy still open: one sequential `--sample-formats` process over all 15 texture-builtin
-  files on yawgpu/Metal grows from ~235 MB to ~930 MB physical footprint over ~7–9 min (caches
-  retain every pipeline while the device lives). Next: measure per-cache entry counts / hit rates,
-  then decide on clearing at spec-file boundaries or a capacity bound.
+- Step 3 — done: ownership/lifetime in [`device-scoped-pipeline-caches.md`](device-scoped-pipeline-caches.md);
+  stats in [`pipeline-cache-stats.md`](pipeline-cache-stats.md) showed zero cross-file reuse, so
+  [`clear-device-scoped-at-file-boundary.md`](clear-device-scoped-at-file-boundary.md) releases the
+  caches at spec-file boundaries: one sequential `--sample-formats` process over the 15 texture-builtin
+  files peaks at ~260 MB instead of ~907 MB (same pipeline misses, wall time within noise).
+- Next: step 4 (param expansion copies), step 5 (`--isolate` re-expansion).
