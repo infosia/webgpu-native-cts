@@ -618,14 +618,19 @@ void runDefaultLayoutBindingTest(AllFeaturesMaxLimitsGpuTest& t, bool computeTes
     WGPURenderPipeline autoRender0 = computeTest ? nullptr : createAutoRenderPipeline(t);
     WGPURenderPipeline autoRender1 = computeTest ? nullptr : createAutoRenderPipeline(t);
     WGPURenderPipeline explicitRender = computeTest ? nullptr : createRenderPipeline(t, explicitLayout);
+    // Layouts obtained via getBindGroupLayout are new references owned here; the explicit
+    // layouts are tracked by the fixture. Owned ones are released once the bind groups exist.
+    std::vector<WGPUBindGroupLayout> ownedLayouts;
     auto getLayout = [&](const std::string& source, uint32_t index) {
         if (source == "explicit") {
             return index < 2 ? emptyExplicit : nonEmptyExplicit;
         }
         if (computeTest) {
-            return wgpuComputePipelineGetBindGroupLayout(source == "auto0" ? autoCompute0 : autoCompute1, index);
+            ownedLayouts.push_back(wgpuComputePipelineGetBindGroupLayout(source == "auto0" ? autoCompute0 : autoCompute1, index));
+            return ownedLayouts.back();
         }
-        return wgpuRenderPipelineGetBindGroupLayout(source == "auto0" ? autoRender0 : autoRender1, index);
+        ownedLayouts.push_back(wgpuRenderPipelineGetBindGroupLayout(source == "auto0" ? autoRender0 : autoRender1, index));
+        return ownedLayouts.back();
     };
     const std::string chosenPipeline = pipelineType == "auto0" ? "auto0" : "explicit";
     WGPUComputePipeline compute = pipelineType == "auto0" ? autoCompute0 : explicitCompute;
@@ -642,6 +647,9 @@ void runDefaultLayoutBindingTest(AllFeaturesMaxLimitsGpuTest& t, bool computeTes
         createBindGroup(t, nonEmptyLayouts[0], {bufferResource(t, 0)}),
         createBindGroup(t, nonEmptyLayouts[1], {bufferResource(t, 0)}),
     };
+    for (WGPUBindGroupLayout ownedLayout : ownedLayouts) {
+        wgpuBindGroupLayoutRelease(ownedLayout);
+    }
     const bool success = empty || t.param<bool>("_success");
     runCompatibility(t, computeTest ? "compute pass" : "render pass", compute, render, groups, {}, computeTest ? t.param<std::string>("computeCommand") : t.param<std::string>("renderCommand"), true, success);
 }

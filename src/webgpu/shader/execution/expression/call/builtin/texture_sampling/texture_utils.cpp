@@ -7046,6 +7046,7 @@ StageWeights queryMipLevelMixWeightsForDeviceStage(AllFeaturesMaxLimitsGpuTest& 
         bgDesc.entryCount = entries.size();
         bgDesc.entries = entries.data();
         WGPUBindGroup bindGroup = t.createBindGroupTracked(bgDesc);
+        wgpuBindGroupLayoutRelease(bgDesc.layout);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
@@ -7104,6 +7105,7 @@ StageWeights queryMipLevelMixWeightsForDeviceStage(AllFeaturesMaxLimitsGpuTest& 
         bgDesc.entryCount = entries.size();
         bgDesc.entries = entries.data();
         WGPUBindGroup bindGroup = t.createBindGroupTracked(bgDesc);
+        wgpuBindGroupLayoutRelease(bgDesc.layout);
 
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
         WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;

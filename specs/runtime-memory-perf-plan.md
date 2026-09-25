@@ -90,7 +90,10 @@ design for result order, JSON, baselines, and expectations.
   encoders/bundles (each pinning the buffers/pipelines it recorded) —
   [`tracked-bundle-encoders-queryset.md`](tracked-bundle-encoders-queryset.md),
   [`audit-untracked-object-leaks.md`](audit-untracked-object-leaks.md). After: workers ~0.25 GB
-  each, whole-run peak ~2.3 GB, identical results. Small leftover: `GetBindGroupLayout` references
-  passed into descriptors (3 files).
+  each, whole-run peak ~2.3 GB, identical results. `GetBindGroupLayout` reference leaks (6 sites,
+  3 files) fixed in [`audit-getbindgrouplayout-refs.md`](audit-getbindgrouplayout-refs.md).
+  Note: max RSS undercounts Dawn (GPU-private allocations are outside RSS); compare backends with
+  `footprint` (e.g. `createBindGroup:buffer,resource_binding_size`: yawgpu max RSS 4.1 GB vs Dawn
+  53 MB, but Dawn's footprint peaks at ~7.5 GB; yawgpu returns the memory between cases).
 - Remaining open: lazy/incremental case generation (step 4, broad part); query-string sharing
   (step 1 follow-up); streaming result aggregation (future).

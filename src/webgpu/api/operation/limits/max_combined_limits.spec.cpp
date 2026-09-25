@@ -258,6 +258,7 @@ CTS_TEST(g, "max_storage_buffer_texture_frag_outputs")
         bg0Desc.entryCount = bg0Entries.size();
         bg0Desc.entries = bg0Entries.data();
         WGPUBindGroup bindGroup0 = t.createBindGroupTracked(bg0Desc);
+        wgpuBindGroupLayoutRelease(bg0Desc.layout);
 
         // Bind group 1: storage texture views.
         WGPUTextureViewDescriptor stViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
@@ -274,6 +275,7 @@ CTS_TEST(g, "max_storage_buffer_texture_frag_outputs")
         bg1Desc.entryCount = bg1Entries.size();
         bg1Desc.entries = bg1Entries.data();
         WGPUBindGroup bindGroup1 = t.createBindGroupTracked(bg1Desc);
+        wgpuBindGroupLayoutRelease(bg1Desc.layout);
 
         // Render pass: color attachments + depth-stencil (contents unchecked).
         WGPUTextureViewDescriptor targetViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
