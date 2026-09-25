@@ -77,7 +77,7 @@ RenderContext makeContext(AllFeaturesMaxLimitsGpuTest& t, const std::string& enc
         WGPURenderBundleEncoderDescriptor desc = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
         desc.colorFormatCount = 1;
         desc.colorFormats = &colorFormat;
-        ctx.bundle = wgpuDeviceCreateRenderBundleEncoder(t.device(), &desc);
+        ctx.bundle = t.createRenderBundleEncoderTracked(desc);
         ctx.pass = beginPass(t, ctx.commandEncoder, ctx.view, maxDrawCount);
     }
     return ctx;
@@ -88,11 +88,8 @@ WGPUCommandBuffer finishContext(AllFeaturesMaxLimitsGpuTest& t, RenderContext& c
         wgpuRenderPassEncoderEnd(ctx.pass);
         return t.finishTracked(ctx.commandEncoder);
     }
-    WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(ctx.bundle, nullptr);
+    WGPURenderBundle bundle = t.finishRenderBundleTracked(ctx.bundle);
     wgpuRenderPassEncoderExecuteBundles(ctx.pass, 1, &bundle);
-    if (bundle != nullptr) {
-        wgpuRenderBundleRelease(bundle);
-    }
     wgpuRenderPassEncoderEnd(ctx.pass);
     return t.finishTracked(ctx.commandEncoder);
 }

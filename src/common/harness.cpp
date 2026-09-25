@@ -436,6 +436,14 @@ void GpuTest::finalize() {
         wgpuRenderPassEncoderRelease(pass);
     }
     renderPassEncoders_.clear();
+    for (WGPURenderBundle bundle : renderBundles_) {
+        wgpuRenderBundleRelease(bundle);
+    }
+    renderBundles_.clear();
+    for (WGPURenderBundleEncoder bundleEncoder : renderBundleEncoders_) {
+        wgpuRenderBundleEncoderRelease(bundleEncoder);
+    }
+    renderBundleEncoders_.clear();
     for (WGPUCommandBuffer commandBuffer : commandBuffers_) {
         wgpuCommandBufferRelease(commandBuffer);
     }
@@ -448,6 +456,10 @@ void GpuTest::finalize() {
         wgpuSamplerRelease(sampler);
     }
     samplers_.clear();
+    for (WGPUQuerySet querySet : querySets_) {
+        wgpuQuerySetRelease(querySet);
+    }
+    querySets_.clear();
     for (WGPUTextureView textureView : textureViews_) {
         wgpuTextureViewRelease(textureView);
     }
@@ -1008,6 +1020,31 @@ WGPUCommandBuffer GpuTest::finishTracked(WGPUCommandEncoder encoder) {
         commandBuffers_.push_back(commandBuffer);
     }
     return commandBuffer;
+}
+
+WGPURenderBundleEncoder GpuTest::createRenderBundleEncoderTracked(const WGPURenderBundleEncoderDescriptor& desc) {
+    WGPURenderBundleEncoder bundleEncoder = wgpuDeviceCreateRenderBundleEncoder(device(), &desc);
+    if (bundleEncoder != nullptr) {
+        renderBundleEncoders_.push_back(bundleEncoder);
+    }
+    return bundleEncoder;
+}
+
+WGPURenderBundle GpuTest::finishRenderBundleTracked(WGPURenderBundleEncoder encoder,
+                                                    const WGPURenderBundleDescriptor* desc) {
+    WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(encoder, desc);
+    if (bundle != nullptr) {
+        renderBundles_.push_back(bundle);
+    }
+    return bundle;
+}
+
+WGPUQuerySet GpuTest::createQuerySetTracked(const WGPUQuerySetDescriptor& desc) {
+    WGPUQuerySet querySet = wgpuDeviceCreateQuerySet(device(), &desc);
+    if (querySet != nullptr) {
+        querySets_.push_back(querySet);
+    }
+    return querySet;
 }
 
 void GpuTest::expectValidationError(const std::function<void()>& body, bool shouldError) {

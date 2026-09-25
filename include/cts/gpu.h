@@ -211,6 +211,13 @@ class GpuTest : public Fixture {
                                                  const WGPURenderPassDescriptor* desc);
     /// Finishes `encoder` into a command buffer and tracks it for release.
     WGPUCommandBuffer finishTracked(WGPUCommandEncoder encoder);
+    /// Creates a render-bundle encoder and tracks it for release.
+    WGPURenderBundleEncoder createRenderBundleEncoderTracked(const WGPURenderBundleEncoderDescriptor& desc);
+    /// Finishes `encoder` into a render bundle and tracks the bundle for release (may be an error bundle).
+    WGPURenderBundle finishRenderBundleTracked(WGPURenderBundleEncoder encoder,
+                                               const WGPURenderBundleDescriptor* desc = nullptr);
+    /// Creates a query set and tracks it for release.
+    WGPUQuerySet createQuerySetTracked(const WGPUQuerySetDescriptor& desc);
     /// Runs `body` inside an error scope and asserts an error did/didn't occur per `shouldError`.
     void expectValidationError(const std::function<void()>& body, bool shouldError);
     /// Maps `buffer` and asserts the map succeeds or fails per `expectSuccess`.
@@ -264,6 +271,9 @@ class GpuTest : public Fixture {
     std::vector<WGPURenderPassEncoder> renderPassEncoders_;
     std::vector<WGPUCommandEncoder> encoders_;
     std::vector<WGPUCommandBuffer> commandBuffers_;
+    std::vector<WGPURenderBundleEncoder> renderBundleEncoders_;
+    std::vector<WGPURenderBundle> renderBundles_;
+    std::vector<WGPUQuerySet> querySets_;
     std::vector<WGPUBuffer> mismatchedDeviceBuffers_;
     WGPUAdapter mismatchedAdapter_ = nullptr;
     WGPUDevice mismatchedDevice_ = nullptr;
