@@ -82,4 +82,8 @@ design for result order, JSON, baselines, and expectations.
 - Step 4 (localized part) — done: [`param-expansion-copies.md`](param-expansion-copies.md).
   `--list-cases 'webgpu:*'` 1.16 s / ~800 MiB → 0.86 s / ~733 MiB; `--workers 6 'webgpu:*'` parent
   footprint ~700 MB → ~177 MB. Lazy/incremental case generation remains open.
-- Next: step 5 (`--isolate` re-expansion: one big test costs ~0.1 s to expand per child).
+- Step 5 — done: [`isolate-single-case-plan.md`](isolate-single-case-plan.md). `--sample-formats
+  --isolate --workers 6` textureSampleGrad:sampled_3d_coords ~156 s → ~100 s (back to back).
+- Bug found on the way: [`fix-sample-formats-vertex-format-abort.md`](fix-sample-formats-vertex-format-abort.md).
+- Remaining open: lazy/incremental case generation (step 4, broad part); query-string sharing
+  (step 1 follow-up); streaming result aggregation (future).

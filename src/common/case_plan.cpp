@@ -362,4 +362,8 @@ bool caseSelectedByShard(size_t position, const RunOptions& options) {
     return caseBelongsToShard(position, options.shardIndex, options.shardCount);
 }
 
+bool singleCasePlanMatchesRunCase(const std::vector<PlannedCase>& cases, const std::string& runCaseQuery) {
+    return cases.size() == 1 && cases[0].run.query == runCaseQuery;
+}
+
 } // namespace cts

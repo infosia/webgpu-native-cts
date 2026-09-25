@@ -521,6 +521,17 @@ SubcaseResult aggregateCaseResult(const std::string& query, const std::vector<Su
 
 int runSingleCase(const RunOptions& options) {
     const std::string& runCaseQuery = options.runCaseQuery;
+    if (!options.casePlanPath.empty()) {
+        const std::vector<PlannedCase> plannedCases = loadCasePlan(options.casePlanPath);
+        if (!singleCasePlanMatchesRunCase(plannedCases, runCaseQuery)) {
+            std::cout << "RESULT\tfail\tcase plan does not match --run-case\n";
+            return 0;
+        }
+        const SubcaseResult aggregate = aggregateCaseResult(runCaseQuery, runCase(plannedCases[0].run));
+        std::cout << "RESULT\t" << statusName(aggregate.status) << "\t" << aggregate.message << "\n";
+        return 0;
+    }
+
     Query query = parseQuery(runCaseQuery);
     std::vector<CaseRun> cases = collectCases({query}, options.sampleFormats, nullptr);
     if (cases.empty() && options.sampleFormats) {
@@ -693,6 +704,7 @@ struct ChildExit {
 struct IsolatedChildState {
     size_t position = 0;
     std::string query;
+    std::unique_ptr<TemporaryCasePlan> casePlan;
     Clock::time_point started;
     std::string output;
     std::optional<ChildExit> exit;
@@ -711,7 +723,10 @@ struct IsolatedChildStart {
     std::optional<SubcaseResult> result;
 };
 
-std::vector<std::string> isolatedChildArgs(const RunOptions& options, const std::string& query) {
+std::vector<std::string> isolatedChildArgs(
+    const RunOptions& options,
+    const std::string& query,
+    const std::string& casePlanPath) {
     std::vector<std::string> args;
     args.push_back(options.executablePath);
     for (const std::string& arg : options.forwardedArgs) {
@@ -719,6 +734,8 @@ std::vector<std::string> isolatedChildArgs(const RunOptions& options, const std:
     }
     args.push_back("--run-case");
     args.push_back(query);
+    args.push_back("--case-plan");
+    args.push_back(casePlanPath);
     return args;
 }
 
@@ -737,7 +754,11 @@ void closeIsolatedReadPipe(IsolatedChildState& child) {
 #endif
 }
 
-IsolatedChildStart startIsolatedChild(const RunOptions& options, const std::string& query, size_t position) {
+IsolatedChildStart startIsolatedChild(const RunOptions& options, const std::vector<CaseRun>& cases, size_t position) {
+    const std::string& query = cases[position].query;
+    std::unique_ptr<TemporaryCasePlan> casePlan = std::make_unique<TemporaryCasePlan>(
+        cases,
+        std::vector<size_t>{position});
 #if defined(_WIN32)
     SECURITY_ATTRIBUTES inheritable{};
     inheritable.nLength = sizeof(inheritable);
@@ -771,7 +792,7 @@ IsolatedChildStart startIsolatedChild(const RunOptions& options, const std::stri
     }
 
     std::string commandLine;
-    for (const std::string& arg : isolatedChildArgs(options, query)) {
+    for (const std::string& arg : isolatedChildArgs(options, query, casePlan->path())) {
         if (!commandLine.empty()) {
             commandLine.push_back(' ');
         }
@@ -811,6 +832,7 @@ IsolatedChildStart startIsolatedChild(const RunOptions& options, const std::stri
     IsolatedChildState child;
     child.position = position;
     child.query = query;
+    child.casePlan = std::move(casePlan);
     child.started = Clock::now();
     child.proc = process;
     child.readPipe = stdoutRead;
@@ -840,7 +862,7 @@ IsolatedChildStart startIsolatedChild(const RunOptions& options, const std::stri
             close(devNull);
         }
 
-        std::vector<std::string> args = isolatedChildArgs(options, query);
+        std::vector<std::string> args = isolatedChildArgs(options, query, casePlan->path());
 
         std::vector<char*> argv;
         argv.reserve(args.size() + 1);
@@ -860,6 +882,7 @@ IsolatedChildStart startIsolatedChild(const RunOptions& options, const std::stri
     IsolatedChildState child;
     child.position = position;
     child.query = query;
+    child.casePlan = std::move(casePlan);
     child.started = Clock::now();
     child.pid = pid;
     child.fd = stdoutPipe[0];
@@ -1255,13 +1278,15 @@ void pumpIsolatedChildren(
 #endif
 }
 
-SubcaseResult runIsolatedChild(const RunOptions& options, const std::string& query) {
-    IsolatedChildStart started = startIsolatedChild(options, query, 0);
+SubcaseResult runIsolatedChild(const RunOptions& options, const std::vector<CaseRun>& cases, size_t position) {
+    const std::string& query = cases[position].query;
+    IsolatedChildStart started = startIsolatedChild(options, cases, position);
     if (started.result) {
         return *started.result;
     }
 
     std::vector<IsolatedChildState> children;
+    started.child->position = 0;
     children.push_back(std::move(*started.child));
     std::vector<std::optional<SubcaseResult>> result(1);
     while (!result[0]) {
@@ -1283,7 +1308,7 @@ std::vector<SubcaseResult> collectIsolatedRuns(
         if (!caseSelectedByShard(i, options)) {
             continue;
         }
-        results.push_back(runIsolatedChild(options, cases[i].query));
+        results.push_back(runIsolatedChild(options, cases, i));
     }
     return results;
 }
@@ -1299,7 +1324,7 @@ void startQueuedIsolatedChildren(
     std::vector<size_t>* completedPositions) {
     while (children.size() < maxChildren && next < queue.size()) {
         const size_t position = queue[next++];
-        IsolatedChildStart started = startIsolatedChild(options, cases[position].query, position);
+        IsolatedChildStart started = startIsolatedChild(options, cases, position);
         if (started.result) {
             recordIsolatedResult(resultsByCase, position, std::move(*started.result), completedPositions);
             continue;
@@ -1389,7 +1414,7 @@ std::vector<SubcaseResult> collectSelectiveRuns(
         }
         const CaseRun& c = cases[i];
         if (expectationMatches(crashList, c.query)) {
-            results.push_back(runIsolatedChild(options, c.query));
+            results.push_back(runIsolatedChild(options, cases, i));
         } else {
             results.push_back(aggregateCaseResult(c.query, runCase(c)));
         }

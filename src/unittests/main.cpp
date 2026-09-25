@@ -259,6 +259,35 @@ void testCasePlanRoundTrip() {
     }
 }
 
+void testSingleCasePlanRunCaseSelection() {
+    const std::string file = "unittest,case_plan";
+    const cts::TestSpec* alpha = findRegisteredTest(file, "alpha");
+    const cts::TestSpec* beta = findRegisteredTest(file, "beta");
+    const cts::ParamRecord alphaParams{{"case", cts::Value(int64_t(1))}};
+    const cts::ParamRecord betaParams{{"case", cts::Value(int64_t(2))}};
+    const std::vector<cts::CaseRun> cases{
+        cts::CaseRun{file, alpha, alphaParams, {}, cts::caseQuery(file, alpha->name, alphaParams)},
+        cts::CaseRun{file, beta, betaParams, {}, cts::caseQuery(file, beta->name, betaParams)},
+    };
+
+    ScopedFile matchingPlanFile(makeCasePlanTempPath());
+    cts::serializeCasePlan(matchingPlanFile.path().string(), cases, std::vector<size_t>{0});
+    const std::vector<cts::PlannedCase> matchingPlan = cts::loadCasePlan(matchingPlanFile.path().string());
+    require(
+        cts::singleCasePlanMatchesRunCase(matchingPlan, cases[0].query),
+        "single-case plan accepts matching --run-case query");
+    require(
+        !cts::singleCasePlanMatchesRunCase(matchingPlan, cases[1].query),
+        "single-case plan rejects mismatched --run-case query");
+
+    ScopedFile multiPlanFile(makeCasePlanTempPath());
+    cts::serializeCasePlan(multiPlanFile.path().string(), cases, std::vector<size_t>{0, 1});
+    const std::vector<cts::PlannedCase> multiPlan = cts::loadCasePlan(multiPlanFile.path().string());
+    require(
+        !cts::singleCasePlanMatchesRunCase(multiPlan, cases[0].query),
+        "single-case plan rejects multiple entries");
+}
+
 void testCasePlanRejectsInvalidPositions() {
     const std::string file = "unittest,case_plan";
     const cts::TestSpec* alpha = findRegisteredTest(file, "alpha");
@@ -1673,6 +1702,7 @@ int main() {
                 "multi-file prefix query selects all tests");
 
         testCasePlanRoundTrip();
+        testSingleCasePlanRunCaseSelection();
         testCasePlanRejectsInvalidPositions();
         testCasePlanRejectsUnsupportedVersion();
         testCasePlanRejectsNonIncreasingPlanPositions();

@@ -28,5 +28,6 @@ void serializeCasePlan(
     const std::vector<size_t>& positions);
 std::vector<PlannedCase> loadCasePlan(const std::string& path);
 bool caseSelectedByShard(size_t position, const RunOptions& options);
+bool singleCasePlanMatchesRunCase(const std::vector<PlannedCase>& cases, const std::string& runCaseQuery);
 
 } // namespace cts
