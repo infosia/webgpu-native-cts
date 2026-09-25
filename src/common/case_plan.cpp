@@ -17,7 +17,7 @@ namespace cts {
 namespace {
 
 constexpr std::array<char, 8> kCasePlanMagic = {'W', 'C', 'T', 'S', 'P', 'L', 'A', 'N'};
-constexpr uint32_t kCasePlanVersion = 1;
+constexpr uint32_t kCasePlanVersion = 2;
 
 enum class ValueTag : uint8_t {
     Int64 = 1,
@@ -246,7 +246,10 @@ std::unordered_map<std::string, const TestSpec*> buildTestLookup() {
 
 } // namespace
 
-void serializeCasePlan(const std::string& path, const std::vector<CaseRun>& cases) {
+void serializeCasePlan(
+    const std::string& path,
+    const std::vector<CaseRun>& cases,
+    const std::vector<size_t>& positions) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) {
         throw std::runtime_error("failed to open case-plan file for writing: " + path);
@@ -254,11 +257,24 @@ void serializeCasePlan(const std::string& path, const std::vector<CaseRun>& case
 
     out.write(kCasePlanMagic.data(), static_cast<std::streamsize>(kCasePlanMagic.size()));
     writeU32(out, kCasePlanVersion);
-    writeU64(out, static_cast<uint64_t>(cases.size()));
-    for (const CaseRun& run : cases) {
+    writeU64(out, static_cast<uint64_t>(positions.size()));
+    bool hasPrevious = false;
+    size_t previous = 0;
+    for (size_t position : positions) {
+        if (position >= cases.size()) {
+            throw std::runtime_error("case-plan position out of range: " + std::to_string(position));
+        }
+        if (hasPrevious && position <= previous) {
+            throw std::runtime_error("case-plan positions must be strictly increasing");
+        }
+        hasPrevious = true;
+        previous = position;
+
+        const CaseRun& run = cases[position];
         if (run.test == nullptr) {
             throw std::runtime_error("cannot serialize case-plan entry with null test: " + run.file);
         }
+        writeU64(out, static_cast<uint64_t>(position));
         writeString(out, run.file);
         writeString(out, run.test->name);
         writeParamRecord(out, run.params);
@@ -270,7 +286,7 @@ void serializeCasePlan(const std::string& path, const std::vector<CaseRun>& case
     }
 }
 
-std::vector<CaseRun> loadCasePlan(const std::string& path) {
+std::vector<PlannedCase> loadCasePlan(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
         throw std::runtime_error("failed to open case-plan file for reading: " + path);
@@ -289,9 +305,22 @@ std::vector<CaseRun> loadCasePlan(const std::string& path) {
 
     const auto lookup = buildTestLookup();
     const size_t caseCount = readCount(reader, "case");
-    std::vector<CaseRun> cases;
+    std::vector<PlannedCase> cases;
     cases.reserve(caseCount);
+    bool hasPrevious = false;
+    size_t previous = 0;
     for (size_t i = 0; i < caseCount; ++i) {
+        const uint64_t position64 = reader.readU64();
+        if (position64 > static_cast<uint64_t>((std::numeric_limits<size_t>::max)())) {
+            reader.fail("case position does not fit in size_t");
+        }
+        const size_t position = static_cast<size_t>(position64);
+        if (hasPrevious && position <= previous) {
+            reader.fail("case positions are not strictly increasing");
+        }
+        hasPrevious = true;
+        previous = position;
+
         std::string file = reader.readString();
         std::string name = reader.readString();
         reader.setCaseContext(file, name);
@@ -303,12 +332,15 @@ std::vector<CaseRun> loadCasePlan(const std::string& path) {
             reader.fail("unknown test");
         }
         std::string query = caseQuery(file, name, params);
-        cases.push_back(CaseRun{
-            file,
-            found->second,
-            std::move(params),
-            std::move(subcases),
-            std::move(query),
+        cases.push_back(PlannedCase{
+            position,
+            CaseRun{
+                file,
+                found->second,
+                std::move(params),
+                std::move(subcases),
+                std::move(query),
+            },
         });
     }
 
@@ -319,6 +351,13 @@ std::vector<CaseRun> loadCasePlan(const std::string& path) {
         reader.fail("stream error after reading plan");
     }
     return cases;
+}
+
+bool caseSelectedByShard(size_t position, const RunOptions& options) {
+    if (position < options.shardFrom) {
+        return false;
+    }
+    return caseBelongsToShard(position, options.shardIndex, options.shardCount);
 }
 
 } // namespace cts

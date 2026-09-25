@@ -6,6 +6,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string_view>
@@ -345,13 +346,6 @@ std::vector<CaseRun> collectCases(
     FormatSampleStats* stats);
 std::vector<SubcaseResult> runCase(const CaseRun& c);
 
-bool caseSelectedByShard(size_t index, const RunOptions& options) {
-    if (index < options.shardFrom) {
-        return false;
-    }
-    return caseBelongsToShard(index, options.shardIndex, options.shardCount);
-}
-
 SubcaseResult runOne(const std::string& query, const TestSpec& test, const ParamRecord& params) {
     if (test.unimplemented) {
         return SubcaseResult{query, TestStatus::Skip, test.unimplementedReason};
@@ -589,7 +583,7 @@ std::string quoteWindowsArg(const std::string& arg) {
 
 class TemporaryCasePlan {
   public:
-    explicit TemporaryCasePlan(const std::vector<CaseRun>& cases) {
+    TemporaryCasePlan(const std::vector<CaseRun>& cases, const std::vector<size_t>& positions) {
 #if defined(_WIN32)
         char tempDir[MAX_PATH + 1]{};
         const DWORD tempDirLength = GetTempPathA(static_cast<DWORD>(sizeof(tempDir)), tempDir);
@@ -607,7 +601,7 @@ class TemporaryCasePlan {
         path_ = tempPath;
 
         try {
-            serializeCasePlan(path_, cases);
+            serializeCasePlan(path_, cases, positions);
         } catch (...) {
             (void)DeleteFileA(path_.c_str());
             path_.clear();
@@ -623,7 +617,7 @@ class TemporaryCasePlan {
         path_ = tempPath;
 
         try {
-            serializeCasePlan(path_, cases);
+            serializeCasePlan(path_, cases, positions);
         } catch (...) {
             (void)unlink(path_.c_str());
             path_.clear();
@@ -634,6 +628,8 @@ class TemporaryCasePlan {
 
     TemporaryCasePlan(const TemporaryCasePlan&) = delete;
     TemporaryCasePlan& operator=(const TemporaryCasePlan&) = delete;
+    TemporaryCasePlan(TemporaryCasePlan&&) = delete;
+    TemporaryCasePlan& operator=(TemporaryCasePlan&&) = delete;
 
     ~TemporaryCasePlan() {
         if (!path_.empty()) {
@@ -1418,12 +1414,12 @@ void collectShardResultRuns(
 }
 
 void collectShardResultRunsFromPlan(const RunOptions& options) {
-    const std::vector<CaseRun> cases = loadCasePlan(options.casePlanPath);
-    for (size_t i = 0; i < cases.size(); ++i) {
-        if (!caseSelectedByShard(i, options)) {
+    const std::vector<PlannedCase> cases = loadCasePlan(options.casePlanPath);
+    for (const PlannedCase& planned : cases) {
+        if (!caseSelectedByShard(planned.position, options)) {
             continue;
         }
-        std::vector<SubcaseResult> caseResults = runCase(cases[i]);
+        std::vector<SubcaseResult> caseResults = runCase(planned.run);
         emitShardResults(caseResults);
     }
 }
@@ -1439,6 +1435,7 @@ struct WorkerState {
     int fd = -1;
 #endif
     std::string buffer;
+    std::string casePlanPath;
     std::vector<size_t> positions;
     size_t next = 0;
 };
@@ -1452,6 +1449,7 @@ std::vector<std::string> workerArgs(
     const std::vector<std::string>& queryTexts,
     int shard,
     int workers,
+    const std::string& casePlanPath,
     const std::vector<size_t>& positions,
     size_t next) {
     std::vector<std::string> args;
@@ -1469,9 +1467,9 @@ std::vector<std::string> workerArgs(
         args.push_back("--shard-from");
         args.push_back(std::to_string(positions[next]));
     }
-    if (!options.casePlanPath.empty()) {
+    if (!casePlanPath.empty()) {
         args.push_back("--case-plan");
-        args.push_back(options.casePlanPath);
+        args.push_back(casePlanPath);
     }
     return args;
 }
@@ -1482,6 +1480,7 @@ WorkerState spawnWorker(
     const std::vector<CaseRun>& cases,
     int shard,
     int workers,
+    const std::string& casePlanPath,
     const std::vector<size_t>& positions,
     size_t next) {
 #if defined(_WIN32)
@@ -1518,7 +1517,7 @@ WorkerState spawnWorker(
     }
 
     std::string commandLine;
-    for (const std::string& arg : workerArgs(options, queryTexts, shard, workers, positions, next)) {
+    for (const std::string& arg : workerArgs(options, queryTexts, shard, workers, casePlanPath, positions, next)) {
         if (!commandLine.empty()) {
             commandLine.push_back(' ');
         }
@@ -1558,12 +1557,13 @@ WorkerState spawnWorker(
     worker.shard = shard;
     worker.proc = process;
     worker.readPipe = stdoutRead;
+    worker.casePlanPath = casePlanPath;
     worker.positions = positions;
     worker.next = next;
     return worker;
 #else
     (void)cases;
-    std::vector<std::string> args = workerArgs(options, queryTexts, shard, workers, positions, next);
+    std::vector<std::string> args = workerArgs(options, queryTexts, shard, workers, casePlanPath, positions, next);
     std::vector<char*> argv;
     argv.reserve(args.size() + 1);
     for (std::string& arg : args) {
@@ -1610,7 +1610,7 @@ WorkerState spawnWorker(
     if (flags >= 0) {
         (void)fcntl(stdoutPipe[0], F_SETFL, flags | O_NONBLOCK);
     }
-    return WorkerState{shard, pid, stdoutPipe[0], "", positions, next};
+    return WorkerState{shard, pid, stdoutPipe[0], "", casePlanPath, positions, next};
 #endif
 }
 
@@ -1746,7 +1746,15 @@ std::optional<WorkerState> finishWorker(
     if (worker.next >= worker.positions.size()) {
         return std::nullopt;
     }
-    return spawnWorker(options, queryTexts, cases, worker.shard, options.workers, worker.positions, worker.next);
+    return spawnWorker(
+        options,
+        queryTexts,
+        cases,
+        worker.shard,
+        options.workers,
+        worker.casePlanPath,
+        worker.positions,
+        worker.next);
 }
 
 std::vector<SubcaseResult> collectParallelRuns(
@@ -1756,10 +1764,8 @@ std::vector<SubcaseResult> collectParallelRuns(
     const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
     std::vector<std::vector<SubcaseResult>> resultsByCase(cases.size());
     std::vector<std::string> queryTexts = options.queries;
-    RunOptions workerOptions = options;
-    TemporaryCasePlan casePlan(cases);
-    workerOptions.casePlanPath = casePlan.path();
 
+    std::vector<std::unique_ptr<TemporaryCasePlan>> casePlans;
     std::vector<WorkerState> workers;
     for (int shard = 0; shard < options.workers; ++shard) {
         std::vector<size_t> positions;
@@ -1769,7 +1775,16 @@ std::vector<SubcaseResult> collectParallelRuns(
             }
         }
         if (!positions.empty()) {
-            workers.push_back(spawnWorker(workerOptions, queryTexts, cases, shard, options.workers, positions, 0));
+            casePlans.push_back(std::make_unique<TemporaryCasePlan>(cases, positions));
+            workers.push_back(spawnWorker(
+                options,
+                queryTexts,
+                cases,
+                shard,
+                options.workers,
+                casePlans.back()->path(),
+                positions,
+                0));
         }
     }
 
@@ -1826,7 +1841,7 @@ std::vector<SubcaseResult> collectParallelRuns(
             }
 
             std::optional<WorkerState> replacement =
-                finishWorker(std::move(workers[i]), workerOptions, queryTexts, cases, resultsByCase);
+                finishWorker(std::move(workers[i]), options, queryTexts, cases, resultsByCase);
             workers.erase(workers.begin() + static_cast<std::ptrdiff_t>(i));
             if (replacement) {
                 workers.push_back(std::move(*replacement));
@@ -1889,7 +1904,7 @@ std::vector<SubcaseResult> collectParallelRuns(
             }
 
             std::optional<WorkerState> replacement =
-                finishWorker(std::move(workers[i]), workerOptions, queryTexts, cases, resultsByCase);
+                finishWorker(std::move(workers[i]), options, queryTexts, cases, resultsByCase);
             workers.erase(workers.begin() + static_cast<std::ptrdiff_t>(i));
             if (replacement) {
                 workers.push_back(std::move(*replacement));

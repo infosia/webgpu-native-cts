@@ -15,7 +15,16 @@ struct CaseRun {
     std::string query;
 };
 
-void serializeCasePlan(const std::string& path, const std::vector<CaseRun>& cases);
-std::vector<CaseRun> loadCasePlan(const std::string& path);
+struct PlannedCase {
+    size_t position = 0;
+    CaseRun run;
+};
+
+void serializeCasePlan(
+    const std::string& path,
+    const std::vector<CaseRun>& cases,
+    const std::vector<size_t>& positions);
+std::vector<PlannedCase> loadCasePlan(const std::string& path);
+bool caseSelectedByShard(size_t position, const RunOptions& options);
 
 } // namespace cts

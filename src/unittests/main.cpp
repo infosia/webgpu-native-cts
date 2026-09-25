@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iostream>
 #include <cstddef>
@@ -65,14 +66,14 @@ void requireBytes(
     require(actual == expected, message);
 }
 
-cts::TestGroup<cts::Fixture> gCasePlanGroup =
+cts::TestGroup<cts::Fixture> casePlanGroup =
     cts::MakeTestGroup<cts::Fixture>("unittest,case_plan", "case-plan unit tests");
 
-CTS_TEST(gCasePlanGroup, "alpha")
+CTS_TEST(casePlanGroup, "alpha")
     .desc("case-plan alpha")
     .fn([](cts::Fixture& fixture) { (void)fixture; });
 
-CTS_TEST(gCasePlanGroup, "beta")
+CTS_TEST(casePlanGroup, "beta")
     .desc("case-plan beta")
     .fn([](cts::Fixture& fixture) { (void)fixture; });
 
@@ -169,6 +170,54 @@ class ScopedFile {
     std::filesystem::path path_;
 };
 
+void requireThrowsContaining(const std::function<void()>& fn, const std::string& text, const std::string& context) {
+    try {
+        fn();
+    } catch (const std::runtime_error& e) {
+        require(std::string(e.what()).find(text) != std::string::npos, context + " message");
+        return;
+    }
+    require(false, context + " throws");
+}
+
+void writePlanU32(std::ostream& out, uint32_t value) {
+    for (size_t i = 0; i < 4; ++i) {
+        const char byte = static_cast<char>((value >> (i * 8)) & 0xffu);
+        out.write(&byte, 1);
+    }
+}
+
+void writePlanU64(std::ostream& out, uint64_t value) {
+    for (size_t i = 0; i < 8; ++i) {
+        const char byte = static_cast<char>((value >> (i * 8)) & 0xffu);
+        out.write(&byte, 1);
+    }
+}
+
+void writePlanString(std::ostream& out, const std::string& value) {
+    writePlanU64(out, static_cast<uint64_t>(value.size()));
+    out.write(value.data(), static_cast<std::streamsize>(value.size()));
+}
+
+void writePlanHeader(std::ostream& out, uint32_t version, uint64_t caseCount) {
+    const char magic[] = {'W', 'C', 'T', 'S', 'P', 'L', 'A', 'N'};
+    out.write(magic, sizeof(magic));
+    writePlanU32(out, version);
+    writePlanU64(out, caseCount);
+}
+
+void writeEmptyPlanEntry(
+    std::ostream& out,
+    uint64_t position,
+    const std::string& file,
+    const std::string& name) {
+    writePlanU64(out, position);
+    writePlanString(out, file);
+    writePlanString(out, name);
+    writePlanU64(out, 0);
+    writePlanU64(out, 0);
+}
+
 void testCasePlanRoundTrip() {
     const std::string file = "unittest,case_plan";
     const cts::TestSpec* alpha = findRegisteredTest(file, "alpha");
@@ -195,15 +244,89 @@ void testCasePlanRoundTrip() {
     };
 
     ScopedFile planFile(makeCasePlanTempPath());
-    cts::serializeCasePlan(planFile.path().string(), cases);
-    const std::vector<cts::CaseRun> loaded = cts::loadCasePlan(planFile.path().string());
+    const std::vector<size_t> positions{0, 2};
+    cts::serializeCasePlan(planFile.path().string(), cases, positions);
+    const std::vector<cts::PlannedCase> loaded = cts::loadCasePlan(planFile.path().string());
 
-    require(loaded.size() == cases.size(), "case-plan case count");
-    require(loaded[0].test->name == "alpha", "case-plan first case ordering");
-    require(loaded[1].test->name == "beta", "case-plan second case ordering");
-    require(loaded[2].test->name == "alpha", "case-plan third case ordering");
-    for (size_t i = 0; i < cases.size(); ++i) {
-        requireCaseRunEqual(loaded[i], cases[i], "case-plan case " + std::to_string(i));
+    require(loaded.size() == positions.size(), "case-plan case count");
+    require(loaded[0].position == 0, "case-plan first global position");
+    require(loaded[1].position == 2, "case-plan second global position");
+    require(loaded[0].run.test->name == "alpha", "case-plan first case ordering");
+    require(loaded[1].run.test->name == "alpha", "case-plan second case ordering");
+    for (size_t i = 0; i < positions.size(); ++i) {
+        requireCaseRunEqual(loaded[i].run, cases[positions[i]], "case-plan case " + std::to_string(i));
+    }
+}
+
+void testCasePlanRejectsInvalidPositions() {
+    const std::string file = "unittest,case_plan";
+    const cts::TestSpec* alpha = findRegisteredTest(file, "alpha");
+    const cts::TestSpec* beta = findRegisteredTest(file, "beta");
+    const std::vector<cts::CaseRun> cases{
+        cts::CaseRun{file, alpha, {}, {}, cts::caseQuery(file, alpha->name, cts::ParamRecord{})},
+        cts::CaseRun{file, beta, {}, {}, cts::caseQuery(file, beta->name, cts::ParamRecord{})},
+    };
+
+    ScopedFile planFile(makeCasePlanTempPath());
+    requireThrowsContaining(
+        [&]() { cts::serializeCasePlan(planFile.path().string(), cases, std::vector<size_t>{1, 1}); },
+        "strictly increasing",
+        "case-plan writer rejects non-increasing positions");
+    requireThrowsContaining(
+        [&]() { cts::serializeCasePlan(planFile.path().string(), cases, std::vector<size_t>{0, 2}); },
+        "out of range",
+        "case-plan writer rejects out-of-range position");
+}
+
+void testCasePlanRejectsUnsupportedVersion() {
+    ScopedFile planFile(makeCasePlanTempPath());
+    {
+        std::ofstream out(planFile.path(), std::ios::binary | std::ios::trunc);
+        writePlanHeader(out, 1, 0);
+    }
+
+    requireThrowsContaining(
+        [&]() { (void)cts::loadCasePlan(planFile.path().string()); },
+        "unsupported version 1",
+        "case-plan reader rejects v1");
+}
+
+void testCasePlanRejectsNonIncreasingPlanPositions() {
+    const std::string file = "unittest,case_plan";
+    ScopedFile planFile(makeCasePlanTempPath());
+    {
+        std::ofstream out(planFile.path(), std::ios::binary | std::ios::trunc);
+        writePlanHeader(out, 2, 2);
+        writeEmptyPlanEntry(out, 8, file, "alpha");
+        writeEmptyPlanEntry(out, 8, file, "beta");
+    }
+
+    requireThrowsContaining(
+        [&]() { (void)cts::loadCasePlan(planFile.path().string()); },
+        "strictly increasing",
+        "case-plan reader rejects non-increasing positions");
+}
+
+void testCasePlanShardSelectionUsesGlobalPosition() {
+    cts::RunOptions options;
+    options.shardIndex = 2;
+    options.shardCount = 3;
+
+    const std::vector<size_t> positions{2, 5, 8, 11};
+    options.shardFrom = 0;
+    for (size_t position : positions) {
+        require(cts::caseSelectedByShard(position, options), "case-plan shard-from 0 selects shard entry");
+    }
+
+    options.shardFrom = 8;
+    require(!cts::caseSelectedByShard(2, options), "case-plan shard-from 8 skips 2");
+    require(!cts::caseSelectedByShard(5, options), "case-plan shard-from 8 skips 5");
+    require(cts::caseSelectedByShard(8, options), "case-plan shard-from 8 selects 8");
+    require(cts::caseSelectedByShard(11, options), "case-plan shard-from 8 selects 11");
+
+    options.shardFrom = 12;
+    for (size_t position : positions) {
+        require(!cts::caseSelectedByShard(position, options), "case-plan shard-from 12 selects none");
     }
 }
 
@@ -1425,6 +1548,10 @@ int main() {
                 "multi-file prefix query selects all tests");
 
         testCasePlanRoundTrip();
+        testCasePlanRejectsInvalidPositions();
+        testCasePlanRejectsUnsupportedVersion();
+        testCasePlanRejectsNonIncreasingPlanPositions();
+        testCasePlanShardSelectionUsesGlobalPosition();
         testWorkerResultLineDrain();
 
         auto failures = cts::runSyntheticFailureForSelfTest();
