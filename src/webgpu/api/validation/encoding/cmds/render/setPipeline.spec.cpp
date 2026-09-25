@@ -221,7 +221,7 @@ static RenderEncoderContext makeRenderEncoderContext(
         bDesc.colorFormatCount = 1;
         bDesc.colorFormats     = &colorFmt;
         bDesc.sampleCount      = 1;
-        ctx.bundleEnc = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bDesc);
+        ctx.bundleEnc = t.createRenderBundleEncoderTracked(bDesc);
     }
 
     return ctx;

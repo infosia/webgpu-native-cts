@@ -79,7 +79,7 @@ Context makeContext(AllFeaturesMaxLimitsGpuTest& t, const std::string& encoderTy
             WGPURenderBundleEncoderDescriptor desc = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
             desc.colorFormatCount = 1;
             desc.colorFormats = &format;
-            ctx.bundle = wgpuDeviceCreateRenderBundleEncoder(t.device(), &desc);
+            ctx.bundle = t.createRenderBundleEncoderTracked(desc);
         }
     }
     return ctx;

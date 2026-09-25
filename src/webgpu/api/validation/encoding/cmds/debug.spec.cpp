@@ -189,7 +189,7 @@ static EncoderContext makeEncoderContext(AllFeaturesMaxLimitsGpuTest& t, const s
         bDesc.colorFormatCount = 1;
         bDesc.colorFormats     = &colorFmt;
         bDesc.sampleCount      = 1;
-        ctx.bundleEnc = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bDesc);
+        ctx.bundleEnc = t.createRenderBundleEncoderTracked(bDesc);
 
         // The render pass that will execute the bundle is also opened here;
         // it is ended (and the bundle executed) during finish().

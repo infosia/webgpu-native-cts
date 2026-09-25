@@ -479,9 +479,9 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_color")
                 WGPURenderBundleEncoderDescriptor bd = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
                 bd.colorFormatCount = 1;
                 bd.colorFormats = &fmt;
-                WGPURenderBundleEncoder be = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bd);
+                WGPURenderBundleEncoder be = t.createRenderBundleEncoderTracked(bd);
                 wgpuRenderBundleEncoderSetBindGroup(be, 0, bg0, 0, nullptr);
-                WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(be, nullptr);
+                WGPURenderBundle bundle = t.finishRenderBundleTracked(be);
                 wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
             } else {
                 wgpuRenderPassEncoderSetBindGroup(pass, 0, bg0, 0, nullptr);
@@ -492,9 +492,9 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_color")
                     WGPURenderBundleEncoderDescriptor bd = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
                     bd.colorFormatCount = 1;
                     bd.colorFormats = &fmt;
-                    WGPURenderBundleEncoder be = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bd);
+                    WGPURenderBundleEncoder be = t.createRenderBundleEncoderTracked(bd);
                     wgpuRenderBundleEncoderSetBindGroup(be, 1, bg1, 0, nullptr);
-                    WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(be, nullptr);
+                    WGPURenderBundle bundle = t.finishRenderBundleTracked(be);
                     wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
                 } else {
                     wgpuRenderPassEncoderSetBindGroup(pass, 1, bg1, 0, nullptr);
@@ -632,9 +632,9 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_aspect")
             bd.colorFormatCount = 1;
             bd.colorFormats = &colorFmt;
             bd.depthStencilFormat = type1 == "render-target" ? format : WGPUTextureFormat_Undefined;
-            WGPURenderBundleEncoder be = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bd);
+            WGPURenderBundleEncoder be = t.createRenderBundleEncoderTracked(bd);
             wgpuRenderBundleEncoderSetBindGroup(be, 0, bg0, 0, nullptr);
-            WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(be, nullptr);
+            WGPURenderBundle bundle = t.finishRenderBundleTracked(be);
             wgpuRenderPassEncoderExecuteBundles(rp, 1, &bundle);
         } else wgpuRenderPassEncoderSetBindGroup(rp, 0, bg0, 0, nullptr);
         if (type1 != "render-target") {
@@ -647,9 +647,9 @@ CTS_TEST(testGroup, "subresources_and_binding_types_combination_for_aspect")
                 WGPURenderBundleEncoderDescriptor bd = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
                 bd.colorFormatCount = 1;
                 bd.colorFormats = &colorFmt;
-                WGPURenderBundleEncoder be = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bd);
+                WGPURenderBundleEncoder be = t.createRenderBundleEncoderTracked(bd);
                 wgpuRenderBundleEncoderSetBindGroup(be, 1, bg1, 0, nullptr);
-                WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(be, nullptr);
+                WGPURenderBundle bundle = t.finishRenderBundleTracked(be);
                 wgpuRenderPassEncoderExecuteBundles(rp, 1, &bundle);
             } else wgpuRenderPassEncoderSetBindGroup(rp, 1, bg1, 0, nullptr);
         }
@@ -900,9 +900,9 @@ CTS_TEST(testGroup, "bindings_in_bundle")
                 WGPURenderBundleEncoderDescriptor bd = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
                 bd.colorFormatCount = 1;
                 bd.colorFormats = &fmt;
-                WGPURenderBundleEncoder be = wgpuDeviceCreateRenderBundleEncoder(t.device(), &bd);
+                WGPURenderBundleEncoder be = t.createRenderBundleEncoderTracked(bd);
                 wgpuRenderBundleEncoderSetBindGroup(be, i, groups[i], 0, nullptr);
-                WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(be, nullptr);
+                WGPURenderBundle bundle = t.finishRenderBundleTracked(be);
                 wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
             } else if (groups[i]) {
                 wgpuRenderPassEncoderSetBindGroup(pass, i, groups[i], 0, nullptr);

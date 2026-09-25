@@ -385,7 +385,7 @@ WGPURenderBundleEncoder createRenderBundleEncoder(AllFeaturesMaxLimitsGpuTest& t
     desc.colorFormatCount = 1;
     desc.colorFormats = &colorFormat;
     desc.sampleCount = 1;
-    return wgpuDeviceCreateRenderBundleEncoder(t.device(), &desc);
+    return t.createRenderBundleEncoderTracked(desc);
 }
 
 void recordRenderBundleDraw(
@@ -542,7 +542,7 @@ CTS_TEST(g, "two_draws_in_the_same_render_pass")
             if (useBundle[i]) {
                 WGPURenderBundleEncoder bundleEncoder = createRenderBundleEncoder(t);
                 recordRenderBundleDraw(t, bundleEncoder, buffer, i + 1);
-                WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(bundleEncoder, nullptr);
+                WGPURenderBundle bundle = t.finishRenderBundleTracked(bundleEncoder);
                 wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
             } else {
                 recordRenderPassDraw(t, pass, buffer, i + 1);
@@ -564,7 +564,7 @@ CTS_TEST(g, "two_draws_in_the_same_render_bundle")
         WGPURenderBundleEncoder bundleEncoder = createRenderBundleEncoder(t);
         recordRenderBundleDraw(t, bundleEncoder, buffer, 1);
         recordRenderBundleDraw(t, bundleEncoder, buffer, 2);
-        WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(bundleEncoder, nullptr);
+        WGPURenderBundle bundle = t.finishRenderBundleTracked(bundleEncoder);
         wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
         wgpuRenderPassEncoderEnd(pass);
         WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);

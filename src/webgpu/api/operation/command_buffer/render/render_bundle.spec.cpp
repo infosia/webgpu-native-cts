@@ -160,7 +160,7 @@ WGPURenderBundleEncoder createBundleEncoder(AllFeaturesMaxLimitsGpuTest& t) {
     desc.colorFormatCount = 1;
     desc.colorFormats     = &colorFormat;
     desc.sampleCount      = 1;
-    return wgpuDeviceCreateRenderBundleEncoder(t.device(), &desc);
+    return t.createRenderBundleEncoderTracked(desc);
 }
 
 // Submit an encoder and free the resulting command buffer.

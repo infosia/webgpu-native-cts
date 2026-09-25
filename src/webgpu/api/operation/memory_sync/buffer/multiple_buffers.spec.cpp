@@ -809,7 +809,7 @@ class OperationContextHelper {
                 desc.colorFormatCount = 1;
                 desc.colorFormats = &colorFormat;
                 desc.sampleCount = 1;
-                renderBundleEncoder = wgpuDeviceCreateRenderBundleEncoder(t_.device(), &desc);
+                renderBundleEncoder = t_.createRenderBundleEncoderTracked(desc);
                 break;
             }
         }
@@ -909,7 +909,7 @@ class OperationContextHelper {
                 currentContext_ = OpContext::CommandEncoder;
                 break;
             case OpContext::RenderBundleEncoder: {
-                WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(renderBundleEncoder, nullptr);
+                WGPURenderBundle bundle = t_.finishRenderBundleTracked(renderBundleEncoder);
                 renderBundleEncoder = nullptr;
                 currentContext_ = OpContext::RenderPassEncoder;
                 renderBundles_.push_back(bundle);
@@ -1324,7 +1324,7 @@ WGPURenderBundleEncoder createRenderBundleEncoder(BufferSyncTest& t) {
     desc.colorFormatCount = 1;
     desc.colorFormats = &colorFormat;
     desc.sampleCount = 1;
-    return wgpuDeviceCreateRenderBundleEncoder(t.device(), &desc);
+    return t.createRenderBundleEncoderTracked(desc);
 }
 
 // ---------------------------------------------------------------------------
@@ -1536,7 +1536,7 @@ CTS_TEST(g, "multiple_pairs_of_draws_in_one_render_pass")
                 renderer.setBindGroup(0, bindGroup);
                 renderer.draw(1);
                 if (useBundle[i]) {
-                    WGPURenderBundle renderBundle = wgpuRenderBundleEncoderFinish(bundleEncoder, nullptr);
+                    WGPURenderBundle renderBundle = t.finishRenderBundleTracked(bundleEncoder);
                     wgpuRenderPassEncoderExecuteBundles(passEncoder, 1, &renderBundle);
                 }
             }
@@ -1580,7 +1580,7 @@ CTS_TEST(g, "multiple_pairs_of_draws_in_one_render_bundle")
             }
         }
 
-        WGPURenderBundle renderBundle = wgpuRenderBundleEncoderFinish(renderEncoder, nullptr);
+        WGPURenderBundle renderBundle = t.finishRenderBundleTracked(renderEncoder);
         wgpuRenderPassEncoderExecuteBundles(passEncoder, 1, &renderBundle);
         wgpuRenderPassEncoderEnd(passEncoder);
         WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
