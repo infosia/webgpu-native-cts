@@ -85,5 +85,12 @@ design for result order, JSON, baselines, and expectations.
 - Step 5 — done: [`isolate-single-case-plan.md`](isolate-single-case-plan.md). `--sample-formats
   --isolate --workers 6` textureSampleGrad:sampled_3d_coords ~156 s → ~100 s (back to back).
 - Bug found on the way: [`fix-sample-formats-vertex-format-abort.md`](fix-sample-formats-vertex-format-abort.md).
+- Worker memory (2026-09-26): full `webgpu:*` `--workers 6` on yawgpu/Metal peaked at ~9.7 GB
+  (workers ~1.4–1.5 GB each; Dawn ~0.6 GB). Cause: ported tests never released render-bundle
+  encoders/bundles (each pinning the buffers/pipelines it recorded) —
+  [`tracked-bundle-encoders-queryset.md`](tracked-bundle-encoders-queryset.md),
+  [`audit-untracked-object-leaks.md`](audit-untracked-object-leaks.md). After: workers ~0.25 GB
+  each, whole-run peak ~2.3 GB, identical results. Small leftover: `GetBindGroupLayout` references
+  passed into descriptors (3 files).
 - Remaining open: lazy/incremental case generation (step 4, broad part); query-string sharing
   (step 1 follow-up); streaming result aggregation (future).
