@@ -8,7 +8,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <cstdint>
+#include <iostream>
 #include <optional>
 #include <sstream>
 #include <string_view>
@@ -228,6 +231,39 @@ uint32_t hashU32(std::initializer_list<uint32_t> valuesIn) {
     return h;
 }
 
+bool cacheStatsEnabled() {
+    static const bool enabled = [] {
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        const char* value = std::getenv("CTS_CACHE_STATS");
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+        return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+    }();
+    return enabled;
+}
+
+void reportCacheStats(std::string_view cacheName, uint64_t entries, uint64_t hits, uint64_t misses) {
+    if (!cacheStatsEnabled() || (hits == 0 && misses == 0)) {
+        return;
+    }
+    std::cerr << "cache-stats\t" << cacheName << "\tentries=" << entries << "\thits=" << hits
+              << "\tmisses=" << misses << '\n';
+}
+
+template <typename Bundle>
+uint64_t nestedCacheEntryCount(
+    const std::unordered_map<WGPUDevice, std::unordered_map<std::string, Bundle>>& byDevice) {
+    uint64_t count = 0;
+    for (const auto& deviceEntry : byDevice) {
+        count += static_cast<uint64_t>(deviceEntry.second.size());
+    }
+    return count;
+}
+
 double implicitMipLevelForCall(uint32_t index, uint32_t mipLevelCount) {
     if (mipLevelCount <= 1) {
         return 0.0;
@@ -287,6 +323,12 @@ struct MipMixWeights {
 
 struct MipMixWeightsCache : DeviceScopedObject {
     std::unordered_map<WGPUDevice, MipMixWeights> byDevice;
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+
+    ~MipMixWeightsCache() override {
+        reportCacheStats("MipMixWeightsCache", static_cast<uint64_t>(byDevice.size()), hits, misses);
+    }
 };
 
 struct SampleParamsData {
@@ -1362,10 +1404,22 @@ static_assert(!std::is_copy_assignable_v<SamplingPipelineBundle>);
 
 struct SamplingPipelineCache : DeviceScopedObject {
     std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> byDevice;
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+
+    ~SamplingPipelineCache() override {
+        reportCacheStats("SamplingPipelineCache", nestedCacheEntryCount(byDevice), hits, misses);
+    }
 };
 
 struct GatherPipelineCache : DeviceScopedObject {
     std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> byDevice;
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+
+    ~GatherPipelineCache() override {
+        reportCacheStats("GatherPipelineCache", nestedCacheEntryCount(byDevice), hits, misses);
+    }
 };
 
 SamplingPipelineBundle createSamplingPipelineBundle(WGPUDevice device, const std::string& wgsl, const TextureCase& c) {
@@ -1411,10 +1465,14 @@ SamplingPipelineBundle createSamplingPipelineBundle(WGPUDevice device, const std
 
 const SamplingPipelineBundle& samplingPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureCase& c) {
     const WGPUDevice device = t.device();
-    auto& deviceCache = deviceScoped<SamplingPipelineCache>().byDevice[device];
+    auto& cache = deviceScoped<SamplingPipelineCache>();
+    auto& deviceCache = cache.byDevice[device];
     auto it = deviceCache.find(wgsl);
     if (it == deviceCache.end()) {
+        ++cache.misses;
         it = deviceCache.emplace(wgsl, createSamplingPipelineBundle(device, wgsl, c)).first;
+    } else {
+        ++cache.hits;
     }
     return it->second;
 }
@@ -1572,10 +1630,14 @@ MipMixWeights queryMipLevelMixWeightsForDevice(AllFeaturesMaxLimitsGpuTest& t) {
 
 const MipMixWeights& mipMixWeightsForDevice(AllFeaturesMaxLimitsGpuTest& t) {
     const WGPUDevice device = t.device();
-    auto& cache = deviceScoped<MipMixWeightsCache>().byDevice;
-    auto it = cache.find(device);
-    if (it == cache.end()) {
-        it = cache.emplace(device, queryMipLevelMixWeightsForDevice(t)).first;
+    auto& cache = deviceScoped<MipMixWeightsCache>();
+    auto& byDevice = cache.byDevice;
+    auto it = byDevice.find(device);
+    if (it == byDevice.end()) {
+        ++cache.misses;
+        it = byDevice.emplace(device, queryMipLevelMixWeightsForDevice(t)).first;
+    } else {
+        ++cache.hits;
     }
     return it->second;
 }
@@ -2188,6 +2250,12 @@ static_assert(!std::is_copy_assignable_v<MetadataPipelineBundle>);
 
 struct MetadataPipelineCache : DeviceScopedObject {
     std::unordered_map<WGPUDevice, std::unordered_map<std::string, MetadataPipelineBundle>> byDevice;
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+
+    ~MetadataPipelineCache() override {
+        reportCacheStats("MetadataPipelineCache", nestedCacheEntryCount(byDevice), hits, misses);
+    }
 };
 
 uint32_t paramU32(const ParamRecord& record, std::string_view key) {
@@ -2553,11 +2621,15 @@ std::string metadataPipelineKey(const std::string& wgsl, const MetadataQueryCase
 }
 
 const MetadataPipelineBundle& metadataPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const MetadataQueryCase& c) {
-    auto& deviceCache = deviceScoped<MetadataPipelineCache>().byDevice[t.device()];
+    auto& cache = deviceScoped<MetadataPipelineCache>();
+    auto& deviceCache = cache.byDevice[t.device()];
     const std::string key = metadataPipelineKey(wgsl, c);
     auto it = deviceCache.find(key);
     if (it == deviceCache.end()) {
+        ++cache.misses;
         it = deviceCache.emplace(key, createMetadataPipelineBundle(t.device(), wgsl, c)).first;
+    } else {
+        ++cache.hits;
     }
     return it->second;
 }
@@ -2867,6 +2939,12 @@ static_assert(!std::is_copy_assignable_v<TextureLoadPipelineBundle>);
 
 struct TextureLoadPipelineCache : DeviceScopedObject {
     std::unordered_map<WGPUDevice, std::unordered_map<std::string, TextureLoadPipelineBundle>> byDevice;
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+
+    ~TextureLoadPipelineCache() override {
+        reportCacheStats("TextureLoadPipelineCache", nestedCacheEntryCount(byDevice), hits, misses);
+    }
 };
 
 std::string stageFromLoadShort(const std::string& stage) {
@@ -2980,8 +3058,8 @@ bool textureLoadBitsMatch(
         return false;
     }
     const float e = floatFromBits(expected);
-    const float g = floatFromBits(got);
-    if (!std::isfinite(e) || !std::isfinite(g)) {
+    const float gotValue = floatFromBits(got);
+    if (!std::isfinite(e) || !std::isfinite(gotValue)) {
         // Non-finite values have no encoded-ULP representation (upstream asserts on
         // them); identical bit patterns were already accepted above.
         return false;
@@ -2998,7 +3076,7 @@ bool textureLoadBitsMatch(
         return false;
     }
     const int64_t eULP = rep.ulpFromZero(component, e);
-    const int64_t gULP = rep.ulpFromZero(component, g);
+    const int64_t gULP = rep.ulpFromZero(component, gotValue);
     const int64_t ulpDiff = eULP >= gULP ? eULP - gULP : gULP - eULP;
     return ulpDiff <= 3;
 }
@@ -3218,11 +3296,15 @@ std::string textureLoadPipelineKey(const std::string& wgsl, const TextureLoadCas
 }
 
 const TextureLoadPipelineBundle& textureLoadPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureLoadCase& c) {
-    auto& deviceCache = deviceScoped<TextureLoadPipelineCache>().byDevice[t.device()];
+    auto& cache = deviceScoped<TextureLoadPipelineCache>();
+    auto& deviceCache = cache.byDevice[t.device()];
     const std::string key = textureLoadPipelineKey(wgsl, c);
     auto it = deviceCache.find(key);
     if (it == deviceCache.end()) {
+        ++cache.misses;
         it = deviceCache.emplace(key, createTextureLoadPipelineBundle(t.device(), wgsl, c)).first;
+    } else {
+        ++cache.hits;
     }
     return it->second;
 }
@@ -3865,7 +3947,8 @@ SamplingPipelineBundle createGatherPipelineBundle(WGPUDevice device, const std::
 
 const SamplingPipelineBundle& gatherPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureCase& c) {
     const WGPUDevice device = t.device();
-    auto& deviceCache = deviceScoped<GatherPipelineCache>().byDevice[device];
+    auto& cache = deviceScoped<GatherPipelineCache>();
+    auto& deviceCache = cache.byDevice[device];
     // The bind group layout depends on the texture sample type and sampler
     // binding type, which are NOT all reflected in the WGSL string (e.g.
     // texture_2d<f32> is shared by a filterable color format and a depth format
@@ -3877,7 +3960,10 @@ const SamplingPipelineBundle& gatherPipelineForDevice(AllFeaturesMaxLimitsGpuTes
     const std::string key = keyStream.str();
     auto it = deviceCache.find(key);
     if (it == deviceCache.end()) {
+        ++cache.misses;
         it = deviceCache.emplace(key, createGatherPipelineBundle(device, wgsl, c)).first;
+    } else {
+        ++cache.hits;
     }
     return it->second;
 }
@@ -4372,6 +4458,12 @@ static_assert(!std::is_copy_assignable_v<TextureStorePipelineBundle>);
 
 struct TextureStorePipelineCache : DeviceScopedObject {
     std::unordered_map<WGPUDevice, std::unordered_map<std::string, TextureStorePipelineBundle>> byDevice;
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+
+    ~TextureStorePipelineCache() override {
+        reportCacheStats("TextureStorePipelineCache", nestedCacheEntryCount(byDevice), hits, misses);
+    }
 };
 
 TextureStorePipelineBundle createTextureStorePipelineBundle(
@@ -4441,7 +4533,8 @@ const TextureStorePipelineBundle& textureStorePipelineForDevice(
     WGPUTextureFormat format,
     WGPUTextureViewDimension viewDimension,
     const std::string& computeEntry) {
-    auto& deviceCache = deviceScoped<TextureStorePipelineCache>().byDevice[t.device()];
+    auto& cache = deviceScoped<TextureStorePipelineCache>();
+    auto& deviceCache = cache.byDevice[t.device()];
     std::ostringstream key;
     key << wgsl << "\n// layout:"
         << " compute=" << (isCompute ? 1 : 0)
@@ -4452,11 +4545,14 @@ const TextureStorePipelineBundle& textureStorePipelineForDevice(
     const std::string keyStr = key.str();
     auto it = deviceCache.find(keyStr);
     if (it == deviceCache.end()) {
+        ++cache.misses;
         it = deviceCache
                  .emplace(keyStr,
                           createTextureStorePipelineBundle(t.device(), wgsl, isCompute, access, format,
                                                            viewDimension, computeEntry))
                  .first;
+    } else {
+        ++cache.hits;
     }
     return it->second;
 }
@@ -6011,7 +6107,7 @@ void executeTextureStoreBgra8unormSwizzle(AllFeaturesMaxLimitsGpuTest& t) {
         t.skip("device does not have feature bgra8unorm-storage");
     }
     const WGPUTextureFormat format = WGPUTextureFormat_BGRA8Unorm;
-    struct V { double r, g, b, a; };
+    struct V { double r, green, b, a; };
     const std::array<V, 8> values = {{
         {-1.1, 0.6, 0.4, 1},
         {1.1, 0.6, 0.4, 1},
@@ -6028,7 +6124,7 @@ void executeTextureStoreBgra8unormSwizzle(AllFeaturesMaxLimitsGpuTest& t) {
     wgsl << "@group(0) @binding(0) var tex : texture_storage_1d<bgra8unorm, write>;\n"
          << "const values = array(";
     for (const V& v : values) {
-        wgsl << "vec4(" << v.r << "," << v.g << "," << v.b << "," << v.a << "),\n";
+        wgsl << "vec4(" << v.r << "," << v.green << "," << v.b << "," << v.a << "),\n";
     }
     wgsl << ");\n"
          << "@compute @workgroup_size(" << numTexels << ")\n"
@@ -6077,7 +6173,7 @@ void executeTextureStoreBgra8unormSwizzle(AllFeaturesMaxLimitsGpuTest& t) {
         const V& v = values[x];
         // bgra8unorm: the GPU stores the vec4 (r,g,b,a) value; TexelRepresentation
         // already encodes the BGRA byte order, so feed it (r,g,b,a) directly.
-        const std::vector<uint8_t> texel = storeEncodeTexel(format, {v.r, v.g, v.b, v.a});
+        const std::vector<uint8_t> texel = storeEncodeTexel(format, {v.r, v.green, v.b, v.a});
         for (size_t b = 0; b < texel.size(); ++b) {
             expected[static_cast<size_t>(x) * 4 + b] = texel[b];
         }
@@ -6721,12 +6817,12 @@ bool texelsApproximatelyEqual(
     for (uint32_t i = 0; i < numComponents; ++i) {
         const TexelComponent comp = static_cast<TexelComponent>(i);
         const uint32_t index = i;
-        const double g = got.v[index];
+        const double gotValue = got.v[index];
         const double e = expect.v[index];
-        const double absDiff = std::abs(g - e);
+        const double absDiff = std::abs(gotValue - e);
         const ComponentDataType type = rep.dataTypes[index];
         const uint32_t bits = rep.bitLengths[index];
-        const double gULP = ulpFromZero(g, type, bits);
+        const double gULP = ulpFromZero(gotValue, type, bits);
         const double eULP = ulpFromZero(e, type, bits);
         const double ulpDiff = std::abs(gULP - eULP);
         (void)comp;
@@ -6811,8 +6907,8 @@ std::vector<double> generateSoftwareMixToGPUMixGradWeights(const std::vector<dou
     std::vector<double> softwareWeights(numSteps + 1u);
     for (uint32_t i = 0; i <= numSteps; ++i) {
         const double u = static_cast<double>(i) / numSteps;
-        const double g = lerp(1.0, 2.0, u) / static_cast<double>(texWidth);
-        const double mipLevel = computeMipLevelFromGradients({g, 0.0, 0.0}, {0.0, 0.0, 0.0}, size);
+        const double gradient = lerp(1.0, 2.0, u) / static_cast<double>(texWidth);
+        const double mipLevel = computeMipLevelFromGradients({gradient, 0.0, 0.0}, {0.0, 0.0, 0.0}, size);
         softwareWeights[i] = std::clamp(mipLevel, 0.0, 1.0);
     }
     std::vector<double> out(numSteps + 1u);

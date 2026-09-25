@@ -319,6 +319,10 @@ The table above is the **complete** flag set — anything else is rejected as `u
 yawgpu's Metal/Vulkan HAL selection is not a flag: it is the `CTS_YAWGPU_BACKEND` env var plus a
 per-backend build dir (see §3).
 
+**Cache diagnostics.** `CTS_CACHE_STATS=1` makes each texture-builtin pipeline cache print one
+`cache-stats\t<Cache>\tentries=<n>\thits=<h>\tmisses=<m>` line to stderr when it is destroyed
+(device teardown / exit). Off by default; results and stdout are unaffected.
+
 ### Large-suite runs & finding triage
 
 At the current suite size (**642 ported files / ~2.1M subcases**) the default full-suite mode on every
