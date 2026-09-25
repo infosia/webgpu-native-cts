@@ -207,6 +207,44 @@ void testCasePlanRoundTrip() {
     }
 }
 
+void testWorkerResultLineDrain() {
+    const std::vector<std::string> expectedQueries{
+        "webgpu:unit,worker:a:*",
+        "webgpu:unit,worker:b:*",
+        "webgpu:unit,worker:c:*",
+        "webgpu:unit,worker:d:*",
+        "webgpu:unit,worker:e:*",
+    };
+    const std::vector<std::string> chunks{
+        "RESULT\tpass\twebgpu:unit,worker:a:*\tone\n"
+        "RESULT\tfail\twebgpu:unit,worker:b:*\ttwo\n"
+        "RESULT\twarn\twebgpu:unit,worker:c:*",
+        "\tthree\n"
+        "RESULT\tskip\twebgpu:unit,worker:d:*\tfour\r\n"
+        "RESULT\tpass\twebgpu:unit,worker:e:*",
+    };
+
+    std::string trailingBuffer;
+    const std::vector<cts::SubcaseResult> results =
+        cts::drainWorkerResultLinesForTest(expectedQueries, chunks, &trailingBuffer);
+
+    require(results.size() == 4, "worker result drain recorded complete line count");
+    require(results[0].query == expectedQueries[0], "worker result drain first query");
+    require(results[0].status == cts::TestStatus::Pass, "worker result drain first status");
+    require(results[0].message == "one", "worker result drain first message");
+    require(results[1].query == expectedQueries[1], "worker result drain second query");
+    require(results[1].status == cts::TestStatus::Fail, "worker result drain second status");
+    require(results[1].message == "two", "worker result drain second message");
+    require(results[2].query == expectedQueries[2], "worker result drain split query");
+    require(results[2].status == cts::TestStatus::Warn, "worker result drain split status");
+    require(results[2].message == "three", "worker result drain split message");
+    require(results[3].query == expectedQueries[3], "worker result drain CRLF query");
+    require(results[3].status == cts::TestStatus::Skip, "worker result drain CRLF status");
+    require(results[3].message == "four", "worker result drain CRLF message");
+    require(trailingBuffer == "RESULT\tpass\twebgpu:unit,worker:e:*",
+            "worker result drain trailing partial");
+}
+
 int hexValueForTest(char ch) {
     if (ch >= '0' && ch <= '9') {
         return ch - '0';
@@ -1387,6 +1425,7 @@ int main() {
                 "multi-file prefix query selects all tests");
 
         testCasePlanRoundTrip();
+        testWorkerResultLineDrain();
 
         auto failures = cts::runSyntheticFailureForSelfTest();
         require(failures.size() == 1, "synthetic failure result count");

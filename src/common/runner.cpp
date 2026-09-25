@@ -4,6 +4,7 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <set>
@@ -409,7 +410,10 @@ std::vector<SubcaseResult> collectRuns(
             continue;
         }
         std::vector<SubcaseResult> caseResults = runCase(cases[i]);
-        results.insert(results.end(), caseResults.begin(), caseResults.end());
+        results.insert(
+            results.end(),
+            std::make_move_iterator(caseResults.begin()),
+            std::make_move_iterator(caseResults.end()));
     }
     return results;
 }
@@ -1395,15 +1399,14 @@ void emitShardResults(const std::vector<SubcaseResult>& results) {
                   << "\t" << result.query
                   << "\t" << sanitizeResultMessage(result.message)
                   << "\n";
-        std::cout.flush();
     }
+    std::cout.flush();
 }
 
-std::vector<SubcaseResult> collectShardResultRuns(
+void collectShardResultRuns(
     const RunOptions& options,
     const std::vector<Query>& queries,
     FormatSampleStats* stats) {
-    std::vector<SubcaseResult> results;
     const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
     for (size_t i = 0; i < cases.size(); ++i) {
         if (!caseSelectedByShard(i, options)) {
@@ -1411,13 +1414,10 @@ std::vector<SubcaseResult> collectShardResultRuns(
         }
         std::vector<SubcaseResult> caseResults = runCase(cases[i]);
         emitShardResults(caseResults);
-        results.insert(results.end(), caseResults.begin(), caseResults.end());
     }
-    return results;
 }
 
-std::vector<SubcaseResult> collectShardResultRunsFromPlan(const RunOptions& options) {
-    std::vector<SubcaseResult> results;
+void collectShardResultRunsFromPlan(const RunOptions& options) {
     const std::vector<CaseRun> cases = loadCasePlan(options.casePlanPath);
     for (size_t i = 0; i < cases.size(); ++i) {
         if (!caseSelectedByShard(i, options)) {
@@ -1425,9 +1425,7 @@ std::vector<SubcaseResult> collectShardResultRunsFromPlan(const RunOptions& opti
         }
         std::vector<SubcaseResult> caseResults = runCase(cases[i]);
         emitShardResults(caseResults);
-        results.insert(results.end(), caseResults.begin(), caseResults.end());
     }
-    return results;
 }
 
 struct WorkerState {
@@ -1689,7 +1687,7 @@ void recordWorkerLine(
         return;
     }
 
-    resultsByCase[position].push_back(*parsed);
+    resultsByCase[position].push_back(std::move(*parsed));
     advanceCompletedWorkerCases(worker, cases, resultsByCase);
 }
 
@@ -1700,14 +1698,18 @@ void drainWorkerLines(
     const std::vector<CaseRun>& cases,
     std::vector<std::vector<SubcaseResult>>& resultsByCase) {
     worker.buffer.append(data, size);
+    size_t consumed = 0;
     while (true) {
-        const size_t newline = worker.buffer.find('\n');
+        const size_t newline = worker.buffer.find('\n', consumed);
         if (newline == std::string::npos) {
             break;
         }
-        std::string line(dropTrailingCR(std::string_view(worker.buffer).substr(0, newline)));
-        worker.buffer.erase(0, newline + 1);
+        std::string line(dropTrailingCR(std::string_view(worker.buffer).substr(consumed, newline - consumed)));
+        consumed = newline + 1;
         recordWorkerLine(worker, line, cases, resultsByCase);
+    }
+    if (consumed > 0) {
+        worker.buffer.erase(0, consumed);
     }
 }
 
@@ -1897,12 +1899,22 @@ std::vector<SubcaseResult> collectParallelRuns(
 #endif
 
     std::vector<SubcaseResult> merged;
+    size_t mergedResultCount = 0;
+    for (const std::vector<SubcaseResult>& caseResults : resultsByCase) {
+        mergedResultCount += caseResults.empty() ? 1 : caseResults.size();
+    }
+    merged.reserve(mergedResultCount);
     for (size_t i = 0; i < cases.size(); ++i) {
         if (resultsByCase[i].empty()) {
             merged.push_back(SubcaseResult{cases[i].query, TestStatus::Crash, "shard worker produced no result"});
             continue;
         }
-        merged.insert(merged.end(), resultsByCase[i].begin(), resultsByCase[i].end());
+        merged.insert(
+            merged.end(),
+            std::make_move_iterator(resultsByCase[i].begin()),
+            std::make_move_iterator(resultsByCase[i].end()));
+        resultsByCase[i].clear();
+        resultsByCase[i].shrink_to_fit();
     }
     return merged;
 }
@@ -2074,6 +2086,41 @@ int printRunResults(
 }
 
 } // namespace
+
+std::vector<SubcaseResult> drainWorkerResultLinesForTest(
+    const std::vector<std::string>& expectedQueries,
+    const std::vector<std::string>& chunks,
+    std::string* trailingBuffer) {
+    std::vector<CaseRun> cases;
+    cases.reserve(expectedQueries.size());
+    for (const std::string& query : expectedQueries) {
+        cases.push_back(CaseRun{"", nullptr, {}, {}, query});
+    }
+
+    WorkerState worker;
+    worker.positions.reserve(cases.size());
+    for (size_t i = 0; i < cases.size(); ++i) {
+        worker.positions.push_back(i);
+    }
+
+    std::vector<std::vector<SubcaseResult>> resultsByCase(cases.size());
+    for (const std::string& chunk : chunks) {
+        drainWorkerLines(worker, chunk.data(), chunk.size(), cases, resultsByCase);
+    }
+
+    if (trailingBuffer != nullptr) {
+        *trailingBuffer = worker.buffer;
+    }
+
+    std::vector<SubcaseResult> results;
+    for (std::vector<SubcaseResult>& caseResults : resultsByCase) {
+        results.insert(
+            results.end(),
+            std::make_move_iterator(caseResults.begin()),
+            std::make_move_iterator(caseResults.end()));
+    }
+    return results;
+}
 
 bool expectationMatches(const ExpectationSet& expectations, const std::string& query) {
     if (expectations.exact.contains(query)) {

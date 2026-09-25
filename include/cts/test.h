@@ -388,8 +388,13 @@ int writeListingJson(const std::string& path);
 std::vector<std::string> crashListLines(const std::vector<SubcaseResult>& results);
 /// True if the case at `index` belongs to shard `shardIndex` of `shardCount`.
 bool caseBelongsToShard(size_t index, int shardIndex, int shardCount);
-/// Parses a single `RESULT\t<status>\t<message>` line into a result, or nullopt.
+/// Parses a single `RESULT\t<status>\t<query>\t<message>` line into a result, or nullopt.
 std::optional<SubcaseResult> parseResultLine(const std::string& line);
+/// Feeds worker RESULT output chunks through the parallel-runner line drainer; test-only.
+std::vector<SubcaseResult> drainWorkerResultLinesForTest(
+    const std::vector<std::string>& expectedQueries,
+    const std::vector<std::string>& chunks,
+    std::string* trailingBuffer);
 /// Scans an isolated child's stdout `output` for its RESULT line for `query`.
 std::optional<SubcaseResult> parseIsolatedResultLine(const std::string& query, const std::string& output);
 /// Produces a deliberate failing result, used by the harness self-test.
