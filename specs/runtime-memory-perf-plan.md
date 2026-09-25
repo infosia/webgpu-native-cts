@@ -68,3 +68,14 @@ design for result order, JSON, baselines, and expectations.
   separately; repeat runs and separate startup/cache effects.
 - For parallel runs, sample parent + child RSS over time and sum at the same instant; never sum
   per-process maxima.
+
+## Progress
+
+- Steps 1 + 6 — done: [`runner-result-retention.md`](runner-result-retention.md).
+- Step 2 — done: [`per-shard-case-plans.md`](per-shard-case-plans.md). `--workers 6 'webgpu:*'`
+  startup: worker physical footprint ~585 MB → ~111 MB each; plan 262 MB → ~43 MB per shard.
+- Step 3 (ownership/lifetime) — done: [`device-scoped-pipeline-caches.md`](device-scoped-pipeline-caches.md).
+  Cache policy still open: one sequential `--sample-formats` process over all 15 texture-builtin
+  files on yawgpu/Metal grows from ~235 MB to ~930 MB physical footprint over ~7–9 min (caches
+  retain every pipeline while the device lives). Next: measure per-cache entry counts / hit rates,
+  then decide on clearing at spec-file boundaries or a capacity bound.

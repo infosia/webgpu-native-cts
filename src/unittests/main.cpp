@@ -22,6 +22,7 @@
 #include "common/case_plan.h"
 #include "common/query.h"
 #include "cts/format_sample.h"
+#include "cts/gpu.h"
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
@@ -487,10 +488,67 @@ std::size_t representativeColorFormatCount() {
     return count;
 }
 
+int deviceScopedConstructed = 0;
+int deviceScopedDestroyed = 0;
+std::vector<int> deviceScopedDestructionOrder;
+
+struct CountingDeviceScopedObject : cts::DeviceScopedObject {
+    int serial = 0;
+
+    CountingDeviceScopedObject()
+        : serial(++deviceScopedConstructed) {}
+
+    ~CountingDeviceScopedObject() override {
+        ++deviceScopedDestroyed;
+    }
+};
+
+struct FirstOrderedDeviceScopedObject : cts::DeviceScopedObject {
+    ~FirstOrderedDeviceScopedObject() override {
+        deviceScopedDestructionOrder.push_back(1);
+    }
+};
+
+struct SecondOrderedDeviceScopedObject : cts::DeviceScopedObject {
+    ~SecondOrderedDeviceScopedObject() override {
+        deviceScopedDestructionOrder.push_back(2);
+    }
+};
+
+void testDeviceScopedObjects() {
+    cts::teardownCachedDevicesForTest();
+    deviceScopedConstructed = 0;
+    deviceScopedDestroyed = 0;
+    deviceScopedDestructionOrder.clear();
+
+    CountingDeviceScopedObject& first = cts::deviceScoped<CountingDeviceScopedObject>();
+    CountingDeviceScopedObject& second = cts::deviceScoped<CountingDeviceScopedObject>();
+    require(&first == &second, "deviceScoped returns same object for repeated calls");
+    require(deviceScopedConstructed == 1, "deviceScoped constructs once");
+    require(deviceScopedDestroyed == 0, "deviceScoped object remains alive before teardown");
+
+    cts::teardownCachedDevicesForTest();
+    require(deviceScopedDestroyed == 1, "teardown destroys deviceScoped object");
+
+    CountingDeviceScopedObject& third = cts::deviceScoped<CountingDeviceScopedObject>();
+    require(third.serial == 2, "deviceScoped recreates object after teardown");
+    require(deviceScopedConstructed == 2, "deviceScoped construction count after recreate");
+    cts::teardownCachedDevicesForTest();
+    require(deviceScopedDestroyed == 2, "second teardown destroys recreated object");
+
+    (void)cts::deviceScoped<FirstOrderedDeviceScopedObject>();
+    (void)cts::deviceScoped<SecondOrderedDeviceScopedObject>();
+    cts::teardownCachedDevicesForTest();
+    require(deviceScopedDestructionOrder == std::vector<int>({2, 1}),
+            "deviceScoped destroys distinct slots in reverse creation order");
+}
+
 } // namespace
 
 int main() {
     try {
+        testDeviceScopedObjects();
+
         cts::ParamsBuilder builder;
         auto cases = builder.combine("case", {1, 2}).beginSubcases().combine("subcase", {true, false}).expand();
         require(cases.size() == 2, "case expansion count");

@@ -12,6 +12,7 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -282,6 +283,10 @@ struct MipData {
 struct MipMixWeights {
     std::array<double, kMipLevelWeightSteps + 1> nearest = {};
     std::array<double, kMipLevelWeightSteps + 1> linear = {};
+};
+
+struct MipMixWeightsCache : DeviceScopedObject {
+    std::unordered_map<WGPUDevice, MipMixWeights> byDevice;
 };
 
 struct SampleParamsData {
@@ -1303,6 +1308,64 @@ struct SamplingPipelineBundle {
     WGPUPipelineLayout pipelineLayout = nullptr;
     WGPUComputePipeline computePipeline = nullptr;
     WGPURenderPipeline renderPipeline = nullptr;
+
+    SamplingPipelineBundle() = default;
+    SamplingPipelineBundle(const SamplingPipelineBundle&) = delete;
+    SamplingPipelineBundle& operator=(const SamplingPipelineBundle&) = delete;
+
+    SamplingPipelineBundle(SamplingPipelineBundle&& other) noexcept {
+        *this = std::move(other);
+    }
+
+    SamplingPipelineBundle& operator=(SamplingPipelineBundle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            module = std::exchange(other.module, nullptr);
+            bindGroupLayout = std::exchange(other.bindGroupLayout, nullptr);
+            pipelineLayout = std::exchange(other.pipelineLayout, nullptr);
+            computePipeline = std::exchange(other.computePipeline, nullptr);
+            renderPipeline = std::exchange(other.renderPipeline, nullptr);
+        }
+        return *this;
+    }
+
+    ~SamplingPipelineBundle() {
+        reset();
+    }
+
+    void reset() {
+        if (computePipeline != nullptr) {
+            wgpuComputePipelineRelease(computePipeline);
+            computePipeline = nullptr;
+        }
+        if (renderPipeline != nullptr) {
+            wgpuRenderPipelineRelease(renderPipeline);
+            renderPipeline = nullptr;
+        }
+        if (pipelineLayout != nullptr) {
+            wgpuPipelineLayoutRelease(pipelineLayout);
+            pipelineLayout = nullptr;
+        }
+        if (bindGroupLayout != nullptr) {
+            wgpuBindGroupLayoutRelease(bindGroupLayout);
+            bindGroupLayout = nullptr;
+        }
+        if (module != nullptr) {
+            wgpuShaderModuleRelease(module);
+            module = nullptr;
+        }
+    }
+};
+
+static_assert(!std::is_copy_constructible_v<SamplingPipelineBundle>);
+static_assert(!std::is_copy_assignable_v<SamplingPipelineBundle>);
+
+struct SamplingPipelineCache : DeviceScopedObject {
+    std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> byDevice;
+};
+
+struct GatherPipelineCache : DeviceScopedObject {
+    std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> byDevice;
 };
 
 SamplingPipelineBundle createSamplingPipelineBundle(WGPUDevice device, const std::string& wgsl, const TextureCase& c) {
@@ -1347,9 +1410,8 @@ SamplingPipelineBundle createSamplingPipelineBundle(WGPUDevice device, const std
 }
 
 const SamplingPipelineBundle& samplingPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureCase& c) {
-    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> cache;
     const WGPUDevice device = t.device();
-    auto& deviceCache = cache[device];
+    auto& deviceCache = deviceScoped<SamplingPipelineCache>().byDevice[device];
     auto it = deviceCache.find(wgsl);
     if (it == deviceCache.end()) {
         it = deviceCache.emplace(wgsl, createSamplingPipelineBundle(device, wgsl, c)).first;
@@ -1509,8 +1571,8 @@ MipMixWeights queryMipLevelMixWeightsForDevice(AllFeaturesMaxLimitsGpuTest& t) {
 }
 
 const MipMixWeights& mipMixWeightsForDevice(AllFeaturesMaxLimitsGpuTest& t) {
-    static std::unordered_map<WGPUDevice, MipMixWeights> cache;
     const WGPUDevice device = t.device();
+    auto& cache = deviceScoped<MipMixWeightsCache>().byDevice;
     auto it = cache.find(device);
     if (it == cache.end()) {
         it = cache.emplace(device, queryMipLevelMixWeightsForDevice(t)).first;
@@ -2067,6 +2129,65 @@ struct MetadataPipelineBundle {
     WGPUPipelineLayout pipelineLayout = nullptr;
     WGPUComputePipeline computePipeline = nullptr;
     WGPURenderPipeline renderPipeline = nullptr;
+
+    MetadataPipelineBundle() = default;
+    MetadataPipelineBundle(const MetadataPipelineBundle&) = delete;
+    MetadataPipelineBundle& operator=(const MetadataPipelineBundle&) = delete;
+
+    MetadataPipelineBundle(MetadataPipelineBundle&& other) noexcept {
+        *this = std::move(other);
+    }
+
+    MetadataPipelineBundle& operator=(MetadataPipelineBundle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            module = std::exchange(other.module, nullptr);
+            textureBindGroupLayout = std::exchange(other.textureBindGroupLayout, nullptr);
+            resultBindGroupLayout = std::exchange(other.resultBindGroupLayout, nullptr);
+            pipelineLayout = std::exchange(other.pipelineLayout, nullptr);
+            computePipeline = std::exchange(other.computePipeline, nullptr);
+            renderPipeline = std::exchange(other.renderPipeline, nullptr);
+        }
+        return *this;
+    }
+
+    ~MetadataPipelineBundle() {
+        reset();
+    }
+
+    void reset() {
+        if (computePipeline != nullptr) {
+            wgpuComputePipelineRelease(computePipeline);
+            computePipeline = nullptr;
+        }
+        if (renderPipeline != nullptr) {
+            wgpuRenderPipelineRelease(renderPipeline);
+            renderPipeline = nullptr;
+        }
+        if (pipelineLayout != nullptr) {
+            wgpuPipelineLayoutRelease(pipelineLayout);
+            pipelineLayout = nullptr;
+        }
+        if (textureBindGroupLayout != nullptr) {
+            wgpuBindGroupLayoutRelease(textureBindGroupLayout);
+            textureBindGroupLayout = nullptr;
+        }
+        if (resultBindGroupLayout != nullptr) {
+            wgpuBindGroupLayoutRelease(resultBindGroupLayout);
+            resultBindGroupLayout = nullptr;
+        }
+        if (module != nullptr) {
+            wgpuShaderModuleRelease(module);
+            module = nullptr;
+        }
+    }
+};
+
+static_assert(!std::is_copy_constructible_v<MetadataPipelineBundle>);
+static_assert(!std::is_copy_assignable_v<MetadataPipelineBundle>);
+
+struct MetadataPipelineCache : DeviceScopedObject {
+    std::unordered_map<WGPUDevice, std::unordered_map<std::string, MetadataPipelineBundle>> byDevice;
 };
 
 uint32_t paramU32(const ParamRecord& record, std::string_view key) {
@@ -2432,8 +2553,7 @@ std::string metadataPipelineKey(const std::string& wgsl, const MetadataQueryCase
 }
 
 const MetadataPipelineBundle& metadataPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const MetadataQueryCase& c) {
-    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, MetadataPipelineBundle>> cache;
-    auto& deviceCache = cache[t.device()];
+    auto& deviceCache = deviceScoped<MetadataPipelineCache>().byDevice[t.device()];
     const std::string key = metadataPipelineKey(wgsl, c);
     auto it = deviceCache.find(key);
     if (it == deviceCache.end()) {
@@ -2693,6 +2813,60 @@ struct TextureLoadPipelineBundle {
     WGPUPipelineLayout pipelineLayout = nullptr;
     WGPUComputePipeline computePipeline = nullptr;
     WGPURenderPipeline renderPipeline = nullptr;
+
+    TextureLoadPipelineBundle() = default;
+    TextureLoadPipelineBundle(const TextureLoadPipelineBundle&) = delete;
+    TextureLoadPipelineBundle& operator=(const TextureLoadPipelineBundle&) = delete;
+
+    TextureLoadPipelineBundle(TextureLoadPipelineBundle&& other) noexcept {
+        *this = std::move(other);
+    }
+
+    TextureLoadPipelineBundle& operator=(TextureLoadPipelineBundle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            module = std::exchange(other.module, nullptr);
+            bindGroupLayout = std::exchange(other.bindGroupLayout, nullptr);
+            pipelineLayout = std::exchange(other.pipelineLayout, nullptr);
+            computePipeline = std::exchange(other.computePipeline, nullptr);
+            renderPipeline = std::exchange(other.renderPipeline, nullptr);
+        }
+        return *this;
+    }
+
+    ~TextureLoadPipelineBundle() {
+        reset();
+    }
+
+    void reset() {
+        if (computePipeline != nullptr) {
+            wgpuComputePipelineRelease(computePipeline);
+            computePipeline = nullptr;
+        }
+        if (renderPipeline != nullptr) {
+            wgpuRenderPipelineRelease(renderPipeline);
+            renderPipeline = nullptr;
+        }
+        if (pipelineLayout != nullptr) {
+            wgpuPipelineLayoutRelease(pipelineLayout);
+            pipelineLayout = nullptr;
+        }
+        if (bindGroupLayout != nullptr) {
+            wgpuBindGroupLayoutRelease(bindGroupLayout);
+            bindGroupLayout = nullptr;
+        }
+        if (module != nullptr) {
+            wgpuShaderModuleRelease(module);
+            module = nullptr;
+        }
+    }
+};
+
+static_assert(!std::is_copy_constructible_v<TextureLoadPipelineBundle>);
+static_assert(!std::is_copy_assignable_v<TextureLoadPipelineBundle>);
+
+struct TextureLoadPipelineCache : DeviceScopedObject {
+    std::unordered_map<WGPUDevice, std::unordered_map<std::string, TextureLoadPipelineBundle>> byDevice;
 };
 
 std::string stageFromLoadShort(const std::string& stage) {
@@ -3044,8 +3218,7 @@ std::string textureLoadPipelineKey(const std::string& wgsl, const TextureLoadCas
 }
 
 const TextureLoadPipelineBundle& textureLoadPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureLoadCase& c) {
-    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, TextureLoadPipelineBundle>> cache;
-    auto& deviceCache = cache[t.device()];
+    auto& deviceCache = deviceScoped<TextureLoadPipelineCache>().byDevice[t.device()];
     const std::string key = textureLoadPipelineKey(wgsl, c);
     auto it = deviceCache.find(key);
     if (it == deviceCache.end()) {
@@ -3691,9 +3864,8 @@ SamplingPipelineBundle createGatherPipelineBundle(WGPUDevice device, const std::
 }
 
 const SamplingPipelineBundle& gatherPipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const std::string& wgsl, const TextureCase& c) {
-    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> cache;
     const WGPUDevice device = t.device();
-    auto& deviceCache = cache[device];
+    auto& deviceCache = deviceScoped<GatherPipelineCache>().byDevice[device];
     // The bind group layout depends on the texture sample type and sampler
     // binding type, which are NOT all reflected in the WGSL string (e.g.
     // texture_2d<f32> is shared by a filterable color format and a depth format
@@ -4145,6 +4317,61 @@ struct TextureStorePipelineBundle {
     WGPUComputePipeline computePipeline = nullptr;
     WGPURenderPipeline renderPipeline = nullptr;
     bool isCompute = true;
+
+    TextureStorePipelineBundle() = default;
+    TextureStorePipelineBundle(const TextureStorePipelineBundle&) = delete;
+    TextureStorePipelineBundle& operator=(const TextureStorePipelineBundle&) = delete;
+
+    TextureStorePipelineBundle(TextureStorePipelineBundle&& other) noexcept {
+        *this = std::move(other);
+    }
+
+    TextureStorePipelineBundle& operator=(TextureStorePipelineBundle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            module = std::exchange(other.module, nullptr);
+            bindGroupLayout = std::exchange(other.bindGroupLayout, nullptr);
+            pipelineLayout = std::exchange(other.pipelineLayout, nullptr);
+            computePipeline = std::exchange(other.computePipeline, nullptr);
+            renderPipeline = std::exchange(other.renderPipeline, nullptr);
+            isCompute = other.isCompute;
+        }
+        return *this;
+    }
+
+    ~TextureStorePipelineBundle() {
+        reset();
+    }
+
+    void reset() {
+        if (computePipeline != nullptr) {
+            wgpuComputePipelineRelease(computePipeline);
+            computePipeline = nullptr;
+        }
+        if (renderPipeline != nullptr) {
+            wgpuRenderPipelineRelease(renderPipeline);
+            renderPipeline = nullptr;
+        }
+        if (pipelineLayout != nullptr) {
+            wgpuPipelineLayoutRelease(pipelineLayout);
+            pipelineLayout = nullptr;
+        }
+        if (bindGroupLayout != nullptr) {
+            wgpuBindGroupLayoutRelease(bindGroupLayout);
+            bindGroupLayout = nullptr;
+        }
+        if (module != nullptr) {
+            wgpuShaderModuleRelease(module);
+            module = nullptr;
+        }
+    }
+};
+
+static_assert(!std::is_copy_constructible_v<TextureStorePipelineBundle>);
+static_assert(!std::is_copy_assignable_v<TextureStorePipelineBundle>);
+
+struct TextureStorePipelineCache : DeviceScopedObject {
+    std::unordered_map<WGPUDevice, std::unordered_map<std::string, TextureStorePipelineBundle>> byDevice;
 };
 
 TextureStorePipelineBundle createTextureStorePipelineBundle(
@@ -4214,8 +4441,7 @@ const TextureStorePipelineBundle& textureStorePipelineForDevice(
     WGPUTextureFormat format,
     WGPUTextureViewDimension viewDimension,
     const std::string& computeEntry) {
-    static std::unordered_map<WGPUDevice, std::unordered_map<std::string, TextureStorePipelineBundle>> cache;
-    auto& deviceCache = cache[t.device()];
+    auto& deviceCache = deviceScoped<TextureStorePipelineCache>().byDevice[t.device()];
     std::ostringstream key;
     key << wgsl << "\n// layout:"
         << " compute=" << (isCompute ? 1 : 0)

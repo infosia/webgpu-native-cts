@@ -2,7 +2,9 @@
 
 #include <array>
 #include <cstring>
+#include <memory>
 #include <sstream>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -28,6 +30,8 @@ std::string toString(WGPUStringView view) {
 }
 
 struct DeviceCache {
+    std::vector<std::unique_ptr<DeviceScopedObject>> scopedObjects;
+    std::unordered_map<const void*, DeviceScopedObject*> scopedObjectsByTag;
     WGPUInstance instance = nullptr;
     WGPUAdapter adapter = nullptr;
     WGPUDevice device = nullptr;
@@ -39,6 +43,7 @@ struct DeviceCache {
     bool deviceLost = false;
 
     ~DeviceCache() {
+        clearDeviceScopedObjects();
         if (queueAllFeatures != nullptr) {
             wgpuQueueRelease(queueAllFeatures);
         }
@@ -59,6 +64,13 @@ struct DeviceCache {
         }
         if (instance != nullptr) {
             wgpuInstanceRelease(instance);
+        }
+    }
+
+    void clearDeviceScopedObjects() {
+        scopedObjectsByTag.clear();
+        while (!scopedObjects.empty()) {
+            scopedObjects.pop_back();
         }
     }
 };
@@ -248,6 +260,7 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
 // device()/queue() lazily rebuilds from a fresh instance+adapter. The adapter is
 // consumed by requestDevice, so a rebuild MUST start from a fresh instance.
 void teardownDevices(DeviceCache& c) {
+    c.clearDeviceScopedObjects();
     if (c.queueAllFeatures != nullptr) {
         wgpuQueueRelease(c.queueAllFeatures);
         c.queueAllFeatures = nullptr;
@@ -284,9 +297,8 @@ void teardownDevices(DeviceCache& c) {
 // the flag), tear it down so the next device()/queue() rebuilds a fresh one. This
 // is what prevents the whole-suite "adapter consumed" collateral cascade. There is
 // deliberately NO periodic/forced recycle: forcing a swap of a *healthy* device
-// mid-run breaks tests that cache device-keyed GPU resources across subcases (the
-// texture-sampling execution helpers key pipeline caches by WGPUDevice, and a
-// recreated device can reuse a freed handle value -> use-after-free). On-loss only.
+// mid-run would churn device-keyed GPU resources across subcases. On teardown,
+// device-scoped caches are cleared before the device handles are released.
 void recycleDevicesIfNeeded() {
     DeviceCache& c = cache();
     if (c.deviceLost) {
@@ -301,6 +313,29 @@ TestFailed::TestFailed(const std::string& message) : std::runtime_error(message)
 
 void Fixture::init() {}
 void Fixture::finalize() {}
+
+DeviceScopedObject& deviceScopedObject(
+    const void* tag,
+    const std::function<std::unique_ptr<DeviceScopedObject>()>& make) {
+    DeviceCache& deviceCache = cache();
+    const auto existing = deviceCache.scopedObjectsByTag.find(tag);
+    if (existing != deviceCache.scopedObjectsByTag.end()) {
+        return *existing->second;
+    }
+
+    std::unique_ptr<DeviceScopedObject> object = make();
+    if (object == nullptr) {
+        throw TestFailed("deviceScopedObject factory returned null");
+    }
+    DeviceScopedObject* const rawObject = object.get();
+    deviceCache.scopedObjects.push_back(std::move(object));
+    deviceCache.scopedObjectsByTag.emplace(tag, rawObject);
+    return *rawObject;
+}
+
+void teardownCachedDevicesForTest() {
+    teardownDevices(cache());
+}
 
 void Fixture::setParams(ParamRecord params) {
     params_ = std::move(params);

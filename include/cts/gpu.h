@@ -4,9 +4,11 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "cts/test.h"
@@ -14,6 +16,29 @@
 #include "webgpu/util/texture_layout.h"
 
 namespace cts {
+
+/// Base for objects whose lifetime is bound to the harness's cached devices.
+struct DeviceScopedObject {
+    virtual ~DeviceScopedObject() = default;
+};
+
+/// Returns the object stored under `tag`, creating it with `make()` on first use.
+/// All stored objects are destroyed (in reverse creation order) before the cached
+/// devices/adapters/instance are released: on device-loss teardown and at exit.
+DeviceScopedObject& deviceScopedObject(
+    const void* tag,
+    const std::function<std::unique_ptr<DeviceScopedObject>()>& make);
+
+/// Typed convenience; one slot per T.
+template <typename T>
+T& deviceScoped() {
+    static_assert(std::is_base_of_v<DeviceScopedObject, T>, "T must derive from DeviceScopedObject");
+    static int tag = 0;
+    return static_cast<T&>(deviceScopedObject(&tag, [] { return std::make_unique<T>(); }));
+}
+
+/// Test-only: runs the device teardown path (GPU-free when no device was created).
+void teardownCachedDevicesForTest();
 
 /// Lifecycle state a resource can be put in for validation tests: a valid
 /// resource, one created invalid (via an error scope), or one explicitly destroyed.
