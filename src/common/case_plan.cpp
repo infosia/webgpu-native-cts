@@ -332,6 +332,7 @@ std::vector<PlannedCase> loadCasePlan(const std::string& path) {
             reader.fail("unknown test");
         }
         std::string query = caseQuery(file, name, params);
+        const size_t expectedResultCount = subcases.empty() ? 1 : subcases.size();
         cases.push_back(PlannedCase{
             position,
             CaseRun{
@@ -340,6 +341,7 @@ std::vector<PlannedCase> loadCasePlan(const std::string& path) {
                 std::move(params),
                 std::move(subcases),
                 std::move(query),
+                expectedResultCount,
             },
         });
     }

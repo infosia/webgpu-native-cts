@@ -347,6 +347,17 @@ std::vector<CaseRun> collectCases(
     FormatSampleStats* stats);
 std::vector<SubcaseResult> runCase(const CaseRun& c);
 
+size_t expandedCaseExpectedResultCount(const ParamsBuilder::ExpandedCase& c) {
+    return c.subcases.empty() ? 1 : c.subcases.size();
+}
+
+void releaseCaseRunData(CaseRun& c) {
+    ParamRecord emptyParams;
+    c.params.swap(emptyParams);
+    std::vector<ParamRecord> emptySubcases;
+    c.subcases.swap(emptySubcases);
+}
+
 SubcaseResult runOne(const std::string& query, const TestSpec& test, const ParamRecord& params) {
     if (test.unimplemented) {
         return SubcaseResult{query, TestStatus::Skip, test.unimplementedReason};
@@ -399,12 +410,13 @@ std::vector<SubcaseResult> collectRuns(
     const RunOptions& options,
     FormatSampleStats* stats) {
     std::vector<SubcaseResult> results;
-    const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
+    std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
     for (size_t i = 0; i < cases.size(); ++i) {
         if (!caseSelectedByShard(i, options)) {
             continue;
         }
         std::vector<SubcaseResult> caseResults = runCase(cases[i]);
+        releaseCaseRunData(cases[i]);
         results.insert(
             results.end(),
             std::make_move_iterator(caseResults.begin()),
@@ -427,8 +439,8 @@ std::vector<CaseRun> collectCases(
             if (!testSelected) {
                 continue;
             }
-            const auto cases = sampledExpandedCases(test, sampleFormats, stats);
-            for (const auto& c : cases) {
+            auto cases = sampledExpandedCases(test, sampleFormats, stats);
+            for (auto& c : cases) {
                 bool selected = false;
                 for (const Query& q : queries) {
                     selected = selected || queryMatchesCase(q, file.path, test.name, c.params);
@@ -436,12 +448,15 @@ std::vector<CaseRun> collectCases(
                 if (!selected) {
                     continue;
                 }
+                std::string query = caseQuery(file.path, test.name, c.params);
+                const size_t expectedCount = expandedCaseExpectedResultCount(c);
                 runs.push_back(CaseRun{
                     file.path,
                     &test,
-                    c.params,
-                    c.subcases,
-                    caseQuery(file.path, test.name, c.params),
+                    std::move(c.params),
+                    std::move(c.subcases),
+                    std::move(query),
+                    expectedCount,
                 });
             }
         }
@@ -1395,7 +1410,7 @@ void writeCrashList(const std::string& path, const std::vector<SubcaseResult>& r
 }
 
 size_t expectedResultCount(const CaseRun& c) {
-    return c.subcases.empty() ? 1 : c.subcases.size();
+    return c.expectedResultCount;
 }
 
 void emitShardResults(const std::vector<SubcaseResult>& results) {
@@ -1766,16 +1781,21 @@ std::optional<WorkerState> finishWorker(
         worker.next);
 }
 
+struct ShardCasePlan {
+    int shard = 0;
+    std::vector<size_t> positions;
+};
+
 std::vector<SubcaseResult> collectParallelRuns(
     const RunOptions& options,
     const std::vector<Query>& queries,
     FormatSampleStats* stats) {
-    const std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
+    std::vector<CaseRun> cases = collectCases(queries, options.sampleFormats, stats);
     std::vector<std::vector<SubcaseResult>> resultsByCase(cases.size());
     std::vector<std::string> queryTexts = options.queries;
 
     std::vector<std::unique_ptr<TemporaryCasePlan>> casePlans;
-    std::vector<WorkerState> workers;
+    std::vector<ShardCasePlan> shardCasePlans;
     for (int shard = 0; shard < options.workers; ++shard) {
         std::vector<size_t> positions;
         for (size_t i = 0; i < cases.size(); ++i) {
@@ -1785,16 +1805,28 @@ std::vector<SubcaseResult> collectParallelRuns(
         }
         if (!positions.empty()) {
             casePlans.push_back(std::make_unique<TemporaryCasePlan>(cases, positions));
-            workers.push_back(spawnWorker(
-                options,
-                queryTexts,
-                cases,
-                shard,
-                options.workers,
-                casePlans.back()->path(),
-                positions,
-                0));
+            ShardCasePlan plan;
+            plan.shard = shard;
+            plan.positions = std::move(positions);
+            shardCasePlans.push_back(std::move(plan));
         }
+    }
+
+    for (CaseRun& c : cases) {
+        releaseCaseRunData(c);
+    }
+
+    std::vector<WorkerState> workers;
+    for (size_t planIndex = 0; planIndex < shardCasePlans.size(); ++planIndex) {
+        workers.push_back(spawnWorker(
+            options,
+            queryTexts,
+            cases,
+            shardCasePlans[planIndex].shard,
+            options.workers,
+            casePlans[planIndex]->path(),
+            shardCasePlans[planIndex].positions,
+            0));
     }
 
 #if defined(_WIN32)

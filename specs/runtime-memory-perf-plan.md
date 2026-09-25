@@ -79,4 +79,7 @@ design for result order, JSON, baselines, and expectations.
   [`clear-device-scoped-at-file-boundary.md`](clear-device-scoped-at-file-boundary.md) releases the
   caches at spec-file boundaries: one sequential `--sample-formats` process over the 15 texture-builtin
   files peaks at ~260 MB instead of ~907 MB (same pipeline misses, wall time within noise).
-- Next: step 4 (param expansion copies), step 5 (`--isolate` re-expansion).
+- Step 4 (localized part) — done: [`param-expansion-copies.md`](param-expansion-copies.md).
+  `--list-cases 'webgpu:*'` 1.16 s / ~800 MiB → 0.86 s / ~733 MiB; `--workers 6 'webgpu:*'` parent
+  footprint ~700 MB → ~177 MB. Lazy/incremental case generation remains open.
+- Next: step 5 (`--isolate` re-expansion: one big test costs ~0.1 s to expand per child).

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@ struct CaseRun {
     ParamRecord params;
     std::vector<ParamRecord> subcases;
     std::string query;
+    size_t expectedResultCount = 1;
 };
 
 struct PlannedCase {

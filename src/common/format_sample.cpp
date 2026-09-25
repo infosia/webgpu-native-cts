@@ -94,21 +94,21 @@ std::vector<ParamsBuilder::ExpandedCase> sampleFormatsInCases(
     std::vector<ParamsBuilder::ExpandedCase> sampled;
     sampled.reserve(cases.size());
     for (std::size_t caseIndex = 0; caseIndex < cases.size(); ++caseIndex) {
-        const ParamsBuilder::ExpandedCase& c = cases[caseIndex];
+        ParamsBuilder::ExpandedCase& c = cases[caseIndex];
         const std::vector<bool>& keep = keepByCase[caseIndex];
         if (c.subcases.empty()) {
             if (!keep.empty() && keep[0]) {
-                sampled.push_back(c);
+                sampled.push_back(std::move(c));
             }
             continue;
         }
 
         ParamsBuilder::ExpandedCase sampledCase;
-        sampledCase.params = c.params;
+        sampledCase.params = std::move(c.params);
         sampledCase.subcases.reserve(c.subcases.size());
         for (std::size_t subcaseIndex = 0; subcaseIndex < c.subcases.size(); ++subcaseIndex) {
             if (subcaseIndex < keep.size() && keep[subcaseIndex]) {
-                sampledCase.subcases.push_back(c.subcases[subcaseIndex]);
+                sampledCase.subcases.push_back(std::move(c.subcases[subcaseIndex]));
             }
         }
         if (!sampledCase.subcases.empty()) {

@@ -369,6 +369,54 @@ void testWorkerResultLineDrain() {
             "worker result drain trailing partial");
 }
 
+void testParamExpansionOrderWithFilters() {
+    std::vector<int> expanderInputs;
+    const auto cases = cts::ParamsBuilder()
+        .combine("case", {1, 2, 3})
+        .filter([](const cts::ParamRecord& params) {
+            return cts::valueAs<int>(*cts::findParam(params, "case")) != 2;
+        })
+        .expand("expanded", [&](const cts::ParamRecord& params) {
+            const int caseValue = cts::valueAs<int>(*cts::findParam(params, "case"));
+            expanderInputs.push_back(caseValue);
+            return std::vector<cts::Value>{cts::Value(caseValue * 10 + 1), cts::Value(caseValue * 10 + 2)};
+        })
+        .beginSubcases()
+        .combine("subcase", {1, 2, 3})
+        .filter([](const cts::ParamRecord& params) {
+            return cts::valueAs<int>(*cts::findParam(params, "subcase")) != 2;
+        })
+        .expand();
+
+    require(expanderInputs == std::vector<int>({1, 3}), "param expansion expander call order");
+    require(cases.size() == 4, "param expansion exact case count");
+
+    const std::vector<cts::ParamRecord> expectedCases{
+        cts::ParamRecord{{"case", 1}, {"expanded", 11}},
+        cts::ParamRecord{{"case", 1}, {"expanded", 12}},
+        cts::ParamRecord{{"case", 3}, {"expanded", 31}},
+        cts::ParamRecord{{"case", 3}, {"expanded", 32}},
+    };
+    const std::vector<cts::ParamRecord> expectedSubcases{
+        cts::ParamRecord{{"subcase", 1}},
+        cts::ParamRecord{{"subcase", 3}},
+    };
+
+    for (size_t caseIndex = 0; caseIndex < expectedCases.size(); ++caseIndex) {
+        requireParamRecordEqual(
+            cases[caseIndex].params,
+            expectedCases[caseIndex],
+            "param expansion case " + std::to_string(caseIndex));
+        require(cases[caseIndex].subcases.size() == expectedSubcases.size(), "param expansion subcase count");
+        for (size_t subcaseIndex = 0; subcaseIndex < expectedSubcases.size(); ++subcaseIndex) {
+            requireParamRecordEqual(
+                cases[caseIndex].subcases[subcaseIndex],
+                expectedSubcases[subcaseIndex],
+                "param expansion subcase " + std::to_string(caseIndex) + "." + std::to_string(subcaseIndex));
+        }
+    }
+}
+
 int hexValueForTest(char ch) {
     if (ch >= '0' && ch <= '9') {
         return ch - '0';
@@ -556,6 +604,7 @@ void testDeviceScopedObjects() {
 int main() {
     try {
         testDeviceScopedObjects();
+        testParamExpansionOrderWithFilters();
 
         cts::ParamsBuilder builder;
         auto cases = builder.combine("case", {1, 2}).beginSubcases().combine("subcase", {true, false}).expand();
