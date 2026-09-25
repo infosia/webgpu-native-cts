@@ -208,8 +208,10 @@ run-mode-sensitive, not a like-for-like comparison to yawgpu/Dawn.
 | `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
 | **total** | **1,632,108** | **464,088** | **117‡** | **0** |
 
-Swept **2026-09-21 raw** — four per-area `--workers 8` runs on yawgpu `35684de` / CTS `134a1cf`,
-NVIDIA driver 610.62: 25 minutes, `crash=0` across 2,096,313 subcases.
+Swept **2026-09-25 raw** — four per-area `--workers 8` runs on yawgpu `2c6ea6f` / CTS `c67fd9f`,
+NVIDIA driver 610.62: 28 minutes (`api/validation` 7m03s, `api/operation` 4m29s,
+`shader/execution` 14m04s, `shader/validation` 2m45s), `crash=0` across 2,096,313 subcases.
+Counts are identical to the 2026-09-21 sweep (yawgpu `35684de` / CTS `134a1cf`, 25 minutes).
 
 ‡ Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`; the suite exits
 `fail=0` once expectations are applied.
