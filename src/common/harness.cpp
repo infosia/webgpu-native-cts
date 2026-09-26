@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
@@ -211,15 +212,71 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
     WGPUSupportedFeatures supportedFeatures = WGPU_SUPPORTED_FEATURES_INIT;
     wgpuAdapterGetFeatures(c.adapterAllFeatures, &supportedFeatures);
 
+    std::vector<WGPUFeatureName> advertisedFeatures(
+        supportedFeatures.features, supportedFeatures.features + supportedFeatures.featureCount);
+    wgpuSupportedFeaturesFreeMembers(supportedFeatures);
+
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
-    descriptor.requiredFeatureCount = supportedFeatures.featureCount;
-    descriptor.requiredFeatures = supportedFeatures.features;
+    descriptor.requiredFeatureCount = advertisedFeatures.size();
+    descriptor.requiredFeatures = advertisedFeatures.data();
     descriptor.requiredLimits = &limits;
     descriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
     descriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
     descriptor.deviceLostCallbackInfo.callback = onDeviceLost;
     DeviceResult device = requestDeviceSync(c.instance, c.adapterAllFeatures, &descriptor);
-    wgpuSupportedFeaturesFreeMembers(supportedFeatures);
+
+    // First line of the step-1 failure message, for the one-line fallback report.
+    std::string firstFailure;
+    const bool allFeaturesFailed =
+        device.status != WGPURequestDeviceStatus_Success || device.device == nullptr;
+    if (allFeaturesFailed) {
+        firstFailure = device.message.substr(0, device.message.find('\n'));
+    }
+
+    // Features a backend advertises on the adapter but can never grant on a
+    // device. Retrying without them keeps every other optional feature instead
+    // of dropping straight to the texture-only fallback below.
+    std::vector<WGPUFeatureName> neverRequestable;
+#if defined(CTS_BACKEND_WGPU)
+    // F-154 (docs/FINDINGS.md): wgpu-native advertises RayQuery and
+    // CooperativeMatrix (wgpu EXPERIMENTAL_* features) but hard-codes
+    // `experimental_features: disabled()`, so requesting either always fails.
+    neverRequestable.push_back(static_cast<WGPUFeatureName>(WGPUNativeFeature_RayQuery));
+    neverRequestable.push_back(static_cast<WGPUFeatureName>(WGPUNativeFeature_CooperativeMatrix));
+#endif
+
+    if (allFeaturesFailed && !neverRequestable.empty()) {
+        std::vector<WGPUFeatureName> requestableFeatures;
+        requestableFeatures.reserve(advertisedFeatures.size());
+        for (WGPUFeatureName feature : advertisedFeatures) {
+            bool excluded = false;
+            for (WGPUFeatureName never : neverRequestable) {
+                if (feature == never) {
+                    excluded = true;
+                    break;
+                }
+            }
+            if (!excluded) {
+                requestableFeatures.push_back(feature);
+            }
+        }
+        if (requestableFeatures.size() < advertisedFeatures.size()) {
+            WGPUDeviceDescriptor requestableDescriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
+            requestableDescriptor.requiredFeatureCount = requestableFeatures.size();
+            requestableDescriptor.requiredFeatures = requestableFeatures.data();
+            requestableDescriptor.requiredLimits = &limits;
+            requestableDescriptor.uncapturedErrorCallbackInfo.callback = onUncapturedError;
+            requestableDescriptor.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
+            requestableDescriptor.deviceLostCallbackInfo.callback = onDeviceLost;
+            device = requestDeviceSync(c.instance, c.adapterAllFeatures, &requestableDescriptor);
+            if (device.status == WGPURequestDeviceStatus_Success && device.device != nullptr) {
+                std::cerr << "harness: all-features device request failed (" << firstFailure
+                          << "); retried without never-requestable features with "
+                          << requestableFeatures.size() << " of " << advertisedFeatures.size()
+                          << " advertised features\n";
+            }
+        }
+    }
 
     if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
         static constexpr std::array<WGPUFeatureName, 8> kTextureFeatures = {
@@ -249,6 +306,11 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
         fallbackDescriptor.deviceLostCallbackInfo.callback = onDeviceLost;
         device = requestDeviceSync(c.instance, c.adapterAllFeatures, &fallbackDescriptor);
         c.allFeaturesDeviceUsedFallback = true;
+        if (device.status == WGPURequestDeviceStatus_Success && device.device != nullptr) {
+            std::cerr << "harness: all-features device request failed (" << firstFailure
+                      << "); retried with texture-only fallback with " << fallbackFeatures.size()
+                      << " of " << advertisedFeatures.size() << " advertised features\n";
+        }
     }
 
     if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
