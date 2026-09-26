@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "cts/gpu.h"
-#include "cts/immediates.h"
 #include "cts/test.h"
 
 using namespace cts;
@@ -184,11 +183,11 @@ makeProgrammableEncoderContext(AllFeaturesMaxLimitsGpuTest& t,
 void ctxSetImmediates(ProgrammableEncoderContext& ctx, uint32_t offset,
                       const void* data, std::size_t size) {
     if (ctx.encoderType == "compute pass") {
-        cts::computePassSetImmediates(ctx.computePass, offset, data, size);
+        wgpuComputePassEncoderSetImmediates(ctx.computePass, offset, data, size);
     } else if (ctx.encoderType == "render pass") {
-        cts::renderPassSetImmediates(ctx.renderPass, offset, data, size);
+        wgpuRenderPassEncoderSetImmediates(ctx.renderPass, offset, data, size);
     } else {
-        cts::renderBundleSetImmediates(ctx.bundleEncoder, offset, data, size);
+        wgpuRenderBundleEncoderSetImmediates(ctx.bundleEncoder, offset, data, size);
     }
 }
 
@@ -535,7 +534,7 @@ CTS_TEST(testGroup, "render_bundle_execution_state_invalidation")
         WGPURenderBundleEncoder bundleEncoder =
             wgpuDeviceCreateRenderBundleEncoder(t.device(), &bundleDesc);
         wgpuRenderBundleEncoderSetPipeline(bundleEncoder, pipeline);
-        cts::renderBundleSetImmediates(
+        wgpuRenderBundleEncoderSetImmediates(
             bundleEncoder, 0, immediateData.data(), immediateData.size());
         wgpuRenderBundleEncoderDraw(bundleEncoder, 3, 1, 0, 0);
         WGPURenderBundle bundle =
@@ -545,13 +544,13 @@ CTS_TEST(testGroup, "render_bundle_execution_state_invalidation")
         ProgrammableEncoderContext ctx =
             makeProgrammableEncoderContext(t, std::string("render pass"));
         wgpuRenderPassEncoderSetPipeline(ctx.renderPass, pipeline);
-        cts::renderPassSetImmediates(
+        wgpuRenderPassEncoderSetImmediates(
             ctx.renderPass, 0, immediateData.data(), immediateData.size());
         wgpuRenderPassEncoderExecuteBundles(ctx.renderPass, 1, &bundle);
         wgpuRenderBundleRelease(bundle);
         wgpuRenderPassEncoderSetPipeline(ctx.renderPass, pipeline);
         if (resetImmediates) {
-            cts::renderPassSetImmediates(
+            wgpuRenderPassEncoderSetImmediates(
                 ctx.renderPass, 0, immediateData.data(), immediateData.size());
         }
         wgpuRenderPassEncoderDraw(ctx.renderPass, 3, 1, 0, 0);

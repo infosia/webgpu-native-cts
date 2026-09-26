@@ -29,9 +29,9 @@ The C API all three backends implement. Tests are written against this header.
 | Field | Value |
 |-------|-------|
 | Project | webgpu-native/webgpu-headers |
-| Pinned commit | `7d3186c3dd2c708703524027b46b8703534ab3cc` |
-| Commit date | 2026-03-19 |
-| Source | wgpu-native submodule `ffi/webgpu-headers` (`7d3186c`) |
+| Pinned commit | `673658bc2bd70ec39fc55ebe6bb0173cf6d0a603` |
+| Commit date | 2026-05-07 |
+| Source | wgpu-native submodule `ffi/webgpu-headers` (`673658b`, "Add missing setImmediates method") |
 
 This is the revision vendored under `third_party/webgpu-headers/` (planned). Each backend ships its
 own copy of the canonical header (wgpu-native and yawgpu both under `ffi/webgpu-headers/webgpu.h`;
@@ -47,7 +47,7 @@ set (e.g. in an `--expectations` file header).
 
 | Backend | Repo | Version observed (local) | License | Notes |
 |---------|------|--------------------------|---------|-------|
-| wgpu-native | github.com/gfx-rs/wgpu-native | `v29.0.0.0-8-g9176708` | MIT / Apache-2.0 | harness bring-up reference |
+| wgpu-native | github.com/gfx-rs/wgpu-native | `v29.0.1.1` (`6aed509`, 2026-06-22 release; wgpu-core / naga 29.0.3; previously `v29.0.0.0-8-g9176708`) | MIT / Apache-2.0 | harness bring-up reference. Implements the standard `SetImmediates` / `immediateSize` API since this revision; still advertises experimental features it cannot grant (F-154), which the harness excludes when requesting the all-features device |
 | yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `e7eba41` (2026-07-02 Metal re-sweep, post F-142 fix; Vulkan last swept `05bf865` 2026-06-28, fixes `bd21cfb`) | MIT / Apache-2.0 | **primary conformance subject**; Metal and Vulkan HALs. **WGSL frontend = Tint** (Dawn's shader compiler), so shader compile/validation is Dawn-equivalent. Runs the ported suite **crash-free** with `shader/execution` `fail=0` on native Metal _and_ native Vulkan (NVIDIA RTX 5060 Ti). Metal sweep 2026-07-02 (`e7eba41`): pass 1,990,542 / skip 105,394 / **fail 2** (the 2 shared `index_buffer_format_dirtying` port-oracle non-defects, Dawn fails them identically) — `api/validation` 292,960, `api/operation` 228,600, `shader/execution` 822,209, `shader/validation` 646,773 (per-subcase). Fail profile is **byte-identical to the Dawn oracle** (both fail only the 2 port-oracle cases). Reporting real Metal hardware limits and exposing `subgroups` brings its coverage to Dawn's level. Expected failures: the spec-in-flux Vulkan cases in `expectations/yawgpu-vulkan.txt` (sample_mask/position semantics, MoltenVK-only artifacts). Vendor header `yawgpu.h` exists but its extension surface is **not yet exercised** by the suite. See [FINDINGS](FINDINGS.md). |
 | Dawn | dawn.googlesource.com/dawn | `802f147f1fb7ab972f87f3e9f95098e0f4b5077b` (2026-05-15) | BSD-3-Clause / Apache-2.0 | C++ reference impl |
 

@@ -35,7 +35,6 @@
 #include <vector>
 
 #include "cts/gpu.h"
-#include "cts/immediates.h"
 #include "cts/test.h"
 
 using namespace cts;
@@ -190,11 +189,11 @@ static void ctxSetImmediates(
     size_t      size)
 {
     if (ctx.encoderType == "compute pass") {
-        cts::computePassSetImmediates(ctx.computePass, offset, data, size);
+        wgpuComputePassEncoderSetImmediates(ctx.computePass, offset, data, size);
     } else if (ctx.encoderType == "render pass") {
-        cts::renderPassSetImmediates(ctx.renderPass, offset, data, size);
+        wgpuRenderPassEncoderSetImmediates(ctx.renderPass, offset, data, size);
     } else {
-        cts::renderBundleSetImmediates(ctx.bundleEnc, offset, data, size);
+        wgpuRenderBundleEncoderSetImmediates(ctx.bundleEnc, offset, data, size);
     }
 }
 
