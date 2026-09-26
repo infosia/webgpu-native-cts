@@ -243,6 +243,28 @@ counts agree to within 5 subcases.
 § Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`; the suite exits
 `fail=0` once expectations are applied.
 
+#### wgpu-native — native Vulkan (Linux / NVIDIA RTX 5060 Ti, naga frontend), per-subcase
+
+| area | pass | skip | fail | crash |
+|------|------:|-----:|-----:|------:|
+| `api/validation` (126) | 132,556 | 132,375 | 8,694 | 7,686 |
+| `api/operation` (70) | 150,337 | 76,267 | 2,695 | 170 |
+| `shader/execution` (239) | 419,010 | 416,648 | 2,990 | 3,167 |
+| `shader/validation` (207) | 277,329 | 316,065 | 73,748 | 0 |
+| **total** | **979,232** | **941,355** | **88,127** | **11,023** |
+
+Swept **2026-09-26 raw** — four per-area `--workers 6` runs on wgpu-native **`v29.0.1.1`** / CTS
+`60af4b1`, NVIDIA driver 610.57.04: 2h45m (`api/validation` 21m36s, `api/operation` 33m51s,
+`shader/execution` 1h48m56s, `shader/validation` 31s). Much slower than Metal because every abort
+restarts a shard worker (device re-creation, cold pipeline caches). `shader/validation` is
+subcase-identical to the Metal table (the naga frontend is platform-independent). The skip gap
+versus Metal is hardware/feature exposure, not conformance: ~342k skips are ASTC / ETC2 / EAC
+formats (no such compression on desktop NVIDIA — yawgpu's Linux table skips them too) and ~50k are
+`subgroups` not granted. The three `api,operation,limits,max_combined_limits:
+max_storage_buffer_texture_frag_outputs` cases, which abort on Metal (F-088), **hang** on Vulkan
+(100% CPU, RSS growing ~40 MB/min); they were killed after ~32 minutes and are counted as `crash`.
+The same run-mode caveats as the Metal table apply.
+
 #### yawgpu — GLES / Tier 2 experimental (Linux / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
 
 > **This is not a conformance table** — see the Tier-2 note under the Haswell table below.

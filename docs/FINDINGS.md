@@ -653,6 +653,12 @@ Skipped — never assigned. The sequence runs F-138 → F-139 → **F-141**; no 
   `texture_reflection_attributes` 9, `lost_on_destroy` 1).
 - **Observed:** the same eager-panic class as F-001…F-021 (wgpu-native aborts on paths Dawn/yawgpu handle
   gracefully) plus requestDevice/limit conformance gaps.
+- **Vulkan (2026-09-26, wgpu-native `v29.0.1.1`, Linux / NVIDIA RTX 5060 Ti, driver 610.57.04):** the
+  3 `max_combined_limits:max_storage_buffer_texture_frag_outputs` cases (`r8uint`, `rgba8uint`,
+  `rgba32uint`) do not abort — each **hangs** at 100% CPU on the main thread with RSS growing
+  ~40 MB/min (~2.9 GB after 32 minutes). Killed by hand in the full sweep (recorded as `crash`,
+  `signal 9`). Not profiled (`ptrace`/`perf` restricted on the host), so whether the spin is in
+  wgpu-native/naga or the driver's shader compiler is unknown.
 - **Status:** **OPEN**; tracked as a **wgpu-native defect** (bring-up reference; to be reflected in
   `expectations/wgpu-native.txt` on regen). Not masked.
 
