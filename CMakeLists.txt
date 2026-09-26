@@ -36,6 +36,11 @@ if(CTS_BACKEND STREQUAL "wgpu-native")
         message(FATAL_ERROR "Could not find webgpu-headers/webgpu.h under ${CTS_WGPU_NATIVE_DIR}")
     endif()
 
+    # wgpu-native's extension header <wgpu.h> (used by include/cts/immediates.h)
+    # does `#include "webgpu.h"`; resolve it to the same webgpu-headers/webgpu.h
+    # the CTS already includes.
+    list(APPEND CTS_WGPU_HEADER_DIR "${CTS_WGPU_HEADER_DIR}/webgpu-headers")
+
     if(CTS_WGPU_NATIVE_LIB)
         set(CTS_BACKEND_LIB "${CTS_WGPU_NATIVE_LIB}")
     else()

@@ -16,7 +16,9 @@
 //  - `encoder.setImmediates(rangeOffset, data, dataOffset, size)` (JS) maps to
 //    `wgpuXxxSetImmediates(encoder, uint32_t offset, void const* data, size_t size)` (C): the
 //    dataOffset/size (element-count) pair becomes a `data.data() + dataOffset*elementSize`
-//    pointer plus a `size*elementSize`-byte length.
+//    pointer plus a `size*elementSize`-byte length. Calls go through the cts::*SetImmediates
+//    shim (include/cts/immediates.h), which keeps that argument order on every backend and
+//    reorders it for wgpu-native's `(encoder, offset, sizeBytes, data)` extension signature.
 //  - The render path renders into an `rgba32uint` 1-row texture (kBytesPerPixel = 16) and reads
 //    values back via a pixel readback, matching upstream's approach of returning results through
 //    the fragment shader's integer color output rather than a storage buffer.
@@ -30,6 +32,7 @@
 #include <vector>
 
 #include "cts/gpu.h"
+#include "cts/immediates.h"
 #include "cts/test.h"
 
 using namespace cts;
@@ -129,11 +132,11 @@ void passSetBindGroupDynamic(Pass& p, uint32_t index, WGPUBindGroup bg, uint32_t
 
 void passSetImmediates(Pass& p, uint32_t offset, const void* data, size_t size) {
     if (p.encoderType == "compute pass") {
-        wgpuComputePassEncoderSetImmediates(p.computePass, offset, data, size);
+        cts::computePassSetImmediates(p.computePass, offset, data, size);
     } else if (p.encoderType == "render pass") {
-        wgpuRenderPassEncoderSetImmediates(p.renderPass, offset, data, size);
+        cts::renderPassSetImmediates(p.renderPass, offset, data, size);
     } else {
-        wgpuRenderBundleEncoderSetImmediates(p.bundleEnc, offset, data, size);
+        cts::renderBundleSetImmediates(p.bundleEnc, offset, data, size);
     }
 }
 
@@ -1122,7 +1125,7 @@ CTS_TEST(g, "render_pass_and_bundle_mix")
         uint32_t off0 = 0;
         wgpuRenderBundleEncoderSetBindGroup(bundleEncoder, 0, bindGroup, 1, &off0);
         uint32_t bundleData[2] = {1, 10};
-        wgpuRenderBundleEncoderSetImmediates(bundleEncoder, 0, bundleData, sizeof(bundleData));
+        cts::renderBundleSetImmediates(bundleEncoder, 0, bundleData, sizeof(bundleData));
         wgpuRenderBundleEncoderDraw(bundleEncoder, 1, 1, 0, 0);
         WGPURenderBundle bundle = wgpuRenderBundleEncoderFinish(bundleEncoder, nullptr);
 
@@ -1158,7 +1161,7 @@ CTS_TEST(g, "render_pass_and_bundle_mix")
         uint32_t off256 = 256;
         wgpuRenderPassEncoderSetBindGroup(pass, 0, bindGroup, 1, &off256);
         uint32_t passData[2] = {2, 20};
-        wgpuRenderPassEncoderSetImmediates(pass, 0, passData, sizeof(passData));
+        cts::renderPassSetImmediates(pass, 0, passData, sizeof(passData));
         wgpuRenderPassEncoderDraw(pass, 1, 1, 0, 0);
 
         wgpuRenderPassEncoderEnd(pass);
@@ -1221,7 +1224,7 @@ CTS_TEST(g, "render_bundle_isolation")
         uint32_t offA = 0;
         wgpuRenderBundleEncoderSetBindGroup(bundleEncoderA, 0, bindGroup, 1, &offA);
         uint32_t bundleDataA[2] = {1, 2};
-        wgpuRenderBundleEncoderSetImmediates(bundleEncoderA, 0, bundleDataA, sizeof(bundleDataA));
+        cts::renderBundleSetImmediates(bundleEncoderA, 0, bundleDataA, sizeof(bundleDataA));
         wgpuRenderBundleEncoderDraw(bundleEncoderA, 1, 1, 0, 0);
         WGPURenderBundle bundleA = wgpuRenderBundleEncoderFinish(bundleEncoderA, nullptr);
 
@@ -1234,7 +1237,7 @@ CTS_TEST(g, "render_bundle_isolation")
         uint32_t offB = 256;
         wgpuRenderBundleEncoderSetBindGroup(bundleEncoderB, 0, bindGroup, 1, &offB);
         uint32_t bundleDataB[2] = {3, 4};
-        wgpuRenderBundleEncoderSetImmediates(bundleEncoderB, 0, bundleDataB, sizeof(bundleDataB));
+        cts::renderBundleSetImmediates(bundleEncoderB, 0, bundleDataB, sizeof(bundleDataB));
         wgpuRenderBundleEncoderDraw(bundleEncoderB, 1, 1, 0, 0);
         WGPURenderBundle bundleB = wgpuRenderBundleEncoderFinish(bundleEncoderB, nullptr);
 
