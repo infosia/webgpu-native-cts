@@ -95,5 +95,23 @@ design for result order, JSON, baselines, and expectations.
   Note: max RSS undercounts Dawn (GPU-private allocations are outside RSS); compare backends with
   `footprint` (e.g. `createBindGroup:buffer,resource_binding_size`: yawgpu max RSS 4.1 GB vs Dawn
   53 MB, but Dawn's footprint peaks at ~7.5 GB; yawgpu returns the memory between cases).
+- Linux/Vulkan re-verification (2026-09-26, yawgpu `e429a9b`, NVIDIA RTX 5060 Ti, 29 GB host):
+  full sweep in 4 areas, `--workers 4`, `MemoryMax=12G`, `expectations/yawgpu-vulkan.txt`,
+  `--baseline` = the pre-fix 2026-09-21 sweep of the same shape. Results identical in all areas
+  (`Regressed=0 Fixed=0 New=0 Removed=0`; fail=0 crash=0). Largest single-process max RSS,
+  pre-fix → post-fix, with the scope's cgroup `memory.peak`:
+
+  | Area | Max RSS 09-21 → 09-26 | cgroup peak | Wall time 09-21 → 09-26 |
+  |---|---|---|---|
+  | `api,validation` | 8.70 GB → 8.68 GB | 4.8 GB | 1312 s → 983 s |
+  | `api,operation` | 332 MB → 275 MB | 432 MB | 540 s → 501 s |
+  | `shader,execution` | 1.79 GB → 621 MB | 2.1 GB | 1278 s → 1537 s |
+  | `shader,validation` | 472 MB → 271 MB | 767 MB | 70 s → 78 s |
+
+  Process-tree RSS in `shader,execution` plateaus at ~2.4–2.7 GB for the whole 26 min (no
+  growth), where an earlier pre-fix probe climbed to ~15 GB within 42 s. The `api,validation`
+  8.7 GB is `createBindGroup:buffer,resource_binding_size` alone (max-binding-size buffers): above
+  6 GB for ~12 s, then back to ~0.7 GB — expected, not a leak; it is also why the Linux run cap in
+  `CLAUDE.md` is 8G per process. The `shader,execution` wall-time increase is uninvestigated.
 - Remaining open: lazy/incremental case generation (step 4, broad part); query-string sharing
   (step 1 follow-up); streaming result aggregation (future).
