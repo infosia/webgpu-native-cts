@@ -187,16 +187,25 @@ difference, not conformance divergence.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 165,877 | 84,634 | 17,445 | 7,043 |
-| `api/operation` (70) | 145,018 | 76,709 | 2,771 | 1,669 |
-| `shader/execution` (239) | 63,365 | 130,051 | 1,840 | 121,797 |
-| `shader/validation` (207) | 251,905 | 316,541 | 98,696 | 0 |
-| **total** | **626,165** | **607,935** | **120,752** | **130,509** |
+| `api/validation` (126) | 178,872 | 81,235 | 9,642 | 7,116 |
+| `api/operation` (70) | 149,347 | 76,270 | 3,681 | 171 |
+| `shader/execution` (239) | 635,636 | 125,436 | 4,280 | 32,096 |
+| `shader/validation` (207) | 277,329 | 316,065 | 73,748 | 0 |
+| **total** | **1,241,184** | **599,006** | **91,351** | **39,383** |
+
+Swept **2026-09-26 raw** — four per-area `--workers 6` runs on wgpu-native **`v29.0.1.1`** (the latest
+release; wgpu-core / naga 29.0.3) / CTS `242cd3e`, macOS / Apple M2: 47 minutes (`api/validation` 2m08s,
+`api/operation` 2m00s, `shader/execution` 42m36s, `shader/validation` 43s). All-features tests run
+with every optional feature wgpu-native can grant (it also advertises two experimental features it
+cannot, which the harness excludes — F-154). Known release defects include the immediates API
+divergences (F-154) and `mapAsync` rejecting `WGPU_WHOLE_MAP_SIZE` (F-155, fixed upstream after the
+release).
 
 wgpu-native is on the **naga** WGSL frontend and is a panic-heavy bring-up reference. Because many
 cases share a worker process, one abort contaminates the rest of that process: `crash` is inflated
-~4× versus a per-case isolate run and `pass` is correspondingly deflated. Read these numbers as
-run-mode-sensitive, not a like-for-like comparison to yawgpu/Dawn.
+versus a per-case isolate run and `pass` is correspondingly deflated, and an aborted case is counted
+once rather than per subcase, so the row totals are below the suite's subcase count. Read these
+numbers as run-mode-sensitive, not a like-for-like comparison to yawgpu/Dawn.
 
 #### yawgpu — native Vulkan (Windows 11 / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
 

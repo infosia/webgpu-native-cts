@@ -193,8 +193,9 @@ run `--isolate --workers 6`. Dawn and yawgpu: **811 pass / 30 skip / 0 fail** on
    limits, so every `AllFeaturesMaxLimitsGpuTest` on wgpu-native ran without its optional features
    (e.g. immediates shaders failed with `Capability Capabilities(IMMEDIATES) is not supported` although
    `maxImmediateSize` is 4096). The harness now retries without those two features and reports any
-   fallback on stderr (`specs/all-features-device-request.md`); earlier wgpu-native numbers for
-   feature-dependent tests should be re-swept.
+   fallback on stderr (`specs/all-features-device-request.md`). wgpu-native was re-swept on
+   2026-09-26 (`v29.0.1.1`, README) with the fix in place; earlier wgpu-native tables understated
+   feature-dependent coverage (e.g. `shader/execution` pass 63,365 → 635,636).
 2. **`setImmediates` before `setPipeline` is rejected** (`In a set_immediates command / Compute
    pipeline must be set`) — all 325 remaining crashes (`setImmediates:alignment|out_of_bounds|overflow`,
    `pipeline_immediate:required_slots_set|unused_variable|overprovisioned_immediate_data`). The WebGPU
