@@ -43,12 +43,24 @@ Full detail: `specs/reference/workflow.md`.
   full-area run so a runaway kills the process, not the host:
 
   ```bash
-  systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0 --collect \
+  systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 --collect \
     /usr/bin/time -f 'peakRSS=%MKB elapsed=%es' build-yawgpu/cts --workers 1 '<query>'
   ```
 
-  Raise `--workers` only after a single-process run of the same query is known
-  to fit well inside the host's RAM divided by N.
+  `systemd-run` is Linux-only; this cap applies to the Linux host (29 GB RAM).
+  8G, not less: `createBindGroup:buffer,resource_binding_size` allocates
+  max-binding-size buffers and legitimately needs >3G on yawgpu/Vulkan (it was
+  killed at 3G and passed at 6G). The cap exists to protect the host, not to
+  detect leaks — track leaks via peakRSS instead.
+
+  - The scope's cgroup covers the whole process tree, so the cap is the
+    **total across all workers**: with `--workers N`, scale `MemoryMax`
+    accordingly and keep it well inside the host's RAM. Raise `--workers` only
+    after a single-process run of the same query is known to fit well inside
+    the host's RAM divided by N.
+  - **Exit 143 with empty output means the cap was hit**, not a test failure —
+    the whole query's results are lost. Split the query per test to locate the
+    heavy one.
 
 ## Tooling — sandbox
 
