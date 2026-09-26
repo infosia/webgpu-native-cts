@@ -130,11 +130,46 @@ port-oracle cases.
 surface (F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027, F-028, F-036, F-052, F-056,
 F-097, F-113), the `zero_init`/`robust_access`/`memory_layout` naga gaps (F-070, F-071, F-075, F-078,
 F-084, F-088), and the naga-lineage shader findings that yawgpu resolved by moving to Tint (F-124, F-129,
-F-133, F-134, F-136).
+F-133, F-134, F-136), and the immediates API divergences (F-154).
 
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
 Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
+
+---
+
+## F-154 — wgpu-native: immediates diverge from the standard API (pipeline required, layout size ignored) — OPEN
+
+Found 2026-09-26 (macOS / Apple M2 / Metal, wgpu-native `9176708`, naga 29.0.1) once the
+wgpu-native build was restored (`cf2043e`). The three immediates files
+(`api,operation,command_buffer,programmable,immediate`, `api,validation,encoding,cmds,setImmediates`,
+`api,validation,encoding,programmable,pipeline_immediate`), run `--isolate --workers 6`:
+**202 pass / 15 skip / 24 fail / 419 crash**. Dawn and yawgpu: **811 pass / 30 skip / 0 fail** on the
+same files.
+
+wgpu-native reports `WGPUNativeFeature_Immediates` and a non-zero standard `maxImmediateSize`, so
+none of these cases skip. Three divergences, each confirmed from the wgpu-native error chain:
+
+1. **`setImmediates` before `setPipeline` is rejected.** `setImmediates:alignment|out_of_bounds|overflow`
+   (every "should succeed" case) fail with `In a set_immediates command / Compute pipeline must be
+   set`. The WebGPU spec validates immediates at draw/dispatch time, not at `setImmediates`, and
+   upstream CTS expects these calls to succeed without a pipeline; Dawn and yawgpu accept them.
+2. **The standard `WGPUPipelineLayoutDescriptor.immediateSize` is ignored.** wgpu-native takes the
+   layout's immediate size only from its extension chain `WGPUPipelineLayoutExtras.immediateDataSize`
+   (`src/conv.rs:512`), so a layout created through the standard field has size 0 and every pipeline
+   whose shader uses `var<immediate>` is invalid (`In a set_pipeline command / ComputePipeline with ''
+   label is invalid`) — all `programmable,immediate` operation cases.
+3. **Some `required_slots_set` shader modules are rejected** (`In wgpuDeviceCreateComputePipeline /
+   ShaderModule with '' label is invalid`, 24 cases, `usage="partial"` scenarios). naga 29 parses
+   `var<immediate>`; the exact rejection is not triaged yet.
+
+The crashes are wgpu-native's usual deferred-error behavior (as in F-004): the validation error
+surfaces at `wgpuQueueSubmit`, which panics (`Error in wgpuQueueSubmit … fatal runtime error …
+aborting`, signal 6), so `--isolate` records a crash rather than a failed expectation.
+
+Also noted, not a defect: wgpu-native declares the three `SetImmediates` entry points only in its
+extension header `wgpu.h`, with the parameter order `(encoder, offset, sizeBytes, data)` instead of the
+standard `(encoder, offset, data, size)`. The CTS maps the standard call in `include/cts/immediates.h`.
 
 ---
 
