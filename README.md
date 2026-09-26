@@ -211,16 +211,18 @@ numbers as run-mode-sensitive, not a like-for-like comparison to yawgpu/Dawn.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 244,672 | 110,316 | 4‡ | 0 |
+| `api/validation` (126) | 244,673 | 110,315 | 4‡ | 0 |
 | `api/operation` (70) | 209,360 | 20,233 | 0 | 0 |
-| `shader/execution` (239) | 531,303 | 313,170 | 113‡ | 0 |
-| `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
-| **total** | **1,632,108** | **464,088** | **117‡** | **0** |
+| `shader/execution` (239) | 531,309 | 313,164 | 113‡ | 0 |
+| `shader/validation` (207) | 646,860 | 20,282 | 0 | 0 |
+| **total** | **1,632,202** | **463,994** | **117‡** | **0** |
 
-Swept **2026-09-25 raw** — four per-area `--workers 8` runs on yawgpu `2c6ea6f` / CTS `c67fd9f`,
-NVIDIA driver 610.62: 28 minutes (`api/validation` 7m03s, `api/operation` 4m29s,
-`shader/execution` 14m04s, `shader/validation` 2m45s), `crash=0` across 2,096,313 subcases.
-Counts are identical to the 2026-09-21 sweep (yawgpu `35684de` / CTS `134a1cf`, 25 minutes).
+Swept **2026-09-26 raw** — four per-area `--workers 8` runs on yawgpu `53ca8bb` (adds
+`subgroup-size-control` on Vulkan) / this CTS revision, NVIDIA driver 610.62, `crash=0`. Versus the
+2026-09-25 sweep (yawgpu `2c6ea6f`): +94 pass / −94 skip, all from the now-runnable
+`subgroup-size-control` cases (`compute_builtins:subgroup_size_attribute` 6,
+`shader,validation,extension,subgroup_size_control` 87,
+`capability_checks,features,subgroup_size_control` 1); the fail set is unchanged.
 
 ‡ Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`; the suite exits
 `fail=0` once expectations are applied.

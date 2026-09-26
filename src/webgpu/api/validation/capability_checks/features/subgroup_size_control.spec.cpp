@@ -15,6 +15,16 @@ TestGroup<FeatureGpuTest> testGroup = MakeTestGroup<FeatureGpuTest>(
 
 CTS_TEST(testGroup, "enables_subgroups")
     .desc("Test that enabling subgroup-size-control also enables subgroups.")
-    .unimplemented("no native WGPUFeatureName for subgroup-size-control in the pinned header");
+    .fn([](FeatureGpuTest& t) {
+        // WGPUFeatureName_SubgroupSizeControl is in the Dawn and yawgpu headers but not
+        // in wgpu-native's; there the feature cannot be requested, so the case skips.
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
+        t.selectDeviceOrSkipTestCase({WGPUFeatureName_SubgroupSizeControl});
+        t.expect(hasFeature(t.device(), WGPUFeatureName_Subgroups),
+                 "device with subgroup-size-control must also have subgroups");
+#else
+        t.skip("subgroup-size-control is not in this backend's webgpu.h");
+#endif
+    });
 
 } // namespace

@@ -40,8 +40,8 @@
 //    single-GPU machines this suite targets).
 //
 // 5. subgroup_size_attribute: the 'subgroup-size-control' feature enum
-//    (WGPUFeatureName_SubgroupSizeControl) only exists in Dawn's webgpu.h.
-//    On non-Dawn backends the test body is compiled down to an unconditional
+//    (WGPUFeatureName_SubgroupSizeControl) exists in the Dawn and yawgpu headers
+//    but not in wgpu-native's. On wgpu-native the test body is compiled down to an unconditional
 //    runtime-skip with a reason, which faithfully mirrors a device without
 //    the feature (and avoids MSVC C4702 unreachable-code). Test registration
 //    (listing) is identical on all backends.
@@ -1238,7 +1238,7 @@ CTS_TEST(g, "num_subgroups")
 // subgroup_size_attribute
 // ---------------------------------------------------------------------------
 
-#if defined(CTS_BACKEND_DAWN)
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
 struct PopScopeState {
     bool completed = false;
     WGPUPopErrorScopeStatus status = WGPUPopErrorScopeStatus_Error;
@@ -1278,7 +1278,7 @@ bool popValidationScopeHadError(GpuTest& t) {
     }
     return state.type != WGPUErrorType_NoError;
 }
-#endif  // defined(CTS_BACKEND_DAWN)
+#endif  // defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
 
 CTS_TEST(g, "subgroup_size_attribute")
     .desc(
@@ -1290,10 +1290,10 @@ CTS_TEST(g, "subgroup_size_attribute")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         // Upstream: t.skipIfDeviceDoesNotHaveFeature('subgroup-size-control').
-        // The feature enum only exists in Dawn's webgpu.h (see header note 5).
-        // The whole body is compiled out on non-Dawn backends so that the
-        // unconditional skip leaves no unreachable code (MSVC /W4 C4702).
-#if !defined(CTS_BACKEND_DAWN)
+        // The feature enum is not in wgpu-native's webgpu.h (see header note 5).
+        // The whole body is compiled out there so that the unconditional skip
+        // leaves no unreachable code (MSVC /W4 C4702).
+#if !defined(CTS_BACKEND_DAWN) && !defined(CTS_BACKEND_YAWGPU)
         t.skip(
             "device does not have the 'subgroup-size-control' feature "
             "(not exposed by this backend's webgpu.h)");
@@ -1365,7 +1365,7 @@ CTS_TEST(g, "subgroup_size_attribute")
 
         t.expect(atLeastOneSucceeded,
                  "No valid @subgroup_size value found in [subgroupMinSize, subgroupMaxSize]");
-#endif  // defined(CTS_BACKEND_DAWN)
+#endif  // defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
     });
 
 } // namespace
