@@ -130,7 +130,7 @@ port-oracle cases.
 surface (F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027, F-028, F-036, F-052, F-056,
 F-097, F-113), the `zero_init`/`robust_access`/`memory_layout` naga gaps (F-070, F-071, F-075, F-078,
 F-084, F-088), and the naga-lineage shader findings that yawgpu resolved by moving to Tint (F-124, F-129,
-F-133, F-134, F-136), and the immediates API divergences (F-154).
+F-133, F-134, F-136), and the immediates / unrequestable-feature divergences (F-154).
 
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
 Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139), all green on both
@@ -138,38 +138,47 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
-## F-154 — wgpu-native: immediates diverge from the standard API (pipeline required, layout size ignored) — OPEN
+## F-154 — wgpu-native: immediates diverge from the standard API; unrequestable features advertised — OPEN
 
 Found 2026-09-26 (macOS / Apple M2 / Metal, wgpu-native `9176708`, naga 29.0.1) once the
-wgpu-native build was restored (`cf2043e`). The three immediates files
-(`api,operation,command_buffer,programmable,immediate`, `api,validation,encoding,cmds,setImmediates`,
-`api,validation,encoding,programmable,pipeline_immediate`), run `--isolate --workers 6`:
-**202 pass / 15 skip / 24 fail / 419 crash**. Dawn and yawgpu: **811 pass / 30 skip / 0 fail** on the
-same files.
+wgpu-native build was restored (`cf2043e`). Files: `api,operation,command_buffer,programmable,immediate`,
+`api,validation,encoding,cmds,setImmediates`, `api,validation,encoding,programmable,pipeline_immediate`,
+run `--isolate --workers 6`. Dawn and yawgpu: **811 pass / 30 skip / 0 fail** on the same files.
 
-wgpu-native reports `WGPUNativeFeature_Immediates` and a non-zero standard `maxImmediateSize`, so
-none of these cases skip. Three divergences, each confirmed from the wgpu-native error chain:
+| wgpu-native | pass | skip | fail | crash |
+| --- | ---: | ---: | ---: | ---: |
+| first run (`cf2043e`) | 202 | 15 | 24 | 419 |
+| after the harness fixes below (`d676144`, P-11) | 319 | 15 | 1 | 325 |
 
-1. **`setImmediates` before `setPipeline` is rejected.** `setImmediates:alignment|out_of_bounds|overflow`
-   (every "should succeed" case) fail with `In a set_immediates command / Compute pipeline must be
-   set`. The WebGPU spec validates immediates at draw/dispatch time, not at `setImmediates`, and
-   upstream CTS expects these calls to succeed without a pipeline; Dawn and yawgpu accept them.
-2. **The standard `WGPUPipelineLayoutDescriptor.immediateSize` is ignored.** wgpu-native takes the
-   layout's immediate size only from its extension chain `WGPUPipelineLayoutExtras.immediateDataSize`
-   (`src/conv.rs:512`), so a layout created through the standard field has size 0 and every pipeline
-   whose shader uses `var<immediate>` is invalid (`In a set_pipeline command / ComputePipeline with ''
-   label is invalid`) — all `programmable,immediate` operation cases.
-3. **Some `required_slots_set` shader modules are rejected** (`In wgpuDeviceCreateComputePipeline /
-   ShaderModule with '' label is invalid`, 24 cases, `usage="partial"` scenarios). naga 29 parses
-   `var<immediate>`; the exact rejection is not triaged yet.
+**wgpu-native defects (open):**
+
+1. **Advertises features it can never grant.** The adapter reports `WGPUNativeFeature_RayQuery` and
+   `WGPUNativeFeature_CooperativeMatrix` (wgpu `EXPERIMENTAL_*`), but wgpu-native hard-codes
+   `experimental_features: disabled()` (`src/conv.rs:483`), so requesting every advertised feature
+   fails: `Some experimental features, EXPERIMENTAL_RAY_QUERY | EXPERIMENTAL_COOPERATIVE_MATRIX, were
+   requested, but experimental features are not enabled`. **Consequence for all earlier wgpu-native
+   results:** the harness then silently fell back to a texture-only feature set while keeping max
+   limits, so every `AllFeaturesMaxLimitsGpuTest` on wgpu-native ran without its optional features
+   (e.g. immediates shaders failed with `Capability Capabilities(IMMEDIATES) is not supported` although
+   `maxImmediateSize` is 4096). The harness now retries without those two features and reports any
+   fallback on stderr (`specs/all-features-device-request.md`); earlier wgpu-native numbers for
+   feature-dependent tests should be re-swept.
+2. **`setImmediates` before `setPipeline` is rejected** (`In a set_immediates command / Compute
+   pipeline must be set`) — all 325 remaining crashes (`setImmediates:alignment|out_of_bounds|overflow`,
+   `pipeline_immediate:required_slots_set|unused_variable|overprovisioned_immediate_data`). The WebGPU
+   spec validates immediates at draw/dispatch time; upstream CTS expects these calls to succeed without a
+   pipeline, and Dawn/yawgpu accept them.
+3. **Immediates are not invalidated by `executeBundles`**
+   (`pipeline_immediate:render_bundle_execution_state_invalidation`: expected validation error, got none).
+
+**API differences the harness now maps (not defects in behavior):** wgpu-native declares the three
+`SetImmediates` entry points only in its extension header `wgpu.h`, with parameter order
+`(encoder, offset, sizeBytes, data)` (`include/cts/immediates.h`, `cf2043e`); and it reads a pipeline
+layout's immediate size only from the chained `WGPUPipelineLayoutExtras.immediateDataSize`, ignoring the
+standard `immediateSize` (`createPipelineLayoutTracked`, `d676144`).
 
 The crashes are wgpu-native's usual deferred-error behavior (as in F-004): the validation error
-surfaces at `wgpuQueueSubmit`, which panics (`Error in wgpuQueueSubmit … fatal runtime error …
-aborting`, signal 6), so `--isolate` records a crash rather than a failed expectation.
-
-Also noted, not a defect: wgpu-native declares the three `SetImmediates` entry points only in its
-extension header `wgpu.h`, with the parameter order `(encoder, offset, sizeBytes, data)` instead of the
-standard `(encoder, offset, data, size)`. The CTS maps the standard call in `include/cts/immediates.h`.
+surfaces at `wgpuQueueSubmit`, which panics (signal 6), so `--isolate` records a crash.
 
 ---
 
