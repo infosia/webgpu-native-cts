@@ -130,11 +130,43 @@ port-oracle cases.
 surface (F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027, F-028, F-036, F-052, F-056,
 F-097, F-113), the `zero_init`/`robust_access`/`memory_layout` naga gaps (F-070, F-071, F-075, F-078,
 F-084, F-088), and the naga-lineage shader findings that yawgpu resolved by moving to Tint (F-124, F-129,
-F-133, F-134, F-136), and the immediates / unrequestable-feature divergences (F-154).
+F-133, F-134, F-136), the immediates / unrequestable-feature divergences (F-154), and the `v29.0.1.1` `mapAsync` `WGPU_WHOLE_MAP_SIZE` regression (F-155, fixed upstream but unreleased).
 
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
 Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
+
+---
+
+## F-155 — wgpu-native v29.0.1.1: `mapAsync` rejects `WGPU_WHOLE_MAP_SIZE` — OPEN (fixed upstream, unreleased)
+
+Found 2026-09-26 on the pinned release **wgpu-native `v29.0.1.1`** (`6aed509`), macOS / Apple M2 /
+Metal; also reported on Windows. `wgpuBufferMapAsync` passes the `WGPU_WHOLE_MAP_SIZE` sentinel
+(`SIZE_MAX`) straight to wgpu-core as a byte count instead of "the rest of the buffer", so every
+`mapAsync` without an explicit size fails validation:
+
+```
+In wgpuBufferMapAsync
+  Buffer range size invalid: range_size 18446744073709551615 must be multiple of 4
+```
+
+Fixed upstream after the release by `d84d8ac` ("fix `WGPU_WHOLE_MAP_SIZE` case in `bufferMapAsync`",
+#602, 2026-06-29), which maps the sentinel to `None`; not in any release yet. We stay on the release
+and record it here.
+
+Scope: only tests that call `mapAsync` without a size — `api,operation,buffers,map`, `map_oom`,
+`api,validation,buffer,mapping`, `api,validation,queue,buffer_mapped`, and `GpuTest::expectMapAsync`
+callers that omit the size. The harness readback paths pass explicit sizes and are unaffected.
+
+`--isolate --workers 4` on `api,operation,buffers,map` + `api,validation,buffer,mapping`:
+14 pass / 9 skip / 44 fail / 115 crash (per-case). **32 of the 44 fails** are this defect. Not this
+defect (recorded for triage):
+- 12 fails in `mapAsync,read` / `mapAsync,read,typedArrayAccess` with explicit map regions: the
+  `mappedAtCreation` contents read back as 0 (`mismatch at byte 0: expected 1, got 0`). Dawn/yawgpu pass.
+- the crashes are wgpu-native's known mapping panics (`mapState` not implemented, invalid map mode,
+  `getMappedRange` error paths) — the F-003 family.
+
+Re-check on the next wgpu-native release.
 
 ---
 
