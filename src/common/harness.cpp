@@ -14,6 +14,10 @@
 #include "webgpu/util/texture_ok.h"
 #include "webgpu/texture_format.h"
 
+#if defined(CTS_BACKEND_WGPU)
+#include <wgpu.h>
+#endif
+
 namespace cts {
 namespace {
 
@@ -963,7 +967,24 @@ WGPUBindGroup GpuTest::createBindGroupTracked(const WGPUBindGroupDescriptor& des
 }
 
 WGPUPipelineLayout GpuTest::createPipelineLayoutTracked(const WGPUPipelineLayoutDescriptor& desc) {
+#if defined(CTS_BACKEND_WGPU)
+    // wgpu-native reads the immediate size only from its chained WGPUPipelineLayoutExtras and
+    // ignores the standard immediateSize field; map the standard field onto the extension struct.
+    WGPUPipelineLayout layout = nullptr;
+    if (desc.immediateSize != 0) {
+        WGPUPipelineLayoutExtras extras = {};
+        extras.chain.next = desc.nextInChain;
+        extras.chain.sType = static_cast<WGPUSType>(WGPUSType_PipelineLayoutExtras);
+        extras.immediateDataSize = desc.immediateSize;
+        WGPUPipelineLayoutDescriptor withExtras = desc;
+        withExtras.nextInChain = &extras.chain;
+        layout = wgpuDeviceCreatePipelineLayout(device(), &withExtras);
+    } else {
+        layout = wgpuDeviceCreatePipelineLayout(device(), &desc);
+    }
+#else
     WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(device(), &desc);
+#endif
     if (layout != nullptr) {
         pipelineLayouts_.push_back(layout);
     }
