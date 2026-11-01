@@ -223,12 +223,8 @@ numbers as run-mode-sensitive, not a like-for-like comparison to yawgpu/Dawn.
 | **total** | **1,652,341** | **605,081** | **31** | **1¶** |
 
 Swept **2026-11-01 raw** — four per-area `--workers 8` runs on yawgpu `9977e34` / CTS `fbe54f0`
-(upstream `d116bcc`, 657 files), Dawn pin `843d53377`, NVIDIA driver 617.14: 31 minutes. The fail
-counts match the Linux table below: 4, 25 and 2. `api/validation` and
-`shader/validation` are identical to Linux, `api/operation` differs by 3 pass → skip, and
-`shader/execution` differs only by the crash, which also lost 4 subcases of its case. The suite was
-re-baselined after the previous sweep (`53ca8bb`), so counts are not comparable with it per area;
-[FINDINGS](docs/FINDINGS.md) breaks down the skip increase.
+(upstream `d116bcc`, 657 files), Dawn pin `843d53377`, NVIDIA driver 617.14: 31 minutes. The suite
+was re-baselined after the previous sweep (`53ca8bb`), so counts are not comparable with it per area.
 
 § Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`.
 
@@ -236,11 +232,7 @@ re-baselined after the previous sweep (`53ca8bb`), so counts are not comparable 
 which Dawn does not report either ([F-159](docs/FINDINGS.md), [F-164](docs/FINDINGS.md)). They are
 not in `expectations/yawgpu-vulkan.txt`, so this area exits non-zero.
 
-¶ `bufferView:mixed_types_aliasing`, `buffer="workgroup"`, `pair="vec4i_paddedh"`, `aliased=true`:
-a shard worker exited `0xC0000005`. The test passed on 3 of 3 reruns at `--workers 8`, and the
-subcase passed on 3 of 3 runs alone, so it is intermittent. It has the same shape as the driver crash
-in [F-165](docs/FINDINGS.md), but no fault address was captured for this one. Not in
-`expectations/yawgpu-vulkan.txt`.
+¶ Intermittent crash attributed to the NVIDIA driver ([F-165](docs/FINDINGS.md)).
 
 #### yawgpu — native Vulkan (Linux / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
 
