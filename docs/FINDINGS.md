@@ -36,7 +36,7 @@ entire naga-lineage finding class no longer manifests on yawgpu.
 | **total** | **1,676,746** | — | **0** | **0** |
 
 Only carried Metal item: the 2 `draw,index_buffer_format_dirtying` cases (a CTS port-oracle quirk — the Dawn oracle fails them identically; `xfail`), so effective `fail=0`.
-**Native Vulkan (Windows / NVIDIA RTX 5060 Ti) is confirmed identical** — same `fail=0 crash=0`, modulo the
+**Native Vulkan (Windows / NVIDIA RTX 5060 Ti) was confirmed identical at this baseline** — same `fail=0 crash=0`, modulo the
 documented non-defect `xfail`s (F-085, F-111, F-129-denormal, F-141; see `expectations/yawgpu-vulkan.txt`).
 
 > **Re-swept on Metal (2026-07-02), still `fail=0`.** A later yawgpu update (real hardware-limit reporting
@@ -77,7 +77,7 @@ the post-fix state.
 |---------|-----:|------:|---------|
 | **Dawn** (oracle, Tint) | **2**¹ | 0 | fully green — pass **1,990,994** / skip 104,942. ¹the only fails are the 2 `index_buffer_format_dirtying` cases (see ¹ below) |
 | **yawgpu — native Metal** (Tint, **re-swept 2026-07-02, post-fix**) | **2**¹ | 0 | green — `fail=0` on `api/operation` (228,600) + `shader/validation` (646,773) + `shader/execution` (822,209)³; the only 2 fails are the shared `index_buffer_format_dirtying` `xfail`s in `api/validation` (292,960 pass). **Fail profile byte-identical to the Dawn oracle again** after resolving **F-142** (5, fixed in yawgpu `e7eba41`) + **F-143** (14, a CTS-harness probe gap — yawgpu was correct). |
-| **yawgpu — native Vulkan** (Windows / NVIDIA RTX 5060 Ti, Tint) | **0** | 0 | green — same `fail=0 crash=0` as Metal, modulo documented **non-defect** `xfail`s: **F-085** (per-sample), **F-111** (external-texture), **F-129** (denormal `fwidth`), **F-141** (NVIDIA memory-model). The last two real Vulkan defects **F-127** + **F-138** are resolved (`bd21cfb`) |
+| **yawgpu — native Vulkan** (Windows / NVIDIA RTX 5060 Ti, Tint; for the 2026-11-01 re-sweep see the [README](../README.md#test-results)) | **0** | 0 | green — same `fail=0 crash=0` as Metal, modulo documented **non-defect** `xfail`s: **F-085** (per-sample), **F-111** (external-texture), **F-129** (denormal `fwidth`), **F-141** (NVIDIA memory-model). The last two real Vulkan defects **F-127** + **F-138** are resolved (`bd21cfb`) |
 | **wgpu-native** (naga, Metal, `--isolate`²) | **6,858** | **38,565** | bring-up reference — fresh sweep 2026-06-28: pass 154,932 / skip 67,138. **Panic-dominated** crash by area: `api` 7,028 + `shader/execution` 31,537; fail by area: `api` 4,967 + `shader/validation` 1,693 (naga-lineage). Carries the F-001…F-021 panics + naga-lineage **F-124/F-129/F-133/F-134/F-136**; not triaged to `fail=0` |
 
 ¹ The 2 fails on **both** Dawn and yawgpu are `draw,index_buffer_format_dirtying`: the CTS oracle expects the
@@ -124,7 +124,9 @@ defect is masked.
 
 **Open — yawgpu:** none. F-161 to F-164, from the `d116bcc` sweep on `ea67149`, were fixed by yawgpu Block 119
 (`9977e34`), apart from the 2 `have_all_language_features` cases shared with Dawn (F-159). Native **Vulkan** last
-swept 2026-11-01 on Linux: `fail=2 crash=0` with expectations, those same 2 cases.
+swept 2026-11-01: on Linux `fail=2 crash=0` with expectations, those same 2 cases. On Windows the raw sweep has 31
+fails, 29 of them carried in `expectations/yawgpu-vulkan.txt` and the other 2 those same cases, and 1 intermittent
+crash attributed to the NVIDIA driver (F-165).
 
 **Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a compile-time zero value). The former **F-130** override-shift divergence **no longer reproduces** on
 the current Dawn build (`fail=0`); Dawn now fails only the 2 shared `index_buffer_format_dirtying`
@@ -173,6 +175,14 @@ subcases pass alone and at `--workers 1`. This cause is inferred, not confirmed 
 **Shader shape.** Tint lowers the workgroup `buffer<128>` shared by the i32 and f16 views to `array<u16, 64>` and reaches
 the typed views through `OpBitcast`. The unaliased `B` stays `array<u32, 32>`. The faulting modules have the most `OpBitcast` instructions of the group (26 to 29). The compiler pass
 responsible is unknown.
+
+**Sibling test.** The 2026-11-01 Windows sweep (yawgpu `9977e34`, CTS `fbe54f0`, `--workers 8`) had 1 crash, in the
+`bufferView` variant of the test, which shares `mixed_type_aliasing_utils.h`:
+`webgpu:shader,execution,expression,call,builtin,bufferView:mixed_types_aliasing`, `buffer="workgroup"`,
+`pair="vec4i_paddedh"`, `overlap="offset"`, `offset="dynamic"`, `aliased=true`. A shard worker exited `0xC0000005`.
+The test then passed on 3 of 3 reruns at `--workers 8`, and the subcase on 3 of 3 runs alone. The shape matches:
+workgroup, aliased, f16. No fault address was captured, and `bufferView` has not been run through the plain Vulkan
+program, so this crash is attributed to F-165 by shape only.
 
 **Status.** Not Dawn-confirmed, and not reported to NVIDIA. Not in `expectations/yawgpu-vulkan.txt`, because the crash is
 intermittent and the cases pass on most runs.

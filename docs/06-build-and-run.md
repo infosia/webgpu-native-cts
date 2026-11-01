@@ -184,6 +184,10 @@ cmake --build <dawn>/out/Release --config Release --target webgpu_dawn -j 8
 #             out/Release/src/dawn/native/Release/webgpu_dawn.lib
 ```
 
+To update, fast-forward the checkout from `dawn.googlesource.com` (the oracle is unmodified upstream,
+so a fork's `main` may lag behind it), re-run both commands above so `DAWN_FETCH_DEPENDENCIES` syncs
+`third_party/`, rebuild `cts`, and copy the new `webgpu_dawn.dll` next to `cts.exe`.
+
 Point CTS at the Dawn checkout (headers) and build dir (library). The canonical `webgpu/webgpu.h`
 is a stub that includes the generated `dawn/webgpu.h`, so two header roots are needed —
 `<dawn>/include` and `<dawn>/out/Release/gen/include` — both supplied automatically from
@@ -245,8 +249,9 @@ used and yields `DynamicLib.Open: ... Windows Error: 87`. Without `d3dcompiler_4
 fails with `failed to request all-features/max-limits device: DynamicLib.Open: d3dcompiler_47.dll
 Windows Error: 87 at EnsureFXC` (Dawn loads FXC for device creation); without `vulkan-1.dll` the
 default Vulkan adapter request fails. A bare `cts.exe` (no query) prints the selected adapter
-(`backendType: vulkan`) and is a good smoke test. Verified on Windows / Vulkan / NVIDIA (2026-06-24):
-smoke cases green (`adapter_info`, `requestAdapter`, `buffers,map:mapAsync,read` all `fail=0 crash=0`).
+(`backendType: vulkan`) and is a good smoke test. Verified on Windows / Vulkan / NVIDIA (2026-11-01,
+Dawn `20734e3`): smoke cases green (`adapter,info`, `adapter,requestAdapter`, `buffers,map:mapAsync,read`,
+`validation,buffer,create` all `fail=0 crash=0`; `requestAdapter` also on `CTS_DAWN_BACKEND=d3d12`).
 
 ---
 

@@ -101,8 +101,9 @@ ported:** the entire **`api`** surface (`api/validation` + `api/operation`), **a
 
 **Conformance (current).** yawgpu's WGSL frontend is **Tint** (Dawn's shader compiler), so its
 shader-compile behaviour is byte-equivalent to the Dawn oracle:
-the whole suite runs **crash-free** on every real-hardware path, and `shader/execution` is
-**`fail=0 crash=0`** on native Metal. Its Metal coverage is at Dawn's level and its Metal fail profile
+the whole suite runs **crash-free** on every real-hardware path, apart from an intermittent
+shader-compiler crash in the NVIDIA Windows driver ([F-165](docs/FINDINGS.md)), and
+`shader/execution` is **`fail=0 crash=0`** on native Metal. Its Metal coverage is at Dawn's level and its Metal fail profile
 is **byte-identical to Dawn**; on Vulkan the residual fails are known non-defects carried as `xfail`.
 The naga-lineage findings do not manifest on yawgpu — they appear only on **wgpu-native**, the one
 naga-based backend and a panic-heavy bring-up reference. Per-backend numbers:
@@ -149,13 +150,17 @@ added: [COVERAGE](docs/COVERAGE.md).
 
 ### Test results
 
-Per-area `pass / skip / fail / crash` from a full sweep of all **642 ported files**: on **macOS /
+Per-area `pass / skip / fail / crash` from a full sweep of all ported files: on **macOS /
 Apple Metal**, on **Windows and Linux / native Vulkan** (NVIDIA RTX 5060 Ti), and on **GLES**
 (Tier-2 experimental — bring-up snapshots, not conformance results). Every backend
 runs whole-suite **per-subcase** (`--workers`, no `--isolate`). All tables are **raw** (no
 `--expectations`), so documented non-defects show in `fail` rather than being masked; each table
 carries its own sweep date, run mode and backend revision. Per-finding detail is in
 [FINDINGS](docs/FINDINGS.md).
+
+The yawgpu native Vulkan tables and the yawgpu GLES / NVIDIA table are at the current pin (upstream
+`d116bcc`, 657 files). The Metal tables, the wgpu-native tables and the Haswell table predate that
+re-baseline (642 files), so their counts are not comparable with the current ones.
 
 #### yawgpu — native Metal (Tint frontend), per-subcase
 
@@ -211,21 +216,30 @@ numbers as run-mode-sensitive, not a like-for-like comparison to yawgpu/Dawn.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 244,673 | 110,315 | 4‡ | 0 |
-| `api/operation` (70) | 209,360 | 20,233 | 0 | 0 |
-| `shader/execution` (239) | 531,309 | 313,164 | 113‡ | 0 |
-| `shader/validation` (207) | 646,860 | 20,282 | 0 | 0 |
-| **total** | **1,632,202** | **463,994** | **117‡** | **0** |
+| `api/validation` (128) | 246,484 | 111,283 | 4§ | 0 |
+| `api/operation` (70) | 180,779 | 152,819 | 0 | 0 |
+| `shader/execution` (246) | 562,543 | 320,680 | 25§ | 1¶ |
+| `shader/validation` (213) | 662,535 | 20,299 | 2‡ | 0 |
+| **total** | **1,652,341** | **605,081** | **31** | **1¶** |
 
-Swept **2026-09-26 raw** — four per-area `--workers 8` runs on yawgpu `53ca8bb` (adds
-`subgroup-size-control` on Vulkan) / this CTS revision, NVIDIA driver 610.62, `crash=0`. Versus the
-2026-09-25 sweep (yawgpu `2c6ea6f`): +94 pass / −94 skip, all from the now-runnable
-`subgroup-size-control` cases (`compute_builtins:subgroup_size_attribute` 6,
-`shader,validation,extension,subgroup_size_control` 87,
-`capability_checks,features,subgroup_size_control` 1); the fail set is unchanged.
+Swept **2026-11-01 raw** — four per-area `--workers 8` runs on yawgpu `9977e34` / CTS `fbe54f0`
+(upstream `d116bcc`, 657 files), Dawn pin `843d53377`, NVIDIA driver 617.14: 31 minutes. The fail
+counts match the Linux table below: 4, 25 and 2. `api/validation` and
+`shader/validation` are identical to Linux, `api/operation` differs by 3 pass → skip, and
+`shader/execution` differs only by the crash, which also lost 4 subcases of its case. The suite was
+re-baselined after the previous sweep (`53ca8bb`), so counts are not comparable with it per area.
 
-‡ Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`; the suite exits
-`fail=0` once expectations are applied.
+§ Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`.
+
+‡ `parse,requires:have_all_language_features` for `fragment_depth` and `unrestricted_aliasing`,
+which Dawn does not report either ([F-159](docs/FINDINGS.md), [F-164](docs/FINDINGS.md)). They are
+not in `expectations/yawgpu-vulkan.txt`, so this area exits non-zero.
+
+¶ `bufferView:mixed_types_aliasing`, `buffer="workgroup"`, `pair="vec4i_paddedh"`, `aliased=true`:
+a shard worker exited `0xC0000005`. The test passed on 3 of 3 reruns at `--workers 8`, and the
+subcase passed on 3 of 3 runs alone, so it is intermittent. It has the same shape as the driver crash
+in [F-165](docs/FINDINGS.md), but no fault address was captured for this one. Not in
+`expectations/yawgpu-vulkan.txt`.
 
 #### yawgpu — native Vulkan (Linux / NVIDIA RTX 5060 Ti, Tint frontend), per-subcase
 
