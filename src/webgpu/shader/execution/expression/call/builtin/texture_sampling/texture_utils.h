@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/texture_utils.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/texture_utils.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
@@ -16,6 +16,7 @@ namespace cts::texture_utils {
 
 std::vector<Value> shortShaderStages();
 std::vector<Value> allTextureFormats();
+std::vector<Value> compressedTextureFormats();
 std::vector<Value> depthStencilFormats();
 std::vector<Value> possibleStorageTextureFormats();
 std::vector<Value> shortAddressModes();
@@ -46,6 +47,7 @@ void executeTextureSampleLevelStage1(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelSampled1D(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelSampled2D(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelSampled2DLodClamp(AllFeaturesMaxLimitsGpuTest& t);
+void executeTextureSampleLevelSampled2DCompressedUnaligned(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelSampled2DArray(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelSampled3D(AllFeaturesMaxLimitsGpuTest& t);
 void executeTextureSampleLevelSampled3DLodClamp(AllFeaturesMaxLimitsGpuTest& t);

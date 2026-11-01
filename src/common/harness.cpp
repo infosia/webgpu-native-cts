@@ -638,13 +638,15 @@ WGPUCompatibilityModeLimits GpuTest::getCompatibilityModeLimits() const {
 }
 
 WGPUBuffer GpuTest::makeBufferWithContents(const void* data, size_t size, WGPUBufferUsage usage) {
+    // A mappedAtCreation buffer must have a size aligned to 4 (upstream: align(byteLength, 4)).
+    const size_t alignedSize = (size + 3) & ~static_cast<size_t>(3);
     WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    desc.size = size;
+    desc.size = alignedSize;
     desc.usage = usage;
     desc.mappedAtCreation = WGPU_TRUE;
     WGPUBuffer buffer = createBufferTracked(desc);
 
-    void* mapped = wgpuBufferGetMappedRange(buffer, 0, size);
+    void* mapped = wgpuBufferGetMappedRange(buffer, 0, alignedSize);
     if (size > 0 && mapped == nullptr) {
         fail("failed to get mapped range for initial buffer contents");
     }
@@ -660,24 +662,30 @@ void GpuTest::expectGPUBufferValuesEqual(
     const void* expected,
     size_t size,
     uint64_t srcByteOffset) {
+    // Upstream's createAlignedCopyForMapRead: copy and map offset and size must be divisible by 4,
+    // so read the enclosing 4-aligned range and compare only the requested bytes.
+    const uint64_t alignedOffset = srcByteOffset & ~uint64_t{3};
+    const size_t subarrayByteStart = static_cast<size_t>(srcByteOffset - alignedOffset);
+    const size_t alignedSize = (size + subarrayByteStart + 3u) & ~size_t{3};
+
     WGPUBufferDescriptor stagingDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    stagingDesc.size = size;
+    stagingDesc.size = alignedSize;
     stagingDesc.usage = WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst;
     WGPUBuffer staging = createBufferTracked(stagingDesc);
 
     WGPUCommandEncoder encoder = createCommandEncoderTracked();
-    wgpuCommandEncoderCopyBufferToBuffer(encoder, src, srcByteOffset, staging, 0, size);
+    wgpuCommandEncoderCopyBufferToBuffer(encoder, src, alignedOffset, staging, 0, alignedSize);
     WGPUCommandBuffer commandBuffer = finishTracked(encoder);
     wgpuQueueSubmit(queue(), 1, &commandBuffer);
 
-    expectMapAsync(staging, WGPUMapMode_Read, true, 0, size);
-    const void* actual = wgpuBufferGetConstMappedRange(staging, 0, size);
+    expectMapAsync(staging, WGPUMapMode_Read, true, 0, alignedSize);
+    const void* actual = wgpuBufferGetConstMappedRange(staging, 0, alignedSize);
     if (size > 0 && actual == nullptr) {
         wgpuBufferUnmap(staging);
         fail("failed to get mapped range for GPU buffer readback");
     }
 
-    const auto* actualBytes = static_cast<const uint8_t*>(actual);
+    const auto* actualBytes = static_cast<const uint8_t*>(actual) + subarrayByteStart;
     const auto* expectedBytes = static_cast<const uint8_t*>(expected);
     size_t mismatchIndex = size;
     uint8_t mismatchExpected = 0;
@@ -1219,6 +1227,26 @@ bool GpuTest::isTextureFormatColorRenderable(WGPUTextureFormat format) {
         return wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureFormatsTier1);
     }
     return textureFormatInList(format, kColorRenderableTextureFormats);
+}
+
+bool GpuTest::isTextureFormatBlendable(WGPUTextureFormat format) {
+    if (!isTextureFormatColorRenderable(format)) {
+        return false;
+    }
+    if (format == WGPUTextureFormat_RG11B10Ufloat) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_RG11B10UfloatRenderable);
+    }
+    if (format == WGPUTextureFormat_R32Float || format == WGPUTextureFormat_RG32Float
+        || format == WGPUTextureFormat_RGBA32Float) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_Float32Blendable);
+    }
+    if (isTier1BlendableMultisampleTextureFormat(format)) {
+        return wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureFormatsTier1);
+    }
+    // colorRender.blend: every other color-renderable format that is not an integer format.
+    const std::string_view identifier = textureFormatIdentifier(format);
+    return identifier.find("uint") == std::string_view::npos
+        && identifier.find("sint") == std::string_view::npos;
 }
 
 bool GpuTest::isTextureFormatUsableAsRenderAttachment(WGPUTextureFormat format) {

@@ -1,20 +1,16 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/statement/swizzle_assignment.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/statement/swizzle_assignment.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) 2024 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
 // Port notes (intentional deviations, all documented for the reviewer):
 //
-// 1. Language-feature guard (swizzle_assignment):
-//    Upstream calls t.skipIfLanguageFeatureNotSupported('swizzle_assignment')
-//    (wgpuInstanceHasWGSLLanguageFeature). The GpuTest harness does not expose
-//    the shared WGPUInstance to test bodies, so this port creates a one-shot
-//    probe instance via createInstance() (precedent:
-//    api/validation/error_scope.spec.cpp creates its own instance) and queries
-//    wgpuInstanceHasWGSLLanguageFeature once, caching the result. On non-Dawn
-//    backends the webgpu-headers do not define a WGPUWGSLLanguageFeatureName
-//    value for swizzle_assignment, so the feature is treated as unsupported
-//    and the tests skip with a reason (spec rule: prefer skip-with-reason).
+// 1. Language-feature guards (swizzle_assignment, pointer_composite_access):
+//    Upstream calls t.skipIfLanguageFeatureNotSupported(). This port uses the
+//    shared probe in webgpu/language_features.h. wgpu-native's webgpu.h does
+//    not define a WGPUWGSLLanguageFeatureName value for swizzle_assignment, so
+//    the feature is treated as unsupported there and the tests skip with a
+//    reason (spec rule: prefer skip-with-reason).
 //
 // 2. eval_order / compound_eval_order: these tests do not go through
 //    runSwizzleAssignmentTest; they invoke runFlowControlTest from the
@@ -49,41 +45,12 @@
 #include "common/webgpu/backend.h"
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/language_features.h"
 #include "webgpu/shader/execution/flow_control/harness.h"
 
 using namespace cts;
 
 namespace {
-
-// ---------------------------------------------------------------------------
-// Language-feature query (see port note (1)).
-//
-// Mirrors upstream t.skipIfLanguageFeatureNotSupported('swizzle_assignment').
-// WGSL language features are an instance-level property, so a one-shot probe
-// instance gives the same answer as the harness's shared instance.
-// ---------------------------------------------------------------------------
-static bool hasSwizzleAssignmentLanguageFeature() {
-#if defined(CTS_BACKEND_DAWN)
-    static const bool supported = [] {
-        WGPUInstance probeInstance = createInstance();
-        if (probeInstance == nullptr) {
-            return false;
-        }
-        const bool has = wgpuInstanceHasWGSLLanguageFeature(
-                             probeInstance,
-                             WGPUWGSLLanguageFeatureName_SwizzleAssignment) != 0u;
-        wgpuInstanceRelease(probeInstance);
-        return has;
-    }();
-    return supported;
-#else
-    // The webgpu-headers used by the non-Dawn backends do not define a
-    // WGPUWGSLLanguageFeatureName value for swizzle_assignment, so the
-    // feature cannot be queried; treat it as unsupported (the tests skip,
-    // matching upstream behavior on implementations without the feature).
-    return false;
-#endif
-}
 
 TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpuTest>(
     "shader,execution,statement,swizzle_assignment",
@@ -92,6 +59,13 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpu
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// Mirrors upstream t.skipIfLanguageFeatureNotSupported('pointer_composite_access').
+static void skipIfNoPointerCompositeAccess(AllFeaturesMaxLimitsGpuTest& t) {
+    if (!hasPointerCompositeAccessLanguageFeature()) {
+        t.skip("pointer_composite_access WGSL language feature not supported");
+    }
+}
 
 // Converts a double-precision value to its IEEE 754 half-precision (f16) bit
 // pattern returned as uint16_t.  Handles the finite values used in this file
@@ -284,6 +258,62 @@ static const SwizzleAssignmentCase kSwizzleAssignmentCases[] = {
         "vec2i(2,3)",
         {3, 0, 2},
     },
+    {
+        "vec4u_xyz_indexed_0_constant",
+        "u32", 4,
+        {1, 2, 3, 4},
+        "xyz[0]",
+        "5u",
+        {5, 2, 3, 4},
+    },
+    {
+        "vec3i_zy_indexed_1_constant",
+        "i32", 3,
+        {10, 20, 30},
+        "zy[1]",
+        "50i",
+        {10, 50, 30},
+    },
+    {
+        "vec4f_yxzw_indexed_2_constant",
+        "f32", 4,
+        {1.0, 2.0, 3.0, 4.0},
+        "yxzw[2]",
+        "5.0f",
+        {1.0, 2.0, 5.0, 4.0},
+    },
+    {
+        "vec2h_yx_indexed_0_constant",
+        "f16", 2,
+        {1.0, 2.0},
+        "yx[0]",
+        "5.0h",
+        {1.0, 5.0},
+    },
+    {
+        "vec2_bool_yx_indexed_1_constant",
+        "bool", 2,
+        {1, 0},
+        "yx[1]",
+        "true",
+        {1, 0},
+    },
+    {
+        "vec3u_chained_dup_lhs_pass",
+        "u32", 3,
+        {1, 2, 3},
+        "xyy.xy",
+        "vec2u(4, 5)",
+        {4, 5, 3},
+    },
+    {
+        "vec2f_chained_dup_lhs_pass",
+        "f32", 2,
+        {1.0, 2.0},
+        "xx.x",
+        "5.0f",
+        {5.0, 2.0},
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -330,6 +360,27 @@ static const SwizzleCompoundAssignmentCase kSwizzleCompoundAssignmentCases[] = {
         "xy", "*=", "vec2f(0.5, 2.0)",
         {0.5, 4.0, 3.0},
     },
+    {
+        "vec4u_xyz_indexed_0_add_5",
+        "u32", 4,
+        {1, 2, 3, 4},
+        "xyz[0]", "+=", "5u",
+        {6, 2, 3, 4},
+    },
+    {
+        "vec3i_zy_indexed_1_add_50",
+        "i32", 3,
+        {10, 20, 30},
+        "zy[1]", "+=", "50i",
+        {10, 70, 30},
+    },
+    {
+        "vec4f_yxzw_indexed_2_mul_5",
+        "f32", 4,
+        {1.0, 2.0, 3.0, 4.0},
+        "yxzw[2]", "*=", "5.0f",
+        {1.0, 2.0, 15.0, 4.0},
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -341,7 +392,7 @@ static void runSwizzleAssignmentTest(
     AllFeaturesMaxLimitsGpuTest& t,
     const char* elemType,
     int vecSize,
-    const std::initializer_list<double>& expectedValues,
+    const std::vector<double>& expectedValues,
     const std::string& wgsl)
 {
     // Mirrors upstream t.skipIfLanguageFeatureNotSupported('swizzle_assignment').
@@ -541,6 +592,13 @@ CTS_TEST(g, "swizzle_assignment_vars")
                 Value(std::string("vec4u_xy_x_literal")),
                 Value(std::string("vec3f_zyx_yz_vec2f")),
                 Value(std::string("vec2i_xz_yx_vec2i")),
+                Value(std::string("vec4u_xyz_indexed_0_constant")),
+                Value(std::string("vec3i_zy_indexed_1_constant")),
+                Value(std::string("vec4f_yxzw_indexed_2_constant")),
+                Value(std::string("vec2h_yx_indexed_0_constant")),
+                Value(std::string("vec2_bool_yx_indexed_1_constant")),
+                Value(std::string("vec3u_chained_dup_lhs_pass")),
+                Value(std::string("vec2f_chained_dup_lhs_pass")),
             })
             .beginSubcases()
             .combine("address_space", {
@@ -574,6 +632,9 @@ CTS_TEST(g, "swizzle_assignment_vars")
         // upstream: t.skipIf(address_space === 'storage' && elemType === 'bool')
         if (addressSpace == "storage" && std::string(tc->elemType) == "bool") {
             t.skip("bool is not a host-shareable type; cannot use vec<bool> in storage address space");
+        }
+        if (memoryView == "ptr") {
+            skipIfNoPointerCompositeAccess(t);
         }
 
         const std::string elemType   = tc->elemType;
@@ -637,6 +698,7 @@ CTS_TEST(g, "swizzle_assignment_vars")
         // runSwizzleAssignmentTest, see port note (1)).
         const std::string wgsl =
             std::string("requires swizzle_assignment;\n") +
+            (memoryView == "ptr" ? "requires pointer_composite_access;\n" : "") +
             (elemType == "f16" ? "enable f16;\n" : "") +
             "\nstruct Outputs {\n" +
             outputsV +
@@ -655,7 +717,7 @@ CTS_TEST(g, "swizzle_assignment_vars")
             "  }\n" +
             "}\n";
 
-        runSwizzleAssignmentTest(t, tc->elemType, vecSize, tc->expected, wgsl);
+        runSwizzleAssignmentTest(t, tc->elemType, vecSize, std::vector<double>(tc->expected), wgsl);
     });
 
 // ---------------------------------------------------------------------------
@@ -671,6 +733,9 @@ CTS_TEST(g, "swizzle_compound_assignment")
                 Value(std::string("vec4u_xy_mul_vec2u")),
                 Value(std::string("vec3i_zx_add_vec2i")),
                 Value(std::string("vec3f_xy_mul_vec2f")),
+                Value(std::string("vec4u_xyz_indexed_0_add_5")),
+                Value(std::string("vec3i_zy_indexed_1_add_50")),
+                Value(std::string("vec4f_yxzw_indexed_2_mul_5")),
             })
             .beginSubcases()
             .combine("address_space", {
@@ -698,6 +763,10 @@ CTS_TEST(g, "swizzle_compound_assignment")
         }
         if (tc == nullptr) {
             t.fail("unknown compound case: " + caseName);
+        }
+
+        if (memoryView == "ptr") {
+            skipIfNoPointerCompositeAccess(t);
         }
 
         const std::string elemType  = tc->elemType;
@@ -741,6 +810,7 @@ CTS_TEST(g, "swizzle_compound_assignment")
 
         const std::string wgsl =
             std::string("requires swizzle_assignment;\n") +
+            (memoryView == "ptr" ? "requires pointer_composite_access;\n" : "") +
             (elemType == "f16" ? "enable f16;\n" : "") +
             "\nstruct Outputs {\n" +
             outputsV +
@@ -759,7 +829,7 @@ CTS_TEST(g, "swizzle_compound_assignment")
             "  }\n" +
             "}\n";
 
-        runSwizzleAssignmentTest(t, tc->elemType, vecSize, tc->expected, wgsl);
+        runSwizzleAssignmentTest(t, tc->elemType, vecSize, std::vector<double>(tc->expected), wgsl);
     });
 
 // ---------------------------------------------------------------------------
@@ -882,6 +952,205 @@ fn bar() -> vec2u {
                 {
                     f.expect_order(1),
                     f.expect_order(2),
+                });
+            return wgsl;
+        });
+    });
+
+// ---------------------------------------------------------------------------
+// Test: dynamic_index_into_swizzle
+// ---------------------------------------------------------------------------
+
+CTS_TEST(g, "dynamic_index_into_swizzle")
+    .desc("Test dynamic array indexing into a swizzle view on LHS of assignment")
+    .params([](ParamsBuilder u) {
+        return u
+            .combine("elemType", {"u32", "i32", "f32", "f16", "bool"})
+            .combine("vecSize", {2, 3, 4})
+            .combine("indexType", {"u32", "i32"})
+            .beginSubcases()
+            .combine("address_space", {"function", "private", "workgroup", "storage"})
+            .combine("memory_view", {"ref", "ptr"})
+            .filter([](const ParamRecord& p) {
+                return !(valueAs<std::string>(*findParam(p, "address_space")) == "storage" &&
+                         valueAs<std::string>(*findParam(p, "elemType")) == "bool");
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const std::string elemType     = t.param<std::string>("elemType");
+        const int         vecSize      = t.param<int>("vecSize");
+        const std::string indexType    = t.param<std::string>("indexType");
+        const std::string addressSpace = t.param<std::string>("address_space");
+        const std::string memoryView   = t.param<std::string>("memory_view");
+
+        // runSwizzleAssignmentTest repeats the swizzle_assignment and shader-f16
+        // skips; they are here too because upstream takes them first.
+        if (!hasSwizzleAssignmentLanguageFeature()) {
+            t.skip("swizzle_assignment WGSL language feature not supported");
+        }
+        if (elemType == "f16" && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
+            t.skip("shader-f16 feature not available");
+        }
+        if (memoryView == "ptr") {
+            skipIfNoPointerCompositeAccess(t);
+        }
+
+        // Index 1 maps to x, for all vector size variations.
+        const std::string swizzle = std::string("yxzw").substr(0, static_cast<size_t>(vecSize));
+
+        const bool isBool = elemType == "bool";
+        const std::string initialValues =
+            std::string(isBool ? "false, false, false, false" : "10, 20, 30, 40")
+                .substr(0, static_cast<size_t>(isBool ? 7 * vecSize - 2 : 4 * vecSize - 2));
+
+        const std::string rhsValue = isBool ? "true" : "99";
+        const std::vector<double> allExpected =
+            isBool ? std::vector<double>{1, 0, 0, 0} : std::vector<double>{99, 20, 30, 40};
+        const std::vector<double> expectedValues(allExpected.begin(), allExpected.begin() + vecSize);
+
+        const std::string vecType = "vec" + std::to_string(vecSize) + "<" + elemType + ">";
+        const std::string outputElemType = isBool ? "u32" : elemType;
+
+        const std::string indexSuffix = indexType == "u32" ? "u" : "i";
+        const std::string indexDecl = "var idx = 1" + indexSuffix + ";";
+
+        const std::string varRef = addressSpace == "storage" ? "outputs.v" : "v";
+        const std::string lhs = memoryView == "ptr"
+            ? "let ptr = &" + varRef + "; ptr." + swizzle + "[idx]"
+            : varRef + "." + swizzle + "[idx]";
+
+        const std::string moduleScopeVar = addressSpace == "private" || addressSpace == "workgroup"
+            ? "var<" + addressSpace + "> v : " + vecType + ";\n\n"
+            : "";
+
+        const std::string wgsl =
+            std::string("requires swizzle_assignment;\n") +
+            (memoryView == "ptr" ? "requires pointer_composite_access;\n" : "") +
+            (elemType == "f16" ? "enable f16;\n" : "") +
+            "\nstruct Outputs {\n" +
+            (addressSpace == "storage" ? "  v : " + vecType + ",\n" : "") +
+            "  data : array<" + outputElemType + ">,\n" +
+            "};\n\n" +
+            "@group(0) @binding(1) var<storage, read_write> outputs : Outputs;\n\n" +
+            moduleScopeVar +
+            "@compute @workgroup_size(1)\n" +
+            "fn main() {\n" +
+            "  " + indexDecl + "\n" +
+            (addressSpace == "function" ? "  var v : " + vecType + ";\n" : "") +
+            "  " + varRef + " = " + vecType + "(" + initialValues + ");\n" +
+            "  " + lhs + " = " + rhsValue + ";\n\n" +
+            "  // Store result to Output\n" +
+            "  for (var i = 0; i < " + std::to_string(vecSize) + "; i++) {\n" +
+            "    outputs.data[i] = " + (isBool ? "u32(" + varRef + "[i])" : varRef + "[i]") + ";\n" +
+            "  }\n" +
+            "}\n";
+
+        runSwizzleAssignmentTest(t, elemType.c_str(), vecSize, expectedValues, wgsl);
+    });
+
+// ---------------------------------------------------------------------------
+// Tests: indexed_swizzle_eval_order, indexed_swizzle_compound_eval_order
+// ---------------------------------------------------------------------------
+
+CTS_TEST(g, "indexed_swizzle_eval_order")
+    .desc("Tests that the lhs components of an indexed swizzle assignment are evaluated left-to-right (lhs pointer, then index, then rhs).")
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        // Mirrors upstream t.skipIfLanguageFeatureNotSupported('swizzle_assignment').
+        if (!hasSwizzleAssignmentLanguageFeature()) {
+            t.skip("swizzle_assignment WGSL language feature not supported");
+        }
+        runFlowControlTest(t, [](FlowControlTestBuilder& f) {
+            FlowControlWgsl wgsl;
+            wgsl.entrypoint = wgslTemplate(
+R"(
+  arr[0] = vec4u(1, 1, 1, 1);
+  %%
+  arr[foo()].xyz[bar()] = baz();
+  %%
+  if (all(arr[0] == vec4u(1, 99, 1, 1))) {
+    %%
+  } else {
+    %%
+  }
+)",
+                {
+                    f.expect_order(0),
+                    f.expect_order(4),
+                    f.expect_order(5),
+                    f.expect_not_reached(),
+                });
+            wgsl.extra = wgslTemplate(
+R"(
+var<private> arr : array<vec4u, 1>;
+fn foo() -> u32 {
+  %%
+  return 0;
+}
+fn bar() -> u32 {
+  %%
+  return 1;
+}
+fn baz() -> u32 {
+  %%
+  return 99;
+}
+)",
+                {
+                    f.expect_order(1),
+                    f.expect_order(2),
+                    f.expect_order(3),
+                });
+            return wgsl;
+        });
+    });
+
+CTS_TEST(g, "indexed_swizzle_compound_eval_order")
+    .desc("Tests that the lhs components of an indexed swizzle compound assignment are evaluated left-to-right (lhs pointer, then index, then rhs).")
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        // Mirrors upstream t.skipIfLanguageFeatureNotSupported('swizzle_assignment').
+        if (!hasSwizzleAssignmentLanguageFeature()) {
+            t.skip("swizzle_assignment WGSL language feature not supported");
+        }
+        runFlowControlTest(t, [](FlowControlTestBuilder& f) {
+            FlowControlWgsl wgsl;
+            wgsl.entrypoint = wgslTemplate(
+R"(
+  arr[0] = vec4u(1, 10, 1, 1);
+  %%
+  arr[foo()].xyz[bar()] += baz();
+  %%
+  if (all(arr[0] == vec4u(1, 15, 1, 1))) {
+    %%
+  } else {
+    %%
+  }
+)",
+                {
+                    f.expect_order(0),
+                    f.expect_order(4),
+                    f.expect_order(5),
+                    f.expect_not_reached(),
+                });
+            wgsl.extra = wgslTemplate(
+R"(
+var<private> arr : array<vec4u, 1>;
+fn foo() -> u32 {
+  %%
+  return 0;
+}
+fn bar() -> u32 {
+  %%
+  return 1;
+}
+fn baz() -> u32 {
+  %%
+  return 5;
+}
+)",
+                {
+                    f.expect_order(1),
+                    f.expect_order(2),
+                    f.expect_order(3),
                 });
             return wgsl;
         });

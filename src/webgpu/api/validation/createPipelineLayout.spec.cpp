@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/api/validation/createPipelineLayout.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/validation/createPipelineLayout.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 
 #include <algorithm>
 #include <array>

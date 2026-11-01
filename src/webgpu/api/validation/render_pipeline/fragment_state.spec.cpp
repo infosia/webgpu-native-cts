@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/fragment_state.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/fragment_state.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 webgpu-native-cts contributors, BSD-3-Clause.
 
@@ -200,23 +200,6 @@ WGPUBlendFactor parseBlendFactor(std::string_view name) {
 bool isDualSourceBlendFactor(WGPUBlendFactor factor) {
     return factor == WGPUBlendFactor_Src1 || factor == WGPUBlendFactor_OneMinusSrc1 ||
         factor == WGPUBlendFactor_Src1Alpha || factor == WGPUBlendFactor_OneMinusSrc1Alpha;
-}
-
-bool is32FloatFormat(WGPUTextureFormat format) {
-    return format == WGPUTextureFormat_R32Float || format == WGPUTextureFormat_RG32Float ||
-        format == WGPUTextureFormat_RGBA32Float;
-}
-
-bool isTextureFormatBlendable(AllFeaturesMaxLimitsGpuTest& t, WGPUTextureFormat format) {
-    if (!t.isTextureFormatColorRenderable(format)) return false;
-    if (format == WGPUTextureFormat_RG11B10Ufloat) {
-        return wgpuDeviceHasFeature(t.device(), WGPUFeatureName_RG11B10UfloatRenderable) != WGPU_FALSE;
-    }
-    if (is32FloatFormat(format)) {
-        return wgpuDeviceHasFeature(t.device(), WGPUFeatureName_Float32Blendable) != WGPU_FALSE;
-    }
-    const ColorRenderInfo* info = colorRenderInfo(format);
-    return info != nullptr && std::string_view(info->sampleType) == "float";
 }
 
 bool blendFactorNameReadsSrcAlpha(std::string_view name) {
@@ -535,7 +518,7 @@ CTS_TEST(g, "targets_format_filterable")
         if (!t.isTextureFormatColorRenderable(format)) t.skip("texture format is not renderable");
         WGPUBlendState blend = WGPU_BLEND_STATE_INIT;
         auto h = makePipeline(t, {colorTarget(format, WGPUColorWriteMask_All, hasBlend ? &blend : nullptr)});
-        doCreateRenderPipelineTest(t, !hasBlend || isTextureFormatBlendable(t, format), h);
+        doCreateRenderPipelineTest(t, !hasBlend || t.isTextureFormatBlendable(format), h);
     });
 
 CTS_TEST(g, "targets_blend")

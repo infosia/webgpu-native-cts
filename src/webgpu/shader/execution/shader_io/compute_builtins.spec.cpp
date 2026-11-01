@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/shader_io/compute_builtins.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/shader_io/compute_builtins.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) 2021 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
@@ -46,16 +46,8 @@
 //    the feature (and avoids MSVC C4702 unreachable-code). Test registration
 //    (listing) is identical on all backends.
 //
-// 6. Upstream's `await t.device.popErrorScope()` (subgroup_size_attribute)
-//    needs an event pump; the harness does not expose its WGPUInstance, so
-//    the pop callback (mode AllowProcessEvents) is pumped indirectly through
-//    t.onSubmittedWorkDoneSync(), which processes events on the shared
-//    harness instance.
-//
-// 7. Upstream's `t.fail(...); break;` inside the subgroup_size_attribute
-//    readback loop records the failure and keeps iterating outer subgroup
-//    sizes; this harness's fail() throws, so the first mismatch ends the
-//    test. The final verdict (fail) is the same.
+// 6.-7. (Unused.) Upstream dropped the popErrorScope retry loop and the outer
+//    subgroup-size loop from subgroup_size_attribute, which these notes covered.
 //
 // 8. `readGPUBufferRangeTyped` + `expectOK` are replaced with
 //    expectGPUBufferValuesPassCheck used as a synchronous readback (the check
@@ -1238,55 +1230,15 @@ CTS_TEST(g, "num_subgroups")
 // subgroup_size_attribute
 // ---------------------------------------------------------------------------
 
-#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
-struct PopScopeState {
-    bool completed = false;
-    WGPUPopErrorScopeStatus status = WGPUPopErrorScopeStatus_Error;
-    WGPUErrorType type = WGPUErrorType_NoError;
-};
-
-void onPopErrorScope(WGPUPopErrorScopeStatus status,
-                     WGPUErrorType type,
-                     WGPUStringView,
-                     void* userdata1,
-                     void*) {
-    auto* state = static_cast<PopScopeState*>(userdata1);
-    state->status = status;
-    state->type = type;
-    state->completed = true;
-}
-
-// Pops the current validation error scope and returns whether an error was
-// captured. The callback is pumped via onSubmittedWorkDoneSync (see header
-// note 6).
-bool popValidationScopeHadError(GpuTest& t) {
-    PopScopeState state;
-    WGPUPopErrorScopeCallbackInfo callbackInfo = WGPU_POP_ERROR_SCOPE_CALLBACK_INFO_INIT;
-    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
-    callbackInfo.callback = onPopErrorScope;
-    callbackInfo.userdata1 = &state;
-    (void)wgpuDevicePopErrorScope(t.device(), callbackInfo);
-
-    for (int i = 0; i < 100 && !state.completed; ++i) {
-        t.onSubmittedWorkDoneSync();
-    }
-    if (!state.completed) {
-        t.fail("popErrorScope did not complete");
-    }
-    if (state.status != WGPUPopErrorScopeStatus_Success) {
-        t.fail("popErrorScope failed");
-    }
-    return state.type != WGPUErrorType_NoError;
-}
-#endif  // defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
-
 CTS_TEST(g, "subgroup_size_attribute")
     .desc(
-        "Tests that at least one power-of-two value in [subgroupMinSize, subgroupMaxSize] can be "
-        "used as\n    the @subgroup_size attribute in a simple compute pipeline. The value of the "
+        "Tests that all power-of-two values in [subgroupMinSize, subgroupMaxSize] can be used as\n"
+        "    the @subgroup_size attribute in a simple compute pipeline. The value of the "
         "subgroup_size\n    builtin must equal the value of the @subgroup_size attribute.")
     .params([](ParamsBuilder u) {
-        return u.combine("numWorkGroups", {1, 2}).combine("numSubgroups", {1, 2, 4});
+        return u.combine("subgroupSize", {4, 8, 16, 32, 64, 128})
+            .combine("numWorkGroups", {1, 2})
+            .combine("numSubgroups", {1, 2, 4});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         // Upstream: t.skipIfDeviceDoesNotHaveFeature('subgroup-size-control').
@@ -1302,69 +1254,58 @@ CTS_TEST(g, "subgroup_size_attribute")
             t.skip("device does not have the 'subgroup-size-control' feature");
         }
 
+        const uint32_t subgroupSize = static_cast<uint32_t>(t.param<int>("subgroupSize"));
         const uint32_t numWorkGroups = static_cast<uint32_t>(t.param<int>("numWorkGroups"));
         const uint32_t numSubgroups = static_cast<uint32_t>(t.param<int>("numSubgroups"));
 
         const SubgroupRange range = querySubgroupRange(t);
-        if (range.minSize == 0) {
-            t.fail("adapter reports subgroupMinSize == 0");
+        if (subgroupSize < range.minSize || subgroupSize > range.maxSize) {
+            t.skip("subgroupSize " + std::to_string(subgroupSize) +
+                   " is outside device range [" + std::to_string(range.minSize) + ", " +
+                   std::to_string(range.maxSize) + "]");
         }
 
-        bool atLeastOneSucceeded = false;
-
-        for (uint32_t subgroupSize = range.minSize; subgroupSize <= range.maxSize;
-             subgroupSize *= 2) {
-            const uint32_t wgx = subgroupSize * numSubgroups;
-
-            const std::string wgsl =
-                std::string("\nenable subgroups;\nenable subgroup_size_control;\n") +
-                "\n@group(0) @binding(0)\n" +
-                "var<storage, read_write> output : array<u32>;\n" +
-                "\n@compute @workgroup_size(" + std::to_string(wgx) + ", 1, 1) @subgroup_size(" +
-                std::to_string(subgroupSize) + ")\n" +
-                "fn main(@builtin(subgroup_size) builtin_size : u32,\n" +
-                "        @builtin(local_invocation_index) lid : u32,\n" +
-                "        @builtin(workgroup_id) wgid : vec3u) {\n" +
-                "  let gid = lid + wgid.x * " + std::to_string(wgx) + "u;\n" +
-                "  // Store 1 if builtin subgroup_size matches the @subgroup_size attribute, 0 "
-                "otherwise.\n" +
-                "  output[gid] = select(0u, 1u, builtin_size == " + std::to_string(subgroupSize) +
-                "u);\n" +
-                "}";
-
-            // Try to create the pipeline; skip this subgroup size if it
-            // fails validation.
-            wgpuDevicePushErrorScope(t.device(), WGPUErrorFilter_Validation);
-            WGPUComputePipeline pipeline = createComputePipelineAuto(t, wgsl);
-            if (popValidationScopeHadError(t)) {
-                continue;
-            }
-
-            atLeastOneSucceeded = true;
-
-            const uint32_t numInvocations = wgx * numWorkGroups;
-            WGPUBuffer outputBuffer = createZeroedU32Buffer(t, numInvocations);
-
-            WGPUBindGroup bindGroup = makeAutoBindGroup(
-                t, pipeline,
-                {{outputBuffer, static_cast<uint64_t>(numInvocations) * sizeof(uint32_t)}});
-            runComputePassX(t, pipeline, bindGroup, numWorkGroups);
-
-            const std::vector<uint32_t> outputData = readBackU32(t, outputBuffer, numInvocations);
-
-            for (uint32_t i = 0; i < numInvocations; i++) {
-                if (outputData[i] != 1u) {
-                    // Upstream records the failure and continues with the
-                    // next subgroup size; this fail() throws (header note 7).
-                    t.fail("@subgroup_size(" + std::to_string(subgroupSize) + "): invocation " +
-                           std::to_string(i) + " has builtin subgroup_size != " +
-                           std::to_string(subgroupSize));
-                }
-            }
+        const uint32_t wgx = subgroupSize * numSubgroups;
+        if (wgx > t.getLimits().maxComputeWorkgroupSizeX) {
+            t.skip("workgroup size " + std::to_string(wgx) +
+                   " exceeds maxComputeWorkgroupSizeX");
         }
 
-        t.expect(atLeastOneSucceeded,
-                 "No valid @subgroup_size value found in [subgroupMinSize, subgroupMaxSize]");
+        const std::string wgsl =
+            std::string("\nenable subgroups;\nenable subgroup_size_control;\n") +
+            "\n@group(0) @binding(0)\n" +
+            "var<storage, read_write> output : array<u32>;\n" +
+            "\n@compute @workgroup_size(" + std::to_string(wgx) + ", 1, 1) @subgroup_size(" +
+            std::to_string(subgroupSize) + ")\n" +
+            "fn main(@builtin(subgroup_size) builtin_size : u32,\n" +
+            "        @builtin(local_invocation_index) lid : u32,\n" +
+            "        @builtin(workgroup_id) wgid : vec3u) {\n" +
+            "  let gid = lid + wgid.x * " + std::to_string(wgx) + "u;\n" +
+            "  // Store 1 if builtin subgroup_size matches the @subgroup_size attribute, 0 "
+            "otherwise.\n" +
+            "  output[gid] = select(0u, 1u, builtin_size == " + std::to_string(subgroupSize) +
+            "u);\n" +
+            "}";
+
+        WGPUComputePipeline pipeline = createComputePipelineAuto(t, wgsl);
+
+        const uint32_t numInvocations = wgx * numWorkGroups;
+        WGPUBuffer outputBuffer = createZeroedU32Buffer(t, numInvocations);
+
+        WGPUBindGroup bindGroup = makeAutoBindGroup(
+            t, pipeline,
+            {{outputBuffer, static_cast<uint64_t>(numInvocations) * sizeof(uint32_t)}});
+        runComputePassX(t, pipeline, bindGroup, numWorkGroups);
+
+        const std::vector<uint32_t> outputData = readBackU32(t, outputBuffer, numInvocations);
+
+        for (uint32_t i = 0; i < numInvocations; i++) {
+            if (outputData[i] != 1u) {
+                t.fail("@subgroup_size(" + std::to_string(subgroupSize) + "): invocation " +
+                       std::to_string(i) + " has builtin subgroup_size != " +
+                       std::to_string(subgroupSize));
+            }
+        }
 #endif  // defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
     });
 

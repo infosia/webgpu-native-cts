@@ -242,6 +242,8 @@ class GpuTest : public Fixture {
     bool textureDimensionAndFormatCompatibleForDevice(WGPUTextureDimension dimension, WGPUTextureFormat format);
     /// True if `format` can be used as a color render target.
     bool isTextureFormatColorRenderable(WGPUTextureFormat format);
+    /// True if `format` can be blended (format_info's isTextureFormatBlendable).
+    bool isTextureFormatBlendable(WGPUTextureFormat format);
     /// True if `format` can be used as a render attachment (color or depth/stencil).
     bool isTextureFormatUsableAsRenderAttachment(WGPUTextureFormat format);
     /// True if `format` supports write-only storage-texture access.

@@ -1,10 +1,11 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/sampling/sampler_texture.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/operation/sampling/sampler_texture.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) 2022 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2025 Kota Iguchi, BSD-3-Clause.
 
 #include <array>
 #include <cstdint>
+#include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -343,12 +344,17 @@ or storage texture.
             numStorageTexturesInFragmentStage,
         };
 
+        // Total columns in the render target.
+        const uint32_t numAcross = maxTestableCombosPerStage
+            + numStorageTexturesInVertexStage
+            + numStorageTexturesInFragmentStage;
+
         // Per-stage WGSL useCombos function bodies.
         std::vector<std::string> useComboFns(2);
         for (uint32_t stage = 0; stage < 2; ++stage) {
             std::ostringstream fn;
             fn << "    fn useCombos" << stage << "(id: u32) -> vec4f {\n";
-            fn << "      var c: vec4f;\n";
+            fn << "      switch(id) {\n";
 
             // Texture+sampler combos.
             for (uint32_t i = 0; i < maxTestableCombosPerStage; ++i) {
@@ -363,8 +369,10 @@ or storage texture.
 
                 expected[stage].push_back({texelVal | (stage << 15), smpNum + 1});
 
-                fn << "      c = sample(" << texId << ", " << smpId
-                   << ", " << i << "u, id, c);\n";
+                std::ostringstream uvX;
+                uvX << std::setprecision(17) << (static_cast<double>(smpNum) + 0.5) / static_cast<double>(width);
+                fn << "        case " << i << "u: { return textureSampleLevel(" << texId << ", " << smpId
+                   << ", vec2f(" << uvX.str() << ", 0.5), 0); }\n";
             }
 
             // Storage texture combos.
@@ -381,39 +389,22 @@ or storage texture.
 
                 expected[stage].push_back({texelVal | (stage << 15), 0});
 
-                fn << "      c = load(" << texId << ", "
-                   << (i + maxTestableCombosPerStage) << "u, id, c);\n";
+                const uint32_t xCoord = (i + maxTestableCombosPerStage) % width;
+                fn << "        case " << (i + maxTestableCombosPerStage) << "u: { return textureLoad("
+                   << texId << ", vec2u(" << xCoord << "u, 0u)); }\n";
             }
 
-            fn << "      return c;\n";
+            fn << "        default: { return vec4f(0); }\n";
+            fn << "      }\n";
             fn << "    }\n";
             useComboFns[stage] = fn.str();
         }
-
-        // Total columns in the render target.
-        const uint32_t numAcross = maxTestableCombosPerStage
-            + numStorageTexturesInVertexStage
-            + numStorageTexturesInFragmentStage;
 
         // Build the full WGSL shader.
         std::ostringstream shaderSS;
         shaderSS << "    // maxTestableCombosPerStage: " << maxTestableCombosPerStage << "\n";
         shaderSS << "    // numStorageTexturesPerVertexStage: " << numStorageTexturesInVertexStage << "\n";
         shaderSS << "    // numStorageTexturesPerFragmentStage: " << numStorageTexturesInFragmentStage << "\n";
-        shaderSS << "\n";
-        shaderSS << "    fn sample(tex: texture_2d<f32>, s: sampler, validId: u32, currentId: u32, c: vec4f) -> vec4f {\n";
-        shaderSS << "      let size = textureDimensions(tex, 0);\n";
-        shaderSS << "      let uv = vec2f((f32(currentId % " << maxSamplersPerShaderStage << "u) + 0.5) / f32(size.x), 0.5);\n";
-        shaderSS << "      let v = textureSampleLevel(tex, s, uv, 0);\n";
-        shaderSS << "      return select(c, v, currentId == validId);\n";
-        shaderSS << "    }\n";
-        shaderSS << "\n";
-        shaderSS << "    fn load(tex: texture_storage_2d<rgba8unorm, read>, validId: u32, currentId: u32, c: vec4f) -> vec4f {\n";
-        shaderSS << "      let size = textureDimensions(tex);\n";
-        shaderSS << "      let uv = vec2u(currentId % size.x, 0u);\n";
-        shaderSS << "      let v = textureLoad(tex, uv);\n";
-        shaderSS << "      return select(c, v, currentId == validId);\n";
-        shaderSS << "    }\n";
         shaderSS << "\n";
         for (const auto& fn : useComboFns) {
             shaderSS << fn << "\n";
@@ -427,11 +418,21 @@ or storage texture.
         shaderSS << "      @location(0) value: vec4f,\n";
         shaderSS << "    };\n";
         shaderSS << "\n";
-        shaderSS << "    @vertex fn vs(@builtin(instance_index) iNdx: u32) -> VOut {\n";
-        shaderSS << "      return VOut(\n";
-        shaderSS << "        vec4f(0, 0, 0, 1),\n";
-        shaderSS << "        useCombos0(iNdx),\n";
+        shaderSS << "    // All points are rendered in a single draw call. vNdx selects the column\n";
+        shaderSS << "    // (combo id, replacing the per-draw firstInstance) and the row (0: vertex-stage\n";
+        shaderSS << "    // results, 1: fragment-stage results) and positions the point at the center of\n";
+        shaderSS << "    // that texel in clip space (replacing the per-draw 1x1 viewport). The render\n";
+        shaderSS << "    // target is [numAcross, 2], so the y term below assumes a height of 2.\n";
+        shaderSS << "    @vertex fn vs(@builtin(vertex_index) vNdx: u32) -> VOut {\n";
+        shaderSS << "      let x = vNdx % " << numAcross << "u;\n";
+        shaderSS << "      let y = vNdx / " << numAcross << "u;\n";
+        shaderSS << "      let pos = vec4f(\n";
+        shaderSS << "        (f32(x) + 0.5) / " << numAcross << ".0 * 2.0 - 1.0,\n";
+        shaderSS << "        1.0 - (f32(y) + 0.5),\n";
+        shaderSS << "        0.0,\n";
+        shaderSS << "        1.0,\n";
         shaderSS << "      );\n";
+        shaderSS << "      return VOut(pos, useCombos0(x));\n";
         shaderSS << "    }\n";
         shaderSS << "\n";
         shaderSS << "    @fragment fn fs(vin: VOut) -> @location(0) vec4u {\n";
@@ -532,19 +533,9 @@ or storage texture.
                 pass, static_cast<uint32_t>(i), bindGroups[i], 0, nullptr);
         }
 
-        // For each row (y=0 vertex stage, y=1 fragment stage) and each column x,
-        // draw 1 point with instance_index = x using a 1x1 viewport at (x, y).
-        for (uint32_t y = 0; y < 2; ++y) {
-            for (uint32_t x = 0; x < numAcross; ++x) {
-                wgpuRenderPassEncoderSetViewport(
-                    pass,
-                    static_cast<float>(x), static_cast<float>(y),
-                    1.0f, 1.0f,
-                    0.0f, 1.0f);
-                // draw(vertexCount=1, instanceCount=1, firstVertex=0, firstInstance=x)
-                wgpuRenderPassEncoderDraw(pass, 1, 1, 0, x);
-            }
-        }
+        // One point per texel of the [numAcross, 2] target, drawn in a single call
+        // instead of numAcross*2 separate setViewport+draw calls.
+        wgpuRenderPassEncoderDraw(pass, numAcross * 2, 1, 0, 0);
         wgpuRenderPassEncoderEnd(pass);
 
         WGPUCommandBuffer cb = t.finishTracked(encoder);

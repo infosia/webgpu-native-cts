@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/command_buffer/copyTextureToTexture.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/operation/command_buffer/copyTextureToTexture.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 
 #include <algorithm>
 #include <array>
@@ -109,6 +109,37 @@ constexpr std::array<SizePair, 4> kArraySizePairs = {{
     {{31, 33, 5}, {31, 33, 5}},
     {{31, 32, 33}, {31, 32, 33}},
     {{32, 32, 6}, {32, 32, 6}},
+}};
+
+struct SizeInBlocksPair {
+    uint32_t srcWidth;
+    uint32_t srcHeight;
+    uint32_t dstWidth;
+    uint32_t dstHeight;
+};
+
+constexpr std::array<SizeInBlocksPair, 6> kCompressedNonArraySizesInBlocks = {{
+    // The heights and widths in blocks are all power of 2
+    {16, 8, 16, 8},
+    // The virtual width of the source texture at mipmap level 2 (15) is not a multiple of 4 blocks
+    {15, 8, 16, 8},
+    // The virtual width of the destination texture at mipmap level 2 (15) is not a multiple
+    // of 4 blocks
+    {16, 8, 15, 8},
+    // The virtual height of the source texture at mipmap level 2 (13) is not a multiple of 4 blocks
+    {16, 13, 16, 8},
+    // The virtual height of the destination texture at mipmap level 2 (13) is not a
+    // multiple of 4 blocks
+    {16, 8, 16, 13},
+    // None of the widths or heights in blocks are power of 2
+    {15, 13, 15, 13},
+}};
+
+constexpr std::array<SizeInBlocksPair, 2> kCompressedArraySizesInBlocks = {{
+    // The heights and widths in blocks are all power of 2
+    {2, 2, 2, 2},
+    // None of the widths or heights in blocks are power of 2
+    {15, 13, 15, 13},
 }};
 
 constexpr std::array<ZeroSizedConfig, 3> kZeroSizedConfigs = {{
@@ -374,53 +405,26 @@ AppliedCopy computeAppliedCopy(
     WGPUExtent3D dstSize,
     const CopyBoxOffset& offsets) {
     const TextureBlockInfo block = getBlockInfoForTextureFormat(format);
-    const int32_t srcOffsetX = offsets.srcOffset.x * static_cast<int32_t>(block.blockWidth);
-    const int32_t srcOffsetY = offsets.srcOffset.y * static_cast<int32_t>(block.blockHeight);
-    const int32_t dstOffsetX = offsets.dstOffset.x * static_cast<int32_t>(block.blockWidth);
-    const int32_t dstOffsetY = offsets.dstOffset.y * static_cast<int32_t>(block.blockHeight);
-    const int32_t srcOffsetZ = offsets.srcOffset.z;
-    const int32_t dstOffsetZ = offsets.dstOffset.z;
+    const int32_t blockWidth = static_cast<int32_t>(block.blockWidth);
+    const int32_t blockHeight = static_cast<int32_t>(block.blockHeight);
+    const int32_t minWidth = static_cast<int32_t>(std::min(srcSize.width, dstSize.width));
+    const int32_t minHeight = static_cast<int32_t>(std::min(srcSize.height, dstSize.height));
+    const int32_t minDepth = static_cast<int32_t>(std::min(srcSize.depthOrArrayLayers, dstSize.depthOrArrayLayers));
 
-    const int32_t maxWidth = std::min(
-        static_cast<int32_t>(srcSize.width) - srcOffsetX,
-        static_cast<int32_t>(dstSize.width) - dstOffsetX);
-    const int32_t maxHeight = std::min(
-        static_cast<int32_t>(srcSize.height) - srcOffsetY,
-        static_cast<int32_t>(dstSize.height) - dstOffsetY);
-    const int32_t maxDepth = std::min(
-        static_cast<int32_t>(srcSize.depthOrArrayLayers) - srcOffsetZ,
-        static_cast<int32_t>(dstSize.depthOrArrayLayers) - dstOffsetZ);
+    const int32_t srcX = std::min(offsets.srcOffset.x * blockWidth, minWidth);
+    const int32_t srcY = std::min(offsets.srcOffset.y * blockHeight, minHeight);
+    const int32_t srcZ = std::min(offsets.srcOffset.z, minDepth);
+    const int32_t dstX = std::min(offsets.dstOffset.x * blockWidth, minWidth);
+    const int32_t dstY = std::min(offsets.dstOffset.y * blockHeight, minHeight);
+    const int32_t dstZ = std::min(offsets.dstOffset.z, minDepth);
 
-    const int32_t copyWidth = std::max(0, maxWidth + offsets.copyExtent.width * static_cast<int32_t>(block.blockWidth));
-    const int32_t copyHeight = std::max(0, maxHeight + offsets.copyExtent.height * static_cast<int32_t>(block.blockHeight));
-    const int32_t copyDepth = std::max(0, maxDepth + offsets.copyExtent.depthOrArrayLayers);
-
-    WGPUOrigin3D srcOrigin{
-        static_cast<uint32_t>(std::max(0, srcOffsetX)),
-        static_cast<uint32_t>(std::max(0, srcOffsetY)),
-        static_cast<uint32_t>(std::max(0, srcOffsetZ)),
-    };
-    WGPUOrigin3D dstOrigin{
-        static_cast<uint32_t>(std::max(0, dstOffsetX)),
-        static_cast<uint32_t>(std::max(0, dstOffsetY)),
-        static_cast<uint32_t>(std::max(0, dstOffsetZ)),
-    };
-    if (copyWidth == 0) {
-        srcOrigin.x = std::min(srcOrigin.x, srcSize.width);
-        dstOrigin.x = std::min(dstOrigin.x, dstSize.width);
-    }
-    if (copyHeight == 0) {
-        srcOrigin.y = std::min(srcOrigin.y, srcSize.height);
-        dstOrigin.y = std::min(dstOrigin.y, dstSize.height);
-    }
-    if (copyDepth == 0) {
-        srcOrigin.z = std::min(srcOrigin.z, srcSize.depthOrArrayLayers);
-        dstOrigin.z = std::min(dstOrigin.z, dstSize.depthOrArrayLayers);
-    }
+    const int32_t copyWidth = std::max(minWidth + offsets.copyExtent.width * blockWidth - std::max(srcX, dstX), 0);
+    const int32_t copyHeight = std::max(minHeight + offsets.copyExtent.height * blockHeight - std::max(srcY, dstY), 0);
+    const int32_t copyDepth = std::max(minDepth + offsets.copyExtent.depthOrArrayLayers - std::max(srcZ, dstZ), 0);
 
     return AppliedCopy{
-        srcOrigin,
-        dstOrigin,
+        WGPUOrigin3D{static_cast<uint32_t>(srcX), static_cast<uint32_t>(srcY), static_cast<uint32_t>(srcZ)},
+        WGPUOrigin3D{static_cast<uint32_t>(dstX), static_cast<uint32_t>(dstY), static_cast<uint32_t>(dstZ)},
         WGPUExtent3D{static_cast<uint32_t>(copyWidth), static_cast<uint32_t>(copyHeight), static_cast<uint32_t>(copyDepth)},
     };
 }
@@ -724,7 +728,10 @@ void expectSingleColor(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, WGPU
         }
     }
 
-    WGPUBuffer buffer = t.makeBufferWithContents(expected.data(), expected.size(), WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+    WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bufferDesc.size = expected.size();
+    bufferDesc.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
+    WGPUBuffer buffer = t.createBufferTracked(bufferDesc);
     copyTextureToBufferAspect(
         t,
         texture,
@@ -855,7 +862,8 @@ void doCopyTextureToTextureTest(
     WGPUExtent3D dstTextureSize,
     const CopyBoxOffset& copyBoxOffsets,
     uint32_t srcCopyLevel,
-    uint32_t dstCopyLevel) {
+    uint32_t dstCopyLevel,
+    uint32_t requestedMipLevelCount = 0) {
     t.skipIfTextureFormatNotSupported(srcFormat);
     t.skipIfTextureFormatNotSupported(dstFormat);
     t.skipIfTextureFormatAndDimensionNotCompatible(srcFormat, dimension);
@@ -864,12 +872,14 @@ void doCopyTextureToTextureTest(
         t.skip("source and destination formats are not view-compatible");
     }
 
-    const uint32_t mipLevelCount = dimension == WGPUTextureDimension_1D ? 1 : 4;
+    const uint32_t mipLevelCount = requestedMipLevelCount != 0
+        ? requestedMipLevelCount
+        : (dimension == WGPUTextureDimension_1D ? 1 : 4);
     WGPUTexture srcTexture = createTexture(t, srcFormat, dimension, srcTextureSize, mipLevelCount);
     WGPUTexture dstTexture = createTexture(t, dstFormat, dimension, dstTextureSize, mipLevelCount);
 
-    const WGPUExtent3D srcSizeAtLevel = physicalMipSize(srcTextureSize, dimension, srcCopyLevel);
-    const WGPUExtent3D dstSizeAtLevel = physicalMipSize(dstTextureSize, dimension, dstCopyLevel);
+    const WGPUExtent3D srcSizeAtLevel = physicalMipSize(srcTextureSize, srcFormat, dimension, srcCopyLevel);
+    const WGPUExtent3D dstSizeAtLevel = physicalMipSize(dstTextureSize, dstFormat, dimension, dstCopyLevel);
     const TextureBlockInfo srcBlock = getBlockInfoForTextureFormat(srcFormat);
     const uint32_t srcBlocksPerRow = blockCount(srcSizeAtLevel.width, srcBlock.blockWidth);
     const uint32_t srcBlockRowsPerImage = blockCount(srcSizeAtLevel.height, srcBlock.blockHeight);
@@ -902,20 +912,64 @@ void doCopyTextureToTextureTest(
         bytesPerDstAlignedBlockRow,
         dstBlockRowsPerImage);
 
-    WGPUBuffer dstBuffer = t.makeBufferWithContents(expected.data(), expected.size(), WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+    WGPUBufferDescriptor dstBufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+    dstBufferDesc.size = expected.size();
+    dstBufferDesc.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
+    WGPUBuffer dstBuffer = t.createBufferTracked(dstBufferDesc);
     copyTextureToBuffer(t, dstTexture, dstBuffer, dstLayout, dstSizeAtLevel, dstCopyLevel);
+
+    if (isCompressedTextureFormat(dstFormat)) {
+        t.expectGPUBufferValuesEqual(dstBuffer, expected.data(), expected.size());
+        return;
+    }
     t.expectGPUBufferValuesEqualWhenInterpretedAsTextureFormat(
         expected.data(), expected.size(), dstBuffer, dstFormat, dstSizeAtLevel, dstLayout);
 }
 
-ParamsBuilder compatibleFormatParams(ParamsBuilder u) {
-    return u.combine("srcFormat", regularTextureFormatValues())
-        .combine("dstFormat", regularTextureFormatValues())
+ParamsBuilder compatibleFormatParams(ParamsBuilder u, const std::vector<Value>& formats) {
+    return u.combine("srcFormat", formats)
+        .combine("dstFormat", formats)
         .filter([](const ParamRecord& params) {
             const auto srcFormat = parseTextureFormat(valueAs<std::string>(*findParam(params, "srcFormat")));
             const auto dstFormat = parseTextureFormat(valueAs<std::string>(*findParam(params, "dstFormat")));
             return textureFormatsAreViewCompatible(srcFormat, dstFormat);
         });
+}
+
+ParamsBuilder compatibleFormatParams(ParamsBuilder u) {
+    return compatibleFormatParams(u, regularTextureFormatValues());
+}
+
+ParamsBuilder compatibleCompressedFormatParams(ParamsBuilder u) {
+    return compatibleFormatParams(u, formatIdentifierValues(kCompressedTextureFormats));
+}
+
+ParamsBuilder compressedNonArrayParams(ParamsBuilder u) {
+    return compatibleCompressedFormatParams(u)
+        .combine("dimension", textureDimensionValues(true))
+        .beginSubcases()
+        .combine("textureSizeInBlocksIndex", indexValues(static_cast<uint32_t>(kCompressedNonArraySizesInBlocks.size())))
+        .combine("copyBoxOffsetsIndex", indexValues(static_cast<uint32_t>(kCopyBoxOffsetsForWholeDepth.size())))
+        .combine("srcCopyLevel", {0, 2})
+        .combine("dstCopyLevel", {0, 2});
+}
+
+ParamsBuilder compressedArrayParams(ParamsBuilder u) {
+    return compatibleCompressedFormatParams(u)
+        .combine("dimension", textureDimensionValues(false))
+        .beginSubcases()
+        .combine("textureSizeInBlocksIndex", indexValues(static_cast<uint32_t>(kCompressedArraySizesInBlocks.size())))
+        .combine("copyBoxOffsetsIndex", indexValues(static_cast<uint32_t>(kCopyBoxOffsetsFor2DArrayTextures.size())))
+        .combine("srcCopyLevel", {0, 2})
+        .combine("dstCopyLevel", {0, 2});
+}
+
+ParamsBuilder compressedUnalignedParams(ParamsBuilder u) {
+    return compatibleCompressedFormatParams(u)
+        .beginSubcases()
+        // Which dimension(s) of mip level 0 have a partial edge block.
+        .combine("partialEdge", {std::string("width"), std::string("height"), std::string("both")})
+        .combine("copyBoxOffsetsIndex", indexValues(static_cast<uint32_t>(kCopyBoxOffsetsForWholeDepth.size())));
 }
 
 ParamsBuilder nonArrayParams(ParamsBuilder u) {
@@ -966,9 +1020,7 @@ ParamsBuilder arrayParams(ParamsBuilder u) {
 }
 
 ParamsBuilder zeroSizedParams(ParamsBuilder u) {
-    return u.combine("srcFormat", {std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))})
-        .combine("dstFormat", {std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))})
-        .beginSubcases()
+    return u.beginSubcases()
         .combine("zeroSizedConfigIndex", indexValues(static_cast<uint32_t>(kZeroSizedConfigs.size())))
         .combine("copyBoxOffsetsIndex", indexValues(static_cast<uint32_t>(kZeroSizedCopyBoxOffsets.size())))
         .filter([](const ParamRecord& params) {
@@ -1032,6 +1084,367 @@ void runArray(AllFeaturesMaxLimitsGpuTest& t) {
         dstCopyLevel);
 }
 
+void runCompressed(
+    AllFeaturesMaxLimitsGpuTest& t,
+    const SizeInBlocksPair& sizeInBlocks,
+    uint32_t depthOrArrayLayers,
+    const CopyBoxOffset& copyBoxOffsets) {
+    const auto srcFormat = parseTextureFormat(t.param<std::string>("srcFormat"));
+    const auto dstFormat = parseTextureFormat(t.param<std::string>("dstFormat"));
+    const auto dimension = parseTextureDimension(t.param<std::string>("dimension"));
+    const uint32_t srcCopyLevel = static_cast<uint32_t>(t.param<int64_t>("srcCopyLevel"));
+    const uint32_t dstCopyLevel = static_cast<uint32_t>(t.param<int64_t>("dstCopyLevel"));
+    t.skipIfTextureFormatAndDimensionNotCompatible(srcFormat, dimension);
+    t.skipIfTextureFormatAndDimensionNotCompatible(dstFormat, dimension);
+    const TextureBlockInfo srcBlock = getBlockInfoForTextureFormat(srcFormat);
+    const TextureBlockInfo dstBlock = getBlockInfoForTextureFormat(dstFormat);
+
+    doCopyTextureToTextureTest(
+        t,
+        srcFormat,
+        dstFormat,
+        dimension,
+        WGPUExtent3D{sizeInBlocks.srcWidth * srcBlock.blockWidth, sizeInBlocks.srcHeight * srcBlock.blockHeight, depthOrArrayLayers},
+        WGPUExtent3D{sizeInBlocks.dstWidth * dstBlock.blockWidth, sizeInBlocks.dstHeight * dstBlock.blockHeight, depthOrArrayLayers},
+        copyBoxOffsets,
+        srcCopyLevel,
+        dstCopyLevel);
+}
+
+void runCompressedNonArray(AllFeaturesMaxLimitsGpuTest& t) {
+    runCompressed(
+        t,
+        kCompressedNonArraySizesInBlocks[static_cast<size_t>(t.param<int64_t>("textureSizeInBlocksIndex"))],
+        1,
+        kCopyBoxOffsetsForWholeDepth[static_cast<size_t>(t.param<int64_t>("copyBoxOffsetsIndex"))]);
+}
+
+void runCompressedArray(AllFeaturesMaxLimitsGpuTest& t) {
+    runCompressed(
+        t,
+        kCompressedArraySizesInBlocks[static_cast<size_t>(t.param<int64_t>("textureSizeInBlocksIndex"))],
+        5,
+        kCopyBoxOffsetsFor2DArrayTextures[static_cast<size_t>(t.param<int64_t>("copyBoxOffsetsIndex"))]);
+}
+
+void runCompressedUnaligned(AllFeaturesMaxLimitsGpuTest& t) {
+    const auto srcFormat = parseTextureFormat(t.param<std::string>("srcFormat"));
+    const auto dstFormat = parseTextureFormat(t.param<std::string>("dstFormat"));
+    const std::string partialEdge = t.param<std::string>("partialEdge");
+    const CopyBoxOffset& copyBoxOffsets =
+        kCopyBoxOffsetsForWholeDepth[static_cast<size_t>(t.param<int64_t>("copyBoxOffsetsIndex"))];
+
+    if (!deviceHasTextureCompressionUnaligned(t.device())) {
+        t.skip("device does not have feature texture-compression-unaligned");
+    }
+
+    // The source and destination formats share the same base format, so they have the same texel
+    // block size.
+    const TextureBlockInfo block = getBlockInfoForTextureFormat(srcFormat);
+
+    // Mip level 0 size: a few full blocks plus a one-texel partial edge block in the selected
+    // dimension(s). An unaligned mip level 0 is only valid with 'texture-compression-unaligned'.
+    const uint32_t width = partialEdge == "height" ? 4 * block.blockWidth : 3 * block.blockWidth + 1;
+    const uint32_t height = partialEdge == "width" ? 4 * block.blockHeight : 3 * block.blockHeight + 1;
+    const WGPUExtent3D size{width, height, 1};
+
+    doCopyTextureToTextureTest(
+        t,
+        srcFormat,
+        dstFormat,
+        WGPUTextureDimension_2D,
+        size,
+        size,
+        copyBoxOffsets,
+        0, // srcCopyLevel: the top (and only) mip level.
+        0, // dstCopyLevel
+        1); // mipLevelCount: a single, unaligned mip level.
+}
+
+WGPUTextureDescriptor multisampledTextureDesc(
+    WGPUTextureFormat format,
+    WGPUExtent3D size,
+    WGPUTextureUsage usage,
+    uint32_t sampleCount) {
+    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    desc.format = format;
+    desc.size = size;
+    desc.usage = usage;
+    desc.sampleCount = sampleCount;
+    return desc;
+}
+
+void copyWholeMultisampledTexture(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture source,
+    WGPUTexture destination,
+    WGPUExtent3D size) {
+    copyTextureToTexture(t, source, destination, size, 0, WGPUOrigin3D{0, 0, 0}, 0, WGPUOrigin3D{0, 0, 0});
+}
+
+void runCopyMultisampledColor(AllFeaturesMaxLimitsGpuTest& t) {
+    const WGPUExtent3D textureSize{32, 16, 1};
+    constexpr WGPUTextureFormat kColorFormat = WGPUTextureFormat_RGBA8Unorm;
+    constexpr uint32_t kSampleCount = 4;
+
+    WGPUTexture sourceTexture = t.createTextureTracked(multisampledTextureDesc(
+        kColorFormat,
+        textureSize,
+        WGPUTextureUsage_CopySrc | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment,
+        kSampleCount));
+    WGPUTexture destinationTexture = t.createTextureTracked(multisampledTextureDesc(
+        kColorFormat,
+        textureSize,
+        WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment,
+        kSampleCount));
+    const WGPUTextureViewDescriptor defaultViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+
+    WGPUColorTargetState target = WGPU_COLOR_TARGET_STATE_INIT;
+    target.format = kColorFormat;
+    target.writeMask = WGPUColorWriteMask_All;
+
+    // Initialize sourceTexture with a draw call.
+    WGPUFragmentState initFragment = WGPU_FRAGMENT_STATE_INIT;
+    initFragment.module = t.createShaderModuleTracked(R"(
+            @fragment
+            fn main() -> @location(0) vec4<f32> {
+              return vec4<f32>(0.3, 0.5, 0.8, 1.0);
+            })");
+    initFragment.targetCount = 1;
+    initFragment.targets = &target;
+
+    WGPURenderPipelineDescriptor initPipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    initPipelineDesc.vertex.module = t.createShaderModuleTracked(R"(
+            @vertex
+            fn main(@builtin(vertex_index) VertexIndex : u32) -> @builtin(position) vec4<f32> {
+              var pos = array<vec2<f32>, 3>(
+                  vec2<f32>(-1.0,  1.0),
+                  vec2<f32>( 1.0,  1.0),
+                  vec2<f32>( 1.0, -1.0)
+              );
+              return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+            })");
+    initPipelineDesc.fragment = &initFragment;
+    initPipelineDesc.multisample.count = kSampleCount;
+    WGPURenderPipeline renderPipelineForInit = t.createRenderPipelineTracked(initPipelineDesc);
+
+    WGPURenderPassColorAttachment initAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    initAttachment.view = t.createViewTracked(sourceTexture, defaultViewDesc);
+    initAttachment.clearValue = WGPUColor{1.0, 0.0, 0.0, 1.0};
+    initAttachment.loadOp = WGPULoadOp_Clear;
+    initAttachment.storeOp = WGPUStoreOp_Store;
+    WGPURenderPassDescriptor initPassDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    initPassDesc.colorAttachmentCount = 1;
+    initPassDesc.colorAttachments = &initAttachment;
+
+    WGPUCommandEncoder initEncoder = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder renderPassForInit = t.beginRenderPassTracked(initEncoder, &initPassDesc);
+    wgpuRenderPassEncoderSetPipeline(renderPassForInit, renderPipelineForInit);
+    wgpuRenderPassEncoderDraw(renderPassForInit, 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(renderPassForInit);
+    submit(t, initEncoder);
+
+    // Do the texture-to-texture copy
+    copyWholeMultisampledTexture(t, sourceTexture, destinationTexture, textureSize);
+
+    // Verify if all the sub-pixel values at the same location of sourceTexture and
+    // destinationTexture are equal.
+    WGPUFragmentState validationFragment = WGPU_FRAGMENT_STATE_INIT;
+    validationFragment.module = t.createShaderModuleTracked(
+        R"(
+          @group(0) @binding(0) var sourceTexture : texture_multisampled_2d<f32>;
+          @group(0) @binding(1) var destinationTexture : texture_multisampled_2d<f32>;
+          @fragment
+          fn main(@builtin(position) coord_in: vec4<f32>) -> @location(0) vec4<f32> {
+            var coord_in_vec2 = vec2<i32>(i32(coord_in.x), i32(coord_in.y));
+            for (var sampleIndex = 0; sampleIndex < )" + std::to_string(kSampleCount) + R"(;
+              sampleIndex = sampleIndex + 1) {
+              var sourceSubPixel : vec4<f32> =
+                textureLoad(sourceTexture, coord_in_vec2, sampleIndex);
+              var destinationSubPixel : vec4<f32> =
+                textureLoad(destinationTexture, coord_in_vec2, sampleIndex);
+              if (!all(sourceSubPixel == destinationSubPixel)) {
+                return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+              }
+            }
+            return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+          })");
+    validationFragment.targetCount = 1;
+    validationFragment.targets = &target;
+
+    WGPURenderPipelineDescriptor validationPipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    validationPipelineDesc.vertex.module = t.createShaderModuleTracked(R"(
+          @vertex
+          fn main(@builtin(vertex_index) VertexIndex : u32) -> @builtin(position) vec4<f32> {
+            var pos = array<vec2<f32>, 6>(
+              vec2<f32>(-1.0,  1.0),
+              vec2<f32>(-1.0, -1.0),
+              vec2<f32>( 1.0,  1.0),
+              vec2<f32>(-1.0, -1.0),
+              vec2<f32>( 1.0,  1.0),
+              vec2<f32>( 1.0, -1.0));
+            return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+          })");
+    validationPipelineDesc.fragment = &validationFragment;
+    WGPURenderPipeline renderPipelineForValidation = t.createRenderPipelineTracked(validationPipelineDesc);
+
+    std::array<WGPUBindGroupEntry, 2> entries = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+    entries[0].binding = 0;
+    entries[0].textureView = t.createViewTracked(sourceTexture, defaultViewDesc);
+    entries[1].binding = 1;
+    entries[1].textureView = t.createViewTracked(destinationTexture, defaultViewDesc);
+    WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bindGroupDesc.layout = wgpuRenderPipelineGetBindGroupLayout(renderPipelineForValidation, 0);
+    bindGroupDesc.entryCount = entries.size();
+    bindGroupDesc.entries = entries.data();
+    WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
+    wgpuBindGroupLayoutRelease(bindGroupDesc.layout);
+
+    WGPUTexture expectedOutputTexture = t.createTextureTracked(multisampledTextureDesc(
+        kColorFormat, textureSize, WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment, 1));
+    WGPURenderPassColorAttachment validationAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    validationAttachment.view = t.createViewTracked(expectedOutputTexture, defaultViewDesc);
+    validationAttachment.clearValue = WGPUColor{1.0, 0.0, 0.0, 1.0};
+    validationAttachment.loadOp = WGPULoadOp_Clear;
+    validationAttachment.storeOp = WGPUStoreOp_Store;
+    WGPURenderPassDescriptor validationPassDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    validationPassDesc.colorAttachmentCount = 1;
+    validationPassDesc.colorAttachments = &validationAttachment;
+
+    WGPUCommandEncoder validationEncoder = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder renderPassForValidation = t.beginRenderPassTracked(validationEncoder, &validationPassDesc);
+    wgpuRenderPassEncoderSetPipeline(renderPassForValidation, renderPipelineForValidation);
+    wgpuRenderPassEncoderSetBindGroup(renderPassForValidation, 0, bindGroup, 0, nullptr);
+    wgpuRenderPassEncoderDraw(renderPassForValidation, 6, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(renderPassForValidation);
+    submit(t, validationEncoder);
+
+    expectSingleColor(t, expectedOutputTexture, textureSize);
+}
+
+void runCopyMultisampledDepth(AllFeaturesMaxLimitsGpuTest& t) {
+    const auto format = parseTextureFormat(t.param<std::string>("format"));
+    t.skipIfTextureFormatNotSupported(format);
+
+    const WGPUExtent3D textureSize{32, 16, 1};
+    constexpr uint32_t kSampleCount = 4;
+    constexpr WGPUTextureFormat kColorFormat = WGPUTextureFormat_RGBA8Unorm;
+    const WGPUTextureViewDescriptor defaultViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+
+    WGPUTexture sourceTexture = t.createTextureTracked(multisampledTextureDesc(
+        format, textureSize, WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment, kSampleCount));
+    WGPUTexture destinationTexture = t.createTextureTracked(multisampledTextureDesc(
+        format, textureSize, WGPUTextureUsage_CopyDst | WGPUTextureUsage_RenderAttachment, kSampleCount));
+
+    WGPUShaderModule vertexModule = t.createShaderModuleTracked(R"(
+          @vertex
+          fn main(@builtin(vertex_index) VertexIndex : u32)-> @builtin(position) vec4<f32> {
+            var pos : array<vec3<f32>, 6> = array<vec3<f32>, 6>(
+                vec3<f32>(-1.0,  1.0, 0.5),
+                vec3<f32>(-1.0, -1.0, 0.0),
+                vec3<f32>( 1.0,  1.0, 1.0),
+                vec3<f32>(-1.0, -1.0, 0.0),
+                vec3<f32>( 1.0,  1.0, 1.0),
+                vec3<f32>( 1.0, -1.0, 0.5));
+            return vec4<f32>(pos[VertexIndex], 1.0);
+          })");
+
+    // Initialize the depth aspect of source texture with a draw call
+    WGPUDepthStencilState initDepthStencil = WGPU_DEPTH_STENCIL_STATE_INIT;
+    initDepthStencil.format = format;
+    initDepthStencil.depthCompare = WGPUCompareFunction_Always;
+    initDepthStencil.depthWriteEnabled = WGPUOptionalBool_True;
+
+    WGPURenderPipelineDescriptor initPipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    initPipelineDesc.vertex.module = vertexModule;
+    initPipelineDesc.depthStencil = &initDepthStencil;
+    initPipelineDesc.multisample.count = kSampleCount;
+    WGPURenderPipeline renderPipelineForInit = t.createRenderPipelineTracked(initPipelineDesc);
+
+    WGPURenderPassDepthStencilAttachment initAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    initAttachment.view = t.createViewTracked(sourceTexture, defaultViewDesc);
+    initAttachment.depthClearValue = 0.0f;
+    initAttachment.depthLoadOp = WGPULoadOp_Clear;
+    initAttachment.depthStoreOp = WGPUStoreOp_Store;
+    if (isStencilTextureFormat(format)) {
+        initAttachment.stencilLoadOp = WGPULoadOp_Clear;
+        initAttachment.stencilStoreOp = WGPUStoreOp_Store;
+    }
+    WGPURenderPassDescriptor initPassDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    initPassDesc.depthStencilAttachment = &initAttachment;
+
+    WGPUCommandEncoder encoderForInit = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder renderPassForInit = t.beginRenderPassTracked(encoderForInit, &initPassDesc);
+    wgpuRenderPassEncoderSetPipeline(renderPassForInit, renderPipelineForInit);
+    wgpuRenderPassEncoderDraw(renderPassForInit, 6, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(renderPassForInit);
+    submit(t, encoderForInit);
+
+    // Do the texture-to-texture copy
+    copyWholeMultisampledTexture(t, sourceTexture, destinationTexture, textureSize);
+
+    // Verify the depth values in destinationTexture are what we expected with
+    // depthCompareFunction == 'equal' and depthWriteEnabled == false in the render pipeline
+    WGPUColorTargetState target = WGPU_COLOR_TARGET_STATE_INIT;
+    target.format = kColorFormat;
+    target.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState verifyFragment = WGPU_FRAGMENT_STATE_INIT;
+    verifyFragment.module = t.createShaderModuleTracked(R"(
+          @fragment
+          fn main() -> @location(0) vec4<f32> {
+            return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+          })");
+    verifyFragment.targetCount = 1;
+    verifyFragment.targets = &target;
+
+    WGPUDepthStencilState verifyDepthStencil = WGPU_DEPTH_STENCIL_STATE_INIT;
+    verifyDepthStencil.format = format;
+    verifyDepthStencil.depthCompare = WGPUCompareFunction_Equal;
+    verifyDepthStencil.depthWriteEnabled = WGPUOptionalBool_False;
+
+    WGPURenderPipelineDescriptor verifyPipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    verifyPipelineDesc.vertex.module = vertexModule;
+    verifyPipelineDesc.fragment = &verifyFragment;
+    verifyPipelineDesc.depthStencil = &verifyDepthStencil;
+    verifyPipelineDesc.multisample.count = kSampleCount;
+    WGPURenderPipeline renderPipelineForVerify = t.createRenderPipelineTracked(verifyPipelineDesc);
+
+    WGPUTexture multisampledColorTexture = t.createTextureTracked(multisampledTextureDesc(
+        kColorFormat, textureSize, WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment, kSampleCount));
+    WGPUTexture colorTextureAsResolveTarget = t.createTextureTracked(multisampledTextureDesc(
+        kColorFormat, textureSize, WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment, 1));
+
+    WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+    colorAttachment.view = t.createViewTracked(multisampledColorTexture, defaultViewDesc);
+    colorAttachment.clearValue = WGPUColor{1.0, 0.0, 0.0, 1.0};
+    colorAttachment.loadOp = WGPULoadOp_Clear;
+    colorAttachment.storeOp = WGPUStoreOp_Discard;
+    colorAttachment.resolveTarget = t.createViewTracked(colorTextureAsResolveTarget, defaultViewDesc);
+
+    WGPURenderPassDepthStencilAttachment depthAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    depthAttachment.view = t.createViewTracked(destinationTexture, defaultViewDesc);
+    depthAttachment.depthLoadOp = WGPULoadOp_Load;
+    depthAttachment.depthStoreOp = WGPUStoreOp_Store;
+    if (isStencilTextureFormat(format)) {
+        depthAttachment.stencilLoadOp = WGPULoadOp_Clear;
+        depthAttachment.stencilStoreOp = WGPUStoreOp_Store;
+    }
+    WGPURenderPassDescriptor verifyPassDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    verifyPassDesc.colorAttachmentCount = 1;
+    verifyPassDesc.colorAttachments = &colorAttachment;
+    verifyPassDesc.depthStencilAttachment = &depthAttachment;
+
+    WGPUCommandEncoder encoderForVerify = t.createCommandEncoderTracked();
+    WGPURenderPassEncoder renderPassForVerify = t.beginRenderPassTracked(encoderForVerify, &verifyPassDesc);
+    wgpuRenderPassEncoderSetPipeline(renderPassForVerify, renderPipelineForVerify);
+    wgpuRenderPassEncoderDraw(renderPassForVerify, 6, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(renderPassForVerify);
+    submit(t, encoderForVerify);
+
+    expectSingleColor(t, colorTextureAsResolveTarget, textureSize);
+}
+
 void runZeroSized(AllFeaturesMaxLimitsGpuTest& t) {
     const uint32_t configIndex = static_cast<uint32_t>(t.param<int64_t>("zeroSizedConfigIndex"));
     const uint32_t offsetIndex = static_cast<uint32_t>(t.param<int64_t>("copyBoxOffsetsIndex"));
@@ -1065,20 +1478,31 @@ CTS_TEST(g, "zero_sized")
     .fn([](AllFeaturesMaxLimitsGpuTest& t) { runZeroSized(t); });
 
 CTS_TEST(g, "color_textures,compressed,non_array")
-    .unimplemented("compressed texture copyTextureToTexture tests are deferred");
+    .params(compressedNonArrayParams)
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) { runCompressedNonArray(t); });
+
+CTS_TEST(g, "color_textures,compressed,unaligned,non_array")
+    .params(compressedUnalignedParams)
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) { runCompressedUnaligned(t); });
 
 CTS_TEST(g, "color_textures,compressed,array")
-    .unimplemented("compressed texture copyTextureToTexture tests are deferred");
+    .params(compressedArrayParams)
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) { runCompressedArray(t); });
 
 CTS_TEST(g, "copy_depth_stencil")
     .params(depthStencilParams)
     .fn([](AllFeaturesMaxLimitsGpuTest& t) { runDepthStencil(t); });
 
 CTS_TEST(g, "copy_multisampled_color")
-    .unimplemented("multisampled color copyTextureToTexture tests are deferred");
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) { runCopyMultisampledColor(t); });
 
 CTS_TEST(g, "copy_multisampled_depth")
-    .unimplemented("multisampled depth copyTextureToTexture tests are deferred");
+    .params([](ParamsBuilder u) {
+        return u.combine("format", depthStencilFormatValues()).filter([](const ParamRecord& params) {
+            return isDepthTextureFormat(parseTextureFormat(valueAs<std::string>(*findParam(params, "format"))));
+        });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) { runCopyMultisampledDepth(t); });
 
 CTS_TEST(g, "copy_multisampled_stencil")
-    .unimplemented("multisampled stencil copyTextureToTexture tests are deferred");
+    .unimplemented("unimplemented upstream");

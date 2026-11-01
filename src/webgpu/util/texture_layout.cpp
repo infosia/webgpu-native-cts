@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/util/texture/layout.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/util/texture/layout.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 #include "webgpu/util/texture_layout.h"
 
 #include <algorithm>
@@ -33,11 +33,11 @@ uint32_t layoutBytesPerRow(TexelCopyBufferLayout layout, WGPUTextureFormat forma
     return static_cast<uint32_t>(alignTo(bytesInACompleteRow(size.width, format), kBytesPerRowAlignment));
 }
 
-uint32_t layoutRowsPerImage(TexelCopyBufferLayout layout, WGPUExtent3D size) {
+uint32_t layoutRowsPerImage(TexelCopyBufferLayout layout, uint32_t heightBlocks) {
     if (layout.rowsPerImage != WGPU_COPY_STRIDE_UNDEFINED) {
         return layout.rowsPerImage;
     }
-    return size.height;
+    return heightBlocks;
 }
 
 } // namespace
@@ -54,13 +54,25 @@ WGPUExtent3D physicalMipSize(WGPUExtent3D baseSize, WGPUTextureDimension dimensi
     return mipSizeFor(baseSize, dimension, mipLevel);
 }
 
+WGPUExtent3D physicalMipSize(
+    WGPUExtent3D baseSize,
+    WGPUTextureFormat format,
+    WGPUTextureDimension dimension,
+    uint32_t mipLevel) {
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+    WGPUExtent3D size = mipSizeFor(baseSize, dimension, mipLevel);
+    size.width = static_cast<uint32_t>(alignTo(size.width, info.blockWidth));
+    size.height = static_cast<uint32_t>(alignTo(size.height, info.blockHeight));
+    return size;
+}
+
 TextureCopyLayout getTextureCopyLayout(
     WGPUTextureFormat format,
     WGPUTextureDimension dimension,
     WGPUExtent3D baseSize,
     uint32_t mipLevel) {
     const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
-    const WGPUExtent3D mipSize = mipSizeFor(baseSize, dimension, mipLevel);
+    const WGPUExtent3D mipSize = physicalMipSize(baseSize, format, dimension, mipLevel);
     const uint32_t widthBlocks = mipSize.width / info.blockWidth;
     const uint32_t heightBlocks = mipSize.height / info.blockHeight;
     const uint32_t depth = mipSize.depthOrArrayLayers;
@@ -117,35 +129,48 @@ uint64_t dataBytesForCopyOrFail(
     if (depth > 1) {
         required += static_cast<uint64_t>(bytesPerRow) * rowsPerImage * (depth - 1);
     }
-    if (heightBlocks > 1) {
-        required += static_cast<uint64_t>(bytesPerRow) * (heightBlocks - 1);
+    if (depth > 0) {
+        if (heightBlocks > 1) {
+            required += static_cast<uint64_t>(bytesPerRow) * (heightBlocks - 1);
+        }
+        if (heightBlocks > 0) {
+            required += bytesInLastRow;
+        }
     }
-    required += bytesInLastRow;
     return layout.offset + required;
 }
 
 void updateLinearTextureDataSubBox(WGPUTextureFormat format, WGPUExtent3D copySize, const LinearTextureSubBox& copy) {
     const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+    const uint32_t heightBlocks = copySize.height / info.blockHeight;
     const uint32_t srcBytesPerRow = layoutBytesPerRow(copy.srcLayout, format, copySize);
-    const uint32_t srcRowsPerImage = layoutRowsPerImage(copy.srcLayout, copySize);
+    const uint32_t srcRowsPerImage = layoutRowsPerImage(copy.srcLayout, heightBlocks);
     const uint32_t dstBytesPerRow = layoutBytesPerRow(copy.dstLayout, format, copySize);
-    const uint32_t dstRowsPerImage = layoutRowsPerImage(copy.dstLayout, copySize);
+    const uint32_t dstRowsPerImage = layoutRowsPerImage(copy.dstLayout, heightBlocks);
     const uint32_t rowBytes = bytesInACompleteRow(copySize.width, format);
 
+    // The origins are in texels, the layouts in block rows.
+    const auto rowOffset = [&info](const WGPUOrigin3D& origin,
+                                   const TexelCopyBufferLayout& layout,
+                                   uint32_t bytesPerRow,
+                                   uint32_t rowsPerImage,
+                                   uint32_t y,
+                                   uint32_t z) {
+        return layout.offset + static_cast<uint64_t>(origin.z + z) * rowsPerImage * bytesPerRow
+            + static_cast<uint64_t>(origin.y / info.blockHeight + y) * bytesPerRow
+            + static_cast<uint64_t>(origin.x / info.blockWidth) * info.bytesPerBlock;
+    };
+
     for (uint32_t z = 0; z < copySize.depthOrArrayLayers; ++z) {
-        for (uint32_t y = 0; y < copySize.height; ++y) {
-            const uint64_t srcOffset = copy.srcLayout.offset
-                + static_cast<uint64_t>(copy.srcOrigin.z + z) * srcRowsPerImage * srcBytesPerRow
-                + static_cast<uint64_t>(copy.srcOrigin.y + y) * srcBytesPerRow
-                + static_cast<uint64_t>(copy.srcOrigin.x) * info.bytesPerBlock;
-            const uint64_t dstOffset = copy.dstLayout.offset
-                + static_cast<uint64_t>(copy.dstOrigin.z + z) * dstRowsPerImage * dstBytesPerRow
-                + static_cast<uint64_t>(copy.dstOrigin.y + y) * dstBytesPerRow
-                + static_cast<uint64_t>(copy.dstOrigin.x) * info.bytesPerBlock;
+        for (uint32_t y = 0; y < heightBlocks; ++y) {
+            const uint64_t srcOffset = rowOffset(copy.srcOrigin, copy.srcLayout, srcBytesPerRow, srcRowsPerImage, y, z);
+            const uint64_t dstOffset = rowOffset(copy.dstOrigin, copy.dstLayout, dstBytesPerRow, dstRowsPerImage, y, z);
             if (srcOffset + rowBytes > copy.srcLen || dstOffset + rowBytes > copy.dstLen) {
                 throw std::runtime_error("linear texture sub-box copy out of bounds");
             }
-            std::memcpy(copy.dst + dstOffset, copy.src + srcOffset, rowBytes);
+            if (rowBytes > 0) {
+                std::memcpy(copy.dst + dstOffset, copy.src + srcOffset, rowBytes);
+            }
         }
     }
 }

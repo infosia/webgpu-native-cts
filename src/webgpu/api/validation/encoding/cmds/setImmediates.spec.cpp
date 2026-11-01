@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/api/validation/encoding/cmds/setImmediates.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/api/validation/encoding/cmds/setImmediates.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2026 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 webgpu-native-cts contributors, BSD-3-Clause.
 //
@@ -16,8 +16,8 @@
 //    no separate dataOffset argument; a JS `data.subarray(dataOffset, dataOffset+size)`
 //    is represented natively as `data.data() + dataOffset*elementSize` with `size`
 //    bytes.
-//  - Several upstream subcases assert `t.shouldThrow('RangeError', ...)` for a
-//    WebIDL/typed-array-view *bounds* violation (dataOffset/size exceeding the
+//  - Several upstream subcases assert `t.shouldThrow('OperationError', ...)` for a
+//    content-timeline *bounds* violation (dataOffset/size exceeding the
 //    backing TypedArray's element count). That is a synchronous JS-level check with
 //    no C analog -- the C caller owns the pointer and never constructs an
 //    out-of-bounds view. Per the established convention in this repo
@@ -288,8 +288,8 @@ CTS_TEST(g, "alignment")
             std::vector<uint8_t> data(static_cast<size_t>(contentByteSize), 0);
             ctxSetImmediates(ctx, static_cast<uint32_t>(rangeOffset), data.data(), data.size());
         } else {
-            // Upstream: shouldThrow('RangeError', ...) -- contentByteSize not a multiple of
-            // 4 is a synchronous WebIDL-level check with no C analog (see file header). We
+            // Upstream: shouldThrow('OperationError', ...) -- contentByteSize not a multiple of
+            // 4 is a synchronous content-timeline check with no C analog (see file header). We
             // skip the call, leaving the encoder untouched, which reproduces upstream's
             // "nothing recorded" observable behavior for this branch.
         }
@@ -336,10 +336,10 @@ CTS_TEST(g, "overflow")
                 // dataOffset + size overflows
                 ParamRecord{
                     {"rangeOffset", int64_t(0)}, {"dataOffset", int64_t(2147483647) /* 2**31 - 1 */},
-                    {"elementCount", int64_t(4)}, {"_expectedError", std::string("RangeError")}},
+                    {"elementCount", int64_t(4)}, {"_expectedError", std::string("OperationError")}},
                 ParamRecord{
                     {"rangeOffset", int64_t(0)}, {"dataOffset", int64_t(4294967295) /* 2**32 - 1 */},
-                    {"elementCount", int64_t(4)}, {"_expectedError", std::string("RangeError")}},
+                    {"elementCount", int64_t(4)}, {"_expectedError", std::string("OperationError")}},
             });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
@@ -351,8 +351,8 @@ CTS_TEST(g, "overflow")
         const int64_t     dataOffset   = t.param<int64_t>("dataOffset");
         const int64_t     elementCount = t.param<int64_t>("elementCount");
 
-        const bool isRangeErrorCase =
-            t.paramIsString("_expectedError") && t.param<std::string>("_expectedError") == "RangeError";
+        const bool isOperationErrorCase =
+            t.paramIsString("_expectedError") && t.param<std::string>("_expectedError") == "OperationError";
         const bool isValidationErrorCase =
             t.paramIsString("_expectedError") && t.param<std::string>("_expectedError") == "validation";
 
@@ -361,18 +361,18 @@ CTS_TEST(g, "overflow")
 
         ProgrammableEncoderContext ctx = makeProgrammableEncoderContext(t, encoderType);
 
-        if (isRangeErrorCase) {
+        if (isOperationErrorCase) {
             // Upstream: `data = new arrayBufferType(elementCount)` (length == elementCount),
             // then `encoder.setImmediates(rangeOffset, data, dataOffset, elementCount)` with a
             // huge dataOffset (2**31-1 / 2**32-1). dataOffset + elementCount always exceeds
-            // data.length -> synchronous RangeError from the WebIDL typed-array-view bounds
+            // data.length -> synchronous OperationError from the content-timeline bounds
             // check, before anything is recorded. No C analog (see file header); we do not
             // call setImmediates and, matching upstream (validateFinish is only invoked in the
             // `else` branch), we do not check finish() either.
             return;
         }
 
-        // Non-RangeError branch: dataOffset is always 0 in these subcases; honor it generally
+        // Non-OperationError branch: dataOffset is always 0 in these subcases; honor it generally
         // (in bytes) for robustness even though it never contributes here.
         std::vector<uint8_t> data(static_cast<size_t>(contentByteSize), 0);
         const uint8_t* dataStart = data.data() + static_cast<size_t>(dataOffset) * static_cast<size_t>(elementSize);
@@ -383,12 +383,12 @@ CTS_TEST(g, "overflow")
 // ---------------------------------------------------------------------------
 // g.test('out_of_bounds')
 // Tests that rangeOffset + contentSize is greater than maxImmediateSize (Validation Error)
-// and contentSize is larger than data size (RangeError).
+// and contentSize is larger than data size (OperationError).
 // ---------------------------------------------------------------------------
 CTS_TEST(g, "out_of_bounds")
     .desc(
         "Tests that rangeOffset + contentSize is greater than maxImmediateSize (Validation "
-        "Error) and contentSize is larger than data size (RangeError).")
+        "Error) and contentSize is larger than data size (OperationError).")
     .params([](ParamsBuilder u) {
         return u.combine("encoderType", kProgrammableEncoderTypeValues())
             .combine("arrayType", kTypedArrayBufferViewKeyValues())
@@ -430,7 +430,7 @@ CTS_TEST(g, "out_of_bounds")
         const bool dataOverLimit  = elementCount > dataLength;
 
         if (dataOverLimit) {
-            // Upstream: shouldThrow('RangeError', ...) -- the backing TypedArray (dataLength
+            // Upstream: shouldThrow('OperationError', ...) -- the backing TypedArray (dataLength
             // elements) is shorter than the elementCount requested by setImmediates. Typed-array
             // bounds check -> no C analog (see file header). Skip the call and do not check
             // finish(), matching upstream (validateFinish is only called `if (!dataOverLimit)`).

@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/command_buffer/image_copy.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/operation/command_buffer/image_copy.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 
 #include <algorithm>
 #include <array>
@@ -6,6 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -15,7 +18,9 @@
 #include "webgpu/capability_info.h"
 #include "webgpu/texture_format.h"
 #include "webgpu/util/enum_strings.h"
+#include "webgpu/util/texel_view.h"
 #include "webgpu/util/texture_layout.h"
+#include "webgpu/util/texture_ok.h"
 
 using namespace cts;
 
@@ -52,16 +57,27 @@ struct OffsetAndPaddingConfig {
     uint32_t dataPaddingInBytes = 0;
 };
 
+/// How the arguments are passed to WriteTexture/CopyB2T/CopyT2B. Upstream's 'arrays' passes GPUOrigin3D
+/// and GPUExtent3D as arrays, which has no C analog: it behaves like None. Undefined passes the default
+/// values as undefined: in C, WGPU_COPY_STRIDE_UNDEFINED for the strides (a zero origin, mip level and
+/// offset already are the defaults).
+enum class ChangeBeforePass {
+    None,
+    Undefined,
+};
+
 struct CopyScenario {
+    TexelCopyBufferLayout textureDataLayout;
+    WGPUExtent3D copySize = WGPUExtent3D{1, 1, 1};
+    uint64_t dataSize = 0;
+    uint32_t mipLevel = 0;
+    WGPUOrigin3D origin = WGPUOrigin3D{0, 0, 0};
+    WGPUExtent3D textureSize = WGPUExtent3D{1, 1, 1};
     WGPUTextureFormat format = WGPUTextureFormat_Undefined;
     WGPUTextureDimension dimension = WGPUTextureDimension_2D;
     InitMethod initMethod = InitMethod::WriteTexture;
     CheckMethod checkMethod = CheckMethod::FullCopyT2B;
-    WGPUExtent3D textureSize = WGPUExtent3D{1, 1, 1};
-    WGPUExtent3D copySize = WGPUExtent3D{1, 1, 1};
-    WGPUOrigin3D origin = WGPUOrigin3D{0, 0, 0};
-    uint32_t mipLevel = 0;
-    TexelCopyBufferLayout uploadLayout;
+    ChangeBeforePass changeBeforePass = ChangeBeforePass::None;
 };
 
 TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpuTest>(
@@ -230,8 +246,12 @@ std::vector<uint8_t> generateData(size_t size, uint32_t start = 0) {
     return data;
 }
 
+// Upstream's kColorTextureFormats: the regular and the compressed formats.
 std::vector<Value> colorFormatValues() {
-    return formatIdentifierValues(kColorTextureFormats);
+    std::vector<Value> values = formatIdentifierValues(kRegularTextureFormats);
+    const std::vector<Value> compressed = formatIdentifierValues(kCompressedTextureFormats);
+    values.insert(values.end(), compressed.begin(), compressed.end());
+    return values;
 }
 
 std::vector<Value> depthStencilFormatValues() {
@@ -261,69 +281,38 @@ std::vector<Value> textureDimensionValues() {
     };
 }
 
+/** Each combination of methods assume that the ones before it were tested and work correctly. */
+std::vector<ParamRecord> methodsToTest() {
+    return {
+        // Then we make sure that WriteTexture works for all formats:
+        ParamRecord{{"initMethod", std::string(initMethodIdentifier(InitMethod::WriteTexture))},
+                    {"checkMethod", std::string(checkMethodIdentifier(CheckMethod::FullCopyT2B))}},
+        // Then we make sure that CopyB2T works for all formats:
+        ParamRecord{{"initMethod", std::string(initMethodIdentifier(InitMethod::CopyB2T))},
+                    {"checkMethod", std::string(checkMethodIdentifier(CheckMethod::FullCopyT2B))}},
+        // Then we make sure that CopyT2B works for all formats:
+        ParamRecord{{"initMethod", std::string(initMethodIdentifier(InitMethod::WriteTexture))},
+                    {"checkMethod", std::string(checkMethodIdentifier(CheckMethod::PartialCopyT2B))}},
+    };
+}
+
+WGPUTextureFormat formatFromParams(const ParamRecord& params) {
+    return parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
+}
+
+WGPUTextureDimension dimensionFromParams(const ParamRecord& params) {
+    return parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
+}
+
+bool formatAndDimensionPossiblyCompatible(const ParamRecord& params) {
+    return textureFormatAndDimensionPossiblyCompatible(dimensionFromParams(params), formatFromParams(params));
+}
+
 ParamsBuilder baseParams(ParamsBuilder u) {
-    return u.combine("format", colorFormatValues())
+    return u.combineWithParams(methodsToTest())
+        .combine("format", colorFormatValues())
         .combine("dimension", textureDimensionValues())
-        .combine("initMethod", {
-            std::string(initMethodIdentifier(InitMethod::WriteTexture)),
-            std::string(initMethodIdentifier(InitMethod::CopyB2T)),
-        })
-        .combine("checkMethod", {
-            std::string(checkMethodIdentifier(CheckMethod::FullCopyT2B)),
-            std::string(checkMethodIdentifier(CheckMethod::PartialCopyT2B)),
-        })
-        .filter([](const ParamRecord& params) {
-            const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
-            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
-            return textureFormatAndDimensionPossiblyCompatible(dimension, format);
-        });
-}
-
-WGPUExtent3D baseTextureSize(WGPUTextureDimension dimension) {
-    switch (dimension) {
-        case WGPUTextureDimension_1D:
-            return WGPUExtent3D{256, 1, 1};
-        case WGPUTextureDimension_2D:
-            return WGPUExtent3D{256, 16, 4};
-        case WGPUTextureDimension_3D:
-            return WGPUExtent3D{256, 16, 8};
-        default:
-            std::abort();
-    }
-}
-
-WGPUExtent3D mipSize(WGPUExtent3D base, WGPUTextureDimension dimension, uint32_t mipLevel) {
-    WGPUExtent3D size = base;
-    size.width = std::max(1u, base.width >> mipLevel);
-    if (dimension != WGPUTextureDimension_1D) {
-        size.height = std::max(1u, base.height >> mipLevel);
-    }
-    if (dimension == WGPUTextureDimension_3D) {
-        size.depthOrArrayLayers = std::max(1u, base.depthOrArrayLayers >> mipLevel);
-    }
-    return size;
-}
-
-uint32_t copyDepthForDimension(WGPUTextureDimension dimension, uint32_t depth) {
-    return dimension == WGPUTextureDimension_3D ? depth : 1;
-}
-
-uint32_t copyHeightForDimension(WGPUTextureDimension dimension, uint32_t height) {
-    return dimension == WGPUTextureDimension_1D ? 1 : height;
-}
-
-TexelCopyBufferLayout concreteLayout(TexelCopyBufferLayout layout, WGPUTextureFormat format, WGPUExtent3D copySize) {
-    if (layout.bytesPerRow == WGPU_COPY_STRIDE_UNDEFINED) {
-        layout.bytesPerRow = bytesInACompleteRow(copySize.width, format);
-    }
-    if (layout.rowsPerImage == WGPU_COPY_STRIDE_UNDEFINED) {
-        layout.rowsPerImage = copySize.height;
-    }
-    return layout;
-}
-
-uint64_t requiredBytes(TexelCopyBufferLayout layout, WGPUTextureFormat format, WGPUExtent3D copySize) {
-    return dataBytesForCopyOrFail(concreteLayout(layout, format, copySize), format, copySize, false);
+        .filter(formatAndDimensionPossiblyCompatible);
 }
 
 WGPUTexelCopyBufferLayout toWgpuLayout(TexelCopyBufferLayout layout) {
@@ -334,30 +323,23 @@ WGPUTexelCopyBufferLayout toWgpuLayout(TexelCopyBufferLayout layout) {
     return out;
 }
 
-TexelCopyBufferLayout uploadLayoutFor(
-    WGPUTextureFormat format,
-    WGPUExtent3D copySize,
-    uint32_t rowPadding,
-    uint32_t imagePadding,
-    uint64_t offset,
-    bool undefinedStrides) {
-    TexelCopyBufferLayout layout;
-    layout.offset = offset;
-    if (undefinedStrides) {
-        layout.bytesPerRow = WGPU_COPY_STRIDE_UNDEFINED;
-        layout.rowsPerImage = WGPU_COPY_STRIDE_UNDEFINED;
-    } else {
-        layout.bytesPerRow = static_cast<uint32_t>(
-            alignTo(bytesInACompleteRow(copySize.width, format) + rowPadding, kBytesPerRowAlignment));
-        layout.rowsPerImage = copySize.height + imagePadding;
+// undefDataLayoutIfNeeded(): zero strides are passed as undefined with ChangeBeforePass::Undefined.
+WGPUTexelCopyBufferLayout appliedLayout(TexelCopyBufferLayout layout, ChangeBeforePass changeBeforePass) {
+    if (changeBeforePass == ChangeBeforePass::Undefined) {
+        if (layout.bytesPerRow == 0) {
+            layout.bytesPerRow = WGPU_COPY_STRIDE_UNDEFINED;
+        }
+        if (layout.rowsPerImage == 0) {
+            layout.rowsPerImage = WGPU_COPY_STRIDE_UNDEFINED;
+        }
     }
-    return layout;
+    return toWgpuLayout(layout);
 }
 
-WGPUTexture createCopyTexture(AllFeaturesMaxLimitsGpuTest& t, const CopyScenario& scenario, uint32_t mipLevelCount) {
+WGPUTexture createCopyTexture(AllFeaturesMaxLimitsGpuTest& t, const CopyScenario& scenario) {
     WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
     desc.size = scenario.textureSize;
-    desc.mipLevelCount = mipLevelCount;
+    desc.mipLevelCount = scenario.mipLevel + 1;
     desc.sampleCount = 1;
     desc.dimension = scenario.dimension;
     desc.format = scenario.format;
@@ -374,13 +356,13 @@ void copyBufferToTexture(
     AllFeaturesMaxLimitsGpuTest& t,
     WGPUTexture texture,
     WGPUBuffer buffer,
-    TexelCopyBufferLayout layout,
+    WGPUTexelCopyBufferLayout layout,
     WGPUExtent3D copySize,
     uint32_t mipLevel,
     WGPUOrigin3D origin) {
     WGPUTexelCopyBufferInfo source = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
     source.buffer = buffer;
-    source.layout = toWgpuLayout(layout);
+    source.layout = layout;
 
     WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
     destination.texture = texture;
@@ -421,7 +403,7 @@ void copyTextureToBuffer(
     AllFeaturesMaxLimitsGpuTest& t,
     WGPUTexture texture,
     WGPUBuffer buffer,
-    TexelCopyBufferLayout layout,
+    WGPUTexelCopyBufferLayout layout,
     WGPUExtent3D copySize,
     uint32_t mipLevel,
     WGPUOrigin3D origin) {
@@ -433,7 +415,7 @@ void copyTextureToBuffer(
 
     WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
     destination.buffer = buffer;
-    destination.layout = toWgpuLayout(layout);
+    destination.layout = layout;
 
     WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &copySize);
@@ -483,17 +465,21 @@ void writeTextureAspect(
     wgpuQueueWriteTexture(t.queue(), &destination, data.data(), data.size(), &wgpuLayout, &size);
 }
 
+/** Put data into a part of the texture with an appropriate method. */
 void uploadLinearTextureDataToTextureSubBox(
     AllFeaturesMaxLimitsGpuTest& t,
     WGPUTexture texture,
     const CopyScenario& scenario,
     const std::vector<uint8_t>& data) {
+    const WGPUTexelCopyBufferLayout layout = appliedLayout(scenario.textureDataLayout, scenario.changeBeforePass);
     if (scenario.initMethod == InitMethod::WriteTexture) {
+        // An empty vector has no data pointer, an empty write still needs one.
+        const uint8_t emptyData = 0;
         t.queueWriteTexture(
             texture,
             scenario.copySize,
-            toWgpuLayout(scenario.uploadLayout),
-            data.data(),
+            layout,
+            data.empty() ? &emptyData : data.data(),
             data.size(),
             scenario.mipLevel,
             scenario.origin);
@@ -501,38 +487,133 @@ void uploadLinearTextureDataToTextureSubBox(
     }
 
     WGPUBuffer src = t.makeBufferWithContents(data.data(), data.size(), WGPUBufferUsage_CopySrc);
-    copyBufferToTexture(t, texture, src, scenario.uploadLayout, scenario.copySize, scenario.mipLevel, scenario.origin);
+    copyBufferToTexture(t, texture, src, layout, scenario.copySize, scenario.mipLevel, scenario.origin);
 }
 
+/**
+ * Compares data in `expected` to data in `buffer`.
+ * Areas defined by size and dataLayout are compared by interpreting the data as appropriate
+ * for the texture format. As an example, with 'rgb9e5ufloat' multiple values can
+ * represent the same number. For example, double the exponent and halving the
+ * mantissa. Areas outside the area defined by size and dataLayout are expected to match
+ * by binary comparison.
+ *
+ * Upstream's texel views ignore dataLayout.offset; here they start at the offset, so that the texel
+ * areas that get compared are the ones the copy wrote.
+ */
+void expectBufferValuesEqualWhenInterpretedAsTextureFormat(
+    AllFeaturesMaxLimitsGpuTest& t,
+    const std::vector<uint8_t>& expected,
+    WGPUBuffer buffer,
+    WGPUTextureFormat format,
+    WGPUExtent3D size,
+    TexelCopyBufferLayout dataLayout) {
+    if (isCompressedTextureFormat(format)) {
+        t.expectGPUBufferValuesEqual(buffer, expected.data(), expected.size());
+        return;
+    }
+
+    const std::function<std::optional<std::string>(const uint8_t*, size_t)> check =
+        [&](const uint8_t* actual, size_t) -> std::optional<std::string> {
+        const bool emptyCopy = size.width == 0 || size.height == 0 || size.depthOrArrayLayers == 0;
+        // compare texel areas
+        if (!emptyCopy) {
+            TexelViewConfig config;
+            config.bytesPerRow = dataLayout.bytesPerRow;
+            config.rowsPerImage = dataLayout.rowsPerImage;
+            config.subrectOrigin = WGPUOrigin3D{0, 0, 0};
+            config.subrectSize = size;
+            const size_t viewLength = expected.size() - static_cast<size_t>(dataLayout.offset);
+            const TexelView actualView = TexelView::fromTextureDataByReference(
+                format, actual + dataLayout.offset, viewLength, config);
+            const TexelView expectedView = TexelView::fromTextureDataByReference(
+                format, expected.data() + dataLayout.offset, viewLength, config);
+            std::optional<std::string> failedPixels =
+                findFailedPixels(format, WGPUOrigin3D{0, 0, 0}, size, actualView, expectedView, 0.0);
+            if (failedPixels) {
+                return "Texture level had unexpected contents:\n" + *failedPixels;
+            }
+        }
+
+        // compare non texel areas
+        const auto compareBytes = [&](size_t begin, size_t end) -> std::optional<std::string> {
+            for (size_t i = begin; i < end; ++i) {
+                if (actual[i] != expected[i]) {
+                    std::ostringstream message;
+                    message << "mismatch outside of the texel area at byte " << i << ": expected "
+                            << static_cast<int>(expected[i]) << ", got " << static_cast<int>(actual[i]);
+                    return message.str();
+                }
+            }
+            return std::nullopt;
+        };
+        const uint32_t rowLength = bytesInACompleteRow(size.width, format);
+        size_t lastOffset = 0;
+        if (!emptyCopy) {
+            for (uint32_t z = 0; z < size.depthOrArrayLayers; ++z) {
+                for (uint32_t y = 0; y < size.height; ++y) {
+                    const size_t offset = static_cast<size_t>(
+                        dataLayout.offset
+                        + (static_cast<uint64_t>(z) * dataLayout.rowsPerImage + y) * dataLayout.bytesPerRow);
+                    if (std::optional<std::string> error = compareBytes(lastOffset, offset)) {
+                        return error;
+                    }
+                    lastOffset = offset + rowLength;
+                }
+            }
+        }
+        // compare end of buffers
+        return compareBytes(lastOffset, expected.size());
+    };
+    t.expectGPUBufferValuesPassCheck(buffer, check, 0, expected.size());
+}
+
+/**
+ * We check an appropriate part of the texture against the given data.
+ * Used directly with PartialCopyT2B check method (for a subpart of the texture)
+ * and by `copyWholeTextureToBufferAndCheckContentsWithUpdatedData` with FullCopyT2B check method
+ * (for the whole texture).
+ */
 void copyPartialTextureToBufferAndCheckContents(
     AllFeaturesMaxLimitsGpuTest& t,
     WGPUTexture texture,
-    const CopyScenario& scenario,
-    const std::vector<uint8_t>& uploadData) {
-    const TextureCopyLayout readInfo = getTextureCopyLayout(scenario.format, scenario.dimension, scenario.copySize);
-    TexelCopyBufferLayout readLayout{0, readInfo.bytesPerRow, readInfo.rowsPerImage};
-    std::vector<uint8_t> expected = generateData(static_cast<size_t>(readInfo.byteLength), 17);
-    std::vector<uint8_t> initial = expected;
-    WGPUBuffer dst = t.makeBufferWithContents(initial.data(), initial.size(), WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+    uint32_t mipLevel,
+    WGPUOrigin3D origin,
+    WGPUExtent3D checkSize,
+    WGPUTextureFormat format,
+    const std::vector<uint8_t>& expected,
+    TexelCopyBufferLayout expectedDataLayout,
+    ChangeBeforePass changeBeforePass = ChangeBeforePass::None) {
+    // The alignment is necessary because we need to copy and map data from this buffer.
+    const size_t bufferSize = static_cast<size_t>(alignTo(expected.size(), kBufferCopyAlignment));
+    // The start value ensures generated data here doesn't match the expected data.
+    std::vector<uint8_t> bufferData = generateData(bufferSize, 17);
+
+    WGPUBuffer buffer = t.makeBufferWithContents(
+        bufferData.data(), bufferData.size(), WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+    // At this point both buffer and bufferData have the same random data in them. We'll use
+    // copyTextureToBuffer to update buffer with data from the texture and
+    // updateLinearTextureDataSubBox to update bufferData with the data we originally uploaded to the
+    // texture.
+    copyTextureToBuffer(
+        t, texture, buffer, appliedLayout(expectedDataLayout, changeBeforePass), checkSize, mipLevel, origin);
 
     LinearTextureSubBox copy;
-    copy.src = uploadData.data();
-    copy.srcLen = uploadData.size();
-    copy.srcLayout = concreteLayout(scenario.uploadLayout, scenario.format, scenario.copySize);
-    copy.dst = expected.data();
-    copy.dstLen = expected.size();
-    copy.dstLayout = readLayout;
-    updateLinearTextureDataSubBox(scenario.format, scenario.copySize, copy);
+    copy.src = expected.data();
+    copy.srcLen = expected.size();
+    copy.srcLayout = expectedDataLayout;
+    copy.dst = bufferData.data();
+    copy.dstLen = bufferData.size();
+    copy.dstLayout = expectedDataLayout;
+    updateLinearTextureDataSubBox(format, checkSize, copy);
 
-    copyTextureToBuffer(t, texture, dst, readLayout, scenario.copySize, scenario.mipLevel, scenario.origin);
-    t.expectGPUBufferValuesEqualWhenInterpretedAsTextureFormat(
-        expected.data(), expected.size(), dst, scenario.format, scenario.copySize, readLayout);
+    expectBufferValuesEqualWhenInterpretedAsTextureFormat(t, bufferData, buffer, format, checkSize, expectedDataLayout);
 }
 
 std::vector<uint8_t> copyTextureToVector(
     AllFeaturesMaxLimitsGpuTest& t,
     WGPUTexture texture,
-    TexelCopyBufferLayout layout,
+    WGPUTexelCopyBufferLayout layout,
     WGPUExtent3D copySize,
     uint32_t mipLevel,
     WGPUOrigin3D origin,
@@ -558,67 +639,65 @@ std::vector<uint8_t> copyTextureToVector(
     return data;
 }
 
-void copyWholeTextureToBufferAndCheckContentsWithUpdatedData(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPUTexture texture,
-    const CopyScenario& scenario,
-    const std::vector<uint8_t>& uploadData) {
-    const WGPUExtent3D subresourceSize = mipSize(scenario.textureSize, scenario.dimension, scenario.mipLevel);
-    const TextureCopyLayout readInfo = getTextureCopyLayout(scenario.format, scenario.dimension, subresourceSize);
-    TexelCopyBufferLayout readLayout{0, readInfo.bytesPerRow, readInfo.rowsPerImage};
+/**
+ * Tests copy between linear data and texture by creating a texture, putting some data into it
+ * with WriteTexture/CopyB2T, then getting data for the whole texture/for a part of it back and
+ * comparing it with the expectation.
+ */
+void uploadTextureAndVerifyCopy(AllFeaturesMaxLimitsGpuTest& t, const CopyScenario& scenario) {
+    WGPUTexture texture = createCopyTexture(t, scenario);
+    const std::vector<uint8_t> data = generateData(static_cast<size_t>(scenario.dataSize));
 
-    uploadLinearTextureDataToTextureSubBox(t, texture, scenario, uploadData);
+    if (scenario.checkMethod == CheckMethod::PartialCopyT2B) {
+        uploadLinearTextureDataToTextureSubBox(t, texture, scenario, data);
+        copyPartialTextureToBufferAndCheckContents(
+            t,
+            texture,
+            scenario.mipLevel,
+            scenario.origin,
+            scenario.copySize,
+            scenario.format,
+            data,
+            scenario.textureDataLayout,
+            scenario.changeBeforePass);
+        return;
+    }
 
-    // Faithful upstream FullCopyT2B: snapshot the whole subresource after the upload, overlay the known
-    // uploaded sub-box onto the snapshot to form the expected contents, then re-read the whole subresource
-    // from the texture and compare. The copied region must equal the uploaded data; the rest must equal its
-    // (snapshotted) pre-existing contents.
-    std::vector<uint8_t> snapshot = copyTextureToVector(
+    // Upload, snapshot the whole subresource (the untouched texels keep their contents), overlay the
+    // uploaded sub-box onto the snapshot, then check the whole subresource against that.
+    uploadLinearTextureDataToTextureSubBox(t, texture, scenario, data);
+
+    const TextureCopyLayout fullTextureCopyLayout =
+        getTextureCopyLayout(scenario.format, scenario.dimension, scenario.textureSize, scenario.mipLevel);
+    const TexelCopyBufferLayout fullLayout{0, fullTextureCopyLayout.bytesPerRow, fullTextureCopyLayout.rowsPerImage};
+    std::vector<uint8_t> fullData = copyTextureToVector(
         t,
         texture,
-        readLayout,
-        subresourceSize,
+        toWgpuLayout(fullLayout),
+        fullTextureCopyLayout.mipSize,
         scenario.mipLevel,
         WGPUOrigin3D{0, 0, 0},
-        static_cast<size_t>(readInfo.byteLength));
+        static_cast<size_t>(fullTextureCopyLayout.byteLength));
 
-    std::vector<uint8_t> expected = snapshot;
     LinearTextureSubBox copy;
-    copy.src = uploadData.data();
-    copy.srcLen = uploadData.size();
-    copy.srcLayout = concreteLayout(scenario.uploadLayout, scenario.format, scenario.copySize);
-    copy.dst = expected.data();
-    copy.dstLen = expected.size();
-    copy.dstLayout = readLayout;
+    copy.src = data.data();
+    copy.srcLen = data.size();
+    copy.srcLayout = scenario.textureDataLayout;
+    copy.dst = fullData.data();
+    copy.dstLen = fullData.size();
+    copy.dstLayout = fullLayout;
     copy.dstOrigin = scenario.origin;
     updateLinearTextureDataSubBox(scenario.format, scenario.copySize, copy);
 
-    WGPUBufferDescriptor cmpDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    cmpDesc.size = static_cast<uint64_t>(readInfo.byteLength);
-    cmpDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
-    WGPUBuffer cmp = t.createBufferTracked(cmpDesc);
-    copyTextureToBuffer(t, texture, cmp, readLayout, subresourceSize, scenario.mipLevel, WGPUOrigin3D{0, 0, 0});
-    t.expectGPUBufferValuesEqualWhenInterpretedAsTextureFormat(
-        expected.data(), expected.size(), cmp, scenario.format, subresourceSize, readLayout);
-}
-
-void uploadTextureAndVerifyCopy(AllFeaturesMaxLimitsGpuTest& t, const CopyScenario& scenario, uint32_t mipLevelCount = 1) {
-    t.skipIfTextureFormatNotSupported(scenario.format);
-    t.skipIfTextureFormatAndDimensionNotCompatible(scenario.format, scenario.dimension);
-    if (!isColorTextureFormat(scenario.format)) {
-        t.skip("image_copy color slice only covers color formats");
-    }
-
-    const uint64_t exactUploadBytes = requiredBytes(scenario.uploadLayout, scenario.format, scenario.copySize);
-    std::vector<uint8_t> uploadData = generateData(static_cast<size_t>(alignTo(exactUploadBytes, kBufferCopyAlignment)));
-    WGPUTexture texture = createCopyTexture(t, scenario, mipLevelCount);
-
-    if (scenario.checkMethod == CheckMethod::FullCopyT2B) {
-        copyWholeTextureToBufferAndCheckContentsWithUpdatedData(t, texture, scenario, uploadData);
-    } else {
-        uploadLinearTextureDataToTextureSubBox(t, texture, scenario, uploadData);
-        copyPartialTextureToBufferAndCheckContents(t, texture, scenario, uploadData);
-    }
+    copyPartialTextureToBufferAndCheckContents(
+        t,
+        texture,
+        scenario.mipLevel,
+        WGPUOrigin3D{0, 0, 0},
+        fullTextureCopyLayout.mipSize,
+        scenario.format,
+        fullData,
+        fullLayout);
 }
 
 WGPUTextureAspect textureAspect(DepthStencilAspect aspect) {
@@ -945,14 +1024,20 @@ void doCopyTextureToBufferWithDepthAspectTest(
 
 CopyScenario scenarioFromParams(AllFeaturesMaxLimitsGpuTest& t) {
     CopyScenario scenario;
-    scenario.format = parseTextureFormat(t.param<std::string>("format"));
     scenario.dimension = parseTextureDimension(t.param<std::string>("dimension"));
     scenario.initMethod = parseInitMethod(t.param<std::string>("initMethod"));
     scenario.checkMethod = parseCheckMethod(t.param<std::string>("checkMethod"));
-    scenario.textureSize = baseTextureSize(scenario.dimension);
-    scenario.copySize = scenario.textureSize;
-    scenario.uploadLayout = uploadLayoutFor(scenario.format, scenario.copySize, 0, 0, 0, false);
+    if (t.hasParam("format")) {
+        scenario.format = parseTextureFormat(t.param<std::string>("format"));
+        t.skipIfTextureFormatNotSupported(scenario.format);
+        t.skipIfTextureFormatAndDimensionNotCompatible(scenario.format, scenario.dimension);
+    }
     return scenario;
+}
+
+uint64_t dataBytesForScenario(const CopyScenario& scenario, TexelCopyBufferLayout layout) {
+    return dataBytesForCopyOrFail(
+        layout, scenario.format, scenario.copySize, scenario.initMethod != InitMethod::WriteTexture);
 }
 
 std::vector<Value> indexValues(uint32_t count) {
@@ -963,64 +1048,301 @@ std::vector<Value> indexValues(uint32_t count) {
     return values;
 }
 
+struct RowsPerImagePadding {
+    uint32_t bytesPerRowPadding;
+    uint32_t rowsPerImagePadding;
+};
+
+constexpr std::array<RowsPerImagePadding, 4> kRowsPerImagePaddings = {{
+    {0, 0}, // no padding
+    {0, 6}, // rowsPerImage padding
+    {6, 0}, // bytesPerRow padding
+    {15, 17}, // both paddings
+}};
+
+struct CopySizeInBlocks {
+    uint32_t copyWidthInBlocks;
+    uint32_t copyHeightInBlocks;
+    uint32_t copyDepth;
+};
+
+constexpr std::array<CopySizeInBlocks, 12> kRowsPerImageCopySizes = {{
+    // In the two cases below, for (WriteTexture, PartialCopyB2T) and (CopyB2T, FullCopyT2B)
+    // sets of methods we will have bytesPerRow = 256 and copyDepth % 2 == { 0, 1 }
+    // respectively. This covers a special code path for D3D12.
+    {3, 4, 5}, // standard copy
+    {5, 4, 2}, // standard copy
+
+    {0, 4, 5}, // empty copy because of width
+    {3, 0, 5}, // empty copy because of height
+    {3, 4, 0}, // empty copy because of depthOrArrayLayers
+    {256, 3, 2}, // copyWidth is 256-aligned
+    {1, 3, 5}, // copyWidth = 1
+
+    // The two cases below cover another special code path for D3D12.
+    //   - For (WriteTexture, FullCopyT2B) with r8unorm:
+    //         bytesPerRow = 15 = 3 * 5 = bytesInACompleteCopyImage.
+    {32, 1, 8}, // copyHeight = 1
+    //   - For (CopyB2T, FullCopyT2B) and (WriteTexture, PartialCopyT2B) with r8unorm:
+    //         bytesPerRow = 256 = 8 * 32 = bytesInACompleteCopyImage.
+    {5, 4, 1}, // copyDepth = 1
+
+    {7, 1, 1}, // copyHeight = 1 and copyDepth = 1
+
+    // These 2 cases are for textureBindingViewDimension: 'cube'
+    // Note: this is indirect. The fact that the copyWidthInBlocks and copyHeightInBlocks
+    // are equal makes it possible to use as a cube
+    {3, 3, 1},
+    {4, 4, 6},
+}};
+
+// Copy sizes that are suitable for 1D texture and check both some copy sizes and empty copies.
+constexpr std::array<CopySizeInBlocks, 5> kRowsPerImageCopySizes1D = {{
+    {3, 1, 1},
+    {5, 1, 1},
+
+    {3, 0, 1},
+    {0, 1, 1},
+    {5, 1, 0},
+}};
+
 ParamsBuilder rowsParams(ParamsBuilder u) {
     return baseParams(u)
         .beginSubcases()
-        .combine("paddingIndex", indexValues(4))
-        .combine("copySizeIndex", indexValues(14))
-        .filter([](const ParamRecord& params) {
-            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
-            const uint32_t copySizeIndex = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "copySizeIndex")));
-            return dimension != WGPUTextureDimension_1D || copySizeIndex < 5;
+        .combine("paddingIndex", indexValues(static_cast<uint32_t>(kRowsPerImagePaddings.size())))
+        .expand("copySizeIndex", [](const ParamRecord& params) {
+            return indexValues(static_cast<uint32_t>(dimensionFromParams(params) == WGPUTextureDimension_1D
+                                                         ? kRowsPerImageCopySizes1D.size()
+                                                         : kRowsPerImageCopySizes.size()));
         });
 }
+
+struct OffsetAndPadding {
+    uint32_t offsetInBlocks;
+    uint32_t dataPaddingInBytes;
+};
+
+constexpr std::array<OffsetAndPadding, 11> kOffsetsAndPaddings = {{
+    {0, 0}, // no offset and no padding
+    {1, 0}, // offset = 1
+    {2, 0}, // offset = 2
+    {15, 0}, // offset = 15
+    {16, 0}, // offset = 16
+    {242, 0}, // for rgba8unorm format: offset + bytesInCopyExtentPerRow = 242 + 12 = 256 = bytesPerRow
+    {243, 0}, // for rgba8unorm format: offset + bytesInCopyExtentPerRow = 243 + 12 > 256 = bytesPerRow
+    {768, 0}, // for copyDepth = 1, blockWidth = 1 and bytesPerBlock = 1: offset = 768 = 3 * 256 = bytesInACompleteCopyImage
+    {769, 0}, // for copyDepth = 1, blockWidth = 1 and bytesPerBlock = 1: offset = 769 > 768 = bytesInACompleteCopyImage
+    {0, 1}, // dataPaddingInBytes > 0
+    {1, 8}, // offset > 0 and dataPaddingInBytes > 0
+}};
 
 ParamsBuilder offsetsParams(ParamsBuilder u) {
     return baseParams(u)
         .beginSubcases()
-        .combine("offsetsAndPaddingsIndex", indexValues(11))
-        .combine("copyDepthIndex", indexValues(3))
-        .combine("copyWidthIndex", indexValues(3))
+        .combine("offsetsAndPaddingsIndex", indexValues(static_cast<uint32_t>(kOffsetsAndPaddings.size())))
+        .combine("copyDepth", {1, 2, 6}) // 2d and 2d-array textures
+        // copyWidth === 3 is the default. Others covers special cases for r8snorm and rg8snorm on
+        // compatiblity mode.
+        .combine("copyWidth", {3, 1, 2, 127, 128, 255, 256})
+        .filter([](const ParamRecord& params) {
+            const WGPUTextureFormat format = formatFromParams(params);
+            if (format == WGPUTextureFormat_R8Snorm || format == WGPUTextureFormat_RG8Snorm) {
+                return true;
+            }
+            // Restrict test parameters to save run time.
+            return valueAs<int>(*findParam(params, "copyWidth")) == 3;
+        })
         .combine("rowsPerImageEqualsCopyHeight", {true, false})
         .filter([](const ParamRecord& params) {
-            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
-            const uint32_t copyDepthIndex = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "copyDepthIndex")));
-            return dimension == WGPUTextureDimension_3D || copyDepthIndex == 0;
+            return !(dimensionFromParams(params) == WGPUTextureDimension_1D
+                     && valueAs<int>(*findParam(params, "copyDepth")) != 1);
         });
 }
 
 ParamsBuilder originsParams(ParamsBuilder u) {
     return baseParams(u)
         .beginSubcases()
-        .combine("originValueInBlocks", indexValues(4))
-        .combine("copySizeValueInBlocks", indexValues(4))
-        .combine("textureSizePaddingValueInBlocks", indexValues(3))
-        .combine("coordinateToTest", indexValues(3))
+        .combine("originValueInBlocks", {0, 6, 7, 8}) // the 6 is needed for textureBindingViewDimension: 'cube'
+        .combine("copySizeValueInBlocks", {0, 6, 7, 8}) // the 6 is needed for textureBindingViewDimension: 'cube'
+        .combine("textureSizePaddingValueInBlocks", {0, 7, 8})
         .filter([](const ParamRecord& params) {
-            const auto dimension = parseTextureDimension(valueAs<std::string>(*findParam(params, "dimension")));
-            const uint32_t coordinate = static_cast<uint32_t>(valueAs<int64_t>(*findParam(params, "coordinateToTest")));
-            return !(dimension == WGPUTextureDimension_1D && coordinate != 0)
-                && !(dimension == WGPUTextureDimension_2D && coordinate == 2);
+            // we can't create an empty texture
+            return valueAs<int>(*findParam(params, "copySizeValueInBlocks"))
+                       + valueAs<int>(*findParam(params, "originValueInBlocks"))
+                       + valueAs<int>(*findParam(params, "textureSizePaddingValueInBlocks"))
+                != 0;
+        })
+        .combine("coordinateToTest", {0, 1, 2})
+        .filter([](const ParamRecord& params) {
+            return !(dimensionFromParams(params) == WGPUTextureDimension_1D
+                     && valueAs<int>(*findParam(params, "coordinateToTest")) != 0);
         });
 }
 
-ParamsBuilder mipParams(ParamsBuilder u) {
-    return baseParams(u)
-        .beginSubcases()
-        .combine("textureSizeIndex", indexValues(4))
-        .combine("mipLevelOffset", indexValues(3));
+struct MipLevelCase {
+    WGPUExtent3D copySizeInBlocks;
+    WGPUOrigin3D originInBlocks;
+    WGPUExtent3D mipSizeInBlocks;
+    uint32_t mipLevel;
+};
+
+constexpr std::array<MipLevelCase, 7> kMipLevelCases = {{
+    // origin + copySize = texturePhysicalSizeAtMipLevel for all coordinates, 2d texture */
+    {{5, 4, 1}, {3, 2, 0}, {8, 6, 1}, 1},
+    // origin + copySize = texturePhysicalSizeAtMipLevel for all coordinates, 2d-array texture
+    {{5, 4, 2}, {3, 2, 1}, {8, 6, 3}, 2},
+    // origin.x + copySize.width = texturePhysicalSizeAtMipLevel.width
+    {{5, 4, 2}, {3, 2, 1}, {8, 7, 4}, 3},
+    // origin.y + copySize.height = texturePhysicalSizeAtMipLevel.height
+    {{5, 4, 2}, {3, 2, 1}, {9, 6, 4}, 4},
+    // origin.z + copySize.depthOrArrayLayers = texturePhysicalSizeAtMipLevel.depthOrArrayLayers
+    {{5, 4, 2}, {3, 2, 1}, {9, 7, 3}, 4},
+    // origin + copySize < texturePhysicalSizeAtMipLevel for all coordinates
+    {{5, 4, 2}, {3, 2, 1}, {9, 7, 4}, 4},
+    // width === height and depthOrArrayLayers = 6 for textureBindingViewDimension: 'cube'
+    {{5, 4, 2}, {3, 2, 1}, {9, 9, 6}, 4},
+}};
+
+std::string textureSizeParam(uint32_t width, uint32_t height, uint32_t depth) {
+    return std::to_string(width) + "," + std::to_string(height) + "," + std::to_string(depth);
 }
 
-ParamsBuilder undefinedParams(ParamsBuilder u) {
-    return baseParams(u)
+WGPUExtent3D parseTextureSizeParam(const std::string& textureSize) {
+    WGPUExtent3D size{};
+    std::stringstream stream(textureSize);
+    char comma = 0;
+    stream >> size.width >> comma >> size.height >> comma >> size.depthOrArrayLayers;
+    return size;
+}
+
+/**
+ * Generates textureSizes which correspond to the same physicalSizeAtMipLevel including virtual
+ * sizes at mip level different from the physical ones.
+ */
+std::vector<Value> generateTestTextureSizes(const ParamRecord& params) {
+    const WGPUTextureDimension dimension = dimensionFromParams(params);
+    const MipLevelCase& mipCase =
+        kMipLevelCases[static_cast<size_t>(valueAs<int64_t>(*findParam(params, "mipLevelCaseIndex")))];
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(formatFromParams(params));
+    const uint32_t mipLevel = mipCase.mipLevel;
+
+    const uint32_t widthAtThisLevel = mipCase.mipSizeInBlocks.width * info.blockWidth;
+    const uint32_t heightAtThisLevel = mipCase.mipSizeInBlocks.height * info.blockHeight;
+    const uint32_t textureWidth = widthAtThisLevel << mipLevel;
+    const uint32_t textureHeight = heightAtThisLevel << mipLevel;
+    const uint32_t textureDepth = mipCase.mipSizeInBlocks.depthOrArrayLayers
+        << (dimension == WGPUTextureDimension_3D ? mipLevel : 0);
+    std::vector<Value> sizes;
+    sizes.emplace_back(textureSizeParam(textureWidth, textureHeight, textureDepth));
+
+    // We choose width and height of the texture so that the values are divisible by blockWidth and
+    // blockHeight respectively and so that the virtual size at mip level corresponds to the same
+    // physical size.
+    // Virtual size at mip level with modified width has width = (physical size width) - (blockWidth / 2).
+    // Virtual size at mip level with modified height has height = (physical size height) - (blockHeight / 2).
+    const uint32_t widthAtPrevLevel = widthAtThisLevel << 1;
+    const uint32_t heightAtPrevLevel = heightAtThisLevel << 1;
+    const uint32_t modifiedWidth = (widthAtPrevLevel - info.blockWidth) << (mipLevel - 1);
+    const uint32_t modifiedHeight = (heightAtPrevLevel - info.blockHeight) << (mipLevel - 1);
+
+    const bool modifyWidth = info.blockWidth > 1 && modifiedWidth != textureWidth;
+    const bool modifyHeight = info.blockHeight > 1 && modifiedHeight != textureHeight;
+
+    if (modifyWidth) {
+        sizes.emplace_back(textureSizeParam(modifiedWidth, textureHeight, textureDepth));
+    }
+    if (modifyHeight) {
+        sizes.emplace_back(textureSizeParam(textureWidth, modifiedHeight, textureDepth));
+    }
+    if (modifyWidth && modifyHeight) {
+        sizes.emplace_back(textureSizeParam(modifiedWidth, modifiedHeight, textureDepth));
+    }
+
+    if (dimension == WGPUTextureDimension_3D) {
+        sizes.emplace_back(textureSizeParam(textureWidth, textureHeight, textureDepth + 1));
+    }
+    return sizes;
+}
+
+ParamsBuilder mipParams(ParamsBuilder u) {
+    return u.combineWithParams(methodsToTest())
+        .combine("format", colorFormatValues())
+        .combine("dimension",
+                 {std::string(textureDimensionIdentifier(WGPUTextureDimension_2D)),
+                  std::string(textureDimensionIdentifier(WGPUTextureDimension_3D))})
+        .filter(formatAndDimensionPossiblyCompatible)
         .beginSubcases()
-        .combine("undefinedBytesPerRow", {true, false})
-        .combine("undefinedRowsPerImage", {true, false})
-        .combine("undefinedOrigin", {true, false})
+        .combine("mipLevelCaseIndex", indexValues(static_cast<uint32_t>(kMipLevelCases.size())))
+        .expand("textureSize", generateTestTextureSizes);
+}
+
+struct UnalignedCopyCase {
+    uint32_t originXInBlocks;
+    uint32_t originYInBlocks;
+    uint32_t widthInBlocks;
+    uint32_t heightInBlocks;
+};
+
+// Copy box in block units. The mip level 0 size is 3 full blocks + 1 partial-edge block (physical
+// size 4 blocks) in each dimension, so x/y of 3 selects the partial edge block.
+constexpr std::array<UnalignedCopyCase, 5> kUnalignedCopyCases = {{
+    // Full copy of the physical extent (touches every partial edge block).
+    {0, 0, 4, 4},
+    // Just the partial edge column / row / corner.
+    {3, 0, 1, 4},
+    {0, 3, 4, 1},
+    {3, 3, 1, 1},
+    // Interior block that does not touch a partial edge block.
+    {0, 0, 1, 1},
+}};
+
+ParamsBuilder unalignedMipLevel0Params(ParamsBuilder u) {
+    return u.combineWithParams(methodsToTest())
+        .combine("format", colorFormatValues())
+        .filter([](const ParamRecord& params) { return isCompressedTextureFormat(formatFromParams(params)); })
+        .beginSubcases()
+        .combine("copyCaseIndex", indexValues(static_cast<uint32_t>(kUnalignedCopyCases.size())));
+}
+
+struct UndefinedParamsCase {
+    uint32_t copyWidth;
+    uint32_t copyHeight;
+    uint32_t copyDepth;
+    // Zero stands for an undefined origin component or stride.
+    uint32_t originX;
+    uint32_t originY;
+    uint32_t originZ;
+    uint32_t bytesPerRow;
+    uint32_t rowsPerImage;
+};
+
+constexpr std::array<UndefinedParamsCase, 7> kUndefinedParamsCases = {{
+    // copying one row: bytesPerRow and rowsPerImage can be undefined
+    {3, 1, 1, 0, 0, 0, 0, 0},
+    // copying one slice: rowsPerImage can be undefined
+    {3, 1, 1, 0, 0, 0, 256, 0},
+    {3, 3, 1, 0, 0, 0, 256, 0},
+    // copying two slices
+    {3, 3, 2, 0, 0, 0, 256, 3},
+    // origin.x = undefined
+    {1, 1, 1, 0, 1, 1, 0, 0},
+    // origin.y = undefined
+    {1, 1, 1, 1, 0, 1, 0, 0},
+    // origin.z = undefined
+    {1, 1, 1, 1, 1, 0, 0, 0},
+}};
+
+ParamsBuilder undefinedParams(ParamsBuilder u) {
+    return u.combineWithParams(methodsToTest())
+        .combine("dimension", textureDimensionValues())
+        .beginSubcases()
+        .combine("undefinedCaseIndex", indexValues(static_cast<uint32_t>(kUndefinedParamsCases.size())))
         .filter([](const ParamRecord& params) {
-            const bool undefinedBytesPerRow = valueAs<bool>(*findParam(params, "undefinedBytesPerRow"));
-            const bool undefinedRowsPerImage = valueAs<bool>(*findParam(params, "undefinedRowsPerImage"));
-            return undefinedBytesPerRow == undefinedRowsPerImage;
+            const UndefinedParamsCase& undefinedCase =
+                kUndefinedParamsCases[static_cast<size_t>(valueAs<int64_t>(*findParam(params, "undefinedCaseIndex")))];
+            const uint32_t textureHeight = undefinedCase.copyHeight + undefinedCase.originY;
+            const uint32_t textureDepth = undefinedCase.copyDepth + undefinedCase.originZ;
+            return !(dimensionFromParams(params) == WGPUTextureDimension_1D && (textureHeight > 1 || textureDepth > 1));
         });
 }
 
@@ -1063,97 +1385,193 @@ ParamsBuilder offsetsDepthStencilParams(ParamsBuilder u) {
 
 void runRowsPerImageAndBytesPerRow(AllFeaturesMaxLimitsGpuTest& t) {
     CopyScenario scenario = scenarioFromParams(t);
-    const uint32_t paddingIndex = static_cast<uint32_t>(t.param<int64_t>("paddingIndex"));
-    const uint32_t copySizeIndex = static_cast<uint32_t>(t.param<int64_t>("copySizeIndex"));
-    static constexpr std::array<uint32_t, 14> widths = {1, 2, 3, 4, 5, 7, 8, 15, 16, 31, 32, 63, 64, 128};
-    const uint32_t width = std::min(widths[copySizeIndex], scenario.textureSize.width);
-    const uint32_t height = copyHeightForDimension(scenario.dimension, 1 + copySizeIndex % 4);
-    const uint32_t depth = copyDepthForDimension(scenario.dimension, 1 + copySizeIndex % 3);
-    scenario.copySize = WGPUExtent3D{width, height, depth};
-    scenario.uploadLayout = uploadLayoutFor(
-        scenario.format, scenario.copySize, paddingIndex * 64, paddingIndex, 0, false);
+    const RowsPerImagePadding& padding = kRowsPerImagePaddings[static_cast<size_t>(t.param<int64_t>("paddingIndex"))];
+    const size_t copySizeIndex = static_cast<size_t>(t.param<int64_t>("copySizeIndex"));
+    const CopySizeInBlocks& copySizeInBlocks = scenario.dimension == WGPUTextureDimension_1D
+        ? kRowsPerImageCopySizes1D[copySizeIndex]
+        : kRowsPerImageCopySizes[copySizeIndex];
+
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(scenario.format);
+    const std::array<uint32_t, 3> maxSize =
+        getMaxValidTextureSizeForFormatAndDimension(t.getLimits(), scenario.format, scenario.dimension);
+
+    // For CopyB2T and CopyT2B we need to have bytesPerRow 256-aligned,
+    // to make this happen we align the bytesInACompleteRow value and multiply
+    // bytesPerRowPadding by 256.
+    const uint32_t bytesPerRowAlignment =
+        scenario.initMethod == InitMethod::WriteTexture && scenario.checkMethod == CheckMethod::FullCopyT2B ? 1 : 256;
+
+    const uint32_t copyWidth = std::min(copySizeInBlocks.copyWidthInBlocks * info.blockWidth, maxSize[0]);
+    const uint32_t copyHeight = std::min(copySizeInBlocks.copyHeightInBlocks * info.blockHeight, maxSize[1]);
+    const uint32_t copyDepth = copySizeInBlocks.copyDepth;
+    const uint32_t rowsPerImage = copySizeInBlocks.copyHeightInBlocks + padding.rowsPerImagePadding;
+    const uint32_t bytesPerRow =
+        static_cast<uint32_t>(alignTo(bytesInACompleteRow(copyWidth, scenario.format), bytesPerRowAlignment))
+        + padding.bytesPerRowPadding * bytesPerRowAlignment;
+
+    scenario.copySize = WGPUExtent3D{copyWidth, copyHeight, copyDepth};
+    scenario.textureDataLayout = TexelCopyBufferLayout{0, bytesPerRow, rowsPerImage};
+    scenario.dataSize = dataBytesForScenario(scenario, scenario.textureDataLayout);
+    /* making sure the texture is non-empty */
+    scenario.textureSize = WGPUExtent3D{
+        std::max(copyWidth, info.blockWidth),
+        std::max(copyHeight, info.blockHeight),
+        std::max(copyDepth, scenario.dimension == WGPUTextureDimension_2D ? 6u : 1u),
+    };
     uploadTextureAndVerifyCopy(t, scenario);
 }
 
 void runOffsetsAndSizes(AllFeaturesMaxLimitsGpuTest& t) {
     CopyScenario scenario = scenarioFromParams(t);
-    const uint32_t offsetIndex = static_cast<uint32_t>(t.param<int64_t>("offsetsAndPaddingsIndex"));
-    const uint32_t copyDepthIndex = static_cast<uint32_t>(t.param<int64_t>("copyDepthIndex"));
-    const uint32_t copyWidthIndex = static_cast<uint32_t>(t.param<int64_t>("copyWidthIndex"));
+    const OffsetAndPadding& offsetAndPadding =
+        kOffsetsAndPaddings[static_cast<size_t>(t.param<int64_t>("offsetsAndPaddingsIndex"))];
+    const uint32_t copyDepth = static_cast<uint32_t>(t.param<int>("copyDepth"));
+    const uint32_t copyWidth = static_cast<uint32_t>(t.param<int>("copyWidth"));
     const bool rowsPerImageEqualsCopyHeight = t.param<bool>("rowsPerImageEqualsCopyHeight");
-    static constexpr std::array<uint32_t, 3> widths = {1, 17, 256};
-    scenario.copySize = WGPUExtent3D{
-        std::min(widths[copyWidthIndex], scenario.textureSize.width),
-        copyHeightForDimension(scenario.dimension, 1 + offsetIndex % 4),
-        copyDepthForDimension(scenario.dimension, 1 + copyDepthIndex),
-    };
-    const uint32_t imagePadding = rowsPerImageEqualsCopyHeight ? 0 : 1 + offsetIndex % 3;
-    const uint32_t offsetStride = static_cast<uint32_t>(
-        alignTo(getBlockInfoForTextureFormat(scenario.format).bytesPerBlock, kBufferCopyAlignment));
-    scenario.uploadLayout = uploadLayoutFor(
-        scenario.format, scenario.copySize, (offsetIndex % 4) * 64, imagePadding, offsetIndex * offsetStride, false);
+
+    // Skip test cases designed for special cases coverage on compatibility mode to save run time.
+    // (This port never runs in compatibility mode.)
+    if (!rowsPerImageEqualsCopyHeight) {
+        t.skip("rowsPerImageEqualsCopyHeight === false is only for r8snorm and rg8snorm on compatibility mode");
+    }
+    if (copyWidth != 3) {
+        t.skip("copyWidth !== 3 is only for r8snorm and rg8snorm on compatibility mode");
+    }
+
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(scenario.format);
+
+    const uint64_t offset = static_cast<uint64_t>(offsetAndPadding.offsetInBlocks) * info.bytesPerBlock;
+    constexpr uint32_t copyHeight = 3;
+    scenario.copySize = WGPUExtent3D{copyWidth * info.blockWidth, copyHeight * info.blockHeight, copyDepth};
+    uint32_t textureHeight = 4 * info.blockHeight;
+    uint32_t rowsPerImage = rowsPerImageEqualsCopyHeight ? copyHeight : copyHeight + 1;
+    const uint32_t bytesPerRow = static_cast<uint32_t>(alignTo(copyWidth * info.bytesPerBlock, 256));
+
+    if (scenario.dimension == WGPUTextureDimension_1D) {
+        scenario.copySize.height = 1;
+        textureHeight = info.blockHeight;
+        rowsPerImage = 1;
+    }
+    // Add textureWidth by 1 to make sure we are doing a partial copy.
+    scenario.textureSize = WGPUExtent3D{(copyWidth + 1) * info.blockWidth, textureHeight, copyDepth};
+
+    scenario.textureDataLayout = TexelCopyBufferLayout{offset, bytesPerRow, rowsPerImage};
+    scenario.dataSize = dataBytesForScenario(scenario, scenario.textureDataLayout) + offsetAndPadding.dataPaddingInBytes;
+
+    // We're copying a (copyWidth x 3 x copyDepth) (in texel blocks) part of a ((copyWidth + 1) x 4 x copyDepth)
+    // (in texel blocks) texture with no origin.
     uploadTextureAndVerifyCopy(t, scenario);
 }
 
 void runOriginsAndExtents(AllFeaturesMaxLimitsGpuTest& t) {
     CopyScenario scenario = scenarioFromParams(t);
-    const uint32_t originValue = static_cast<uint32_t>(t.param<int64_t>("originValueInBlocks"));
-    const uint32_t copySizeValue = static_cast<uint32_t>(t.param<int64_t>("copySizeValueInBlocks"));
-    const uint32_t texturePadding = static_cast<uint32_t>(t.param<int64_t>("textureSizePaddingValueInBlocks"));
-    const uint32_t coordinate = static_cast<uint32_t>(t.param<int64_t>("coordinateToTest"));
-    const uint32_t origin = originValue;
-    const uint32_t copyExtent = 1 + copySizeValue;
-    const uint32_t textureExtent = origin + copyExtent + texturePadding + 1;
+    const uint32_t originValueInBlocks = static_cast<uint32_t>(t.param<int>("originValueInBlocks"));
+    const uint32_t copySizeValueInBlocks = static_cast<uint32_t>(t.param<int>("copySizeValueInBlocks"));
+    const uint32_t textureSizePaddingValueInBlocks =
+        static_cast<uint32_t>(t.param<int>("textureSizePaddingValueInBlocks"));
+    const size_t coordinateToTest = static_cast<size_t>(t.param<int>("coordinateToTest"));
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(scenario.format);
 
-    scenario.textureSize = WGPUExtent3D{8, copyHeightForDimension(scenario.dimension, 8), copyDepthForDimension(scenario.dimension, 8)};
-    if (coordinate == 0) {
-        scenario.textureSize.width = std::max(textureExtent, 1u);
-        scenario.origin.x = origin;
-        scenario.copySize.width = copyExtent;
-        scenario.copySize.height = copyHeightForDimension(scenario.dimension, 2);
-        scenario.copySize.depthOrArrayLayers = copyDepthForDimension(scenario.dimension, 2);
-    } else if (coordinate == 1) {
-        scenario.textureSize.height = textureExtent;
-        scenario.origin.y = origin;
-        scenario.copySize = WGPUExtent3D{4, copyExtent, copyDepthForDimension(scenario.dimension, 2)};
-    } else {
-        scenario.textureSize.depthOrArrayLayers = textureExtent;
-        scenario.origin.z = origin;
-        scenario.copySize = WGPUExtent3D{4, copyHeightForDimension(scenario.dimension, 2), copyExtent};
+    std::array<uint32_t, 3> originBlocks = {1, 1, 1};
+    std::array<uint32_t, 3> copySizeBlocks = {2, 2, 2};
+    std::array<uint32_t, 3> texSizeBlocks = {3, 3, 3};
+    if (scenario.dimension == WGPUTextureDimension_1D) {
+        originBlocks = {1, 0, 0};
+        copySizeBlocks = {2, 1, 1};
+        texSizeBlocks = {3, 1, 1};
     }
-    scenario.uploadLayout = uploadLayoutFor(scenario.format, scenario.copySize, 256, 1, 0, false);
+
+    originBlocks[coordinateToTest] = originValueInBlocks;
+    copySizeBlocks[coordinateToTest] = copySizeValueInBlocks;
+    texSizeBlocks[coordinateToTest] =
+        originBlocks[coordinateToTest] + copySizeBlocks[coordinateToTest] + textureSizePaddingValueInBlocks;
+
+    scenario.origin = WGPUOrigin3D{originBlocks[0] * info.blockWidth, originBlocks[1] * info.blockHeight, originBlocks[2]};
+    scenario.copySize = WGPUExtent3D{copySizeBlocks[0] * info.blockWidth, copySizeBlocks[1] * info.blockHeight, copySizeBlocks[2]};
+    scenario.textureSize = WGPUExtent3D{texSizeBlocks[0] * info.blockWidth, texSizeBlocks[1] * info.blockHeight, texSizeBlocks[2]};
+
+    const uint32_t rowsPerImage = copySizeBlocks[1];
+    const uint32_t bytesPerRow = static_cast<uint32_t>(alignTo(copySizeBlocks[0] * info.bytesPerBlock, 256));
+    scenario.textureDataLayout = TexelCopyBufferLayout{0, bytesPerRow, rowsPerImage};
+    scenario.dataSize = dataBytesForScenario(scenario, scenario.textureDataLayout);
+
+    // For testing width: we copy a (_ x 2 x 2) (in texel blocks) part of a (_ x 3 x 3)
+    // (in texel blocks) texture with origin (_, 1, 1) (in texel blocks).
+    // Similarly for other coordinates.
     uploadTextureAndVerifyCopy(t, scenario);
 }
 
 void runMipLevels(AllFeaturesMaxLimitsGpuTest& t) {
     CopyScenario scenario = scenarioFromParams(t);
-    const uint32_t textureSizeIndex = static_cast<uint32_t>(t.param<int64_t>("textureSizeIndex"));
-    const uint32_t mipLevelOffset = static_cast<uint32_t>(t.param<int64_t>("mipLevelOffset"));
-    static constexpr std::array<uint32_t, 4> baseWidths = {8, 16, 32, 64};
-    const uint32_t width = baseWidths[textureSizeIndex];
-    scenario.textureSize = WGPUExtent3D{
-        width,
-        copyHeightForDimension(scenario.dimension, std::max(1u, width / 2)),
-        copyDepthForDimension(scenario.dimension, std::max(1u, width / 4)),
+    const MipLevelCase& mipCase = kMipLevelCases[static_cast<size_t>(t.param<int64_t>("mipLevelCaseIndex"))];
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(scenario.format);
+
+    scenario.origin = WGPUOrigin3D{
+        mipCase.originInBlocks.x * info.blockWidth,
+        mipCase.originInBlocks.y * info.blockHeight,
+        mipCase.originInBlocks.z,
     };
-    const uint32_t mipLevelCount = maxMipLevelCount(scenario.textureSize, scenario.dimension);
-    scenario.mipLevel = std::min(mipLevelOffset, mipLevelCount - 1);
-    const WGPUExtent3D subresourceSize = mipSize(scenario.textureSize, scenario.dimension, scenario.mipLevel);
-    scenario.copySize = subresourceSize;
-    scenario.uploadLayout = uploadLayoutFor(scenario.format, scenario.copySize, 256, 1, 0, false);
-    uploadTextureAndVerifyCopy(t, scenario, mipLevelCount);
+    scenario.copySize = WGPUExtent3D{
+        mipCase.copySizeInBlocks.width * info.blockWidth,
+        mipCase.copySizeInBlocks.height * info.blockHeight,
+        mipCase.copySizeInBlocks.depthOrArrayLayers,
+    };
+
+    const uint32_t rowsPerImage = mipCase.copySizeInBlocks.height + 1;
+    const uint32_t bytesPerRow = static_cast<uint32_t>(alignTo(scenario.copySize.width, 256));
+    scenario.textureDataLayout = TexelCopyBufferLayout{0, bytesPerRow, rowsPerImage};
+    scenario.dataSize = dataBytesForScenario(scenario, scenario.textureDataLayout);
+    scenario.mipLevel = mipCase.mipLevel;
+    scenario.textureSize = parseTextureSizeParam(t.param<std::string>("textureSize"));
+    uploadTextureAndVerifyCopy(t, scenario);
+}
+
+void runUnalignedMipLevel0(AllFeaturesMaxLimitsGpuTest& t) {
+    CopyScenario scenario;
+    scenario.format = parseTextureFormat(t.param<std::string>("format"));
+    scenario.initMethod = parseInitMethod(t.param<std::string>("initMethod"));
+    scenario.checkMethod = parseCheckMethod(t.param<std::string>("checkMethod"));
+    const UnalignedCopyCase& copyCase = kUnalignedCopyCases[static_cast<size_t>(t.param<int64_t>("copyCaseIndex"))];
+    t.skipIfTextureFormatNotSupported(scenario.format);
+    if (!deviceHasTextureCompressionUnaligned(t.device())) {
+        t.skip("device does not have feature texture-compression-unaligned");
+    }
+
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(scenario.format);
+
+    // Unaligned mip level 0: three full blocks plus a one-texel partial edge block in each dimension
+    // (physical size four blocks). This is only valid with 'texture-compression-unaligned'.
+    scenario.textureSize = WGPUExtent3D{3 * info.blockWidth + 1, 3 * info.blockHeight + 1, 1};
+
+    scenario.origin = WGPUOrigin3D{copyCase.originXInBlocks * info.blockWidth, copyCase.originYInBlocks * info.blockHeight, 0};
+    scenario.copySize = WGPUExtent3D{copyCase.widthInBlocks * info.blockWidth, copyCase.heightInBlocks * info.blockHeight, 1};
+
+    const uint32_t rowsPerImage = copyCase.heightInBlocks + 1;
+    const uint32_t bytesPerRow = static_cast<uint32_t>(alignTo(scenario.copySize.width, 256));
+    scenario.textureDataLayout = TexelCopyBufferLayout{0, bytesPerRow, rowsPerImage};
+    scenario.dataSize = dataBytesForScenario(scenario, scenario.textureDataLayout);
+    scenario.dimension = WGPUTextureDimension_2D;
+    uploadTextureAndVerifyCopy(t, scenario);
 }
 
 void runUndefinedParams(AllFeaturesMaxLimitsGpuTest& t) {
     CopyScenario scenario = scenarioFromParams(t);
-    const bool undefinedBytesPerRow = t.param<bool>("undefinedBytesPerRow");
-    const bool undefinedRowsPerImage = t.param<bool>("undefinedRowsPerImage");
-    const bool undefinedOrigin = t.param<bool>("undefinedOrigin");
-    scenario.textureSize = WGPUExtent3D{8, 1, 1};
-    scenario.copySize = WGPUExtent3D{7, 1, 1};
-    scenario.origin = undefinedOrigin ? WGPUOrigin3D{0, 0, 0} : WGPUOrigin3D{1, 0, 0};
-    scenario.uploadLayout = uploadLayoutFor(
-        scenario.format, scenario.copySize, 0, 0, 0, undefinedBytesPerRow && undefinedRowsPerImage);
+    const UndefinedParamsCase& undefinedCase =
+        kUndefinedParamsCases[static_cast<size_t>(t.param<int64_t>("undefinedCaseIndex"))];
+
+    // Zero will get turned back into undefined later.
+    scenario.textureDataLayout = TexelCopyBufferLayout{0, undefinedCase.bytesPerRow, undefinedCase.rowsPerImage};
+    scenario.copySize = WGPUExtent3D{undefinedCase.copyWidth, undefinedCase.copyHeight, undefinedCase.copyDepth};
+    scenario.dataSize = 2000;
+    scenario.textureSize = WGPUExtent3D{
+        100,
+        undefinedCase.copyHeight + undefinedCase.originY,
+        undefinedCase.copyDepth + undefinedCase.originZ,
+    };
+    // Zeros will get turned back into undefined later.
+    scenario.origin = WGPUOrigin3D{undefinedCase.originX, undefinedCase.originY, undefinedCase.originZ};
+    scenario.format = WGPUTextureFormat_RGBA8Unorm;
+    scenario.changeBeforePass = ChangeBeforePass::Undefined;
     uploadTextureAndVerifyCopy(t, scenario);
 }
 
@@ -1284,6 +1702,10 @@ CTS_TEST(g, "origins_and_extents")
 CTS_TEST(g, "mip_levels")
     .params(mipParams)
     .fn([](AllFeaturesMaxLimitsGpuTest& t) { runMipLevels(t); });
+
+CTS_TEST(g, "compressed_textures,unaligned_mip_level_0")
+    .params(unalignedMipLevel0Params)
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) { runUnalignedMipLevel0(t); });
 
 CTS_TEST(g, "undefined_params")
     .params(undefinedParams)

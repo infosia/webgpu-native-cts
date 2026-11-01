@@ -1,8 +1,9 @@
-// Ported from gpuweb/cts src/webgpu/api/validation/createTexture.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/validation/createTexture.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -191,6 +192,43 @@ WGPUTextureDimension dimensionFromParams(const ParamRecord& params) {
 WGPUTextureDimension dimensionParam(AllFeaturesMaxLimitsGpuTest& t) {
     return t.paramIsUndefined("dimension") ? WGPUTextureDimension_Undefined
                                            : parseTextureDimension(t.param<std::string>("dimension"));
+}
+
+// [width, height, depthOrArrayLayers] of the "size" subcases of the
+// texture_size,default_value_and_smallest_size tests. An omitted component keeps its default of 1.
+struct DefaultValueSizeCase {
+    const char* name;
+    bool widthIsBlockSized;
+    bool hasHeight;
+    // Success when mip level 0 has to be aligned to the texel block size.
+    bool successWhenAligned;
+};
+
+constexpr std::array<DefaultValueSizeCase, 6> kCompressedDefaultValueSizeCases = {{
+    {"[1]", false, false, false},
+    {"[blockWidth]", true, false, false},
+    {"[1,1]", false, true, false},
+    {"[blockWidth,blockHeight]", true, true, true},
+    {"[1,1,1]", false, true, false},
+    {"[blockWidth,blockHeight,1]", true, true, true},
+}};
+
+std::vector<Value> compressedDefaultValueSizeCaseValues() {
+    std::vector<Value> values;
+    values.reserve(kCompressedDefaultValueSizeCases.size());
+    for (const DefaultValueSizeCase& sizeCase : kCompressedDefaultValueSizeCases) {
+        values.emplace_back(std::string(sizeCase.name));
+    }
+    return values;
+}
+
+const DefaultValueSizeCase& compressedDefaultValueSizeCase(std::string_view name) {
+    for (const DefaultValueSizeCase& sizeCase : kCompressedDefaultValueSizeCases) {
+        if (name == sizeCase.name) {
+            return sizeCase;
+        }
+    }
+    std::abort();
 }
 
 std::vector<Value> mipLevelCountValues() {
@@ -391,7 +429,7 @@ CTS_TEST(g, "viewFormats")
 CTS_TEST(g, "sample_count,1d_2d_array_3d")
     .desc("Test that 1d, 2d array, and 3d multisampled textures are invalid.")
     .params([](ParamsBuilder u) {
-        return u.beginSubcases().combineWithParams({
+        return u.combineWithParams({
             ParamRecord{{"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_2D))}, {"w", 4}, {"h", 4}, {"d", 1}, {"shouldError", false}},
             ParamRecord{{"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_1D))}, {"w", 4}, {"h", 1}, {"d", 1}, {"shouldError", true}},
             ParamRecord{{"dimension", std::string(textureDimensionIdentifier(WGPUTextureDimension_2D))}, {"w", 4}, {"h", 4}, {"d", 4}, {"shouldError", true}},
@@ -776,6 +814,88 @@ CTS_TEST(g, "mipLevelCount,bound_check,bigger_than_integer_bit_width")
         }, true);
     });
 
+CTS_TEST(g, "texture_size,default_value_and_smallest_size,uncompressed_format")
+    .desc(
+        "Test default values for height and depthOrArrayLayers for every dimension type and every "
+        "uncompressed format.\n"
+        "It also tests smallest size (lower bound) for every dimension type and every uncompressed "
+        "format, while other texture_size tests are testing the upper bound.")
+    .params([](ParamsBuilder u) {
+        return u.combine("dimension", textureDimensionValuesWithUndefined())
+            .combine("format", uncompressedTextureFormatValues())
+            .beginSubcases()
+            .combine("size", {Value(std::string("[1]")), Value(std::string("[1,1]")), Value(std::string("[1,1,1]"))})
+            // Filter out incompatible dimension type and format combinations.
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureDimension dimension = dimensionFromParams(params);
+                const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
+                return textureFormatAndDimensionPossiblyCompatible(dimension, format);
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension dimension = dimensionParam(t);
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+        t.skipIfTextureFormatNotSupported(format);
+        t.skipIfTextureFormatAndDimensionNotCompatible(format, dimension);
+
+        // Every spelling of "size" is 1x1x1 once the omitted components take their default of 1.
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size = WGPUExtent3D{1, 1, 1};
+        desc.dimension = dimension;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_TextureBinding;
+        t.createTextureTracked(desc);
+    });
+
+CTS_TEST(g, "texture_size,default_value_and_smallest_size,compressed_format")
+    .desc(
+        "Test default values for height and depthOrArrayLayers for every dimension type and every "
+        "compressed format.\n"
+        "It also tests smallest size (lower bound) for every dimension type and every compressed "
+        "format, while other texture_size tests are testing the upper bound.")
+    .params([](ParamsBuilder u) {
+        // Compressed formats are invalid for 1D.
+        return u
+            .combine("dimension",
+                     {Value::undef(),
+                      Value(std::string(textureDimensionIdentifier(WGPUTextureDimension_2D))),
+                      Value(std::string(textureDimensionIdentifier(WGPUTextureDimension_3D)))})
+            .combine("format", compressedTextureFormatValues())
+            .filter([](const ParamRecord& params) {
+                const WGPUTextureDimension dimension = dimensionFromParams(params);
+                const auto format = parseTextureFormat(valueAs<std::string>(*findParam(params, "format")));
+                return textureFormatAndDimensionPossiblyCompatible(dimension, format);
+            })
+            .beginSubcases()
+            .combine("size", compressedDefaultValueSizeCaseValues());
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureDimension dimension = dimensionParam(t);
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+        t.skipIfTextureFormatNotSupported(format);
+        t.skipIfTextureFormatAndDimensionNotCompatible(format, dimension);
+
+        const TextureBlockInfo blockInfo = getBlockInfoForTextureFormat(format);
+        const DefaultValueSizeCase& sizeCase =
+            compressedDefaultValueSizeCase(t.param<std::string>("size"));
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size.width = sizeCase.widthIsBlockSized ? blockInfo.blockWidth : 1;
+        desc.size.height = sizeCase.hasHeight && sizeCase.widthIsBlockSized ? blockInfo.blockHeight : 1;
+        desc.size.depthOrArrayLayers = 1;
+        desc.dimension = dimension;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_TextureBinding;
+
+        // With 'texture-compression-unaligned', mip level 0 is no longer required to be a multiple of
+        // the texel block size, so every (small, in-range) size in this test becomes valid.
+        const bool success = deviceHasTextureCompressionUnaligned(t.device()) || sizeCase.successWhenAligned;
+
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
+
 CTS_TEST(g, "texture_size,1d_texture")
     .desc("Test upper-bound texture size validation for 1D regular textures.")
     .params([](ParamsBuilder u) {
@@ -925,8 +1045,12 @@ CTS_TEST(g, "texture_size,2d_texture,compressed_format")
         desc.format = format;
         desc.usage = WGPUTextureUsage_TextureBinding;
 
-        const bool success = size.width % blockInfo.blockWidth == 0
-            && size.height % blockInfo.blockHeight == 0
+        // With 'texture-compression-unaligned', mip level 0 of a compressed texture is no longer
+        // required to be a multiple of the texel block size, so unaligned widths/heights are valid.
+        const bool supportsUnaligned = deviceHasTextureCompressionUnaligned(t.device());
+        const bool success = (supportsUnaligned
+                              || (size.width % blockInfo.blockWidth == 0
+                                  && size.height % blockInfo.blockHeight == 0))
             && size.width <= limits.maxTextureDimension2D
             && size.height <= limits.maxTextureDimension2D
             && size.depthOrArrayLayers <= limits.maxTextureArrayLayers;
@@ -966,8 +1090,12 @@ CTS_TEST(g, "texture_size,3d_texture,compressed_format")
         desc.format = format;
         desc.usage = WGPUTextureUsage_TextureBinding;
 
-        const bool success = size.width % blockInfo.blockWidth == 0
-            && size.height % blockInfo.blockHeight == 0
+        // With 'texture-compression-unaligned', mip level 0 of a compressed texture is no longer
+        // required to be a multiple of the texel block size, so unaligned widths/heights are valid.
+        const bool supportsUnaligned = deviceHasTextureCompressionUnaligned(t.device());
+        const bool success = (supportsUnaligned
+                              || (size.width % blockInfo.blockWidth == 0
+                                  && size.height % blockInfo.blockHeight == 0))
             && size.width <= limits.maxTextureDimension3D
             && size.height <= limits.maxTextureDimension3D
             && size.depthOrArrayLayers <= limits.maxTextureDimension3D
@@ -975,6 +1103,108 @@ CTS_TEST(g, "texture_size,3d_texture,compressed_format")
         t.expectValidationError([&] {
             t.createTextureTracked(desc);
         }, !success);
+    });
+
+CTS_TEST(g, "depthOrArrayLayers_and_mipLevelCount_for_transient_attachments")
+    .desc("Test depthOrArrayLayers and mipLevelCount must be 1 for transient attachments")
+    .params([](ParamsBuilder u) {
+        return u.combine("format",
+                         {Value(std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))),
+                          Value(std::string(textureFormatIdentifier(WGPUTextureFormat_Depth24Plus)))})
+            .beginSubcases()
+            .combine("depthOrArrayLayers", {Value(1), Value(2)})
+            .combine("mipLevelCount", {Value(1), Value(2)});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        // MAINTENANCE_TODO(#4509): Remove this after all implementations have TRANSIENT_ATTACHMENT.
+        t.skipIfTransientAttachmentNotSupported();
+
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+        const uint32_t depthOrArrayLayers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+        const uint32_t mipLevelCount = static_cast<uint32_t>(t.param<int>("mipLevelCount"));
+
+        const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size = WGPUExtent3D{info.blockWidth, info.blockHeight, depthOrArrayLayers};
+        desc.mipLevelCount = mipLevelCount;
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TransientAttachment;
+
+        const bool success = depthOrArrayLayers == 1 && mipLevelCount == 1;
+        t.expectValidationError([&] {
+            t.createTextureTracked(desc);
+        }, !success);
+    });
+
+CTS_TEST(g, "transient_viewFormats")
+    .desc("Test that viewFormats is not allowed with TRANSIENT_ATTACHMENT textures.")
+    .params([](ParamsBuilder u) {
+        // Just test rgba8unorm formats as this check doesn't care about what the format is.
+        return u.combine("format",
+                         {Value(std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8Unorm))),
+                          Value(std::string(textureFormatIdentifier(WGPUTextureFormat_RGBA8UnormSrgb)))})
+            .beginSubcases()
+            .combineWithParams({
+                // Control cases
+                ParamRecord{{"useTransient", true}, {"viewFormat", Value::undef()}},
+                ParamRecord{{"useTransient", false}, {"viewFormat", std::string("format")}},
+                ParamRecord{{"useTransient", false}, {"viewFormat", std::string("_otherFormat")}},
+                // Invalid cases
+                ParamRecord{{"useTransient", true}, {"viewFormat", std::string("format")}},
+                ParamRecord{{"useTransient", true}, {"viewFormat", std::string("_otherFormat")}},
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+        const WGPUTextureFormat otherFormat = format == WGPUTextureFormat_RGBA8Unorm
+            ? WGPUTextureFormat_RGBA8UnormSrgb
+            : WGPUTextureFormat_RGBA8Unorm;
+        const bool useTransient = t.param<bool>("useTransient");
+        const bool hasViewFormat = !t.paramIsUndefined("viewFormat");
+
+        // Upstream never skips this test on implementations without TRANSIENT_ATTACHMENT, but the
+        // usage bit eager-aborts on wgpu-native (see skipIfTransientAttachmentNotSupported).
+        if (useTransient) {
+            t.skipIfTransientAttachmentNotSupported();
+        }
+
+        const WGPUTextureFormat viewFormat = hasViewFormat && t.param<std::string>("viewFormat") == "format"
+            ? format
+            : otherFormat;
+        if (hasViewFormat && !textureFormatsAreViewCompatible(format, viewFormat)) {
+            t.skip("format and viewFormat are not view-compatible");
+        }
+
+        const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+        const bool invalid = useTransient && hasViewFormat;
+
+        WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        desc.size = WGPUExtent3D{info.blockWidth, info.blockHeight, 1};
+        desc.format = format;
+        desc.usage = WGPUTextureUsage_RenderAttachment
+            | (useTransient ? WGPUTextureUsage_TransientAttachment : WGPUTextureUsage_None);
+        // Doesn't matter what formats we request, TRANSIENT_ATTACHMENT doesn't allow it.
+        if (hasViewFormat) {
+            desc.viewFormatCount = 1;
+            desc.viewFormats = &viewFormat;
+        }
+
+        WGPUTexture texture = nullptr;
+        t.expectValidationError([&] {
+            texture = t.createTextureTracked(desc);
+        }, invalid);
+
+        if (invalid) {
+            // When we reach here the texture should be invalid, so creating a view should be invalid.
+            // But try it anyway just to see what happens - if the browser had a bug above, this could
+            // issue a bad command to the backend API.
+            WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+            viewDesc.format = viewFormat;
+            t.expectValidationError([&] {
+                t.createViewTracked(texture, viewDesc);
+            }, true);
+        }
     });
 
 } // namespace

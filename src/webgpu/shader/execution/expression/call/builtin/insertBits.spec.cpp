@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/insertBits.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/insertBits.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
@@ -6,8 +6,10 @@
 // Execution tests for the 'insertBits' builtin function.
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
+#include "cts/gpu.h"
 #include "webgpu/shader/execution/expression/expression.h"
 
 using namespace cts;
@@ -118,6 +120,57 @@ CTS_TEST(testGroup, "integer")
         run(t, builtin("insertBits"),
             {T, T, scalarType(ScalarKind::U32), scalarType(ScalarKind::U32)}, T,
             inputSourceFromParam(t.param<std::string>("inputSource")), 0, cases);
+    });
+
+CTS_TEST(testGroup, "array_index")
+    .desc("Test insertBits offset edge case where the result is used as an array index.")
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const std::string wgsl = R"(
+      @group(0) @binding(0) var<storage, read_write> res: array<u32, 8>;
+
+      @compute @workgroup_size(1)
+      fn main() {
+        let count = 0u;
+        res[insertBits(5u, 1u, 32u, count)] = 42u;
+      }
+    )";
+
+        WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        pipelineDesc.layout = nullptr; // auto
+        pipelineDesc.compute.module = t.createShaderModuleTracked(wgsl);
+        pipelineDesc.compute.entryPoint = WGPUStringView{"main", 4};
+        WGPUComputePipeline pipeline = t.createComputePipelineTracked(pipelineDesc);
+
+        const uint64_t resBufferSize = 8 * 4;
+        WGPUBufferDescriptor resBufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        resBufferDesc.size = resBufferSize;
+        resBufferDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc;
+        WGPUBuffer resBuffer = t.createBufferTracked(resBufferDesc);
+
+        WGPUBindGroupLayout bgl = wgpuComputePipelineGetBindGroupLayout(pipeline, 0);
+        WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
+        entry.binding = 0;
+        entry.buffer = resBuffer;
+        entry.size = resBufferSize;
+        WGPUBindGroupDescriptor groupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        groupDesc.layout = bgl;
+        groupDesc.entryCount = 1;
+        groupDesc.entries = &entry;
+        WGPUBindGroup group = t.createBindGroupTracked(groupDesc);
+        wgpuBindGroupLayoutRelease(bgl);
+
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
+        wgpuComputePassEncoderSetPipeline(pass, pipeline);
+        wgpuComputePassEncoderSetBindGroup(pass, 0, group, 0, nullptr);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
+        wgpuComputePassEncoderEnd(pass);
+        WGPUCommandBuffer commands = t.finishTracked(encoder);
+        wgpuQueueSubmit(t.queue(), 1, &commands);
+
+        const std::vector<uint32_t> expected = {0, 0, 0, 0, 0, 42, 0, 0};
+        t.expectGPUBufferValuesEqual(resBuffer, expected.data(), expected.size() * sizeof(uint32_t));
     });
 
 } // namespace

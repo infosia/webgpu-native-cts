@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/command_buffer/programmable/immediate.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/operation/command_buffer/programmable/immediate.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) 2024 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 The webgpu-native-cts Authors, BSD-3-Clause.

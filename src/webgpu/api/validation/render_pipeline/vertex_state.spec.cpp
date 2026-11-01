@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/vertex_state.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/vertex_state.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 webgpu-native-cts contributors, BSD-3-Clause.
 
@@ -47,7 +47,10 @@ struct VertexFormatInfo {
     uint64_t byteSize;
 };
 
-static constexpr std::array<VertexFormatInfo, 41> kVertexFormats = {{
+// Stands in for an enumerator that this backend's webgpu.h does not have.
+static constexpr WGPUVertexFormat kVertexFormatNotInHeader = WGPUVertexFormat_Force32;
+
+static constexpr std::array<VertexFormatInfo, 42> kVertexFormats = {{
     {"uint8", WGPUVertexFormat_Uint8, VertexFormatKind::Uint, 1},
     {"uint8x2", WGPUVertexFormat_Uint8x2, VertexFormatKind::Uint, 2},
     {"uint8x4", WGPUVertexFormat_Uint8x4, VertexFormatKind::Uint, 4},
@@ -89,6 +92,11 @@ static constexpr std::array<VertexFormatInfo, 41> kVertexFormats = {{
     {"sint32x4", WGPUVertexFormat_Sint32x4, VertexFormatKind::Sint, 16},
     {"unorm10-10-10-2", WGPUVertexFormat_Unorm10_10_10_2, VertexFormatKind::Unorm, 4},
     {"unorm8x4-bgra", WGPUVertexFormat_Unorm8x4BGRA, VertexFormatKind::Unorm, 4},
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
+    {"snorm10-10-10-2", WGPUVertexFormat_Snorm10_10_10_2, VertexFormatKind::Snorm, 4},
+#else
+    {"snorm10-10-10-2", kVertexFormatNotInHeader, VertexFormatKind::Snorm, 4},
+#endif
 }};
 
 std::vector<Value> vertexFormatValues() {
@@ -103,6 +111,15 @@ const VertexFormatInfo& vertexFormatInfo(std::string_view name) {
         if (name == info.name) return info;
     }
     std::abort();
+}
+
+template <class Test>
+const VertexFormatInfo& vertexFormatInfoOrSkip(Test& t, std::string_view name) {
+    const VertexFormatInfo& info = vertexFormatInfo(name);
+    if (info.format == kVertexFormatNotInHeader) {
+        t.skip("the vertex format is not in this backend's webgpu.h");
+    }
+    return info;
 }
 
 const char* requiredBaseType(VertexFormatKind kind) {
@@ -482,7 +499,7 @@ CTS_TEST(g, "vertex_shader_type_matches_attribute_format")
             });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const VertexFormatInfo& info = vertexFormatInfo(t.param<std::string>("format"));
+        const VertexFormatInfo& info = vertexFormatInfoOrSkip(t, t.param<std::string>("format"));
         const std::string shaderBaseType = t.param<std::string>("shaderBaseType");
         const std::string shaderType = t.param<std::string>("shaderType");
         WGPUVertexAttribute attr = WGPU_VERTEX_ATTRIBUTE_INIT;
@@ -532,7 +549,7 @@ CTS_TEST(g, "vertex_attribute_offset_alignment")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPULimits limits = t.getLimits();
-        const VertexFormatInfo& info = vertexFormatInfo(t.param<std::string>("format"));
+        const VertexFormatInfo& info = vertexFormatInfoOrSkip(t, t.param<std::string>("format"));
         const uint64_t stride = makeLimitVariant(limits.maxVertexBufferArrayStride, readVariant(t, "arrayStrideVariant"));
         const uint64_t offset = makeValueTestVariant(stride, parseVariantString(t.param<std::string>("offsetVariant")));
         const uint32_t index = static_cast<uint32_t>(makeLimitVariant(limits.maxVertexBuffers, readVariant(t, "vertexBufferIndexVariant")));
@@ -576,7 +593,7 @@ CTS_TEST(g, "vertex_attribute_contained_in_stride")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const WGPULimits limits = t.getLimits();
-        const VertexFormatInfo& info = vertexFormatInfo(t.param<std::string>("format"));
+        const VertexFormatInfo& info = vertexFormatInfoOrSkip(t, t.param<std::string>("format"));
         const uint64_t arrayStride = makeLimitVariant(limits.maxVertexBufferArrayStride, readVariant(t, "arrayStrideVariant"));
         const uint64_t strideForOffset = arrayStride != 0 ? arrayStride : limits.maxVertexBufferArrayStride;
         const uint64_t offset = makeValueTestVariant(strideForOffset, parseVariantString(t.param<std::string>("offsetVariant")));

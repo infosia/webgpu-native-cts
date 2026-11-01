@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/expression/binary/i32_arithmetic.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/execution/expression/binary/i32_arithmetic.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
@@ -139,6 +139,22 @@ CTS_TEST(testGroup, "remainder_compound").params(vectorizeParams).fn([](AllFeatu
     const bool isConst = cfgInputSource(t) == InputSource::Const;
     runCompoundScalar(t, "%=", isConst ? I32Op(i32_remainder_const) : I32Op(i32_remainder_non_const));
 });
+CTS_TEST(testGroup, "remainder_negative")
+    .desc("Expression: x % y, with negative dividends across non-power-of-two moduli.\n\n"
+          "Regression coverage for implementations that compute signed remainder as\n"
+          "unsigned for negative operands (e.g. lowering to a poison-prone OpSRem without\n"
+          "VK_KHR_maintenance8), which returns 255 instead of -1 for -1 % 768.\n"
+          "See https://github.com/gfx-rs/wgpu/issues/8191.")
+    .params(vectorizeParams)
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const bool isConst = cfgInputSource(t) == InputSource::Const;
+        // i32_arithmetic.cache.ts: remainder_negative_{const,non_const}.
+        const std::vector<int32_t> dividends = {-1, -2, -5, -255, -256, -768, -769, -1000, -1234567};
+        const std::vector<int32_t> moduli = {3, 7, 100, 256, 768, 1000};
+        auto cases = generateBinaryToI32Cases(
+            dividends, moduli, isConst ? I32Op(i32_remainder_const) : I32Op(i32_remainder_non_const));
+        run(t, binaryOp("%"), {I32, I32}, I32, cfgInputSource(t), cfgVectorize(t), cases);
+    });
 
 // scalar-vector / vector-scalar.
 CTS_TEST(testGroup, "addition_scalar_vector").params(vectorizeRhsParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {

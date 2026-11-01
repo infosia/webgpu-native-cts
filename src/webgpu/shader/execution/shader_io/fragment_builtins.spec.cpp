@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/shader_io/fragment_builtins.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/shader_io/fragment_builtins.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) 2024 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
@@ -25,6 +25,8 @@
 // - checkSampleRectsApproximatelyEqual is implemented directly on the f32
 //   readback data with upstream's rgba32float ulpFromZero comparison
 //   (maxDiffULPsForFloatFormat semantics) instead of going through TexelView.
+//   Like upstream's comparer, it matches whole texels: a texel passes if all
+//   of its components match `expected`, or all of them match the alternate.
 // - readGPUBufferRangeTyped / mapAsync readbacks map to
 //   expectGPUBufferValuesPassCheck (the harness does the staging copy).
 // - Subgroup limits come from WGPUAdapterInfo.subgroupMinSize/subgroupMaxSize
@@ -418,8 +420,13 @@ std::array<double, 4> computeFragmentFrontFacing(const FragData& fd) {
     return {fd.frontFacing ? 1.0 : 0.0, 0, 0, 0};
 }
 
-std::array<double, 4> computeSampleMask(const FragData& fd) {
+std::array<double, 4> computeFullSampleCoverageMask(const FragData& fd) {
     return {static_cast<double>(fd.sampleMask), 0, 0, 0};
+}
+
+// Computes (1 << sample_index)
+std::array<double, 4> computeSingleSampleMask(const FragData& fd) {
+    return {static_cast<double>(1u << fd.sampleIndex), 0, 0, 0};
 }
 
 // ---------------------------------------------------------------------------
@@ -880,44 +887,61 @@ void checkSampleRectsApproximatelyEqual(
     uint32_t sampleCount,
     WGPUBuffer actualBuffer,
     const std::vector<float>& expected,
-    int64_t maxDiffULPsForFloatFormat) {
+    int64_t maxDiffULPsForFloatFormat,
+    const std::vector<float>* alternativeExpected = nullptr) {
     const size_t byteLength = expected.size() * sizeof(float);
     t.expectGPUBufferValuesPassCheck(
         actualBuffer,
-        [&expected, width, height, sampleCount,
+        [&expected, alternativeExpected, width, height, sampleCount,
          maxDiffULPsForFloatFormat](const uint8_t* actualBytes, size_t len)
             -> std::optional<std::string> {
             std::vector<float> actual(len / sizeof(float));
             std::memcpy(actual.data(), actualBytes, len);
+
+            const auto texelMatches = [&actual, maxDiffULPsForFloatFormat](
+                                          const std::vector<float>& want, size_t texelOffset) {
+                for (size_t c = 0; c < 4; ++c) {
+                    const int64_t ulpA = ulpFromZeroF32(actual[texelOffset + c]);
+                    const int64_t ulpE = ulpFromZeroF32(want[texelOffset + c]);
+                    const int64_t diff = ulpA > ulpE ? ulpA - ulpE : ulpE - ulpA;
+                    if (diff > maxDiffULPsForFloatFormat) {
+                        return false;
+                    }
+                }
+                return true;
+            };
 
             std::ostringstream msg;
             int failures = 0;
             constexpr int kMaxReportedFailures = 10;
             for (uint32_t y = 0; y < height; ++y) {
                 for (uint32_t xs = 0; xs < width * sampleCount; ++xs) {
-                    for (uint32_t c = 0; c < 4; ++c) {
-                        const size_t i =
-                            (static_cast<size_t>(y) * width * sampleCount + xs) * 4 + c;
-                        const int64_t ulpA = ulpFromZeroF32(actual[i]);
-                        const int64_t ulpE = ulpFromZeroF32(expected[i]);
-                        const int64_t diff = ulpA > ulpE ? ulpA - ulpE : ulpE - ulpA;
-                        if (diff > maxDiffULPsForFloatFormat) {
-                            ++failures;
-                            if (failures <= kMaxReportedFailures) {
-                                msg << "\n  at (x=" << (xs / sampleCount)
-                                    << ", y=" << y << ", sample=" << (xs % sampleCount)
-                                    << ") component " << c << ": expected "
-                                    << expected[i] << ", actual " << actual[i]
-                                    << " (ULP diff " << diff << " > "
-                                    << maxDiffULPsForFloatFormat << ")";
-                            }
+                    const size_t i = (static_cast<size_t>(y) * width * sampleCount + xs) * 4;
+                    if (texelMatches(expected, i) ||
+                        (alternativeExpected != nullptr &&
+                         texelMatches(*alternativeExpected, i))) {
+                        continue;
+                    }
+                    ++failures;
+                    if (failures <= kMaxReportedFailures) {
+                        msg << "\n  at (x=" << (xs / sampleCount) << ", y=" << y
+                            << ", sample=" << (xs % sampleCount) << "): expected ("
+                            << expected[i] << ", " << expected[i + 1] << ", "
+                            << expected[i + 2] << ", " << expected[i + 3] << ")";
+                        if (alternativeExpected != nullptr) {
+                            const std::vector<float>& alt = *alternativeExpected;
+                            msg << " or (" << alt[i] << ", " << alt[i + 1] << ", " << alt[i + 2]
+                                << ", " << alt[i + 3] << ")";
                         }
+                        msg << ", actual (" << actual[i] << ", " << actual[i + 1] << ", "
+                            << actual[i + 2] << ", " << actual[i + 3] << "), max ULP diff "
+                            << maxDiffULPsForFloatFormat;
                     }
                 }
             }
             if (failures > 0) {
                 return "Texture level had unexpected contents: " +
-                       std::to_string(failures) + " failed component(s)" + msg.str();
+                       std::to_string(failures) + " failed texel(s)" + msg.str();
             }
             return std::nullopt;
         },
@@ -938,6 +962,9 @@ struct InputsTestConfig {
     std::string fragInCode;
     std::string outputCode;
     InterpolateFn interpolateFn;
+    // When set, a texel may also match the values this produces (upstream's
+    // `alternativeExpected`).
+    InterpolateFn alternativeInterpolateFn;
     int64_t maxDiffULPsForFloatFormat = 0;
     // Invoked with the CPU-side expected values before the GPU comparison
     // (used for upstream's sanity asserts).
@@ -976,9 +1003,16 @@ void runInputsTest(AllFeaturesMaxLimitsGpuTest& t, const InputsTestConfig& c) {
         c.beforeCheck(expected);
     }
 
+    std::vector<float> alternativeExpected;
+    if (c.alternativeInterpolateFn) {
+        go.interpolateFn = c.alternativeInterpolateFn;
+        alternativeExpected = generateFragmentInputs(go);
+    }
+
     checkSampleRectsApproximatelyEqual(
         t, kWidth, kHeight, c.sampleCount, actualBuffer, expected,
-        c.maxDiffULPsForFloatFormat);
+        c.maxDiffULPsForFloatFormat,
+        c.alternativeInterpolateFn ? &alternativeExpected : nullptr);
 }
 
 std::array<double, 2> parseNearFar(const std::string& text) {
@@ -1270,10 +1304,14 @@ CTS_TEST(g, "inputs,sample_mask")
     Test fragment shader builtin(sample_mask) values.
 
     Draws various triangles that should trigger different sample_mask values.
-    Checks that sample_mask matches what's expected. Note: the triangles
-    are selected so they do not intersect sample points as we don't want
-    to test precision issues on whether or not a sample point is inside
-    or outside the triangle when right on the edge.
+    Checks that sample_mask matches what's expected. The expected sample mask
+    is either:
+    - the full coverage mask for the fragment, or
+    - only has 1 bit at the current sample index.
+
+    Note: the triangles are selected so they do not intersect sample points
+    as we don't want to test precision issues on whether or not a sample point
+    is inside or outside the triangle when right on the edge.
   )")
     .params([](ParamsBuilder u) {
         return u
@@ -1327,6 +1365,7 @@ CTS_TEST(g, "inputs,sample_mask")
             {-x + 0.2, y, 0, 1},
             {x + 0.2, y, 0, 1},
         };
+        // This is not significant in this test, but is still needed by the helper.
         static const VecList kInterStagePoints = {
             {13, 14, 15, 16},
             {17, 18, 19, 20},
@@ -1341,7 +1380,8 @@ CTS_TEST(g, "inputs,sample_mask")
         c.interStagePoints = &kInterStagePoints;
         c.fragInCode = "@builtin(sample_mask) sample_mask: u32,";
         c.outputCode = "vec4f(f32(fin.sample_mask), 0, 0, 0)";
-        c.interpolateFn = computeSampleMask;
+        c.interpolateFn = computeFullSampleCoverageMask;
+        c.alternativeInterpolateFn = computeSingleSampleMask;
         c.maxDiffULPsForFloatFormat = 0;
         runInputsTest(t, c);
     });

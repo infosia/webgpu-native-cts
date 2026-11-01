@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/texture_utils.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/texture_utils.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
@@ -170,10 +170,10 @@ uint32_t lcmU32(uint32_t a, uint32_t b) {
 }
 
 WGPUAddressMode addressModeFromShort(const std::string& mode) {
-    if (mode == "repeat") {
+    if (mode == "repeat" || mode == "r") {
         return WGPUAddressMode_Repeat;
     }
-    if (mode == "mirror") {
+    if (mode == "mirror" || mode == "m") {
         return WGPUAddressMode_MirrorRepeat;
     }
     return WGPUAddressMode_ClampToEdge;
@@ -387,6 +387,14 @@ struct TextureCase {
     bool gatherCompare = false;
     int gatherComponent = 0;
     std::string gatherResultType = "f32";
+    // Keep baseSize as given instead of block-aligning every mip level; only for formats and sizes
+    // the device accepts ('texture-compression-unaligned').
+    bool unalignedBaseSize = false;
+    // When not empty, these are the sample coordinates, all at level 0.
+    std::vector<Vec3> explicitCoords;
+    // When set, a component passes if it is within this of the expected value or within 3 f32 ULPs
+    // of it (upstream's texelsApproximatelyEqual), instead of comparisonToleranceForFormat.
+    std::optional<double> maxFractionalDiff;
 };
 
 bool isCubeKind(SampleKind kind) {
@@ -443,7 +451,7 @@ std::vector<MipData> makeTextureData(
 
 WGPUExtent3D adjustedBaseSizeForFormat(const TextureCase& c) {
     WGPUExtent3D size = c.baseSize;
-    if (!isCompressedTextureFormat(c.format)) {
+    if (!isCompressedTextureFormat(c.format) || c.unalignedBaseSize) {
         return size;
     }
     const TextureBlockInfo info = getBlockInfoForTextureFormat(c.format);
@@ -1132,6 +1140,15 @@ std::string buildRenderWgsl(uint32_t callCount, const TextureCase& c) {
 
 std::vector<SampleCall> generateCalls(const TextureCase& c) {
     std::vector<SampleCall> calls;
+    if (!c.explicitCoords.empty()) {
+        calls.reserve(c.explicitCoords.size());
+        for (const Vec3& coords : c.explicitCoords) {
+            SampleCall call;
+            call.coords = coords;
+            calls.push_back(call);
+        }
+        return calls;
+    }
     // For cube gather, generate interior (non-edge) face points with a 0.75
     // sub-texel offset so the 2x2 footprint stays within a single face and is
     // unambiguous. Upstream's cube gather likewise avoids face edges/corners,
@@ -1856,6 +1873,17 @@ void initializeDepthTexture(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture,
     submit(t, encoder);
 }
 
+int64_t f32UlpDistance(float a, float b) {
+    const auto ulpFromZero = [](float v) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &v, sizeof(bits));
+        const int64_t magnitude = static_cast<int64_t>(bits & 0x7fffffffu);
+        return (bits & 0x80000000u) != 0u ? -magnitude : magnitude;
+    };
+    const int64_t diff = ulpFromZero(a) - ulpFromZero(b);
+    return diff < 0 ? -diff : diff;
+}
+
 void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     t.skipIfTextureFormatNotSupported(c.format);
     c.baseSize = adjustedBaseSizeForFormat(c);
@@ -2033,7 +2061,7 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
             if (len < static_cast<size_t>(outputSize)) {
                 return std::string("textureSampleLevel output buffer too small");
             }
-            const double tolerance = comparisonToleranceForFormat(c.format, c.filt);
+            const double tolerance = c.maxFractionalDiff.value_or(comparisonToleranceForFormat(c.format, c.filt));
             for (size_t i = 0; i < calls.size(); ++i) {
                 for (size_t component = 0; component < 4; ++component) {
                     const size_t byteOffset = c.stage == "compute"
@@ -2042,7 +2070,9 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
                     float gotValue = 0.0f;
                     std::memcpy(&gotValue, actual + byteOffset, sizeof(float));
                     const double diff = std::abs(static_cast<double>(gotValue) - expected[i][component]);
-                    if (diff > tolerance) {
+                    const bool withinUlps = c.maxFractionalDiff.has_value()
+                        && f32UlpDistance(gotValue, static_cast<float>(expected[i][component])) <= 3;
+                    if (diff > tolerance && !withinUlps) {
                         std::ostringstream msg;
                         msg << "textureSampleLevel mismatch at call " << i << " component " << component
                             << ": expected " << expected[i][component] << ", got " << gotValue
@@ -4616,6 +4646,10 @@ std::vector<Value> allTextureFormats() {
     return out;
 }
 
+std::vector<Value> compressedTextureFormats() {
+    return formatValues(kCompressedTextureFormats);
+}
+
 std::vector<Value> depthStencilFormats() {
     return formatValues(kDepthStencilFormats);
 }
@@ -4787,6 +4821,107 @@ void executeTextureSampleLevelSampled2DLodClamp(AllFeaturesMaxLimitsGpuTest& t) 
     c.baseMipLevel = static_cast<uint32_t>(t.param<int>("baseMipLevel"));
     c.lodMinClamp = t.param<double>("lodMinClamp");
     c.lodMaxClamp = t.param<double>("lodMaxClamp");
+    executeCase(t, c);
+}
+
+void executeTextureSampleLevelSampled2DCompressedUnaligned(AllFeaturesMaxLimitsGpuTest& t) {
+    const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+    const std::string filt = t.param<std::string>("filt");
+    const std::string partialEdge = t.param<std::string>("partialEdge");
+    // Upstream's skipIfTextureFormatNotFilterable never skips here: every compressed format with a
+    // float sample type is filterable.
+    t.skipIfTextureFormatNotSupported(format);
+    if (!deviceHasTextureCompressionUnaligned(t.device())) {
+        t.skip("device does not have the 'texture-compression-unaligned' feature");
+    }
+
+    // Mip level 0 size: a few full blocks plus a one-texel partial edge block in the selected
+    // dimension(s). An unaligned mip level 0 is only valid with 'texture-compression-unaligned'.
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+    const uint32_t width = partialEdge == "height" ? 4u * info.blockWidth : 3u * info.blockWidth + 1u;
+    const uint32_t height = partialEdge == "width" ? 4u * info.blockHeight : 3u * info.blockHeight + 1u;
+
+    TextureCase c;
+    c.kind = SampleKind::Sampled2D;
+    c.format = format;
+    c.stage = t.param<std::string>("stage") == "c" ? "compute" : "fragment";
+    c.filt = filt;
+    c.baseSize = baseSize(width, height, 1);
+    c.mipLevelCount = 1;
+    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
+    c.modeV = c.modeU;
+    c.unalignedBaseSize = true;
+    // checkCallResults: maxFractionalDiff is 0 unless the sampler filters linearly.
+    c.maxFractionalDiff = filt == "linear" ? maxFractionalDiffForTextureFormat(format) : 0.0;
+
+    // generateTextureBuiltinInputs2D(50, { method: 'spiral', ... }): coordinates are quantized to
+    // a quarter texel and, with nearest filtering, moved off the edges of texels.
+    constexpr uint32_t kSpiralPoints = 50;
+    const auto quantize = [&filt](double v, uint32_t size) {
+        constexpr double kSubdivisionsPerTexel = 4.0;
+        const double q = static_cast<double>(size) * kSubdivisionsPerTexel;
+        const double v1 = std::floor(v * q);
+        const bool isTexelEdgeCase = std::abs(std::fmod(v1, kSubdivisionsPerTexel)) == 0.0;
+        return (isTexelEdgeCase && filt == "nearest" ? v1 + 1.0 : v1) / q;
+    };
+    std::vector<Vec3>& coords = c.explicitCoords;
+    for (uint32_t i = 0; i < kSpiralPoints; ++i) {
+        const double f = static_cast<double>(i) / static_cast<double>(kSpiralPoints - 1u);
+        const double r = 1.5 * f;
+        const double a = 2.0 * 2.0 * 3.14159265358979323846 * f;
+        coords.push_back(Vec3{quantize(0.5 + r * std::cos(a), width), quantize(0.5 + r * std::sin(a), height), 0.0});
+    }
+
+    // Coordinates, in one axis, on and a quarter texel to each side of both edges of the texture.
+    // With linear filtering, sampling exactly on the edge blends the texels on each side of it
+    // with equal weights. With nearest filtering we skip the edge itself since either texel could
+    // be chosen.
+    const std::vector<double> edgeOffsets = filt == "linear"
+        ? std::vector<double>{-0.25, 0.0, 0.25}
+        : std::vector<double>{-0.25, 0.25};
+    const auto edgeCoords = [&edgeOffsets](uint32_t size) {
+        std::vector<double> out;
+        for (double edge : {0.0, 1.0}) {
+            for (double offset : edgeOffsets) {
+                out.push_back(edge + offset / static_cast<double>(size));
+            }
+        }
+        return out;
+    };
+    // Coordinates, in one axis, of the center of every texel.
+    const auto centerCoords = [](uint32_t size) {
+        std::vector<double> out;
+        for (uint32_t i = 0; i < size; ++i) {
+            out.push_back((static_cast<double>(i) + 0.5) / static_cast<double>(size));
+        }
+        return out;
+    };
+
+    if (partialEdge != "height") {
+        // Sample across the left and right edges on every row.
+        for (double u : edgeCoords(width)) {
+            for (double v : centerCoords(height)) {
+                coords.push_back(Vec3{u, v, 0.0});
+            }
+        }
+    }
+    if (partialEdge != "width") {
+        // Sample across the top and bottom edges on every column.
+        for (double v : edgeCoords(height)) {
+            for (double u : centerCoords(width)) {
+                coords.push_back(Vec3{u, v, 0.0});
+            }
+        }
+    }
+    if (partialEdge == "both") {
+        // Sample across the corners.
+        for (double u : edgeCoords(width)) {
+            for (double v : edgeCoords(height)) {
+                coords.push_back(Vec3{u, v, 0.0});
+            }
+        }
+    }
+
     executeCase(t, c);
 }
 

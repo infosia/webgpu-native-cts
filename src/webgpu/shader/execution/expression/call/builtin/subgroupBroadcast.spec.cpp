@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/subgroupBroadcast.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/subgroupBroadcast.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
@@ -642,7 +642,7 @@ std::optional<std::string> checkFragment(
             const uint32_t res = data[offset];
             auto it = inBounds.find(res);
             bool bound = it == inBounds.end() ? true : it->second;
-            bound = bound && row < height - 1 && col < height - 1;
+            bound = bound && row < height - 1 && col < width - 1;
             inBounds[res] = bound;
         }
     }
@@ -677,13 +677,14 @@ std::optional<std::string> checkFragment(
     for (const auto& kv : inBounds) {
         const uint32_t id = kv.first;
         if (kv.second) {
-            auto it = sizes.find(id);
-            const uint32_t size = it == sizes.end() ? 0u : it->second;
-            const uint32_t seenCount = it == sizes.end() ? 0u : it->second;
-            if (size < seenCount) {
+            // Groups whose broadcasting invocation was not found have indeterminate results.
+            const auto it = sizes.find(id);
+            const auto seenIt = seen.find(id);
+            const uint32_t numSeen = seenIt == seen.end() ? 0u : seenIt->second;
+            if (it != sizes.end() && it->second < numSeen) {
                 std::ostringstream msg;
                 msg << "Unexpected number of invocations for subgroup " << id
-                    << "\n- expected: " << size << "\n-      got: " << seenCount;
+                    << "\n- expected: " << it->second << "\n-      got: " << numSeen;
                 return msg.str();
             }
         }

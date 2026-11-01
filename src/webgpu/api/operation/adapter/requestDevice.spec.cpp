@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/adapter/requestDevice.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/operation/adapter/requestDevice.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) 2019 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
@@ -319,7 +319,10 @@ struct FeatureNameEntry {
     WGPUFeatureName value;
 };
 
-const std::array<FeatureNameEntry, 22> kFeatureNameEntries = {{
+// Stands in for an enumerator that this backend's webgpu.h does not have.
+constexpr WGPUFeatureName kFeatureNotInHeader = WGPUFeatureName_Force32;
+
+const std::array<FeatureNameEntry, 25> kFeatureNameEntries = {{
     {"bgra8unorm-storage", WGPUFeatureName_BGRA8UnormStorage},
     {"depth-clip-control", WGPUFeatureName_DepthClipControl},
     {"depth32float-stencil8", WGPUFeatureName_Depth32FloatStencil8},
@@ -342,6 +345,15 @@ const std::array<FeatureNameEntry, 22> kFeatureNameEntries = {{
     {"texture-formats-tier2", WGPUFeatureName_TextureFormatsTier2},
     {"primitive-index", WGPUFeatureName_PrimitiveIndex},
     {"texture-component-swizzle", WGPUFeatureName_TextureComponentSwizzle},
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
+    {"subgroup-size-control", WGPUFeatureName_SubgroupSizeControl},
+    {"atomic-vec2u-min-max", WGPUFeatureName_AtomicVec2uMinMax},
+    {"texture-compression-unaligned", WGPUFeatureName_TextureCompressionUnaligned},
+#else
+    {"subgroup-size-control", kFeatureNotInHeader},
+    {"atomic-vec2u-min-max", kFeatureNotInHeader},
+    {"texture-compression-unaligned", kFeatureNotInHeader},
+#endif
 }};
 
 std::vector<Value> kFeatureNames() {
@@ -554,8 +566,10 @@ CTS_TEST(g, "stale")
     .desc(
         "Test that adapter.requestDevice() can successfully return a device once, and once only.\n"
         "- Tests that we can successfully resolve after serial and concurrent rejections.\n"
-        "- Tests that consecutive valid attempts only succeeds the first time, returning lost "
-        "device otherwise.")
+        "- Tests that consecutive valid attempts only succeeds the first time, throwing "
+        "OperationError afterward, when the adapter state is \"consumed\". (Note it's not possibe "
+        "for CTS to test the adapter state \"expired\" since there's no way to lose an adapter in "
+        "the API.)")
     .params([](ParamsBuilder u) {
         return u.beginSubcases()
             .combine("initialError", {Value::undef(), Value("TypeError"), Value("OperationError")})
@@ -650,6 +664,9 @@ CTS_TEST(g, "features,known")
         const FeatureNameEntry* entry = findFeature(feature);
         if (entry == nullptr) {
             t.fail("features,known: unknown feature name " + feature);
+        }
+        if (entry->value == kFeatureNotInHeader) {
+            t.skip("the feature is not in this backend's webgpu.h");
         }
 
         OwnedAdapterContext ctx;

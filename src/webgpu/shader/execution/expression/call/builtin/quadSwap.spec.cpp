@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/quadSwap.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/quadSwap.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
@@ -391,9 +391,13 @@ CTS_TEST(g, "compute,split")
              << "  output.subgroup_size[lid] = subgroupBroadcastFirst(lid + 1);\n"
              << "  metadata.id[lid] = id;\n"
              << "  metadata.subgroup_size[lid] = subgroupSize;\n\n"
-             << "  if " << testcase.cond << " {\n"
-             << "    let b = " << op << "(lid);\n"
-             << "    output.results[lid] = b;\n"
+             << "  // Only run the quad op when a (subgroupSize / 2) split predicate is\n"
+             << "  // guaranteed to keep every quad fully active. See checker for skip.\n"
+             << "  if subgroupSize >= 8u {\n"
+             << "    if " << testcase.cond << " {\n"
+             << "      let b = " << op << "(lid);\n"
+             << "      output.results[lid] = b;\n"
+             << "    }\n"
              << "  }\n"
              << "}";
 
@@ -401,8 +405,17 @@ CTS_TEST(g, "compute,split")
         const std::function<bool(uint32_t, uint32_t)> filter = testcase.filter;
         sg::runComputeTest(
             t, wgsl.str(), wgSize, uintsPerOutput, std::vector<uint32_t>{0},
-            [op, filter](const std::vector<uint32_t>& metadata,
-                         const std::vector<uint32_t>& output) -> std::optional<std::string> {
+            [&t, op, filter](const std::vector<uint32_t>& metadata,
+                             const std::vector<uint32_t>& output) -> std::optional<std::string> {
+                const size_t bound = output.size() / 2;
+                // metadata layout: [id, ..., subgroup_size, ...]. The first entry
+                // of the second half is the subgroupSize of invocation 0.
+                if (metadata[bound] < 8) {
+                    t.skip("Implementation selected subgroup size " +
+                           std::to_string(metadata[bound]) +
+                           "; a split predicate would leave no fully active quad "
+                           "(undefined behavior).");
+                }
                 return checkSwapCompute(metadata, output, op, filter);
             });
     });

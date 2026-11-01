@@ -727,6 +727,21 @@ inline bool isColorTextureFormat(WGPUTextureFormat format) {
     return !info.hasDepth && !info.hasStencil;
 }
 
+/// True for a color format with 4 components (format_info's `color.componentCount === 4`), that is,
+/// one whose components include alpha.
+inline bool isColorTextureFormatWithAlpha(WGPUTextureFormat format) {
+    if (!isColorTextureFormat(format)) {
+        return false;
+    }
+    const std::string_view identifier = textureFormatIdentifier(format);
+    for (std::string_view withAlpha : {"rgba", "bgra", "rgb10a2", "rgb8a1", "astc"}) {
+        if (identifier.find(withAlpha) != std::string_view::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline bool isDepthTextureFormat(WGPUTextureFormat format) {
     return textureFormatInfo(format).hasDepth;
 }
@@ -1031,6 +1046,18 @@ inline bool textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension dim
     const TextureFormatInfo& info = textureFormatInfo(format);
     const bool restrictedDimension = dimension == WGPUTextureDimension_1D || dimension == WGPUTextureDimension_3D;
     return !(restrictedDimension && (info.blockWidth > 1 || info.hasDepth || info.hasStencil));
+}
+
+/// True if `device` enabled 'texture-compression-unaligned', which lifts the requirement that mip
+/// level 0 of a compressed texture is a multiple of the texel block size. The enumerator is not in
+/// wgpu-native's header, so the feature cannot be enabled there.
+inline bool deviceHasTextureCompressionUnaligned(WGPUDevice device) {
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
+    return wgpuDeviceHasFeature(device, WGPUFeatureName_TextureCompressionUnaligned) != WGPU_FALSE;
+#else
+    (void)device;
+    return false;
+#endif
 }
 
 inline bool isTier1BlendableMultisampleTextureFormat(WGPUTextureFormat format) {

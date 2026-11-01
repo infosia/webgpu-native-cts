@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/api/validation/createBindGroupLayout.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/validation/createBindGroupLayout.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 
 #include <string>
 #include <string_view>
@@ -583,6 +583,62 @@ CTS_TEST(g, "max_resources_per_stage,in_pipeline_layout")
         t.expectValidationError([&] {
             createPipelineLayoutWithBindGroupLayouts(t, {goodLayout, extraLayout});
         }, sameLimit);
+    });
+
+// BINDINGS_OF_TYPES: at most one member of an entry is set per value. The union of two values
+// mirrors upstream's `{ ...entry1, ...entry2 }`. Object params are not representable as a `Value`,
+// so they are named after the member they set ("none" is upstream's `{}`).
+std::vector<Value> bindingsOfTypesValues() {
+    return {
+        std::string("none"),
+        std::string("buffer"),
+        std::string("sampler"),
+        std::string("texture"),
+        std::string("storageTexture"),
+    };
+}
+
+void addBindingOfType(WGPUBindGroupLayoutEntry& entry, const std::string& type) {
+    if (type == "buffer") {
+        entry.buffer.type = WGPUBufferBindingType_Uniform;
+    } else if (type == "sampler") {
+        entry.sampler.type = WGPUSamplerBindingType_Comparison;
+    } else if (type == "texture") {
+        entry.texture.multisampled = WGPU_FALSE;
+        entry.texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
+    } else if (type == "storageTexture") {
+        entry.storageTexture.access = WGPUStorageTextureAccess_ReadOnly;
+        entry.storageTexture.format = WGPUTextureFormat_R32Uint;
+    }
+}
+
+CTS_TEST(g, "binding_type")
+    .desc(
+        "Test that exactly one of the binding types is specified for each entry.\n"
+        "- Test each type of bind group resource.\n"
+        "- Test that a validation error is generated if more than one type is specified.\n"
+        "- Test that a validation error is generated if no type is specified.")
+    .params([](ParamsBuilder u) {
+        return u.combine("entry1", bindingsOfTypesValues()).combine("entry2", bindingsOfTypesValues());
+    })
+    .fn([](GpuTest& t) {
+        const std::string entry1 = t.param<std::string>("entry1");
+        const std::string entry2 = t.param<std::string>("entry2");
+
+        // The INIT macro leaves all four binding members at their "not used" value.
+        WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        entry.binding = 0;
+        entry.visibility = WGPUShaderStage_Vertex;
+        addBindingOfType(entry, entry1);
+        addBindingOfType(entry, entry2);
+
+        const size_t joinedKeys = entry1 == entry2 ? (entry1 == "none" ? 0u : 1u)
+            : (entry1 == "none" || entry2 == "none") ? 1u
+                                                     : 2u;
+
+        t.expectValidationError([&] {
+            createBindGroupLayoutWithEntries(t, {entry});
+        }, joinedKeys != 1);
     });
 
 } // namespace

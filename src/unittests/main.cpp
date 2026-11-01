@@ -950,6 +950,14 @@ int main() {
                         WGPUTextureFormat_RGBA8Uint, WGPUOrigin3D{0, 0, 0}, WGPUExtent3D{1, 2, 1},
                         changedView, expected, 0.0).has_value(),
                     "findFailedPixels detects planted diff");
+            require(!cts::findFailedPixels(
+                        WGPUTextureFormat_RGBA8Uint, WGPUOrigin3D{0, 0, 0}, WGPUExtent3D{1, 2, 1},
+                        changedView, expected, 0.0, &changedView),
+                    "findFailedPixels accepts a texel matching the alternate");
+            require(cts::findFailedPixels(
+                        WGPUTextureFormat_RGBA8Uint, WGPUOrigin3D{0, 0, 0}, WGPUExtent3D{1, 2, 1},
+                        expected, changedView, 0.0, &changedView).has_value(),
+                    "findFailedPixels rejects a texel matching neither view");
         }
 
         {

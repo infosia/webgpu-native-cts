@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/rendering/depth.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/operation/rendering/depth.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 
 #include <array>
 #include <cmath>
@@ -11,6 +11,7 @@
 
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/language_features.h"
 #include "webgpu/texture_format.h"
 #include "webgpu/util/enum_strings.h"
 #include "webgpu/util/texture_layout.h"
@@ -586,6 +587,93 @@ struct VertexOut {
         submit(t, encoder);
 
         expectColorOkInTexture(t, color, reversed ? kGreen : kRed, WGPUExtent3D{kWidth, kHeight, 1});
+    });
+
+CTS_TEST(g, "fragment_depth_qualifiers")
+    .desc("Validates that less and greater qualifiers to @builtin(frag_depth) are accepted.")
+    .params([](ParamsBuilder u) {
+        return u.combine("mode", {Value(std::string("less")), Value(std::string("greater"))});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        if (!hasFragmentDepthLanguageFeature()) {
+            t.skip("Missing fragment_depth language feature");
+        }
+
+        const std::string mode = t.param<std::string>("mode");
+        const std::string val = mode == "less" ? "0.4" : "0.6";
+
+        WGPUShaderModule vertexModule = t.createShaderModuleTracked(R"(
+            @vertex
+            fn main() -> @builtin(position) vec4f {
+              return vec4f(0, 0, 0, 1);
+            }
+          )");
+        WGPUShaderModule fragmentModule = t.createShaderModuleTracked(
+            "\n"
+            "            requires fragment_depth;\n"
+            "\n"
+            "            struct Output {\n"
+            "              @location(0) color: vec4f,\n"
+            "              @builtin(frag_depth, " + mode + ") depth: f32,\n"
+            "            }\n"
+            "\n"
+            "            @fragment\n"
+            "            fn main() -> Output {\n"
+            "              return Output(vec4f(0, 1, 0, 1), " + val + ");\n"
+            "            }\n"
+            "          ");
+
+        constexpr WGPUTextureFormat depthFormat = WGPUTextureFormat_Depth32Float;
+
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
+        colorTarget.writeMask = WGPUColorWriteMask_All;
+
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = fragmentModule;
+        fragment.targetCount = 1;
+        fragment.targets = &colorTarget;
+
+        WGPUDepthStencilState depthStencil = WGPU_DEPTH_STENCIL_STATE_INIT;
+        depthStencil.format = depthFormat;
+        depthStencil.depthWriteEnabled = WGPUOptionalBool_True;
+        depthStencil.depthCompare = mode == "less" ? WGPUCompareFunction_Less : WGPUCompareFunction_Greater;
+
+        WGPURenderPipelineDescriptor pipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        pipelineDesc.vertex.module = vertexModule;
+        pipelineDesc.primitive.topology = WGPUPrimitiveTopology_PointList;
+        pipelineDesc.multisample.count = 1;
+        pipelineDesc.fragment = &fragment;
+        pipelineDesc.depthStencil = &depthStencil;
+        WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipelineDesc);
+
+        WGPUTexture colorTexture = createColorTarget(t);
+        WGPUTexture depthTexture = createDepthTarget(t, depthFormat);
+        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+        WGPUTextureView colorView = t.createViewTracked(colorTexture, viewDesc);
+        WGPUTextureView depthView = t.createViewTracked(depthTexture, viewDesc);
+
+        WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        colorAttachment.view = colorView;
+        colorAttachment.loadOp = WGPULoadOp_Clear;
+        colorAttachment.storeOp = WGPUStoreOp_Store;
+        colorAttachment.clearValue = WGPUColor{1.0, 0.0, 0.0, 1.0};
+        WGPURenderPassDepthStencilAttachment dsAttachment =
+            depthAttachment(depthView, depthFormat, WGPULoadOp_Clear, 0.5f);
+
+        WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        passDesc.colorAttachmentCount = 1;
+        passDesc.colorAttachments = &colorAttachment;
+        passDesc.depthStencilAttachment = &dsAttachment;
+
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+        wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+        wgpuRenderPassEncoderEnd(pass);
+        submit(t, encoder);
+
+        expectColorOkInTexture(t, colorTexture, kGreen, WGPUExtent3D{kWidth, kHeight, 1});
     });
 
 } // namespace

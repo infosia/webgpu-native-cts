@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/textureSampleLevel.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/shader/execution/expression/call/builtin/textureSampleLevel.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 // SPDX-License-Identifier: BSD-3-Clause
 // Upstream CTS: Copyright (c) The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
@@ -45,6 +45,34 @@ CTS_TEST(testGroup, "sampled_2d_coords,lodClamp")
             .combineWithParams(lodClampParams());
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) { executeTextureSampleLevelSampled2DLodClamp(t); });
+
+CTS_TEST(testGroup, "sampled_2d_coords,compressed_unaligned")
+    .desc(R"(
+Tests textureSampleLevel with block-compressed textures whose mip level 0 size is NOT a multiple of
+the texel block size, using the 'texture-compression-unaligned' feature.
+
+The blocks at the unaligned edges of the texture are only partially inside the texture. The texels
+of those blocks that are outside the texture must never be sampled. In particular:
+ * with 'repeat', sampling at the edge must blend the last texel with texel 0 (and vice versa).
+ * with 'clamp-to-edge' and 'mirror-repeat', sampling at the edge must only use the edge texel.
+
+The texture is filled with random blocks, so the texels outside the texture have different values
+than the ones inside. The expected values are computed only from the texels inside the texture.
+
+In addition to the usual sample points, samples every row and/or column on and around the
+unaligned edges (and the edges opposite to them, which wrap around to the unaligned edges).
+)")
+    .params([](ParamsBuilder u) {
+        return u.combine("stage", {"f", "c"})
+            .combine("format", compressedTextureFormats())
+            .filter(isPotentiallyFilterableAndFillable)
+            .combine("filt", {"nearest", "linear"})
+            .combine("mode", {"c", "r", "m"})
+            .beginSubcases()
+            // Which dimension(s) of mip level 0 have a partial edge block.
+            .combine("partialEdge", {"width", "height", "both"});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) { executeTextureSampleLevelSampled2DCompressedUnaligned(t); });
 
 CTS_TEST(testGroup, "sampled_array_2d_coords")
     .desc("textureSampleLevel sampled 2d-array coordinates.")

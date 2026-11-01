@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/util/texture/layout.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/util/texture/layout.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 #pragma once
 
 #include <cstddef>
@@ -40,6 +40,12 @@ struct LinearTextureSubBox {
 
 uint32_t bytesInACompleteRow(uint32_t width, WGPUTextureFormat format);
 WGPUExtent3D physicalMipSize(WGPUExtent3D baseSize, WGPUTextureDimension dimension, uint32_t mipLevel);
+/// The size of a mip level rounded up to a multiple of the texel block size of `format`.
+WGPUExtent3D physicalMipSize(
+    WGPUExtent3D baseSize,
+    WGPUTextureFormat format,
+    WGPUTextureDimension dimension,
+    uint32_t mipLevel);
 TextureCopyLayout getTextureCopyLayout(
     WGPUTextureFormat format,
     WGPUTextureDimension dimension,

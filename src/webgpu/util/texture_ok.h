@@ -1,4 +1,4 @@
-// Ported from gpuweb/cts src/webgpu/util/texture/texture_ok.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/util/texture/texture_ok.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 #pragma once
 
 #include <cstdint>
@@ -28,12 +28,15 @@ uint64_t getTexelOffsetInBytes(
     WGPUTextureFormat format,
     WGPUOrigin3D texelBlock,
     WGPUOrigin3D origin);
+/// A texel passes if all of its components match `expected` or, when given, all of them match
+/// `alternateExpected`.
 std::optional<std::string> findFailedPixels(
     WGPUTextureFormat format,
     WGPUOrigin3D origin,
     WGPUExtent3D size,
     const TexelView& actual,
     const TexelView& expected,
-    double maxFractionalDiff);
+    double maxFractionalDiff,
+    const TexelView* alternateExpected = nullptr);
 
 } // namespace cts

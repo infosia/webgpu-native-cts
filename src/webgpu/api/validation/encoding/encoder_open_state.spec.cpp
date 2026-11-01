@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/api/validation/encoding/encoder_open_state.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/api/validation/encoding/encoder_open_state.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2026 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 webgpu-native-cts contributors, BSD-3-Clause.
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -198,9 +199,14 @@ bool isUnavailableCommand(const std::string& command) {
     return command == "setImmediates" || command == "multiDrawIndirect" || command == "multiDrawIndexedIndirect";
 }
 
+// A single u32 of immediate data, like upstream's `new Uint32Array(1)`.
+constexpr uint32_t kImmediateData = 0;
+
 void skipUnavailableCommand(AllFeaturesMaxLimitsGpuTest& t, const std::string& command) {
-    if (command == "setImmediates") {
-        t.skip("setImmediates native entry points are not exported by any backend at this revision");
+    // Mirrors upstream's "'setImmediates' in GPUXxxEncoder.prototype" skip: the entry points exist
+    // in every backend header, so what can be missing is immediate data support on the device.
+    if (command == "setImmediates" && t.getLimits().maxImmediateSize < sizeof(kImmediateData)) {
+        t.skip("setImmediates not supported");
     }
     if (command == "multiDrawIndirect" || command == "multiDrawIndexedIndirect") {
         t.skip("chromium-experimental-multi-draw-indirect is not exposed in native headers");
@@ -306,6 +312,8 @@ void encodeRenderPassCommand(AllFeaturesMaxLimitsGpuTest& t, WGPURenderPassEncod
         wgpuRenderPassEncoderSetBlendConstant(pass, &color);
     } else if (command == "setStencilReference") {
         wgpuRenderPassEncoderSetStencilReference(pass, 0);
+    } else if (command == "setImmediates") {
+        wgpuRenderPassEncoderSetImmediates(pass, 0, &kImmediateData, sizeof(kImmediateData));
     } else if (command == "beginOcclusionQuery") {
         wgpuRenderPassEncoderBeginOcclusionQuery(pass, 0);
         wgpuRenderPassEncoderEndOcclusionQuery(pass);
@@ -359,6 +367,8 @@ void encodeRenderBundleCommand(AllFeaturesMaxLimitsGpuTest& t, WGPURenderBundleE
         wgpuRenderBundleEncoderSetIndexBuffer(bundle, indexBuffer, WGPUIndexFormat_Uint32, 0, 16);
     } else if (command == "setVertexBuffer") {
         wgpuRenderBundleEncoderSetVertexBuffer(bundle, 0, vertexBuffer, 0, 16);
+    } else if (command == "setImmediates") {
+        wgpuRenderBundleEncoderSetImmediates(bundle, 0, &kImmediateData, sizeof(kImmediateData));
     } else if (command == "pushDebugGroup") {
         wgpuRenderBundleEncoderPushDebugGroup(bundle, sv("group"));
         wgpuRenderBundleEncoderPopDebugGroup(bundle);
@@ -389,6 +399,8 @@ void encodeComputePassCommand(AllFeaturesMaxLimitsGpuTest& t, WGPUComputePassEnc
         wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
     } else if (command == "dispatchWorkgroupsIndirect") {
         wgpuComputePassEncoderDispatchWorkgroupsIndirect(pass, buffer, 0);
+    } else if (command == "setImmediates") {
+        wgpuComputePassEncoderSetImmediates(pass, 0, &kImmediateData, sizeof(kImmediateData));
     } else if (command == "pushDebugGroup") {
         wgpuComputePassEncoderPushDebugGroup(pass, sv("group"));
         wgpuComputePassEncoderPopDebugGroup(pass);

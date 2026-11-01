@@ -1,13 +1,16 @@
-// Ported from gpuweb/cts src/webgpu/api/validation/buffer/mapping.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// Ported from gpuweb/cts src/webgpu/api/validation/buffer/mapping.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
 //
 // C getMappedRange returns a raw pointer. Invalid calls are observed as nullptr returns, not
 // validation errors, and JS ArrayBuffer byteLength/detach assertions have no C API equivalent.
 
 #include <array>
 #include <cstddef>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include "common/webgpu/backend.h"
+#include "common/webgpu/sync.h"
 #include "cts/gpu.h"
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
@@ -152,6 +155,141 @@ CTS_TEST(g, "mapAsync,invalidBuffer")
         const WGPUMapMode mapMode = t.param<WGPUMapMode>("mapMode");
         WGPUBuffer buffer = t.getErrorBuffer();
         t.expectMapAsync(buffer, mapMode, false);
+    });
+
+// State shared between the device callbacks and the mapAsync,destroyedDevice test body. It outlives
+// the device so a late callback never sees a dangling pointer.
+struct DestroyableDeviceState {
+    bool lost = false;
+    WGPUDeviceLostReason lostReason = WGPUDeviceLostReason_Unknown;
+    bool uncapturedError = false;
+};
+
+// A private device for mapAsync,destroyedDevice: the harness's cached device must stay alive.
+struct DestroyableDevice {
+    WGPUInstance instance = nullptr;
+    WGPUAdapter adapter = nullptr;
+    WGPUDevice device = nullptr;
+    WGPUBuffer buffer = nullptr;
+
+    DestroyableDevice() = default;
+    DestroyableDevice(const DestroyableDevice&) = delete;
+    DestroyableDevice& operator=(const DestroyableDevice&) = delete;
+
+    ~DestroyableDevice() {
+        if (buffer != nullptr) {
+            wgpuBufferRelease(buffer);
+        }
+        if (device != nullptr) {
+            wgpuDeviceRelease(device);
+        }
+        if (adapter != nullptr) {
+            wgpuAdapterRelease(adapter);
+        }
+        if (instance != nullptr) {
+            wgpuInstanceRelease(instance);
+        }
+    }
+};
+
+void createDestroyableDevice(GpuTest& t, DestroyableDevice& ctx, DestroyableDeviceState& state) {
+    ctx.instance = createInstance();
+    if (ctx.instance == nullptr) {
+        t.fail("failed to create WGPUInstance");
+    }
+    AdapterResult adapter = requestAdapterSync(ctx.instance, adapterOptions());
+    if (adapter.status != WGPURequestAdapterStatus_Success || adapter.adapter == nullptr) {
+        t.fail("failed to request adapter: " + adapter.message);
+    }
+    ctx.adapter = adapter.adapter;
+
+    WGPUDeviceDescriptor desc = WGPU_DEVICE_DESCRIPTOR_INIT;
+    desc.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    desc.deviceLostCallbackInfo.callback = [](WGPUDevice const*,
+                                              WGPUDeviceLostReason reason,
+                                              WGPUStringView,
+                                              void* userdata1,
+                                              void*) {
+        auto* lostState = static_cast<DestroyableDeviceState*>(userdata1);
+        lostState->lost = true;
+        lostState->lostReason = reason;
+    };
+    desc.deviceLostCallbackInfo.userdata1 = &state;
+    desc.uncapturedErrorCallbackInfo.callback = [](WGPUDevice const*,
+                                                   WGPUErrorType,
+                                                   WGPUStringView,
+                                                   void* userdata1,
+                                                   void*) {
+        static_cast<DestroyableDeviceState*>(userdata1)->uncapturedError = true;
+    };
+    desc.uncapturedErrorCallbackInfo.userdata1 = &state;
+
+    DeviceResult device = requestDeviceSync(ctx.instance, ctx.adapter, &desc);
+    if (device.status != WGPURequestDeviceStatus_Success || device.device == nullptr) {
+        t.fail("failed to request device: " + device.message);
+    }
+    ctx.device = device.device;
+}
+
+// testMapAsyncCall() on the private device. A C mapAsync that "rejects" reports it through its
+// callback status: OperationError is WGPUMapAsyncStatus_Error, AbortError is WGPUMapAsyncStatus_Aborted.
+void mapAsyncOnDestroyableDevice(GpuTest& t,
+                                 DestroyableDevice& ctx,
+                                 WGPUMapAsyncStatus expectedStatus,
+                                 bool expectValidationError) {
+    wgpuDevicePushErrorScope(ctx.device, WGPUErrorFilter_Validation);
+    const WGPUMapAsyncStatus status =
+        bufferMapSync(ctx.instance, ctx.buffer, WGPUMapMode_Read, 0, WGPU_WHOLE_MAP_SIZE);
+    const ScopeResult scope = popErrorScopeSync(ctx.instance, ctx.device);
+    if (scope.status != WGPUPopErrorScopeStatus_Success) {
+        t.fail("popErrorScope failed: " + scope.message);
+    }
+    t.expect(status == expectedStatus, "mapAsync finished with an unexpected status");
+    t.expect((scope.type != WGPUErrorType_NoError) == expectValidationError,
+             expectValidationError ? "expected a validation error" : "unexpected validation error");
+}
+
+CTS_TEST(g, "mapAsync,destroyedDevice")
+    .desc("Test that mapAsync is an error when called on a destroyed device.")
+    .params([](ParamsBuilder u) {
+        return u.combine("bufferState", {Value(std::string("valid")), Value(std::string("invalid"))})
+            .combine("awaitLost", {true, false});
+    })
+    .fn([](GpuTest& t) {
+        const bool validBuffer = t.param<std::string>("bufferState") == "valid";
+        const bool awaitLost = t.param<bool>("awaitLost");
+
+        DestroyableDeviceState state;
+        DestroyableDevice ctx;
+        createDestroyableDevice(t, ctx, state);
+
+        WGPUBufferDescriptor bufferDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        bufferDesc.size = 4;
+        // MAP_READ | MAP_WRITE is the invalid usage GpuTest::getErrorBuffer() uses.
+        bufferDesc.usage = validBuffer ? WGPUBufferUsage_MapRead
+                                       : (WGPUBufferUsage_MapRead | WGPUBufferUsage_MapWrite);
+        wgpuDevicePushErrorScope(ctx.device, WGPUErrorFilter_Validation);
+        ctx.buffer = wgpuDeviceCreateBuffer(ctx.device, &bufferDesc);
+        const ScopeResult createScope = popErrorScopeSync(ctx.instance, ctx.device);
+        t.expect(createScope.status == WGPUPopErrorScopeStatus_Success
+                     && (createScope.type != WGPUErrorType_NoError) == !validBuffer,
+                 "the buffer was not created in the requested state");
+
+        if (validBuffer) {
+            mapAsyncOnDestroyableDevice(t, ctx, WGPUMapAsyncStatus_Success, false);
+        } else {
+            mapAsyncOnDestroyableDevice(t, ctx, WGPUMapAsyncStatus_Error, true);
+        }
+        wgpuBufferUnmap(ctx.buffer);
+        wgpuDeviceDestroy(ctx.device);
+        if (awaitLost) {
+            if (!processEventsUntil(ctx.instance, [&state] { return state.lost; })) {
+                t.fail("device was not lost");
+            }
+            t.expect(state.lostReason == WGPUDeviceLostReason_Destroyed, "device was lost from destroy");
+        }
+        mapAsyncOnDestroyableDevice(t, ctx, WGPUMapAsyncStatus_Aborted, false);
+        t.expect(!state.uncapturedError, "unexpected uncaptured error");
     });
 
 CTS_TEST(g, "mapAsync,state,destroyed")
