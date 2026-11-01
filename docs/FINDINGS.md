@@ -133,8 +133,29 @@ F-084, F-088), and the naga-lineage shader findings that yawgpu resolved by movi
 F-133, F-134, F-136), the immediates / unrequestable-feature divergences (F-154), and the `v29.0.1.1` `mapAsync` `WGPU_WHOLE_MAP_SIZE` regression (F-155, fixed upstream but unreleased).
 
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
-Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139), all green on both
+Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139, F-158), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
+
+---
+
+## F-158 — MoltenVK: `subgroupShuffle` reads 0 after Tint's shuffle-ID bound — MoltenVK only
+
+Found 2026-11-01 on yawgpu at Tint `v20261030.184100` through MoltenVK. Seven cases fail on every run
+with "expected N, got 0", and all seven pass on every run with the previous library:
+
+- `webgpu:shader,execution,expression,call,builtin,subgroupShuffle:data_types`:
+  `subgroupShuffleDown` with `i32`, `u32`, `f16`, `f32`
+- `...subgroupShuffle:shuffleUpDown,delta`: `subgroupShuffleUp` with `override_2`;
+  `subgroupShuffleDown` with `dynamic_1`, `override_2`
+
+The likely trigger is Dawn `d71bca28b3` ("[tint][spirv] Bound subgroup IDs by highest active
+invocation"), which bounds shuffle IDs with `OpGroupNonUniformBallotFindMSB`. The SPIR-V passes
+`spirv-val`. The root cause inside MoltenVK is unconfirmed.
+
+Native Windows Vulkan passes, and native Metal does not use this path and passes, so this is a MoltenVK
+defect, not a yawgpu or Tint one. Dawn on MoltenVK could not be compared: its Vulkan backend reports no
+adapter there. Like F-139, the cases are intentionally not in `expectations/yawgpu-vulkan.txt`: listing
+them would `xpass` on the authoritative native run. They still fail in a MoltenVK sweep.
 
 ---
 
