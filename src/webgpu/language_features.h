@@ -70,4 +70,10 @@ inline bool hasFragmentDepthLanguageFeature() {
 #endif
 }
 
+/// The 'unrestricted_aliasing' language feature. No backend's webgpu.h has an enumerator for it, so
+/// no backend can report it (F-159).
+inline bool hasUnrestrictedAliasingLanguageFeature() {
+    return false;
+}
+
 } // namespace cts

@@ -122,7 +122,7 @@ port-oracle quirk the Dawn oracle fails identically; Metal + Vulkan) and the Vul
 **F-111**, **F-129** (denormal `fwidth`), **F-141**, all in `expectations/yawgpu-vulkan.txt`. No yawgpu
 defect is masked.
 
-**Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet). The former **F-130** override-shift divergence **no longer reproduces** on
+**Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a compile-time zero value). The former **F-130** override-shift divergence **no longer reproduces** on
 the current Dawn build (`fail=0`); Dawn now fails only the 2 shared `index_buffer_format_dirtying`
 port-oracle cases.
 
@@ -135,6 +135,23 @@ F-133, F-134, F-136), the immediates / unrequestable-feature divergences (F-154)
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
 Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139, F-158), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
+
+---
+
+## F-160 — Dawn/Metal: `atomicStoreMax`/`atomicStoreMin` return wrong data when the stored value is a compile-time zero — OPEN
+
+Found 2026-11-01 on Dawn `v20261030.184100`, Apple M2 / Metal.
+`webgpu:shader,execution,expression,call,builtin,atomics,atomicStore{Max,Min}:store_{max,min}_basic`
+fails for `rndMultiplyX=0;rndMultiplyY=0`, across workgroup and dispatch sizes (70 of 72 such cases in
+the first run; the other 864+ pass per file). The shader stores `vec2u(id[0] * 0, id[1] * 0)` to a
+zero-initialized buffer, so the correct result is `[0, 0]`. `atomicStoreMin` returns
+`[4294967295, 4294967295]`, and `atomicStoreMax` returns values that differ on every run.
+
+Cases that also store zero at run time pass, for example `workgroupSize=1;dispatchSize=1;rndMultiplyX=1;rndMultiplyY=1`,
+so the trigger is the zero being known at compile time. The port's shader and expected values match
+upstream. Dawn's `webgpu-cts/expectations.txt` has no entry for this. Whether the fault is in Tint's MSL
+output or in the Metal compiler is unconfirmed; yawgpu was not run. The cases are in
+`expectations/dawn.txt`.
 
 ---
 
