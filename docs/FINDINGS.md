@@ -139,6 +139,43 @@ F-133, F-134, F-136), the immediates / unrequestable-feature divergences (F-154)
 Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139, F-158), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
+**Open — NVIDIA driver:** F-165 (shader compiler crash on `bufferArrayView` workgroup f16 aliasing, intermittent).
+
+---
+
+## F-165 — NVIDIA/Windows: shader compiler crash on `bufferArrayView` workgroup f16 aliasing — driver defect, NOT yawgpu
+
+**DRIVER DEFECT — NOT yawgpu** (Windows 11 / NVIDIA RTX 5060 Ti, driver 617.14, native Vulkan; found and triaged
+2026-11-01, yawgpu `9977e34`, CTS `fbe54f0`) — `webgpu:shader,execution,expression,call,builtin,bufferArrayView:mixed_types_aliasing`
+intermittently crashes a shard worker with `0xC0000005` during `vkCreateComputePipelines`. Seen once in the whole-suite
+sweep and in 1 of 3 `bufferArrayView` reruns at `--workers 8`. Every crash observed was `buffer="workgroup"`,
+`aliased=true`, with an f16 pair:
+
+- `pair="vec4i_f16"`, `overlap="same_start"`, `access="dynamic_base"`
+- `pair="vec4i_f16"`, `overlap="offset"`, `access="dynamic_base"`
+- `pair="vec4i_vec4h"`, `overlap="same_start"`, `access="dynamic_index"`
+- `pair="vec4i_vec4h"`, `overlap="offset"`, `access="dynamic_base"` (sweep only)
+
+**Evidence.** The fault is a read of `0xffffffffffffffff` at `nvgpucomp64.dll+0xa8bb72` with `rcx=baadf00dbaadf008`,
+on the stack `wgpuDeviceCreateComputePipeline` → `vkCreateComputePipelines` → `nvoglv64.dll` → `nvgpucomp64.dll`.
+A plain Vulkan program with no yawgpu or `webgpu.h` in the process faults at the same address on the dumped SPIR-V, so
+yawgpu is not on the failing path. The modules pass `spirv-val --target-env vulkan1.3`, and the program enables the
+features they need: `shaderFloat16`, `shaderInt16`, `storageBuffer16BitAccess`, `uniformAndStorageBuffer16BitAccess`,
+`vulkanMemoryModel`, `vulkanMemoryModelDeviceScope`.
+
+**Reproduction.** With the NVIDIA disk cache off (`__GL_SHADER_DISK_CACHE=0`), 3 of the 15 modules from the first three
+subcases above fault on 3 of 3 attempts under a debugger, whose debug heap fills fresh allocations with `0xBAADF00D`. The
+other 12 do not fault. Without a debugger, the same program ran 30 processes without a fault. That and the register
+value suggest the compiler reads an uninitialized pointer, which would explain why the crash is intermittent, and why the
+subcases pass alone and at `--workers 1`. This cause is inferred, not confirmed inside the driver.
+
+**Shader shape.** Tint lowers the workgroup `buffer<128>` shared by the i32 and f16 views to `array<u16, 64>` and reaches
+the typed views through `OpBitcast`. The unaliased `B` stays `array<u32, 32>`. The faulting modules have the most `OpBitcast` instructions of the group (26 to 29). The compiler pass
+responsible is unknown.
+
+**Status.** Not Dawn-confirmed, and not reported to NVIDIA. Not in `expectations/yawgpu-vulkan.txt`, because the crash is
+intermittent and the cases pass on most runs.
+
 ---
 
 ## F-164 — yawgpu reports four known WGSL language features as missing — OPEN (expected)
