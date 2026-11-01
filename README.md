@@ -227,7 +227,8 @@ Swept **2026-11-01 raw** — four per-area `--workers 8` runs on yawgpu `9977e34
 counts match the Linux table below: 4, 25 and 2. `api/validation` and
 `shader/validation` are identical to Linux, `api/operation` differs by 3 pass → skip, and
 `shader/execution` differs only by the crash, which also lost 4 subcases of its case. The suite was
-re-baselined after the previous sweep (`53ca8bb`), so counts are not comparable with it per area.
+re-baselined after the previous sweep (`53ca8bb`), so counts are not comparable with it per area;
+[FINDINGS](docs/FINDINGS.md) breaks down the skip increase.
 
 § Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`.
 

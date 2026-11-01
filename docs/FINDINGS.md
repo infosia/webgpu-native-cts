@@ -146,6 +146,45 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
+## Skip increase at the `d116bcc` re-baseline — yawgpu, Windows native Vulkan (2026-11-01)
+
+Not a finding. This records why skip rose by 141,087 between the 2026-09-26 sweep (yawgpu `53ca8bb`, 642 files) and
+the 2026-11-01 sweep (yawgpu `9977e34`, CTS `fbe54f0`, 657 files). Nothing here points to a yawgpu regression.
+
+| area | 2026-09-26 | 2026-11-01 | change |
+|---|---:|---:|---:|
+| `api/operation` | 20,233 | 152,819 | **+132,586** |
+| `shader/execution` | 313,164 | 320,680 | +7,516 |
+| `api/validation` | 110,315 | 111,283 | +968 |
+| `shader/validation` | 20,282 | 20,299 | +17 |
+| **total** | **463,994** | **605,081** | **+141,087** |
+
+**`api/operation`.** At `c77b620`, `copyTextureToTexture:color_textures,compressed,*` was `unimplemented` and
+`image_copy` had no compressed formats. Those two files now account for 132,585 skips, which matches the increase to
+within 1:
+
+| reason (skip message) | subcases | meaning |
+|---|---:|---|
+| `texture format requires an unsupported feature` | 76,776 | mainly ASTC and ETC2/EAC in the sampled rows; desktop NVIDIA has neither |
+| `format does not support dimension` | 35,376 | compressed formats in dimensions such as `1d`; out of scope by spec |
+| `rowsPerImageEqualsCopyHeight === false` / `copyWidth !== 3` | 18,249 | `image_copy:offsets_and_sizes` combinations reserved for compatibility mode |
+| `device does not have feature texture-compression-unaligned` | 2,184 | the device lacks this feature |
+
+Pass fell by 28,581 in the same area. The 18,249 compatibility-mode skips are the likely main cause, since `c77b620`
+ran those combinations. The rest is attributed to the reshaped `image_copy` catalog, unconfirmed.
+
+**`shader/execution`.** Only part of the +7,516 is identified. The current skips include 4,042 for the missing
+`unrestricted_aliasing` language feature (F-159) and 1,800 for the missing `atomic-vec2u-min-max` feature. The
+remainder is unexplained.
+
+**Evidence limits.** The breakdown comes from the 2026-11-01 `--output` JSONL plus a diff of `listing.json` and the
+specs against `c77b620`. Per-subcase results from the older sweep were not kept, only the README area totals, so it
+was not compared test by test. The 19,494 skips in `texture_component_swizzle:read_swizzle`, a test unchanged in the
+catalog, are inferred to make up most of the old 20,233. The compatibility-mode skips were read from the port's
+comment, not checked against an upstream checkout.
+
+---
+
 ## F-165 — NVIDIA/Windows: shader compiler crash on `bufferArrayView` workgroup f16 aliasing — driver defect, NOT yawgpu
 
 **DRIVER DEFECT — NOT yawgpu** (Windows 11 / NVIDIA RTX 5060 Ti, driver 617.14, native Vulkan; found and triaged
