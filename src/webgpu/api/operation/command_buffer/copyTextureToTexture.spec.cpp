@@ -1288,7 +1288,7 @@ void runCopyMultisampledColor(AllFeaturesMaxLimitsGpuTest& t) {
     validationPipelineDesc.fragment = &validationFragment;
     WGPURenderPipeline renderPipelineForValidation = t.createRenderPipelineTracked(validationPipelineDesc);
 
-    std::array<WGPUBindGroupEntry, 2> entries = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+    std::array<WGPUBindGroupEntry, 2> entries = {{WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT}};
     entries[0].binding = 0;
     entries[0].textureView = t.createViewTracked(sourceTexture, defaultViewDesc);
     entries[1].binding = 1;
