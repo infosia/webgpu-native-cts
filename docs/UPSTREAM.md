@@ -13,12 +13,12 @@ target this revision.
 |-------|-------|
 | Project | gpuweb/cts (WebGPU CTS) |
 | Repo | https://github.com/gpuweb/cts.git |
-| Pinned commit | `b507bd117e53db86f2fb52d0d858d3ae7d684a85` |
-| Commit date | 2026-05-28 |
-| Subject | Add validation coverage for `const SHIFT override` (#4649) |
-| Pinned on | 2026-05-30 |
+| Pinned commit | `d116bcccd1833369fa3715a6df503c0dd9b0d7fa` |
+| Commit date | 2026-10-23 |
+| Subject | Minor fixes to subgroupBroadcast tests (#4721) |
+| Pinned on | 2026-11-01 |
 
-> The pinned revision above (`b507bd1`) is canonical for this project. Port against a local
+> The pinned revision above (`d116bcc`) is canonical for this project. Port against a local
 > `gpuweb/cts` checkout at that commit (set its location wherever you cloned it; no fixed path is
 > assumed).
 
@@ -72,4 +72,5 @@ A helper (`tools/coverage`, planned) automates step 2's diff — see
 | Date | Change |
 |------|--------|
 | 2026-05-30 | Initial pin: CTS `b507bd1`, headers `7d3186c`. |
-| 2026-11-01 | Dawn oracle moved to `v20261030.184100`. CTS pin unchanged; upstream `8dc100410ad` applied on top of it (F-156). |
+| 2026-11-01 | Dawn oracle moved to `v20261030.184100`; upstream `8dc100410ad` ported ahead of the re-baseline (F-156). |
+| 2026-11-01 | CTS re-baselined `b507bd1` → `d116bcc`: 54 ported files updated, 15 spec files added. Verified on Dawn/Metal only; yawgpu and wgpu-native compile but were not swept at this pin. |

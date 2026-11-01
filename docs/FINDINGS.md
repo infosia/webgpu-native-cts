@@ -142,8 +142,8 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 Found 2026-11-01 on Dawn `v20261030.184100`, Apple M2 / Metal.
 `webgpu:shader,execution,expression,call,builtin,atomics,atomicStore{Max,Min}:store_{max,min}_basic`
-fails for `rndMultiplyX=0;rndMultiplyY=0`, across workgroup and dispatch sizes (70 of 72 such cases in
-the first run; the other 864+ pass per file). The shader stores `vec2u(id[0] * 0, id[1] * 0)` to a
+fails for `rndMultiplyX=0;rndMultiplyY=0` at every workgroup and dispatch size (72 cases); the other
+1,728 cases pass. The shader stores `vec2u(id[0] * 0, id[1] * 0)` to a
 zero-initialized buffer, so the correct result is `[0, 0]`. `atomicStoreMin` returns
 `[4294967295, 4294967295]`, and `atomicStoreMax` returns values that differ on every run.
 
@@ -226,8 +226,8 @@ Whole-suite oracle move, per subcase: previous oracle pass 1,997,097 / skip 99,2
 prints 156: it also lists `index_buffer_format_dirtying`, whose subcase statuses are identical in both
 runs.) None was triaged as a Dawn defect: 6 are F-157, and 149 are ports older than the upstream tests they track
 (`createTexture:texture_size,*_texture,compressed_format` 146, `types,pointer:ptr_not_instantiable` 2,
-`extension,subgroup_size_control:enable_subgroup_size_control_requires_subgroups` 1), attributed by
-upstream commits `70c18489402`, `f4186348cf4` and `2959e1c3959` and pending the CTS re-baseline.
+`extension,subgroup_size_control:enable_subgroup_size_control_requires_subgroups` 1), fixed by the
+CTS re-baseline to `d116bcc` (upstream `70c18489402`, `f4186348cf4`, `2959e1c3959`).
 
 ---
 

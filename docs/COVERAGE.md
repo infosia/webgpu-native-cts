@@ -3,7 +3,7 @@
 Tracks how much of the upstream CTS has been ported, per area and per file. Denominators are the
 upstream `.spec.ts` file counts at the pinned revision (see [UPSTREAM.md](UPSTREAM.md)).
 
-**Pinned upstream:** gpuweb/cts `b507bd1` (2026-05-28) — 683 `.spec.ts` files under `src/webgpu/`.
+**Pinned upstream:** gpuweb/cts `d116bcc` (2026-10-23) — 698 `.spec.ts` files under `src/webgpu/`.
 
 > This is a living document. Update it as files are ported (or deliberately skipped). The file
 > table starts empty; only the area summary's denominators are pre-filled.
