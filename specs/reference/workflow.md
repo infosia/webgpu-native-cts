@@ -38,7 +38,21 @@ The authoritative description of how work flows between **Claude** (planner/orch
 The coding agent never advances scope on its own: anything not in the spec/handoff is out of
 scope and goes back to Claude as a question in `REPORT.md`.
 
+## Verification policy
+
+Dawn is the oracle, and iteration speed is the priority.
+
+- **Default backend: Dawn on Metal.** Do not run yawgpu or wgpu-native unless explicitly told to.
+  Those backends must still compile.
+- **Targeted first.** After a change, run only the queries it can affect. A fix-then-recheck loop
+  re-runs the failing queries, not the whole area.
+- **Full sweeps are rare.** Run one at the end of a phase, on Dawn. Do not sweep per batch.
+- **Skip runs that decide nothing.** Before a run of more than a few minutes, name the decision its
+  result changes. If there is none, do not run it.
+
 ## Verifying against yawgpu (fast → full)
+
+This section applies only when explicitly told to verify on yawgpu.
 
 yawgpu is the primary conformance subject, so most CTS work is a find→fix loop against it. The
 **fast mode** (`cts --sample-formats`, which runs one representative texture format per major decode

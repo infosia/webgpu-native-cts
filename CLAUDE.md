@@ -32,6 +32,15 @@ Full detail: `specs/reference/workflow.md`.
   committed. The checked-in `src/webgpu/listing.json` test catalog is the
   deliberate exception (it is the suite catalog, like upstream's `listing.js`).
 
+## Verification
+
+- **Iteration speed comes first.** Do not run a test whose result cannot change
+  a decision.
+- **Verify on Dawn/Metal, the oracle.** Run yawgpu or wgpu-native only when
+  explicitly asked to.
+- After a change, run only the queries it can affect. Run a full sweep once, at
+  the end of a phase. Details: `specs/reference/workflow.md`.
+
 ## Tooling — builds
 
 - **Compile in parallel: `-j 8`** on `cmake --build` and `cargo build`. The
