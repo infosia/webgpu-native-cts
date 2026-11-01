@@ -231,19 +231,23 @@ Swept **2026-09-26 raw** — four per-area `--workers 8` runs on yawgpu `53ca8bb
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 244,676 | 110,316 | 4§ | 0 |
-| `api/operation` (70) | 209,360 | 20,233 | 0 | 0 |
-| `shader/execution` (239) | 531,304 | 313,170 | 113§ | 0 |
-| `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
-| **total** | **1,632,113** | **464,088** | **117§** | **0** |
+| `api/validation` (128) | 246,484 | 111,283 | 4§ | 0 |
+| `api/operation` (70) | 180,782 | 152,816 | 0 | 0 |
+| `shader/execution` (246) | 562,548 | 320,680 | 25§ | 0 |
+| `shader/validation` (213) | 662,535 | 20,299 | 2‡ | 0 |
+| **total** | **1,652,349** | **605,078** | **31** | **0** |
 
-Swept **2026-09-21 raw** — four per-area `--workers 4` runs on yawgpu `80219df` / CTS `df58708`,
-NVIDIA driver 595.91, Vulkan 1.4.329: 53 minutes, `crash=0` across 2,096,318 subcases. Same GPU as
-the Windows table on a different OS: skip and fail counts are identical in every area, and pass
-counts agree to within 5 subcases.
+Swept **2026-11-01** — four per-area `--workers 4` runs on yawgpu `9977e34` / CTS `b7ac3ef`
+(upstream `d116bcc`, 657 files), Dawn pin `843d53377`, NVIDIA driver 615.71.09, Vulkan 1.4.351:
+35 minutes, `crash=0` across 2,257,458 subcases. Run with `expectations/yawgpu-vulkan.txt`; the
+counts above are the raw statuses from the `--output` JSONL. The suite was re-baselined after the
+previous sweep (`efff42c`), so counts are not comparable with it per area.
 
-§ Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`; the suite exits
-`fail=0` once expectations are applied.
+§ Documented non-defects, carried as `xfail` in `expectations/yawgpu-vulkan.txt`.
+
+‡ `parse,requires:have_all_language_features` for `fragment_depth` and `unrestricted_aliasing`,
+which Dawn does not report either ([F-159](docs/FINDINGS.md), [F-164](docs/FINDINGS.md)). They are
+not in `expectations/yawgpu-vulkan.txt`, so this area exits non-zero.
 
 #### wgpu-native — native Vulkan (Linux / NVIDIA RTX 5060 Ti, naga frontend), per-subcase
 
@@ -273,16 +277,18 @@ The same run-mode caveats as the Metal table apply.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 203,412 | 151,323 | 257 | 0 |
-| `api/operation` (70) | 141,076 | 76,704 | **11,813** | 0 |
-| `shader/execution` (239) | 309,535 | 517,406 | **17,645** | 0 |
-| `shader/validation` (207) | 369,753 | 297,389 | 0 | 0 |
-| **total** | **1,023,776** | **1,042,822** | **29,715** | **0** |
+| `api/validation` (128) | 204,742 | 152,703 | 326 | 0 |
+| `api/operation` (70) | 91,746 | 233,174 | **8,678** | 0 |
+| `shader/execution` (246) | 330,771 | 532,678 | **19,804** | 0 |
+| `shader/validation` (213) | 377,272 | 305,562 | 2 | 0 |
+| **total** | **1,004,531** | **1,224,117** | **28,810** | **0** |
 
-Swept **2026-09-21 raw** — `--workers 2` on yawgpu `80219df` built `--features gles`, OpenGL ES 3.2
-via `EGL_PLATFORM_DEVICE_EXT` (headless), driver 595.91.07; 10 minutes. `shader/validation` is
-byte-identical to the Haswell table below — the WGSL→GLSL-ES path is Tint, so it is driver-independent.
-Nothing is excluded here: the 2 files quarantined on the Haswell host run clean on this driver.
+Swept **2026-11-01 raw** — `--workers 2` on yawgpu `9977e34` built `--features gles` / CTS `b7ac3ef`
+(upstream `d116bcc`, 657 files), OpenGL ES 3.2 via `EGL_PLATFORM_DEVICE_EXT` (headless), driver
+615.71.09; 15 minutes. The suite was re-baselined after the previous sweep (`efff42c`), so counts are
+not comparable with it per area. The 2 `shader/validation` failures are the same two language-feature
+cases as on Vulkan. Nothing is excluded here: the 2 files quarantined on the Haswell host run clean on
+this driver.
 
 #### yawgpu — GLES / Tier 2 experimental (Linux / Mesa `crocus` on Intel Haswell, Tint frontend), per-subcase
 

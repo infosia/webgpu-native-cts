@@ -56,7 +56,7 @@ Full detail: `specs/reference/workflow.md`.
     /usr/bin/time -f 'peakRSS=%MKB elapsed=%es' build-yawgpu/cts --workers 1 '<query>'
   ```
 
-  `systemd-run` is Linux-only; this cap applies to the Linux host (29 GB RAM).
+  `systemd-run` is Linux-only; this cap applies to the Linux host (60 GB RAM).
   8G, not less: `createBindGroup:buffer,resource_binding_size` allocates
   max-binding-size buffers and legitimately needs >3G on yawgpu/Vulkan (it was
   killed at 3G and passed at 6G). The cap exists to protect the host, not to

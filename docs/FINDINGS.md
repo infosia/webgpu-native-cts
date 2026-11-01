@@ -122,8 +122,9 @@ port-oracle quirk the Dawn oracle fails identically; Metal + Vulkan) and the Vul
 **F-111**, **F-129** (denormal `fwidth`), **F-141**, all in `expectations/yawgpu-vulkan.txt`. No yawgpu
 defect is masked.
 
-**Open — yawgpu:** F-161 (`snorm10-10-10-2`), F-162 (dispatch validation), F-163 (`alphaToCoverage` abort), F-164
-(language features), from the `d116bcc` sweep on `ea67149`.
+**Open — yawgpu:** none. F-161 to F-164, from the `d116bcc` sweep on `ea67149`, were fixed by yawgpu Block 119
+(`9977e34`), apart from the 2 `have_all_language_features` cases shared with Dawn (F-159). Native **Vulkan** last
+swept 2026-11-01 on Linux: `fail=2 crash=0` with expectations, those same 2 cases.
 
 **Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a compile-time zero value). The former **F-130** override-shift divergence **no longer reproduces** on
 the current Dawn build (`fail=0`); Dawn now fails only the 2 shared `index_buffer_format_dirtying`
@@ -178,7 +179,11 @@ intermittent and the cases pass on most runs.
 
 ---
 
-## F-164 — yawgpu reports four known WGSL language features as missing — OPEN (expected)
+## F-164 — yawgpu reports four known WGSL language features as missing — RESOLVED (2 cases shared with Dawn remain)
+
+Fixed by yawgpu Block 119 (`9977e34`): `swizzle_assignment` and `buffer_view` are reported. `fragment_depth`
+and `unrestricted_aliasing` stay unreported, as on Dawn (F-159), so those 2 cases still fail on Metal and on
+Linux native Vulkan and GLES (2026-11-01). The report below is the state on `ea67149`.
 
 `webgpu:shader,validation,parse,requires:have_all_language_features` fails on yawgpu `ea67149` for
 `swizzle_assignment`, `fragment_depth`, `buffer_view` and `unrestricted_aliasing`. Dawn also lacks the last
@@ -187,7 +192,10 @@ two (F-159). Dependent tests skip, which accounts for most of yawgpu's extra ski
 
 ---
 
-## F-163 — yawgpu: `alphaToCoverageEnabled` with a non-blendable format aborts the process — OPEN
+## F-163 — yawgpu: `alphaToCoverageEnabled` with a non-blendable format aborts the process — RESOLVED
+
+Fixed by yawgpu Block 119 (`9977e34`). Metal `fail=2 crash=0` on `webgpu:*`; Linux native Vulkan `fail=0` on this
+query (2026-11-01). The report below is the state on `ea67149`.
 
 `webgpu:api,validation,render_pipeline,multisample_state:alpha_to_coverage,first_format_blendable_and_has_alpha`
 crashes on yawgpu `ea67149` (Metal) for `alphaToCoverageEnabled=true`, both `isAsync` values. The spec
@@ -197,7 +205,10 @@ Dawn passes.
 
 ---
 
-## F-162 — yawgpu: dispatch does not validate shader-required buffer sizes or linear-index range — OPEN
+## F-162 — yawgpu: dispatch does not validate shader-required buffer sizes or linear-index range — RESOLVED
+
+Fixed by yawgpu Block 119 (`9977e34`). These queries pass on Metal and on Linux native Vulkan and GLES
+(2026-11-01). The report below is the state on `ea67149`.
 
 Dispatch-time under-validation on yawgpu `ea67149`; Dawn passes all of these.
 
@@ -210,7 +221,11 @@ Dispatch-time under-validation on yawgpu `ea67149`; Dawn passes all of these.
 
 ---
 
-## F-161 — yawgpu does not implement the `snorm10-10-10-2` vertex format — OPEN
+## F-161 — yawgpu does not implement the `snorm10-10-10-2` vertex format — RESOLVED
+
+Fixed by yawgpu Block 119 (`9977e34`). `fail=0` for these queries on Metal and Linux native Vulkan (2026-11-01).
+On GLES, 38 subcases still fail in `vertex_format_to_shader_format_conversion`, which fails the same way for
+other formats. The report below is the state on `ea67149`.
 
 477 subcases fail on yawgpu `ea67149` with "render pipeline vertex attribute format is invalid", or the
 resulting submit error, in `api,validation,render_pipeline,vertex_state` and
@@ -851,6 +866,8 @@ Skipped — never assigned. The sequence runs F-138 → F-139 → **F-141**; no 
 ---
 
 ## F-085 — Vulkan per-sample dispatch fragment builtins: `sample_mask` xfail (spec in flux) + `position` RESOLVED on yawgpu
+
+**Update 2026-11-01:** the `d116bcc` re-baseline (`efff42c`) changed the `sample_mask` oracle to accept the full coverage mask or the sample's single bit. All 88 subcases now pass on Linux native Vulkan and show as `xpass`. The entries in `expectations/yawgpu-vulkan.txt` are stale.
 
 **Split 2026-07-01** after a native-Vulkan re-run (NVIDIA RTX 5060 Ti) showed the two halves are not the same kind of finding:
 
