@@ -701,7 +701,6 @@ void submitRenderPass(AllFeaturesMaxLimitsGpuTest& t,
                       uint32_t vertexCount,
                       uint32_t instanceCount) {
     constexpr uint32_t kBytesPerTexel = 4;
-    constexpr uint64_t kBytesPerRowAlignment = 256;
 
     WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
     textureDesc.format = WGPUTextureFormat_R32Sint;
