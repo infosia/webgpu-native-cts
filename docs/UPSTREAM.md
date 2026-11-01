@@ -73,4 +73,5 @@ A helper (`tools/coverage`, planned) automates step 2's diff — see
 |------|--------|
 | 2026-05-30 | Initial pin: CTS `b507bd1`, headers `7d3186c`. |
 | 2026-11-01 | Dawn oracle moved to `v20261030.184100`; upstream `8dc100410ad` ported ahead of the re-baseline (F-156). |
-| 2026-11-01 | CTS re-baselined `b507bd1` → `d116bcc`: 54 ported files updated, 15 spec files added. Verified on Dawn/Metal only; yawgpu and wgpu-native compile but were not swept at this pin. |
+| 2026-11-01 | CTS re-baselined `b507bd1` → `d116bcc`: 54 ported files updated, 15 spec files added. Verified on Dawn/Metal. |
+| 2026-11-01 | yawgpu `ea67149` swept on Metal at `d116bcc`: pass 2,071,962 / skip 184,925 / fail 491 / crash 2 / xfail 2 (F-161 to F-164). wgpu-native compiles but was not swept at this pin. |

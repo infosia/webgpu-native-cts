@@ -122,6 +122,9 @@ port-oracle quirk the Dawn oracle fails identically; Metal + Vulkan) and the Vul
 **F-111**, **F-129** (denormal `fwidth`), **F-141**, all in `expectations/yawgpu-vulkan.txt`. No yawgpu
 defect is masked.
 
+**Open — yawgpu:** F-161 (`snorm10-10-10-2`), F-162 (dispatch validation), F-163 (`alphaToCoverage` abort), F-164
+(language features), from the `d116bcc` sweep on `ea67149`.
+
 **Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a compile-time zero value). The former **F-130** override-shift divergence **no longer reproduces** on
 the current Dawn build (`fail=0`); Dawn now fails only the 2 shared `index_buffer_format_dirtying`
 port-oracle cases.
@@ -135,6 +138,47 @@ F-133, F-134, F-136), the immediates / unrequestable-feature divergences (F-154)
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
 Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139, F-158), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
+
+---
+
+## F-164 — yawgpu reports four known WGSL language features as missing — OPEN (expected)
+
+`webgpu:shader,validation,parse,requires:have_all_language_features` fails on yawgpu `ea67149` for
+`swizzle_assignment`, `fragment_depth`, `buffer_view` and `unrestricted_aliasing`. Dawn also lacks the last
+two (F-159). Dependent tests skip, which accounts for most of yawgpu's extra skips over Dawn at this pin
+(7,589 cases). Not in `expectations/yawgpu.txt`.
+
+---
+
+## F-163 — yawgpu: `alphaToCoverageEnabled` with a non-blendable format aborts the process — OPEN
+
+`webgpu:api,validation,render_pipeline,multisample_state:alpha_to_coverage,first_format_blendable_and_has_alpha`
+crashes on yawgpu `ea67149` (Metal) for `alphaToCoverageEnabled=true`, both `isAsync` values. The spec
+requires a validation error. yawgpu passes the descriptor to Metal, whose API validation aborts:
+`alphaToCoverageEnabled requires a float/unorm pixel format, but colorAttachments[0].pixelFormat(MTLPixelFormatRGBA8Uint) is not blendable`.
+Dawn passes.
+
+---
+
+## F-162 — yawgpu: dispatch does not validate shader-required buffer sizes or linear-index range — OPEN
+
+Dispatch-time under-validation on yawgpu `ea67149`; Dawn passes all of these.
+
+- `webgpu:api,validation,dispatch:shader_required_buffer_size` and
+  `webgpu:api,validation,min_buffer_binding_size:compute,shader_required_buffer_size`, cases
+  `uniform_32bytes`, `storage_32bytes`, `ro_storage_32bytes`: "expected validation error, got none".
+- `webgpu:api,validation,dispatch:dispatch,linear_indexing_range`, `global_invocation_index` and
+  `workgroup_index`: "expected validation error, got none". The `dispatchIndirect` variant of the same
+  test fails with "expected mapAsync success".
+
+---
+
+## F-161 — yawgpu does not implement the `snorm10-10-10-2` vertex format — OPEN
+
+477 subcases fail on yawgpu `ea67149` with "render pipeline vertex attribute format is invalid", or the
+resulting submit error, in `api,validation,render_pipeline,vertex_state` and
+`api,operation,vertex_state,correctness`. Upstream does not gate this format on a feature, and Dawn passes.
+yawgpu declares `WGPUVertexFormat_Snorm10_10_10_2` but does not implement it.
 
 ---
 
