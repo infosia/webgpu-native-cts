@@ -156,6 +156,10 @@ VK_ICD_FILENAMES=$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json \
 `DYLD_LIBRARY_PATH=$VULKAN_SDK/lib` is required so `ash` can load the Vulkan loader; without it yawgpu
 can report `BackendUnavailable`.
 
+> **Do not wrap Vulkan runs in `/usr/bin/timeout` on macOS.** It strips `DYLD_LIBRARY_PATH` from the
+> child environment, so the loader is not found and every case fails with "failed to create WebGPU
+> instance". That looks like a total backend failure, but it is an artifact of the wrapper.
+
 Expectation files are split per backend **and per API**: Metal runs use
 `expectations/<backend>.txt`; Vulkan-backend runs (native Windows or MoltenVK) use
 `expectations/<backend>-vulkan.txt`, which carries the Vulkan-only xfails (currently the F-085

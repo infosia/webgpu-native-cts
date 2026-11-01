@@ -215,6 +215,11 @@ WGPUDevice getAllFeaturesMaxLimitsDevice() {
     std::vector<WGPUFeatureName> advertisedFeatures(
         supportedFeatures.features, supportedFeatures.features + supportedFeatures.featureCount);
     wgpuSupportedFeaturesFreeMembers(supportedFeatures);
+#if defined(CTS_BACKEND_DAWN)
+    // Native-only Dawn feature, never exposed by the browser API: it relaxes the
+    // load/store op validation that the CTS tests.
+    std::erase(advertisedFeatures, WGPUFeatureName_DawnAllowUndefinedLoadStoreOp);
+#endif
 
     WGPUDeviceDescriptor descriptor = WGPU_DEVICE_DESCRIPTOR_INIT;
     descriptor.requiredFeatureCount = advertisedFeatures.size();

@@ -311,7 +311,7 @@ CTS_TEST(testGroup, "required_slots_set")
             callFragment = "use_f();";
         } else if (scenario == "dynamic_indexing") {
             layoutImmediateSize = 16;
-            declarations = "var<immediate> data: array<u32, 4>;";
+            declarations = "var<immediate> data: vec4u;";
             helpers = "fn use_data(i: u32) { _ = data[i]; }";
             computeArgs = "@builtin(local_invocation_index) i: u32";
             callCompute = "use_data(i);";

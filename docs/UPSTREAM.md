@@ -49,7 +49,7 @@ set (e.g. in an `--expectations` file header).
 |---------|------|--------------------------|---------|-------|
 | wgpu-native | github.com/gfx-rs/wgpu-native | `v29.0.1.1` (`6aed509`, 2026-06-22 release; wgpu-core / naga 29.0.3; previously `v29.0.0.0-8-g9176708`) | MIT / Apache-2.0 | harness bring-up reference. Implements the standard `SetImmediates` / `immediateSize` API since this revision; still advertises experimental features it cannot grant (F-154), which the harness excludes when requesting the all-features device |
 | yawgpu | [github.com/infosia/yawgpu](https://github.com/infosia/yawgpu) | `e7eba41` (2026-07-02 Metal re-sweep, post F-142 fix; Vulkan last swept `05bf865` 2026-06-28, fixes `bd21cfb`) | MIT / Apache-2.0 | **primary conformance subject**; Metal and Vulkan HALs. **WGSL frontend = Tint** (Dawn's shader compiler), so shader compile/validation is Dawn-equivalent. Runs the ported suite **crash-free** with `shader/execution` `fail=0` on native Metal _and_ native Vulkan (NVIDIA RTX 5060 Ti). Metal sweep 2026-07-02 (`e7eba41`): pass 1,990,542 / skip 105,394 / **fail 2** (the 2 shared `index_buffer_format_dirtying` port-oracle non-defects, Dawn fails them identically) — `api/validation` 292,960, `api/operation` 228,600, `shader/execution` 822,209, `shader/validation` 646,773 (per-subcase). Fail profile is **byte-identical to the Dawn oracle** (both fail only the 2 port-oracle cases). Reporting real Metal hardware limits and exposing `subgroups` brings its coverage to Dawn's level. Expected failures: the spec-in-flux Vulkan cases in `expectations/yawgpu-vulkan.txt` (sample_mask/position semantics, MoltenVK-only artifacts). Vendor header `yawgpu.h` exists but its extension surface is **not yet exercised** by the suite. See [FINDINGS](FINDINGS.md). |
-| Dawn | dawn.googlesource.com/dawn | `802f147f1fb7ab972f87f3e9f95098e0f4b5077b` (2026-05-15) | BSD-3-Clause / Apache-2.0 | C++ reference impl |
+| Dawn | dawn.googlesource.com/dawn | `v20261030.184100` (`97ae1b10ac9d579f7e6b790ce7fc4faa1041f820`, 2026-10-30; previously `802f147`) | BSD-3-Clause / Apache-2.0 | C++ reference impl. The oracle is built from unmodified upstream, not from a fork. The harness excludes the native-only `DawnAllowUndefinedLoadStoreOp` feature from the all-features device (F-157) |
 
 ## Re-baselining process
 
@@ -72,3 +72,4 @@ A helper (`tools/coverage`, planned) automates step 2's diff — see
 | Date | Change |
 |------|--------|
 | 2026-05-30 | Initial pin: CTS `b507bd1`, headers `7d3186c`. |
+| 2026-11-01 | Dawn oracle moved to `v20261030.184100`. CTS pin unchanged; upstream `8dc100410ad` applied on top of it (F-156). |

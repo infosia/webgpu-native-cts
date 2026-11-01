@@ -138,6 +138,49 @@ native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 ---
 
+## F-157 — Dawn `v20261030.184100`: all-features device enabled a native-only feature that relaxes validation — RESOLVED (harness)
+
+Found 2026-11-01 moving the oracle to Dawn `v20261030.184100` (macOS / Apple M2 / Metal). Dawn
+`127fab0482` adds the native-only feature `DawnAllowUndefinedLoadStoreOp`. The harness requests every
+advertised feature, so the all-features device enabled it, and Dawn stopped rejecting undefined load
+and store ops. The browser API never exposes this feature, so this is a harness defect, not a Dawn one.
+
+Affected: `webgpu:api,validation,render_pass,render_pass_descriptor:depth_stencil_attachment,loadOp_storeOp_match_depthReadOnly_stencilReadOnly`,
+all 6 `format` cases, with "expected validation error, got none".
+
+Fix: `getAllFeaturesMaxLimitsDevice()` drops the feature on Dawn. `render_pass_descriptor` then runs
+pass 9,489 / skip 23 / fail 0. Three other sites still request all adapter features on Dawn
+(`shader_validation_test.h`, `state/device_lost/destroy.spec.cpp`,
+`operation/device/all_limits_and_features.spec.cpp`); none failed in the sweep, so they are unchanged.
+
+---
+
+## F-156 — WGSL disallows arrays in `var<immediate>`; `required_slots_set` shader was invalid — RESOLVED (port)
+
+Dawn `e5dd1223d8` ("[wgsl] Disallow arrays in immediate variables", 2026-07-21) makes the resolver
+reject arrays in `var<immediate>`, citing the WGSL spec. Our port of
+`webgpu:api,validation,encoding,programmable,pipeline_immediate:required_slots_set` declared
+`var<immediate> data: array<u32, 4>;` for `scenario="dynamic_indexing"`, so at this Tint the shader
+module is an error module and every such case (28) fails on pipeline or bundle errors unrelated to
+what it tests. Measured on yawgpu at Tint `v20261030.184100`: 28 regressions and no other status change
+across 267,868 cases.
+
+Fix: ported upstream CTS `8dc100410ad` (#4683), which uses `vec4u`. The dynamic index and the 16-byte
+size are unchanged, so the scenario keeps its intent. On Dawn `v20261030.184100`, `required_slots_set`
+passes all 161 cases, including all 28 `dynamic_indexing` cases. Upstream `a5da7576540` (#4685) fixes
+the same issue in `shader_io/align`, but our port has no `immediate` address space there, so it needs
+no change.
+
+Whole-suite oracle move, per subcase: previous oracle pass 1,997,097 / skip 99,214 / fail 2; Dawn
+`v20261030.184100` pass 1,995,052 / skip 98,894 / fail 2,367, with 155 regressed cases. (`--baseline`
+prints 156: it also lists `index_buffer_format_dirtying`, whose subcase statuses are identical in both
+runs.) None was triaged as a Dawn defect: 6 are F-157, and 149 are ports older than the upstream tests they track
+(`createTexture:texture_size,*_texture,compressed_format` 146, `types,pointer:ptr_not_instantiable` 2,
+`extension,subgroup_size_control:enable_subgroup_size_control_requires_subgroups` 1), attributed by
+upstream commits `70c18489402`, `f4186348cf4` and `2959e1c3959` and pending the CTS re-baseline.
+
+---
+
 ## F-155 — wgpu-native v29.0.1.1: `mapAsync` rejects `WGPU_WHOLE_MAP_SIZE` — OPEN (fixed upstream, unreleased)
 
 Found 2026-09-26 on the pinned release **wgpu-native `v29.0.1.1`** (`6aed509`), macOS / Apple M2 /
