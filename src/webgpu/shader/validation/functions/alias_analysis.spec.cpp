@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/functions/alias_analysis.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/functions/alias_analysis.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 
@@ -78,11 +78,22 @@ static std::string genUse(const std::string& useName, const std::string& ref) {
     return replaceAll(findUse(useName).gen, "%REF%", ref);
 }
 
+// Returns true if aliased pointer arguments with a write access are a shader-creation error.
+// This is the case unless the 'unrestricted_aliasing' language feature is supported.
+static bool aliasingRestricted(ShaderValidationTest& t) {
+    return !t.hasLanguageFeature("unrestricted_aliasing");
+}
+
 // shouldPass: expect fail if the pointers are aliased and at least one of the
-// accesses is a write; if either access is "no access" then expect pass.
-static bool shouldPass2(bool aliased, const std::string& a, const std::string& b) {
+// accesses is a write; if either access is "no access" then expect pass. If the
+// 'unrestricted_aliasing' language feature is supported then always expect pass.
+static bool shouldPass2(ShaderValidationTest& t,
+                        bool aliased,
+                        const std::string& a,
+                        const std::string& b) {
     const bool anyWrite = findUse(a).isWrite || findUse(b).isWrite;
-    return !aliased || !anyWrite || a == "no_access" || b == "no_access";
+    return !aliasingRestricted(t) || !aliased || !anyWrite || a == "no_access" ||
+           b == "no_access";
 }
 
 // ptr() — mirrors upstream ptr(addressSpace, type).
@@ -224,7 +235,7 @@ CTS_TEST(g, "two_pointers")
             maybeDeclareFunctionScopeVar("x", addressSpace, "i32") + "\n  " +
             maybeDeclareFunctionScopeVar("y", addressSpace, "i32") + "\n  callee(&x, " +
             (aliased ? "&x" : "&y") + ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, bUse), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, bUse), code);
     });
 
 CTS_TEST(g, "two_pointers_to_array_elements")
@@ -256,7 +267,7 @@ CTS_TEST(g, "two_pointers_to_array_elements")
             maybeDeclareFunctionScopeVar("x", addressSpace, "array<i32, 4>") + "\n  " +
             maybeDeclareFunctionScopeVar("y", addressSpace, "array<i32, 4>") + "\n  callee(&x[" +
             std::to_string(index) + "], " + (aliased ? "&x[0]" : "&y[0]") + ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, bUse), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, bUse), code);
     });
 
 CTS_TEST(g, "two_pointers_to_array_elements_indirect")
@@ -293,7 +304,7 @@ CTS_TEST(g, "two_pointers_to_array_elements_indirect")
             maybeDeclareFunctionScopeVar("x", addressSpace, "array<i32, 4>") + "\n  " +
             maybeDeclareFunctionScopeVar("y", addressSpace, "array<i32, 4>") + "\n  index(&x, " +
             (aliased ? "&x" : "&y") + ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, bUse), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, bUse), code);
     });
 
 CTS_TEST(g, "two_pointers_to_struct_members")
@@ -326,7 +337,7 @@ CTS_TEST(g, "two_pointers_to_struct_members")
             maybeDeclareFunctionScopeVar("x", addressSpace, "S") + "\n  " +
             maybeDeclareFunctionScopeVar("y", addressSpace, "S") + "\n  callee(&x." + member +
             ", " + (aliased ? "&x.a" : "&y.a") + ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, bUse), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, bUse), code);
     });
 
 CTS_TEST(g, "two_pointers_to_struct_members_indirect")
@@ -363,7 +374,7 @@ CTS_TEST(g, "two_pointers_to_struct_members_indirect")
             maybeDeclareFunctionScopeVar("x", addressSpace, "S") + "\n  " +
             maybeDeclareFunctionScopeVar("y", addressSpace, "S") + "\n  access(&x, " +
             (aliased ? "&x" : "&y") + ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, bUse), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, bUse), code);
     });
 
 CTS_TEST(g, "one_pointer_one_module_scope")
@@ -391,7 +402,7 @@ CTS_TEST(g, "one_pointer_one_module_scope")
             ptr(addressSpace, "i32") + ") -> i32 {\n  " + genUse(aUse, "x") + "\n  " +
             genUse(bUse, "*pb") + "\n  return 0;\n}\n\nfn caller() {\n  callee(" +
             (aliased ? "&x" : "&y") + ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, bUse), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, bUse), code);
     });
 
 CTS_TEST(g, "subcalls")
@@ -423,7 +434,7 @@ CTS_TEST(g, "subcalls")
             ") -> i32 {\n  let new_pa = &*pa;\n  let new_pb = &*pb;\n  subcall_" + aUse +
             "(new_pa);\n  subcall_" + bUse + "(new_pb);\n  return 0;\n}\n\nfn caller() {\n  callee(&x, " +
             (aliased ? "&x" : "&y") + ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, bUse), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, bUse), code);
     });
 
 CTS_TEST(g, "member_accessors")
@@ -452,7 +463,7 @@ CTS_TEST(g, "member_accessors")
             ", pb : " + ptrS + ") -> i32 {\n  " + genUse(aUse, "(*pa).a") + "\n  " +
             genUse(bUse, "(*pb).a") + "\n  return 0;\n}\n\nfn caller() {\n  callee(&x, " +
             (aliased ? "&x" : "&y") + ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, bUse), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, bUse), code);
     });
 
 CTS_TEST(g, "swizzles")
@@ -485,7 +496,7 @@ CTS_TEST(g, "swizzles")
             (deref ? std::string("(*pb)") : std::string("pb")) +
             ".wzyx;\n  return 0;\n}\n\nfn caller() {\n  callee(&x, " + (aliased ? "&x" : "&y") +
             ");\n}\n";
-        t.expectCompileResult(shouldPass2(aliased, aUse, "let_init"), code);
+        t.expectCompileResult(shouldPass2(t, aliased, aUse, "let_init"), code);
     });
 
 CTS_TEST(g, "same_pointer_read_and_write")
@@ -544,7 +555,8 @@ CTS_TEST(g, "two_atomic_pointers")
             ptrAtomic + ", pb : " + ptrAtomic + ") {\n  var i : i32;\n  " +
             callAtomicBuiltin(builtinA, "pa") + ";\n  " + callAtomicBuiltin(builtinB, "pb") +
             ";\n}\n\nfn caller() {\n  callee(&x, &" + (aliased ? "x" : "y") + ");\n}\n";
-        const bool shouldFail = aliased && (atomicIsWrite(builtinA) || atomicIsWrite(builtinB));
+        const bool shouldFail = aliasingRestricted(t) && aliased &&
+                                (atomicIsWrite(builtinA) || atomicIsWrite(builtinB));
         t.expectCompileResult(!shouldFail, code);
     });
 
@@ -575,7 +587,8 @@ CTS_TEST(g, "two_atomic_pointers_to_array_elements")
             ") {\n  var i : i32;\n  " + callAtomicBuiltin(builtinA, "pa") + ";\n  " +
             callAtomicBuiltin(builtinB, "pb") + ";\n}\n\nfn caller() {\n  callee(&x[" +
             std::to_string(index) + "], &" + (aliased ? "x" : "y") + "[0]);\n}\n";
-        const bool shouldFail = aliased && (atomicIsWrite(builtinA) || atomicIsWrite(builtinB));
+        const bool shouldFail = aliasingRestricted(t) && aliased &&
+                                (atomicIsWrite(builtinA) || atomicIsWrite(builtinB));
         t.expectCompileResult(!shouldFail, code);
     });
 
@@ -606,7 +619,8 @@ CTS_TEST(g, "two_atomic_pointers_to_struct_members")
             ", pb : " + ptrAtomic + ") {\n  var i : i32;\n  " + callAtomicBuiltin(builtinA, "pa") +
             ";\n  " + callAtomicBuiltin(builtinB, "pb") + ";\n}\n\nfn caller() {\n  callee(&x." +
             member + ", &" + (aliased ? "x" : "y") + ".a);\n}\n";
-        const bool shouldFail = aliased && (atomicIsWrite(builtinA) || atomicIsWrite(builtinB));
+        const bool shouldFail = aliasingRestricted(t) && aliased &&
+                                (atomicIsWrite(builtinA) || atomicIsWrite(builtinB));
         t.expectCompileResult(!shouldFail, code);
     });
 
@@ -633,7 +647,8 @@ CTS_TEST(g, "one_atomic_pointer_one_module_scope")
             declareModuleScopeVar("y", addressSpace, "atomic<i32>") + "\n\nfn callee(p : " +
             ptrAtomic + ") {\n  var i : i32;\n  " + callAtomicBuiltin(builtinA, "p") + ";\n  " +
             callAtomicBuiltin(builtinB, aliased ? "&x" : "&y") + ";\n}\n\nfn caller() {\n  callee(&x);\n}\n";
-        const bool shouldFail = aliased && (atomicIsWrite(builtinA) || atomicIsWrite(builtinB));
+        const bool shouldFail = aliasingRestricted(t) && aliased &&
+                                (atomicIsWrite(builtinA) || atomicIsWrite(builtinB));
         t.expectCompileResult(!shouldFail, code);
     });
 
@@ -664,8 +679,37 @@ CTS_TEST(g, "workgroup_uniform_load")
             "ptr<workgroup, i32>, pb : ptr<workgroup, i32>) -> i32 {\n  var v : i32;\n  " +
             useExpr + ";\n  return v + workgroupUniformLoad(pb);\n}\n\nfn caller() {\n  callee(&x, &" +
             (aliased ? "x" : "y") + ");\n}\n";
-        const bool shouldFail = aliased && use == "store";
+        const bool shouldFail = aliasingRestricted(t) && aliased && use == "store";
         t.expectCompileResult(!shouldFail, code);
+    });
+
+CTS_TEST(g, "requires_unrestricted_aliasing")
+    .desc("Test that aliased pointer arguments with write accesses are valid with a\n"
+          "'requires unrestricted_aliasing' directive, iff the language feature is supported.")
+    .params([](ParamsBuilder u) {
+        return u.combine("address_space", writableAddressSpaces())
+            .combine("aliased", {true, false});
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string addressSpace = t.param<std::string>("address_space");
+        const bool aliased = t.param<bool>("aliased");
+
+        if (requiresUnrestrictedPointerParameters(addressSpace)) {
+            skipIfLanguageFeatureNotSupported(t, "unrestricted_pointer_parameters");
+        }
+
+        const std::string code =
+            "\nrequires unrestricted_aliasing;\n\n" +
+            maybeDeclareModuleScopeVar("x", addressSpace, "i32") + "\n" +
+            maybeDeclareModuleScopeVar("y", addressSpace, "i32") + "\n\nfn callee(pa : " +
+            ptr(addressSpace, "i32") + ",\n          pb : " + ptr(addressSpace, "i32") +
+            ") -> i32 {\n  *pa = 1;\n  *pb = 2;\n  return *pa;\n}\n\nfn caller() {\n  " +
+            maybeDeclareFunctionScopeVar("x", addressSpace, "i32") + "\n  " +
+            maybeDeclareFunctionScopeVar("y", addressSpace, "i32") + "\n  callee(&x, " +
+            (aliased ? "&x" : "&y") + ");\n}\n";
+        // The 'requires' directive is an error if the feature is not supported, regardless of
+        // aliasing.
+        t.expectCompileResult(t.hasLanguageFeature("unrestricted_aliasing"), code);
     });
 
 }  // namespace

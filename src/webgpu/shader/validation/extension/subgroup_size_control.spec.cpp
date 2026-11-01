@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/extension/subgroup_size_control.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/extension/subgroup_size_control.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2024 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -49,11 +49,15 @@ static void skipIfSubgroupSizeControlUnsupported(SVT& t) {
 // [subgroupMinSize, subgroupMaxSize] for which a @subgroup_size pipeline builds.
 static std::vector<uint32_t> getValidSubgroupSizes(SVT& t) {
     const SVT::SubgroupSizeRange range = t.getSubgroupSizeRange();
+    const uint32_t maxWorkgroupSizeX = t.getMaxComputeWorkgroupSizeX();
     std::vector<uint32_t> sizes;
     if (range.minSize == 0 || range.maxSize == 0) {
         return sizes;
     }
     for (uint32_t s = range.minSize; s <= range.maxSize; s *= 2) {
+        if (s > maxWorkgroupSizeX) {
+            break;
+        }
         const std::string wgsl =
             "\nenable subgroups;"
             "\nenable subgroup_size_control;\n"
@@ -72,8 +76,8 @@ static std::vector<uint32_t> getValidSubgroupSizes(SVT& t) {
 // enable_subgroup_size_control_requires_subgroups
 // ---------------------------------------------------------------------------
 CTS_TEST(g, "enable_subgroup_size_control_requires_subgroups")
-    .desc(R"(Checks that enabling the WGSL extension subgroup_size_control without also enabling the
-     subgroups extension is a compilation error.)")
+    .desc(R"(Checks that enabling the WGSL extension subgroup_size_control also enables the
+     subgroups extension.)")
     .params([](ParamsBuilder u) {
         return u.combine("enableSubgroups", {Value(false), Value(true)});
     })
@@ -84,10 +88,13 @@ CTS_TEST(g, "enable_subgroup_size_control_requires_subgroups")
         const std::string code =
             "\n        " + subgroupsLine +
             "\n        enable subgroup_size_control;"
+            "\n        @group(0) @binding(0) var<storage, read_write> out : u32;"
             "\n        @compute @workgroup_size(1)"
-            "\n        fn main() {}"
+            "\n        fn main(@builtin(subgroup_size) size : u32) {"
+            "\n          out = size;"
+            "\n        }"
             "\n      ";
-        t.expectCompileResult(enableSubgroups, code);
+        t.expectCompileResult(true, code);
     });
 
 // ---------------------------------------------------------------------------
@@ -264,7 +271,7 @@ CTS_TEST(g, "subgroup_size_override_must_be_power_of_2_at_pipeline_creation")
     .desc(R"(Checks that when @subgroup_size is an override expression, it is a pipeline creation error
      if the override value resolves to a value that is not a power of 2.)")
     .params([](ParamsBuilder u) {
-        return u.combine("size", {Value(3), Value(5), Value(7), Value(15), Value(31),
+        return u.combine("size", {Value(0), Value(3), Value(5), Value(7), Value(15), Value(31),
                                   Value(63), Value(127)});
     })
     .fn([](SVT& t) {
@@ -341,6 +348,9 @@ CTS_TEST(g, "workgroup_size_x_must_be_multiple_of_subgroup_size_at_pipeline_crea
             if (workgroupSizeX <= 0) {
                 continue;
             }
+            if (workgroupSizeX > static_cast<int64_t>(t.getMaxComputeWorkgroupSizeX())) {
+                continue;
+            }
             const bool isMultiple = workgroupSizeX % static_cast<int64_t>(subgroupSize) == 0;
 
             const std::string sgStr = std::to_string(subgroupSize);
@@ -365,6 +375,69 @@ CTS_TEST(g, "workgroup_size_x_must_be_multiple_of_subgroup_size_at_pipeline_crea
             args.addWorkgroupSize = false;
             t.expectPipelineResult(args);
         }
+    });
+
+// ---------------------------------------------------------------------------
+// subgroup_size_must_be_between_min_and_max_at_pipeline_creation
+// ---------------------------------------------------------------------------
+CTS_TEST(g, "subgroup_size_must_be_between_min_and_max_at_pipeline_creation")
+    .desc(R"(Checks that a pipeline-creation error results if the subgroup_size value is smaller than
+     subgroupMinSize or greater than subgroupMaxSize. Tests both constant and override expressions
+     for the subgroup_size attribute.)")
+    .params([](ParamsBuilder u) {
+        return u
+            .combine("subgroupSizeIsOverride", {Value(false), Value(true)})
+            .combine("relation", {Value(std::string("below_min")), Value(std::string("at_min")),
+                                  Value(std::string("at_max")), Value(std::string("above_max"))});
+    })
+    .fn([](SVT& t) {
+        skipIfSubgroupSizeControlUnsupported(t);
+        const bool subgroupSizeIsOverride = t.param<bool>("subgroupSizeIsOverride");
+        const std::string relation = t.param<std::string>("relation");
+        const SVT::SubgroupSizeRange range = t.getSubgroupSizeRange();
+
+        uint32_t subgroupSize = 0;
+        bool shouldSucceed = false;
+        if (relation == "below_min") {
+            // Use a power-of-2 value below min. If min is already 1, skip.
+            subgroupSize = range.minSize / 2;
+            if (subgroupSize < 1) {
+                t.skip("subgroupMinSize is 1, cannot test below minimum");
+            }
+            shouldSucceed = false;
+        } else if (relation == "at_min") {
+            subgroupSize = range.minSize;
+            shouldSucceed = true;
+        } else if (relation == "at_max") {
+            subgroupSize = range.maxSize;
+            shouldSucceed = true;
+        } else {
+            // above_max: use a power-of-2 value above max.
+            subgroupSize = range.maxSize * 2;
+            shouldSucceed = false;
+        }
+
+        // Ensure workgroup_size x is a multiple of subgroup_size and within limits.
+        const uint32_t workgroupSizeX = subgroupSize;
+        if (workgroupSizeX > t.getMaxComputeWorkgroupSizeX()) {
+            t.skip("subgroup size exceeds maxComputeWorkgroupSizeX");
+        }
+
+        const std::string sgStr = std::to_string(subgroupSize);
+        SVT::PipelineArgs args;
+        args.expectedResult = shouldSucceed;
+        args.code =
+            "\n          enable subgroups;"
+            "\n          enable subgroup_size_control;"
+            "\n          const const_S = " + sgStr + "u;"
+            "\n          override override_S: u32;"
+            "\n          @workgroup_size(" + std::to_string(workgroupSizeX) + ")"
+            "\n          @subgroup_size(" +
+            (subgroupSizeIsOverride ? "override_S" : "const_S") + ")"
+            "\n        ";
+        args.constants["override_S"] = static_cast<double>(subgroupSize);
+        args.addWorkgroupSize = false;
+        t.expectPipelineResult(args);
     });
 
 } // namespace

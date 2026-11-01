@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/types/ref.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/types/ref.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 
 #include <string>
 
 #include "cts/test.h"
+#include "webgpu/shader/validation/decl/util.h"
 #include "webgpu/shader/validation/shader_validation_test.h"
 
 using namespace cts;
@@ -77,6 +78,20 @@ CTS_TEST(g, "not_typeable_alias")
         const std::string code =
             "\n    struct S { a : u32 }\n    alias a = " + view + "<private, " + type + ">;";
         t.expectCompileResult(view == "ptr", code);
+    });
+
+CTS_TEST(g, "not_typeable_ref_immediate")
+    .desc("Test that ref<immediate, T> cannot be written as an explicit type.")
+    .params([](ParamsBuilder u) {
+        return u.combine("type", kTypes());
+    })
+    .fn([](ShaderValidationTest& t) {
+        skipIfImmediateDataNotSupported(t);
+        const std::string type = t.param<std::string>("type");
+        const std::string code =
+            "\n      requires immediate_address_space;\n      struct S { a : u32 }\n      alias "
+            "a = ref<immediate, " + type + ">;";
+        t.expectCompileResult(false, code);
     });
 
 }  // namespace

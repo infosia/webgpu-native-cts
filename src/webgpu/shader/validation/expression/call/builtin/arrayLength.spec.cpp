@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/expression/call/builtin/arrayLength.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/expression/call/builtin/arrayLength.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2022 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 
@@ -24,6 +24,18 @@ CTS_TEST(g, "bool_type")
         const std::string code =
             "\n@compute @workgroup_size(1)\nfn main() {\n  var b = true;\n  _ = "
             "arrayLength(&b);\n}";
+        t.expectCompileResult(false, code);
+    });
+
+CTS_TEST(g, "buffer_type")
+    .desc("Validates buffers are rejected")
+    .params([](ParamsBuilder u) { return u.combine("sized", {Value(false), Value(true)}); })
+    .fn([](ShaderValidationTest& t) {
+        const bool sized = t.param<bool>("sized");
+        const std::string code =
+            std::string("\n@group(0) @binding(0) var<storage> b : buffer") +
+            (sized ? "<1024>" : "") +
+            ";\n@compute @workgroup_size(1)\nfn main() {\n  _ = arrayLength(&b);\n}";
         t.expectCompileResult(false, code);
     });
 

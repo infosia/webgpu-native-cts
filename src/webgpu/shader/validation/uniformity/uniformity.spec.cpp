@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/uniformity/uniformity.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/uniformity/uniformity.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "cts/test.h"
+#include "webgpu/shader/validation/decl/util.h"
 #include "webgpu/shader/validation/shader_validation_test.h"
 
 using namespace cts;
@@ -221,6 +222,8 @@ std::string generateCondition(const std::string& condition) {
         return "u_let == 0";
     } else if (condition == "nonuniform_let") {
         return "n_let == 0";
+    } else if (condition == "uniform_immediate") {
+        return "immediate_value == 0u";
     } else if (condition == "uniform_or") {
         return "u_let == 0 || uniform_buffer.y > 1";
     } else if (condition == "nonuniform_or1") {
@@ -525,7 +528,8 @@ const ConditionEntry kConditions[] = {
     {"nonuniform_storage_rw", false}, {"nonuniform_builtin", false},
     {"uniform_literal", true},      {"uniform_const", true},
     {"uniform_override", true},     {"uniform_let", true},
-    {"nonuniform_let", false},      {"uniform_or", true},
+    {"nonuniform_let", false},      {"uniform_immediate", true},
+    {"uniform_or", true},
     {"nonuniform_or1", false},      {"nonuniform_or2", false},
     {"uniform_and", true},          {"nonuniform_and1", false},
     {"nonuniform_and2", false},     {"uniform_func_var", true},
@@ -557,8 +561,8 @@ void skipIfLanguageFeatureNotSupported(ShaderValidationTest& t, const std::strin
 }
 
 // Shared bindings preamble used by basics / basics,subgroups.
-std::string basicsPreamble() {
-    return std::string(
+std::string basicsPreamble(bool needsImmediate) {
+    return std::string(needsImmediate ? "\n requires immediate_address_space;" : "") +
         "\n @group(0) @binding(0) var s : sampler;"
         "\n @group(0) @binding(1) var s_comp : sampler_comparison;"
         "\n @group(0) @binding(2) var tex : texture_2d<f32>;"
@@ -566,7 +570,8 @@ std::string basicsPreamble() {
         "\n"
         "\n @group(1) @binding(0) var<storage, read> ro_buffer : array<f32, 4>;"
         "\n @group(1) @binding(1) var<storage, read_write> rw_buffer : array<f32, 4>;"
-        "\n @group(1) @binding(2) var<uniform> uniform_buffer : vec4<f32>;"
+        "\n @group(1) @binding(2) var<uniform> uniform_buffer : vec4<f32>;" +
+        std::string(needsImmediate ? "\n var<immediate> immediate_value : u32;" : "") +
         "\n"
         "\n @group(2) @binding(0) var ro_storage_texture : texture_storage_2d<rgba8unorm, read>;"
         "\n @group(2) @binding(1) var rw_storage_texture : texture_storage_2d<rgba8unorm, "
@@ -575,7 +580,7 @@ std::string basicsPreamble() {
         "\n var<private> priv_var : array<u32, 4> = array(0,0,0,0);"
         "\n"
         "\n const c = false;"
-        "\n override o : f32;\n");
+        "\n override o : f32;\n";
 }
 
 // ===========================================================================
@@ -608,8 +613,12 @@ CTS_TEST(g, "basics")
         if (op == "textureBarrier" || startsWith(cond, "storage_texture")) {
             skipIfLanguageFeatureNotSupported(t, "readonly_and_readwrite_storage_textures");
         }
+        const bool needsImmediate = cond == "uniform_immediate";
+        if (needsImmediate) {
+            skipIfImmediateDataNotSupported(t);
+        }
 
-        std::string code = basicsPreamble();
+        std::string code = basicsPreamble(needsImmediate);
         if (stage == "compute") {
             code += "var<workgroup> wg : f32;\n";
             code += " @workgroup_size(16, 1, 1)";
@@ -690,7 +699,12 @@ CTS_TEST(g, "basics,subgroups")
         const std::string op = t.param<std::string>("op");
         const std::string stage = t.param<std::string>("stage");
 
-        std::string code = "\n enable subgroups;\n" + basicsPreamble();
+        const bool needsImmediate = cond == "uniform_immediate";
+        if (needsImmediate) {
+            skipIfImmediateDataNotSupported(t);
+        }
+
+        std::string code = "\n enable subgroups;\n" + basicsPreamble(needsImmediate);
         if (stage == "compute") {
             code += "var<workgroup> wg : f32;\n";
             code += " @workgroup_size(16, 1, 1)";

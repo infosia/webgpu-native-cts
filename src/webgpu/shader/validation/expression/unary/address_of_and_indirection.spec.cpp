@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/expression/unary/address_of_and_indirection.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/expression/unary/address_of_and_indirection.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2022 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "cts/test.h"
+#include "webgpu/shader/validation/decl/util.h"
 #include "webgpu/shader/validation/shader_validation_test.h"
 
 using namespace cts;
@@ -26,7 +27,7 @@ TestGroup<ShaderValidationTest> g = MakeTestGroup<ShaderValidationTest>(
 
 // kAddressSpaces / kAccessModes / kStorageTypes / kCompositeTypes (order preserved).
 static const std::vector<std::string> kAddressSpaces = {"function", "private", "workgroup",
-                                                        "uniform", "storage"};
+                                                        "uniform", "storage", "immediate"};
 static const std::vector<std::string> kAccessModes = {"read", "read_write"};
 static const std::vector<std::string> kStorageTypes = {"bool", "u32", "i32", "f32", "f16"};
 static const std::vector<std::string> kCompositeTypes = {"array", "struct", "vec", "mat"};
@@ -97,6 +98,12 @@ CTS_TEST(g, "basic")
                 return true;
             })
             .filter([](const ParamRecord& p) {
+                if (filterStr(p, "addressSpace") != "immediate") {
+                    return true;
+                }
+                return filterStr(p, "storageType") != "bool";
+            })
+            .filter([](const ParamRecord& p) {
                 // This test does not test composite access.
                 return !findDerefType(filterStr(p, "derefType")).requires_pointer_composite_access;
             });
@@ -107,9 +114,14 @@ CTS_TEST(g, "basic")
         const std::string storageType = t.param<std::string>("storageType");
         const DerefType& deref = findDerefType(t.param<std::string>("derefType"));
 
+        if (addressSpace == "immediate") {
+            skipIfImmediateDataNotSupported(t);
+        }
         const bool isLocal = addressSpace == "function";
         const std::string commaAccessMode =
             addressSpace == "storage" ? (", " + accessMode) : std::string();
+        const std::string header =
+            addressSpace == "immediate" ? "requires immediate_address_space;\n" : "";
 
         std::string varDecl;
         if (addressSpace == "uniform" || addressSpace == "storage") {
@@ -118,7 +130,8 @@ CTS_TEST(g, "basic")
         varDecl += "var<" + addressSpace + commaAccessMode + "> a : VarType;";
 
         const std::string wgsl =
-            "\n      " + (storageType == "f16" ? std::string("enable f16;") : std::string("")) +
+            header + "\n      " +
+            (storageType == "f16" ? std::string("enable f16;") : std::string("")) +
             "\n"
             "\n      alias VarType = " + storageType + ";"
             "\n      alias PtrType = ptr<" + addressSpace + ", VarType " + commaAccessMode + ">;"
@@ -161,6 +174,13 @@ CTS_TEST(g, "composite")
                     return st == "f32" || st == "f16";
                 }
                 return true;
+            })
+            .filter([](const ParamRecord& p) {
+                if (filterStr(p, "addressSpace") != "immediate") {
+                    return true;
+                }
+                return filterStr(p, "compositeType") != "array" &&
+                       filterStr(p, "storageType") != "bool";
             });
     })
     .fn([](ShaderValidationTest& t) {
@@ -170,9 +190,14 @@ CTS_TEST(g, "composite")
         const DerefType& deref = findDerefType(t.param<std::string>("derefType"));
         const std::string accessMode = t.param<std::string>("accessMode");
 
+        if (addressSpace == "immediate") {
+            skipIfImmediateDataNotSupported(t);
+        }
         const bool isLocal = addressSpace == "function";
         const std::string commaAccessMode =
             addressSpace == "storage" ? (", " + accessMode) : std::string();
+        const std::string header =
+            addressSpace == "immediate" ? "requires immediate_address_space;\n" : "";
 
         std::string varDecl;
         if (addressSpace == "uniform" || addressSpace == "storage") {
@@ -181,7 +206,8 @@ CTS_TEST(g, "composite")
         varDecl += "var<" + addressSpace + commaAccessMode + "> a : VarType;";
 
         std::string wgsl =
-            "\n          " + (storageType == "f16" ? std::string("enable f16;") : std::string(""));
+            header + "\n          " +
+            (storageType == "f16" ? std::string("enable f16;") : std::string(""));
 
         const std::string ptrTypeLine =
             "\n          alias PtrType = ptr<" + addressSpace + ", VarType " + commaAccessMode + ">;";

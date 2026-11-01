@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/shader_io/align.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/shader_io/align.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -37,6 +37,8 @@ struct ParseCase {
 static const std::vector<ParseCase>& kParseTests() {
     static const std::vector<ParseCase> cases = {
         {"blank", "", true},
+        // EXCEPTION: If the type is valid for some address space, the align value must be a
+        // multiple of the type's alignment.
         {"one", "@align(1)", false},
         {"four_a", "@align(4)", true},
         {"four_i", "@align(4i)", true},
@@ -45,6 +47,8 @@ static const std::vector<ParseCase>& kParseTests() {
         {"trailing_comma", "@align(4,)", true},
         {"const_u", "@align(u_val)", true},
         {"const_i", "@align(i_val)", true},
+        // EXCEPTION: If the type is valid for some address space, the align value must be a
+        // multiple of the type's alignment.
         {"const_expr", "@align(i_val + 4 - 6)", false},
         {"const_expr_2", "@align(i_val + 8 - 4)", true},
         {"large", "@align(1073741824)", true},
@@ -102,14 +106,7 @@ CTS_TEST(g, "parsing")
             "\nstruct B {"
             "\n  " + std::string(curr.src) + " a: i32,"
             "\n}"
-            "\n"
-            "\n@group(0) @binding(0)"
-            "\nvar<uniform> uniform_buffer: B;"
-            "\n"
-            "\n@fragment"
-            "\nfn main() -> @location(0) vec4<f32> {"
-            "\n  return vec4<f32>(.4, .2, .3, .1);"
-            "\n}";
+            "\n";
         t.expectCompileResult(curr.pass, code);
     });
 
@@ -156,6 +153,7 @@ static const std::vector<AlignType>& kAlignTypes() {
         {"array<vec2<i32>, 2>", 8, 16},
         {"array<vec4<i32>, 2>", 16, 16},
         {"S", 8, 16},
+        {"array<u32>", 4, 4},
     };
     return v;
 }
@@ -189,30 +187,64 @@ static bool contains(const std::string& s, const std::string& needle) {
 CTS_TEST(g, "required_alignment")
     .desc("Test that the align with an invalid size is an error")
     .params([](ParamsBuilder u) {
-        return u.combine("address_space",
-                         {Value(std::string("storage")), Value(std::string("uniform"))})
+        return u.combine("decl", {Value(std::string("var")), Value(std::string("const")),
+                                  Value(std::string("let"))})
+            .combine("address_space",
+                     {Value(std::string("storage")), Value(std::string("uniform")),
+                      Value(std::string("workgroup")), Value(std::string("function")),
+                      Value(std::string("private")), Value(std::string("immediate"))})
             .combine("align", {Value(1), Value(2), Value(std::string("alignment")), Value(32)})
+            .beginSubcases()
             .combine("type", alignTypeNames())
-            .beginSubcases();
+            .filter([](const ParamRecord& p) {
+                const std::string decl = valueAs<std::string>(*findParam(p, "decl"));
+                const std::string addressSpace =
+                    valueAs<std::string>(*findParam(p, "address_space"));
+                const std::string typeName = valueAs<std::string>(*findParam(p, "type"));
+                if (decl == "let" && addressSpace != "function") {
+                    return false;
+                }
+                if (decl == "const" && !(addressSpace == "private" || addressSpace == "function")) {
+                    // Private is used as placeholder for module-scope const and function as
+                    // placeholder for function-scope const.
+                    return false;
+                }
+                if (startsWith(typeName, "atomic")) {
+                    if (addressSpace != "storage" && addressSpace != "workgroup") {
+                        return false;
+                    }
+                    if (decl != "var") {
+                        return false;
+                    }
+                }
+                if (typeName == "array<u32>" && addressSpace != "storage") {
+                    return false;
+                }
+                // No arrays in immediate address space.
+                if ((startsWith(typeName, "array") || typeName == "S") &&
+                    addressSpace == "immediate") {
+                    return false;
+                }
+                return true;
+            });
     })
     .fn([](ShaderValidationTest& t) {
-        // If the `uniform_buffer_standard_layout` feature is supported, the `uniform` address space
-        // has the same layout constraints as `storage`.
-        const bool hasUboStdLayout = t.hasLanguageFeature("uniform_buffer_standard_layout");
-
+        const std::string declParam = t.param<std::string>("decl");
         const std::string addressSpaceParam = t.param<std::string>("address_space");
         const std::string typeName = t.param<std::string>("type");
         const AlignType& type = findAlignType(typeName);
 
+        t.skipIf(addressSpaceParam == "immediate" &&
+                     !t.hasLanguageFeature("immediate_address_space"),
+                 "Immediate address space not supported");
+
+        // If the `uniform_buffer_standard_layout` feature is supported, the `uniform` address space
+        // has the same layout constraints as `storage`.
+        const bool hasUboStdLayout = t.hasLanguageFeature("uniform_buffer_standard_layout");
+
         // align param is either an integer (1, 2, 32) or the string "alignment".
         const bool alignIsString = t.paramIsString("align");
         const int alignInt = alignIsString ? 0 : t.param<int>("align");
-
-        // While this would fail validation, it doesn't fail for any reasons related to alignment.
-        // Atomics are not allowed in uniform address space as they have to be read_write.
-        if (addressSpaceParam == "uniform" && startsWith(typeName, "atomic")) {
-            t.skip("No atomics in uniform address space");
-        }
 
         std::string code;
         if (contains(typeName, "f16")) {
@@ -221,7 +253,7 @@ CTS_TEST(g, "required_alignment")
 
         // Testing the struct case, generate the struct.
         if (typeName == "S") {
-            const int innerVec = (addressSpaceParam == "storage" || hasUboStdLayout) ? 2 : 4;
+            const int innerVec = (addressSpaceParam != "uniform" || hasUboStdLayout) ? 2 : 4;
             code += "struct S {"
                     "\n        a: mat4x2<f32>,          // Align 8"
                     "\n        b: array<vec" + std::to_string(innerVec) +
@@ -231,28 +263,44 @@ CTS_TEST(g, "required_alignment")
         }
 
         // Alignment value listed in the spec.
-        const int minAlign = (addressSpaceParam == "storage" || hasUboStdLayout)
+        const int minAlign = (addressSpaceParam != "uniform" || hasUboStdLayout)
                                  ? type.storage
                                  : type.uniform;
         const std::string alignStr = alignIsString ? std::to_string(minAlign)
                                                     : std::to_string(alignInt);
 
-        std::string addressSpace = "uniform";
+        std::string addressSpace = addressSpaceParam;
         if (addressSpaceParam == "storage") {
             // atomics require read_write, not just the default of read.
             addressSpace = "storage, read_write";
         }
+        std::string decl = declParam;
+        if (decl == "var") {
+            decl = "var<" + addressSpace + ">";
+        }
+        const std::string init =
+            declParam == "let" || declParam == "const" ? " = MyStruct()" : "";
+
+        std::string moduleDecl;
+        if (addressSpaceParam != "function") {
+            const bool hasBinding = declParam == "var" &&
+                                    (addressSpaceParam == "uniform" || addressSpaceParam == "storage");
+            moduleDecl = std::string(hasBinding ? "@group(0) @binding(0)" : "") + "\n    " + decl +
+                         " a : MyStruct" + init + ";";
+        }
+
+        const std::string funcDecl = addressSpaceParam == "function"
+                                         ? decl + " a : MyStruct" + init + ";"
+                                         : std::string();
 
         code += "struct MyStruct {"
                 "\n      @align(" + alignStr + ") a: " + typeName + ","
                 "\n    }"
                 "\n"
-                "\n    @group(0) @binding(0)"
-                "\n    var<" + addressSpace + "> a : MyStruct;";
+                "\n    " + moduleDecl;
 
-        code += "\n    @fragment"
-                "\n    fn main() -> @location(0) vec4<f32> {"
-                "\n      return vec4<f32>(.4, .2, .3, .1);"
+        code += "\n    fn foo() {"
+                "\n      " + funcDecl +
                 "\n    }";
 
         // align < min_align. For the string "alignment" case, align == min_align so this is false.

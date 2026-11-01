@@ -52,6 +52,15 @@ inline bool hasBufferViewLanguageFeature() {
 #endif
 }
 
+/// The 'immediate_address_space' language feature. Not in wgpu-native's webgpu.h.
+inline bool hasImmediateAddressSpaceLanguageFeature() {
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
+    return hasWGSLLanguageFeature(WGPUWGSLLanguageFeatureName_ImmediateAddressSpace);
+#else
+    return false;
+#endif
+}
+
 /// The 'fragment_depth' language feature. Not in wgpu-native's webgpu.h.
 inline bool hasFragmentDepthLanguageFeature() {
 #if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)

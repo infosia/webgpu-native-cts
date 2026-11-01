@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/expression/access/vector.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/expression/access/vector.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2022 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -152,6 +152,7 @@ static const std::vector<ConcreteCase>& kConcreteCases() {
         {"rgba", "let r : vec4<T> = v.rgba;", Ok::GtW3},
         {"gbra", "let r : vec4<T> = v.gbra;", Ok::GtW3},
         // swizzle chains
+        {"xy_x", "let r : T = v.xy.x;", Ok::True},
         {"xy_yx", "let r : vec2<T> = v.xy.yx;", Ok::True},
         {"xyx_xxy", "let r : vec3<T> = v.xyx.xxy;", Ok::True},
         {"xyz_zyx", "let r : vec3<T> = v.xyz.zyx;", Ok::GtW2},
@@ -309,6 +310,7 @@ static const std::vector<AbstractCase>& kAbstractCases() {
         {"rgba", "const r = V.rgba;", true, 4, Ok::GtW3},
         {"gbra", "const r = V.gbra;", true, 4, Ok::GtW3},
         // swizzle chains
+        {"xy_x", "const r = V.xy.x;", true, 1, Ok::True},
         {"xy_yx", "const r = V.xy.yx;", true, 2, Ok::True},
         {"xyx_xxy", "const r = V.xyx.xxy;", true, 3, Ok::True},
         {"xyz_zyx", "const r = V.xyz.zyx;", true, 3, Ok::GtW2},
@@ -450,6 +452,63 @@ CTS_TEST(g, "abstract")
         const bool convertible = abstractConvertible(abstract_type, concrete_type);
         const bool pass = convertible && okFor(c.ok, vector_width);
         t.expectCompileResult(pass, code);
+    });
+
+// kChainedSwizzleCases (object key order preserved).
+struct ChainedSwizzleCase {
+    const char* name;
+    const char* chain;
+};
+
+static const std::vector<ChainedSwizzleCase>& kChainedSwizzleCases() {
+    static const std::vector<ChainedSwizzleCase> cases = {
+        // Single-element swizzle of a swizzle
+        {"xy_x", "xy.x"},
+        // Single-element swizzle of a swizzle with duplicate components
+        {"xx_x", "xx.x"},
+        // Multi-element swizzle of a swizzle
+        {"xyy_xy", "xyy.xy"},
+    };
+    return cases;
+}
+
+static std::vector<Value> chainedSwizzleCaseNames() {
+    std::vector<Value> values;
+    for (const ChainedSwizzleCase& c : kChainedSwizzleCases()) {
+        values.emplace_back(std::string(c.name));
+    }
+    return values;
+}
+
+static std::string findChainedSwizzle(const std::string& name) {
+    for (const ChainedSwizzleCase& c : kChainedSwizzleCases()) {
+        if (name == c.name) {
+            return c.chain;
+        }
+    }
+    return "";
+}
+
+CTS_TEST(g, "chained_swizzle")
+    .desc("Validate that chained swizzles on memory views succeed during pipeline creation.")
+    .params([](ParamsBuilder u) {
+        return u.combine("address_space", {"function", "private"})
+            .combine("case", chainedSwizzleCaseNames());
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string address_space = t.param<std::string>("address_space");
+        const std::string chain = findChainedSwizzle(t.param<std::string>("case"));
+
+        ShaderValidationTest::PipelineArgs args;
+        args.expectedResult = true;
+        if (address_space == "private") {
+            args.code = "var<private> v = vec4f(1.0, 2.0, 3.0, 4.0);";
+        } else {
+            args.statements.push_back("var v = vec4f(1.0, 2.0, 3.0, 4.0);");
+        }
+        args.statements.push_back("let a = v." + chain + ";");
+        args.statements.push_back("_ = a;");
+        t.expectPipelineResult(args);
     });
 
 }  // namespace

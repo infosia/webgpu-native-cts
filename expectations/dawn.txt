@@ -1,2 +1,6 @@
 # Dawn expectations captured for Phase 2b.
-# No expected failures are currently required for the ported validation files.
+
+# F-159: this test exists to fail until every known WGSL language feature is reported. Dawn at
+# v20261030.184100 reports neither feature, and its own webgpu-cts/expectations.txt suppresses both.
+webgpu:shader,validation,parse,requires:have_all_language_features:feature="fragment_depth"
+webgpu:shader,validation,parse,requires:have_all_language_features:feature="unrestricted_aliasing"

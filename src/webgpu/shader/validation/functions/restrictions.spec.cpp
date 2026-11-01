@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/functions/restrictions.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/functions/restrictions.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 
@@ -7,10 +7,12 @@
 #include <vector>
 
 #include "cts/test.h"
+#include "webgpu/shader/validation/decl/util.h"
 #include "webgpu/shader/validation/shader_validation_test.h"
 
 using namespace cts;
 using cts::shader_validation::ShaderValidationTest;
+using cts::shader_validation::skipIfImmediateDataNotSupported;
 
 namespace {
 
@@ -153,7 +155,7 @@ static const RetTypeCase& findRet(const std::string& name) {
 // ---------------------------------------------------------------------------
 // function_parameter_types / function_parameter_matching
 // ---------------------------------------------------------------------------
-enum class ParamValid { kFalse, kTrue, kWithUnrestrictedPointerParameters };
+enum class ParamValid { kFalse, kTrue, kWithUnrestrictedPointerParameters, kWithBufferView };
 
 struct ParamTypeCase {
     const char* key;
@@ -212,6 +214,7 @@ static const std::vector<ParamTypeCase>& kFunctionParamTypeCases() {
         {"ptr11", "ptr<storage, host_shareable, read>",
          ParamValid::kWithUnrestrictedPointerParameters},
         {"ptr12", "ptr<uniform, host_shareable>", ParamValid::kWithUnrestrictedPointerParameters},
+        {"ptrImmediate", "ptr<immediate, u32>", ParamValid::kWithUnrestrictedPointerParameters},
         {"ptrWorkgroupAtomic", "ptr<workgroup, atomic<u32>>",
          ParamValid::kWithUnrestrictedPointerParameters},
         {"ptrWorkgroupNestedAtomic", "ptr<workgroup, array<atomic<u32>,1>>",
@@ -230,6 +233,35 @@ static const std::vector<ParamTypeCase>& kFunctionParamTypeCases() {
         {"invalid_ptr6", "ptr<private,u32,read_write>", ParamValid::kFalse},
         {"invalid_ptr7", "ptr<private,clamp>", ParamValid::kFalse},
         {"invalid_ptr8", "ptr<function, texture_external>", ParamValid::kFalse},
+        {"invalid_ptr_immediate_access_read", "ptr<immediate, u32, read>", ParamValid::kFalse},
+        {"invalid_ptr_immediate_access_write", "ptr<immediate, u32, write>", ParamValid::kFalse},
+        {"invalid_ptr_immediate_access_read_write", "ptr<immediate, u32, read_write>",
+         ParamValid::kFalse},
+
+        // Buffers (need buffer_view and unrestricted_pointer_parameters)
+        {"ptrBufferUnsized_storage", "ptr<storage, buffer, read_write>",
+         ParamValid::kWithBufferView},
+        {"ptrBufferSized_storage", "ptr<storage, buffer<128>, read_write>",
+         ParamValid::kWithBufferView},
+        {"ptrBufferSizedSmall_storage", "ptr<storage, buffer<64>, read_write>",
+         ParamValid::kWithBufferView},
+        {"ptrBufferUnsized_ro_storage", "ptr<storage, buffer>", ParamValid::kWithBufferView},
+        {"ptrBufferSized_ro_storage", "ptr<storage, buffer<128>>", ParamValid::kWithBufferView},
+        {"ptrBufferSizedSmall_ro_storage", "ptr<storage, buffer<64>>",
+         ParamValid::kWithBufferView},
+        {"ptrBufferUnsized_uniform", "ptr<uniform, buffer>", ParamValid::kWithBufferView},
+        {"ptrBufferSized_uniform", "ptr<uniform, buffer<128>>", ParamValid::kWithBufferView},
+        {"ptrBufferSizedSmall_uniform", "ptr<uniform, buffer<64>>", ParamValid::kWithBufferView},
+        {"ptrBufferUnsized_workgroup", "ptr<workgroup, buffer>", ParamValid::kWithBufferView},
+        {"ptrBufferSized_workgroup", "ptr<workgroup, buffer<128>>", ParamValid::kWithBufferView},
+        {"ptrBufferSizedSmall_workgroup", "ptr<workgroup, buffer<64>>",
+         ParamValid::kWithBufferView},
+        {"ptrBufferOverrideNoDefault_workgroup", "ptr<workgroup, buffer<override_no_default>>",
+         ParamValid::kWithBufferView},
+        {"ptrBufferOverrideDefault_workgroup", "ptr<workgroup, buffer<override_default>>",
+         ParamValid::kWithBufferView},
+        {"ptrBufferOverrideExpr_workgroup", "ptr<workgroup, buffer<override_expr>>",
+         ParamValid::kWithBufferView},
     };
     return cases;
 }
@@ -257,6 +289,7 @@ struct ParamValueCase {
     const char* value;
     std::vector<std::string> matches;
     bool needsUnrestrictedPointerParameters;
+    bool needsBufferView = false;
 };
 
 static const std::vector<ParamValueCase>& kFunctionParamValueCases() {
@@ -387,11 +420,75 @@ static const std::vector<ParamValueCase>& kFunctionParamValueCases() {
         {"ptr10", "&rw_host_shareable", {"ptr10"}, true},
         {"ptr11", "&ro_host_shareable", {"ptr11"}, true},
         {"ptr12", "&uniform_host_shareable", {"ptr12"}, true},
+        {"ptrImmediate", "&immediate_u32", {"ptrImmediate"}, true},
         {"ptrWorkgroupOverrideNoDefault", "&wg_override_no_default",
          {"ptrWorkgroupOverrideNoDefault"}, true},
         {"ptrWorkgroupOverrideWithDefault", "&wg_override_default",
          {"ptrWorkgroupOverrideWithDefault"}, true},
         {"ptrWorkgroupOverrideExpr", "&wg_override_expr", {"ptrWorkgroupOverrideExpr"}, true},
+
+        // Buffer view
+        {"ptrStorageBufferUnsized", "&storage_buffer_unsized", {"ptrBufferUnsized_storage"}, false,
+         true},
+        {"ptrStorageBufferSized",
+         "&storage_buffer_sized",
+         {"ptrBufferUnsized_storage", "ptrBufferSized_storage", "ptrBufferSizedSmall_storage"},
+         false,
+         true},
+        {"ptrStorageBufferSizedSmall",
+         "&storage_buffer_sized_small",
+         {"ptrBufferUnsized_storage", "ptrBufferSizedSmall_storage"},
+         false,
+         true},
+        {"ptrROStorageBufferUnsized", "&ro_storage_buffer_unsized",
+         {"ptrBufferUnsized_ro_storage"}, false, true},
+        {"ptrROStorageBufferSized",
+         "&ro_storage_buffer_sized",
+         {"ptrBufferUnsized_ro_storage", "ptrBufferSized_ro_storage",
+          "ptrBufferSizedSmall_ro_storage"},
+         false,
+         true},
+        {"ptrROStorageBufferSizedSmall",
+         "&ro_storage_buffer_sized_small",
+         {"ptrBufferUnsized_ro_storage", "ptrBufferSizedSmall_ro_storage"},
+         false,
+         true},
+        {"ptrUniformBufferSized",
+         "&uniform_buffer_sized",
+         {"ptrBufferUnsized_uniform", "ptrBufferSized_uniform", "ptrBufferSizedSmall_uniform"},
+         false,
+         true},
+        {"ptrUniformBufferSizedSmall",
+         "&uniform_buffer_sized_small",
+         {"ptrBufferUnsized_uniform", "ptrBufferSizedSmall_uniform"},
+         false,
+         true},
+        {"ptrWorkgroupBufferSized",
+         "&wg_buffer_sized",
+         {"ptrBufferUnsized_workgroup", "ptrBufferSized_workgroup",
+          "ptrBufferSizedSmall_workgroup"},
+         false,
+         true},
+        {"ptrWorkgroupBufferSizedSmall",
+         "&wg_buffer_sized_small",
+         {"ptrBufferUnsized_workgroup", "ptrBufferSizedSmall_workgroup"},
+         false,
+         true},
+        {"ptrWorkgroupBufferOverrideNoDefault",
+         "&wg_buffer_override_no_default",
+         {"ptrBufferUnsized_workgroup", "ptrBufferOverrideNoDefault_workgroup"},
+         false,
+         true},
+        {"ptrWorkgroupBufferOverrideDefault",
+         "&wg_buffer_override_default",
+         {"ptrBufferUnsized_workgroup", "ptrBufferOverrideDefault_workgroup"},
+         false,
+         true},
+        {"ptrWorkgroupBufferOverrideExpr",
+         "&wg_buffer_override_expr",
+         {"ptrBufferUnsized_workgroup", "ptrBufferOverrideExpr_workgroup"},
+         false,
+         true},
     };
     return cases;
 }
@@ -410,7 +507,7 @@ static const ParamValueCase& findParamValue(const std::string& name) {
             return c;
         }
     }
-    static const ParamValueCase dummy{"", "", {}, false};
+    static const ParamValueCase dummy{"", "", {}, false, false};
     return dummy;
 }
 
@@ -638,14 +735,29 @@ CTS_TEST(g, "function_parameter_types")
     .fn([](ShaderValidationTest& t) {
         const ParamTypeCase& tc = findParamType(t.param<std::string>("case"));
         const std::string enable = std::string(tc.name) == "f16" ? "enable f16;" : "";
-        const std::string code = "\n" + enable + "\n\n" + kCCommonTypeDecls + "\nfn foo(param : " +
-                                 tc.name + ") {\n}";
+        const bool needsImmediate = std::string(tc.name).find("immediate") != std::string::npos;
+        if (needsImmediate) {
+            skipIfImmediateDataNotSupported(t);
+        }
+        const std::string immediateRequires =
+            needsImmediate ? "requires immediate_address_space;" : "";
+        const std::string unrestrictedRequires =
+            tc.valid == ParamValid::kWithUnrestrictedPointerParameters &&
+                    t.hasLanguageFeature("unrestricted_pointer_parameters")
+                ? "requires unrestricted_pointer_parameters;"
+                : "";
+        const std::string code = "\n" + enable + "\n" + immediateRequires + "\n" +
+                                 unrestrictedRequires + "\n\n" + kCCommonTypeDecls +
+                                 "\nfn foo(param : " + tc.name + ") {\n}";
 
         bool isValid = false;
         if (tc.valid == ParamValid::kTrue) {
             isValid = true;
         } else if (tc.valid == ParamValid::kWithUnrestrictedPointerParameters) {
             isValid = t.hasLanguageFeature("unrestricted_pointer_parameters");
+        } else if (tc.valid == ParamValid::kWithBufferView) {
+            isValid = t.hasLanguageFeature("unrestricted_pointer_parameters") &&
+                      t.hasLanguageFeature("buffer_view");
         }
         t.expectCompileResult(isValid, code);
     });
@@ -667,8 +779,44 @@ CTS_TEST(g, "function_parameter_matching")
         const ParamTypeCase& param = findParamType(declKey);
         const ParamValueCase& arg = findParamValue(t.param<std::string>("arg"));
         const std::string enable = std::string(param.name) == "f16" ? "enable f16;" : "";
+        std::string bufferDecls;
+        if (param.valid == ParamValid::kWithBufferView) {
+            bufferDecls = R"(
+@group(2) @binding(0) var<storage, read_write> storage_buffer_unsized : buffer;
+@group(2) @binding(1) var<storage, read_write> storage_buffer_sized : buffer<128>;
+@group(2) @binding(2) var<storage, read_write> storage_buffer_sized_small : buffer<64>;
+@group(2) @binding(3) var<storage> ro_storage_buffer_unsized : buffer;
+@group(2) @binding(4) var<storage> ro_storage_buffer_sized : buffer<128>;
+@group(2) @binding(5) var<storage> ro_storage_buffer_sized_small : buffer<64>;
+@group(2) @binding(6) var<uniform> uniform_buffer_sized : buffer<128>;
+@group(2) @binding(7) var<uniform> uniform_buffer_sized_small : buffer<64>;
+
+var<workgroup> wg_buffer_sized : buffer<128>;
+var<workgroup> wg_buffer_sized_small : buffer<64>;
+var<workgroup> wg_buffer_override_no_default : buffer<override_no_default>;
+var<workgroup> wg_buffer_override_default : buffer<override_default>;
+var<workgroup> wg_buffer_override_expr : buffer<override_expr>;
+)";
+        }
+
+        const bool needsUnrestricted =
+            (param.valid == ParamValid::kWithUnrestrictedPointerParameters) ||
+            arg.needsUnrestrictedPointerParameters;
+        const std::string argKey = t.param<std::string>("arg");
+        const bool needsImmediate = std::string(param.name).find("immediate") != std::string::npos ||
+                                    argKey == "ptrImmediate";
+        if (needsImmediate) {
+            skipIfImmediateDataNotSupported(t);
+        }
+        const std::string immediateRequires =
+            needsImmediate ? "requires immediate_address_space;" : "";
+        const std::string unrestrictedRequires =
+            needsUnrestricted && t.hasLanguageFeature("unrestricted_pointer_parameters")
+                ? "requires unrestricted_pointer_parameters;"
+                : "";
         const std::string code =
-            "\n" + enable + "\n\n" + kCCommonTypeDecls +
+            "\n" + enable + "\n" + immediateRequires + "\n" + unrestrictedRequires + "\n\n" +
+            kCCommonTypeDecls +
             "@group(0) @binding(0)\nvar t : texture_2d<f32>;\n@group(0) @binding(1)\nvar s : "
             "sampler;\n@group(0) @binding(2)\nvar s_depth : sampler_comparison;\n@group(0) "
             "@binding(3)\nvar t_storage : texture_storage_2d<rgba8unorm, write>;\n@group(0) "
@@ -677,7 +825,9 @@ CTS_TEST(g, "function_parameter_matching")
             ": texture_external;\n\n@group(1) @binding(0)\nvar<storage> ro_host_shareable : "
             "host_shareable;\n@group(1) @binding(1)\nvar<storage, read_write> rw_host_shareable : "
             "host_shareable;\n@group(1) @binding(2)\nvar<uniform> uniform_host_shareable : "
-            "host_shareable;\n\nfn bar(param : " +
+            "host_shareable;\n" +
+            (needsImmediate ? "var<immediate> immediate_u32 : u32;" : "") + "\n\n" + bufferDecls +
+            "\n\nfn bar(param : " +
             param.name +
             ") { }\n\nvar<private> g_u32 : u32;\nvar<private> g_i32 : i32;\nvar<private> g_f32 : "
             "f32;\nvar<private> g_bool : bool;\nvar<private> g_vec2 : vec2u;\nvar<private> g_vec3 "
@@ -706,13 +856,16 @@ CTS_TEST(g, "function_parameter_matching")
             "ptr_g_constructible = &g_constructible;\n  let let_let_f_u32 = ptr_f_u32;\n\n  bar(" +
             arg.value + ");\n}\n";
 
-        const bool needsUnrestricted =
-            (param.valid == ParamValid::kWithUnrestrictedPointerParameters) ||
-            arg.needsUnrestrictedPointerParameters;
+        const bool needsBufferView =
+            param.valid == ParamValid::kWithBufferView || arg.needsBufferView;
 
         bool isValid = parameterMatches(declKey, arg.matches);
         if (isValid && needsUnrestricted) {
             isValid = t.hasLanguageFeature("unrestricted_pointer_parameters");
+        }
+        if (isValid && needsBufferView) {
+            isValid = t.hasLanguageFeature("unrestricted_pointer_parameters") &&
+                      t.hasLanguageFeature("buffer_view");
         }
         t.expectCompileResult(isValid, code);
     });

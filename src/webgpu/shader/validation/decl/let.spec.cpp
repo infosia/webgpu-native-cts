@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/decl/let.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/decl/let.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 
@@ -19,8 +19,9 @@ TestGroup<ShaderValidationTest> g = MakeTestGroup<ShaderValidationTest>(
     "Validation tests for let declarations");
 
 // Validity of a case. kTrue/kFalse are simple booleans; kTextureAndSamplerLet
-// means the expectation is t.hasLanguageFeature('texture_and_sampler_let').
-enum class Validity { kTrue, kFalse, kTextureAndSamplerLet };
+// means the expectation is t.hasLanguageFeature('texture_and_sampler_let'), and
+// kBufferView means it is t.hasLanguageFeature('buffer_view').
+enum class Validity { kTrue, kFalse, kTextureAndSamplerLet, kBufferView };
 
 struct LetCase {
     const char* name;
@@ -80,6 +81,18 @@ static const std::vector<LetCase>& kTypeCases() {
         {"sampler_comparison", "let s : sampler_comparison = samp_comp;",
          Validity::kTextureAndSamplerLet,
          "@group(0) @binding(0) var samp_comp : sampler_comparison;"},
+        {"buffer", "let x : buffer = b;", Validity::kFalse,
+         "@group(0) @binding(0) var<storage> b : buffer;"},
+        {"buffer_sized", "let x : buffer<128> = b;", Validity::kFalse,
+         "@group(0) @binding(0) var<uniform> b : buffer<128>;"},
+        {"buffer_override_sized", "let x : buffer<o> = b;", Validity::kFalse,
+         "override o = 16u; var<workgroup> b : buffer<o>;"},
+        {"ptr_buffer", "let x : ptr<storage, buffer> = &b;", Validity::kBufferView,
+         "@group(0) @binding(0) var<storage> b : buffer;"},
+        {"ptr_buffer_sized", "let x : ptr<uniform, buffer<128>> = &b;", Validity::kBufferView,
+         "@group(0) @binding(0) var<uniform> b : buffer<128>;"},
+        {"ptr_buffer_override_sized", "let x : ptr<workgroup, buffer<o>> = &b;",
+         Validity::kBufferView, "override o = 16u; var<workgroup> b : buffer<o>;"},
     };
     return cases;
 }
@@ -101,6 +114,8 @@ CTS_TEST(g, "type")
         bool expect = c.valid == Validity::kTrue;
         if (c.valid == Validity::kTextureAndSamplerLet) {
             expect = t.hasLanguageFeature("texture_and_sampler_let");
+        } else if (c.valid == Validity::kBufferView) {
+            expect = t.hasLanguageFeature("buffer_view");
         }
         t.expectCompileResult(expect, code);
     });
@@ -121,6 +136,12 @@ static const std::vector<LetCase>& kInitCases() {
         {"init_const_expr", "let y = x * 2;", Validity::kTrue, "const x = 1;"},
         {"init_override_expr", "let y = x + 1;", Validity::kTrue, "override x = 1;"},
         {"init_runtime_expr", "var x = 1;\nlet y = x << 1;", Validity::kTrue, ""},
+        {"buffer_mismatch", "let x : ptr<uniform, buffer> = &b;", Validity::kFalse,
+         "@group(0) @binding(0) var<uniform> b : buffer<128>;"},
+        {"buffer_smaller_size", "let x : ptr<uniform, buffer<64>> = &b;", Validity::kFalse,
+         "@group(0) @binding(0) var<uniform> b : buffer<128>;"},
+        {"buffer_mismatched_overrides", "let p : ptr<workgroup, buffer<o1>> = &b;",
+         Validity::kFalse, "override o1 : u32;\noverride o2 : u32;\nvar<workgroup> b : buffer<o2>;"},
     };
     return cases;
 }

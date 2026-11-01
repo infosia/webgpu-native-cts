@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/types/enumerant.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/types/enumerant.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 
@@ -61,6 +61,7 @@ static std::vector<Value> kEnumerantValues() {
         // Address spaces
         std::string("function"), std::string("private"), std::string("workgroup"),
         std::string("storage"), std::string("uniform"), std::string("handle"),
+        std::string("immediate"),
         // Texel formats
         std::string("rgba8unorm"), std::string("rgba8snorm"), std::string("rgba8uint"),
         std::string("rgba8sint"), std::string("rgba16uint"), std::string("rgba16sint"),

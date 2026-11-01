@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/types/pointer.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/types/pointer.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -11,20 +11,22 @@
 //     kAccessModeInfo from shader/types.ts) and the decl/util.ts helpers
 //     (declareEntryPoint, declareVarX, getVarDeclShader, pointerType,
 //     explicitSpaceExpander, accessModeExpander, supportsWrite) are ported inline,
-//     matching decl/var.spec.cpp. The address-space table preserves the upstream
-//     OBJECT KEY order (storage, uniform, private, function, workgroup, handle) so
-//     query/case identities match keysOf() ordering.
-//   - This spec does not use the pipeline path or hasLanguageFeature.
+//     matching decl/var.spec.cpp.
+//   - This spec does not use the pipeline path.
 
 #include <algorithm>
 #include <string>
 #include <vector>
 
 #include "cts/test.h"
+#include "webgpu/shader/validation/decl/util.h"
 #include "webgpu/shader/validation/shader_validation_test.h"
 
 using namespace cts;
+using cts::shader_validation::requiredLanguageFeatureHeader;
 using cts::shader_validation::ShaderValidationTest;
+using cts::shader_validation::skipIfAddressSpaceNotSupported;
+using cts::shader_validation::skipIfImmediateDataNotSupported;
 
 namespace {
 
@@ -61,7 +63,6 @@ struct AddressSpaceInfo {
     bool moduleScope; // true => 'module', false => 'function'
 };
 
-// Object key order preserved (storage, uniform, private, function, workgroup, handle).
 static const std::vector<AddressSpaceInfo>& kAddressSpaceInfo() {
     static const std::vector<AddressSpaceInfo> info = {
         {"storage", true, Requirement::kMust, {"read", "read_write"}, Requirement::kMay, true},
@@ -69,6 +70,7 @@ static const std::vector<AddressSpaceInfo>& kAddressSpaceInfo() {
         {"private", false, Requirement::kMust, {"read_write"}, Requirement::kNever, true},
         {"function", false, Requirement::kMay, {"read_write"}, Requirement::kNever, false},
         {"workgroup", false, Requirement::kMust, {"read_write"}, Requirement::kNever, true},
+        {"immediate", false, Requirement::kMust, {"read"}, Requirement::kNever, true},
         {"handle", true, Requirement::kNever, {}, Requirement::kNever, true},
     };
     return info;
@@ -140,11 +142,12 @@ static std::string getVarDeclShader(const VarDeclParams& p, const std::string& a
     const AddressSpaceInfo& info = addressSpaceInfo(p.addressSpace);
     const std::string decl =
         declareVarX(p.explicitSpace ? p.addressSpace : "", p.explicitAccess ? p.accessMode : "");
+    const std::string header = requiredLanguageFeatureHeader(p.addressSpace);
     if (info.moduleScope) {
-        return decl + "\n" + declareEntryPoint(p.stage, additionalBody);
+        return header + decl + "\n" + declareEntryPoint(p.stage, additionalBody);
     }
     // function scope
-    return declareEntryPoint(p.stage, decl + "\n" + additionalBody);
+    return header + declareEntryPoint(p.stage, decl + "\n" + additionalBody);
 }
 
 // pointerType: ptr<space,storeType[,accessMode]> ; space = explicitSpace ? addressSpace : function.
@@ -220,13 +223,18 @@ static std::vector<Value> accessModeExpander(const ParamRecord& p) {
 CTS_TEST(g, "missing_type")
     .desc("Test that pointer types require an element type")
     .params([](ParamsBuilder u) {
-        return u.combine("aspace", {"function", "private", "workgroup", "storage", "uniform"})
+        return u.combine("aspace", {"function", "private", "workgroup", "storage", "uniform",
+                                    "immediate"})
             .combine("comma", {"", ","});
     })
     .fn([](ShaderValidationTest& t) {
         const std::string aspace = t.param<std::string>("aspace");
         const std::string comma = t.param<std::string>("comma");
-        const std::string code = "alias T = ptr<" + aspace + comma + ">;";
+        if (aspace == "immediate") {
+            skipIfImmediateDataNotSupported(t);
+        }
+        const std::string header = aspace == "immediate" ? "requires immediate_address_space;\n" : "";
+        const std::string code = header + "alias T = ptr<" + aspace + comma + ">;";
         t.expectCompileResult(false, code);
     });
 
@@ -234,13 +242,17 @@ CTS_TEST(g, "address_space")
     .desc("Test address spaces in pointer type parameterization")
     .params([](ParamsBuilder u) {
         return u.combine("aspace", {"function", "private", "workgroup", "storage", "uniform",
-                                    "handle", "bad_aspace"})
+                                    "immediate", "handle", "bad_aspace"})
             .combine("comma", {"", ","});
     })
     .fn([](ShaderValidationTest& t) {
         const std::string aspace = t.param<std::string>("aspace");
         const std::string comma = t.param<std::string>("comma");
-        const std::string code = "alias T = ptr<" + aspace + ", u32" + comma + ">;";
+        if (aspace == "immediate") {
+            skipIfImmediateDataNotSupported(t);
+        }
+        const std::string header = aspace == "immediate" ? "requires immediate_address_space;\n" : "";
+        const std::string code = header + "alias T = ptr<" + aspace + ", u32" + comma + ">;";
         const bool success = aspace != "handle" && aspace != "bad_aspace";
         t.expectCompileResult(success, code);
     });
@@ -248,7 +260,8 @@ CTS_TEST(g, "address_space")
 CTS_TEST(g, "access_mode")
     .desc("Test access mode in pointer type parameterization")
     .params([](ParamsBuilder u) {
-        return u.combine("aspace", {"function", "private", "storage", "uniform", "workgroup"})
+        return u.combine("aspace", {"function", "private", "storage", "uniform", "workgroup",
+                                    "immediate"})
             .combine("access", {"read", "write", "read_write"})
             .combine("comma", {"", ","});
     })
@@ -257,8 +270,12 @@ CTS_TEST(g, "access_mode")
         const std::string access = t.param<std::string>("access");
         const std::string comma = t.param<std::string>("comma");
         // Default access mode is tested above.
+        if (aspace == "immediate") {
+            skipIfImmediateDataNotSupported(t);
+        }
+        const std::string header = aspace == "immediate" ? "requires immediate_address_space;\n" : "";
         const std::string code =
-            "alias T = ptr<" + aspace + ", u32, " + access + comma + ">;";
+            header + "alias T = ptr<" + aspace + ", u32, " + access + comma + ">;";
         const bool success = aspace == "storage" && access != "write";
         t.expectCompileResult(success, code);
     });
@@ -270,6 +287,7 @@ struct TypeCase {
     bool storable;
     bool f16;
     const char* aspace; // "" => default 'storage'
+    bool buffer_view = false;
 };
 
 static const std::vector<TypeCase>& kTypeCases() {
@@ -324,6 +342,10 @@ static const std::vector<TypeCase>& kTypeCases() {
 
         // Reference
         {"reference", "ref<function, u32>", false, false, "function"},
+
+        // Runtime arrays (allowed by buffer_view).
+        {"uniform_runtime_array", "array<u32>", true, false, "uniform", true},
+        {"workgroup_runtime_array", "array<u32>", true, false, "workgroup", true},
     };
     return cases;
 }
@@ -353,6 +375,10 @@ CTS_TEST(g, "type")
     })
     .fn([](ShaderValidationTest& t) {
         const TypeCase& testcase = findTypeCase(t.param<std::string>("case"));
+        bool expect = testcase.storable;
+        if (testcase.buffer_view) {
+            expect = expect && t.hasLanguageFeature("buffer_view");
+        }
         const std::string typeStr = testcase.type;
         const std::string aspace =
             std::string(testcase.aspace).empty() ? std::string("storage") : testcase.aspace;
@@ -364,7 +390,7 @@ CTS_TEST(g, "type")
             "\n    override o : u32;\n    struct S { x : u32 }\n    struct T { s : array<S> }\n    "
             "alias u32_alias = u32;\n    alias Type = ptr<" +
             aspace + ", " + typeStr + access + ">;";
-        t.expectCompileResult(testcase.storable, code);
+        t.expectCompileResult(expect, code);
     });
 
 CTS_TEST(g, "let_ptr_explicit_type_matches_var")
@@ -385,6 +411,7 @@ CTS_TEST(g, "let_ptr_explicit_type_matches_var")
         p.explicitAccess = t.param<bool>("explicitAccess");
         p.accessMode = t.param<std::string>("accessMode");
         p.stage = t.param<std::string>("stage");
+        skipIfAddressSpaceNotSupported(t, p.addressSpace);
         const std::string ptrStoreType = t.param<std::string>("ptrStoreType");
         const std::string ptrTy = pointerType(p.addressSpace, p.explicitSpace, p.accessMode,
                                                ptrStoreType);
@@ -411,6 +438,7 @@ CTS_TEST(g, "let_ptr_reads")
         p.explicitAccess = t.param<bool>("explicitAccess");
         p.accessMode = t.param<std::string>("accessMode");
         p.stage = t.param<std::string>("stage");
+        skipIfAddressSpaceNotSupported(t, p.addressSpace);
         const bool inferPtrType = t.param<bool>("inferPtrType");
         const std::string ptrStoreType = t.param<std::string>("ptrStoreType");
         const std::string typePart =
@@ -440,6 +468,7 @@ CTS_TEST(g, "let_ptr_writes")
         p.explicitAccess = t.param<bool>("explicitAccess");
         p.accessMode = t.param<std::string>("accessMode");
         p.stage = t.param<std::string>("stage");
+        skipIfAddressSpaceNotSupported(t, p.addressSpace);
         const bool inferPtrType = t.param<bool>("inferPtrType");
         const std::string ptrStoreType = t.param<std::string>("ptrStoreType");
         const std::string typePart =
@@ -497,13 +526,21 @@ static const std::vector<StoreTypeCase>& kStoreTypeNotInstantiable() {
         {"privateAtomic", "alias p = ptr<private,atomic<u32>>;"},
         {"functionAtomic", "alias p = ptr<function,atomic<u32>>;"},
         {"uniformAtomic", "alias p = ptr<uniform,atomic<u32>>;"},
-        {"workgroupRTArray", "alias p = ptr<workgroup,array<i32>>;"},
-        {"uniformRTArray", "alias p = ptr<uniform,array<i32>>;"},
         {"privateRTArray", "alias p = ptr<private,array<i32>>;"},
         {"functionRTArray", "alias p = ptr<function,array<i32>>;"},
         {"RTArrayNotLast", "struct S { a: array<i32>, b: i32 } alias p = ptr<storage,S>;"},
         {"nestedRTArray",
          "struct S { a: array<i32>, b: i32 } struct { s: S } alias p = ptr<storage,T>;"},
+        {"immediateBool", "requires immediate_address_space; alias p = ptr<immediate,bool>;"},
+        {"immediateArray",
+         "requires immediate_address_space; alias p = ptr<immediate,array<u32, 4>>;"},
+        {"immediateStructWithArray",
+         "requires immediate_address_space; struct S { data: array<u32, 4> } alias p = "
+         "ptr<immediate,S>;"},
+        {"immediateAtomic",
+         "requires immediate_address_space; alias p = ptr<immediate,atomic<u32>>;"},
+        {"immediateRuntimeArray",
+         "requires immediate_address_space; alias p = ptr<immediate,array<u32>>;"},
     };
     return cases;
 }

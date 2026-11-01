@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/shader_validation_test.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/shader_validation_test.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2022 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -32,10 +32,10 @@
 //    NOT dropped (per the spec). A mismatch on either check fails the case.
 //
 // 3. Feature auto-skip (skipIfCodeNeedsFeatureAndDeviceDoesNotHaveFeature):
-//    regex-detect `enable f16|subgroups|clip_distances|chromium_experimental_primitive_id`
-//    in the WGSL and skip the case if the private device lacks the corresponding
-//    device feature (shader-f16 / subgroups / clip-distances /
-//    chromium-experimental-primitive-id). This makes the feature-absent path
+//    regex-detect `enable f16|subgroups|clip_distances|chromium_experimental_primitive_id|
+//    atomic_vec2u_min_max` in the WGSL and skip the case if the private device lacks the
+//    corresponding device feature (shader-f16 / subgroups / clip-distances /
+//    chromium-experimental-primitive-id / atomic-vec2u-min-max). This makes the feature-absent path
 //    correct (a skip), while a real backend gap shows as a finding on the
 //    feature-present backend. The skip is never removed.
 
@@ -54,6 +54,7 @@
 #include "common/webgpu/sync.h"
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/language_features.h"
 
 namespace cts::shader_validation {
 
@@ -279,6 +280,26 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
         auto it = featureCache.find(key);
         if (it != featureCache.end()) {
             return it->second;
+        }
+
+        // Newer features: the enumerators are missing from some backends' webgpu.h, so the
+        // backend-guarded shared probe answers.
+        if (feature == "immediate_address_space") {
+            featureCache[key] = hasImmediateAddressSpaceLanguageFeature();
+            return featureCache[key];
+        }
+        if (feature == "buffer_view") {
+            featureCache[key] = hasBufferViewLanguageFeature();
+            return featureCache[key];
+        }
+        if (feature == "fragment_depth") {
+            featureCache[key] = hasFragmentDepthLanguageFeature();
+            return featureCache[key];
+        }
+        if (feature == "unrestricted_aliasing") {
+            // No backend's webgpu.h has an enumerator for it, so no backend can report it.
+            featureCache[key] = false;
+            return false;
         }
 
         bool supported = false;
@@ -517,6 +538,16 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
         return range;
     }
 
+    // ---- device.limits.maxComputeWorkgroupSizeX of the private device -------
+    uint32_t getMaxComputeWorkgroupSizeX() {
+        ensureContext();
+        WGPULimits limits = WGPU_LIMITS_INIT;
+        if (wgpuDeviceGetLimits(ctxDevice_, &limits) != WGPUStatus_Success) {
+            fail("failed to query the device limits");
+        }
+        return limits.maxComputeWorkgroupSizeX;
+    }
+
     // ---- Pipeline-creation success check on the private context ------------
     // Like the createComputePipeline error-scope check in expectPipelineResult, but
     // for an already-built shaderModule/descriptor. Returns true if a validation
@@ -575,6 +606,10 @@ class ShaderValidationTest : public AllFeaturesMaxLimitsGpuTest {
             {"subgroups", WGPUFeatureName_Subgroups},
             {"clip_distances", WGPUFeatureName_ClipDistances},
             {"chromium_experimental_primitive_id", WGPUFeatureName_PrimitiveIndex},
+#if defined(CTS_BACKEND_DAWN) || defined(CTS_BACKEND_YAWGPU)
+            // Not in wgpu-native's webgpu.h.
+            {"atomic_vec2u_min_max", WGPUFeatureName_AtomicVec2uMinMax},
+#endif
         };
         ensureContext();
         for (const EnableFeature& ef : kEnables) {

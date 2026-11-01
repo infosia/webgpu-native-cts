@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/shader_io/builtins.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/shader_io/builtins.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -482,7 +482,7 @@ CTS_TEST(g, "reuse_builtin_name")
     });
 
 // ---------------------------------------------------------------------------
-// parse
+// parse_builtin
 // ---------------------------------------------------------------------------
 struct ParseCase {
     const char* name;
@@ -490,7 +490,7 @@ struct ParseCase {
     bool pass;
 };
 
-static const std::vector<ParseCase>& kParseTests() {
+static const std::vector<ParseCase>& kBuiltinTests() {
     static const std::vector<ParseCase> v = {
         {"pos", "@builtin(position)", true},
         {"trailing_comma", "@builtin(position,)", true},
@@ -512,14 +512,14 @@ static const std::vector<ParseCase>& kParseTests() {
 
 static std::vector<Value> parseCaseNames() {
     std::vector<Value> values;
-    for (const ParseCase& c : kParseTests()) {
+    for (const ParseCase& c : kBuiltinTests()) {
         values.emplace_back(std::string(c.name));
     }
     return values;
 }
 
 static const ParseCase& findParseCase(const std::string& name) {
-    for (const ParseCase& c : kParseTests()) {
+    for (const ParseCase& c : kBuiltinTests()) {
         if (name == c.name) {
             return c;
         }
@@ -528,7 +528,7 @@ static const ParseCase& findParseCase(const std::string& name) {
     return dummy;
 }
 
-CTS_TEST(g, "parse")
+CTS_TEST(g, "parse_builtin")
     .desc("Test that @builtin is parsed correctly.")
     .params([](ParamsBuilder u) {
         return u.combine("builtin", parseCaseNames());
@@ -626,6 +626,67 @@ CTS_TEST(g, "placement")
         // has no 'undefined' key (returns undefined -> falsy), but the leading
         // `scope === undefined` short-circuits to true for that case.
         t.expectCompileResult(scope == "undefined" || placementAllowed(scope), code);
+    });
+
+// ---------------------------------------------------------------------------
+// parse_frag_depth
+// ---------------------------------------------------------------------------
+struct FragDepthCase {
+    const char* name;
+    const char* src;
+    bool pass;
+    bool requiresFeature;
+};
+
+static const std::vector<FragDepthCase>& kFragDepthTests() {
+    static const std::vector<FragDepthCase> v = {
+        {"unset", "@builtin(frag_depth)", true, false},
+        {"less", "@builtin(frag_depth, less)", true, true},
+        {"greater", "@builtin(frag_depth, greater)", true, true},
+        {"trailing_comma", "@builtin(frag_depth, less,)", true, true},
+        {"missing_enum", "@builtin(frag_depth,)", true, false},
+        {"invalid_enum", "@builtin(frag_depth, any)", false, false},
+        {"missing_comma", "@builtin(frag_depth greater)", false, false},
+    };
+    return v;
+}
+
+static std::vector<Value> fragDepthCaseNames() {
+    std::vector<Value> values;
+    for (const FragDepthCase& c : kFragDepthTests()) {
+        values.emplace_back(std::string(c.name));
+    }
+    return values;
+}
+
+static const FragDepthCase& findFragDepthCase(const std::string& name) {
+    for (const FragDepthCase& c : kFragDepthTests()) {
+        if (name == c.name) {
+            return c;
+        }
+    }
+    static const FragDepthCase dummy{"", "", false, false};
+    return dummy;
+}
+
+CTS_TEST(g, "parse_frag_depth")
+    .desc("Test that @builtin is parsed correctly.")
+    .params([](ParamsBuilder u) {
+        return u.combine("builtin", fragDepthCaseNames());
+    })
+    .fn([](ShaderValidationTest& t) {
+        const FragDepthCase& data = findFragDepthCase(t.param<std::string>("builtin"));
+
+        if (data.requiresFeature) {
+            t.skipIfLanguageFeatureNotSupported("fragment_depth");
+        }
+
+        const std::string code =
+            "\n@fragment"
+            "\nfn main() -> " + std::string(data.src) + " f32 {"
+            "\n  return .5;"
+            "\n}";
+        t.expectCompileResult(data.pass, code);
     });
 
 } // namespace

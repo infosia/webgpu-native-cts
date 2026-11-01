@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/decl/var.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/decl/var.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 //
@@ -14,10 +14,14 @@
 #include <vector>
 
 #include "cts/test.h"
+#include "webgpu/shader/validation/decl/util.h"
 #include "webgpu/shader/validation/shader_validation_test.h"
 
 using namespace cts;
+using cts::shader_validation::requiredLanguageFeatureHeader;
 using cts::shader_validation::ShaderValidationTest;
+using cts::shader_validation::skipIfAddressSpaceNotSupported;
+using cts::shader_validation::skipIfImmediateDataNotSupported;
 
 namespace {
 
@@ -54,7 +58,7 @@ struct AddressSpaceInfo {
     bool moduleScope; // true => 'module', false => 'function'
 };
 
-// Object key order preserved (storage, uniform, private, workgroup, function, handle).
+// Object key order preserved (storage, uniform, private, workgroup, function, immediate, handle).
 static const std::vector<AddressSpaceInfo>& kAddressSpaceInfo() {
     static const std::vector<AddressSpaceInfo> info = {
         {"storage", true, Requirement::kMust, {"read", "read_write"}, Requirement::kMay, true},
@@ -62,6 +66,7 @@ static const std::vector<AddressSpaceInfo>& kAddressSpaceInfo() {
         {"private", false, Requirement::kMust, {"read_write"}, Requirement::kNever, true},
         {"workgroup", false, Requirement::kMust, {"read_write"}, Requirement::kNever, true},
         {"function", false, Requirement::kMay, {"read_write"}, Requirement::kNever, false},
+        {"immediate", false, Requirement::kMust, {"read"}, Requirement::kNever, true},
         {"handle", true, Requirement::kNever, {}, Requirement::kNever, true},
     };
     return info;
@@ -133,11 +138,12 @@ static std::string getVarDeclShader(const VarDeclParams& p, const std::string& a
     const AddressSpaceInfo& info = addressSpaceInfo(p.addressSpace);
     const std::string decl =
         declareVarX(p.explicitSpace ? p.addressSpace : "", p.explicitAccess ? p.accessMode : "");
+    const std::string header = requiredLanguageFeatureHeader(p.addressSpace);
     if (info.moduleScope) {
-        return decl + "\n" + declareEntryPoint(p.stage, additionalBody);
+        return header + decl + "\n" + declareEntryPoint(p.stage, additionalBody);
     }
     // function scope
-    return declareEntryPoint(p.stage, decl + "\n" + additionalBody);
+    return header + declareEntryPoint(p.stage, decl + "\n" + additionalBody);
 }
 
 // effectiveAccessMode: accessMode || info.accessModes[0]
@@ -174,39 +180,44 @@ struct TypeInfo {
     bool isConstructible;
     bool isFixedFootprint;
     bool requiresF16;
+    bool requiresBufferView;
 };
 
 static const std::vector<TypeInfo>& kTypes() {
     static const std::vector<TypeInfo> types = {
-        {"bool", false, true, true, false},
-        {"i32", true, true, true, false},
-        {"u32", true, true, true, false},
-        {"f32", true, true, true, false},
-        {"f16", true, true, true, true},
-        {"vec2<bool>", false, true, true, false},
-        {"vec3i", true, true, true, false},
-        {"vec4u", true, true, true, false},
-        {"vec2f", true, true, true, false},
-        {"vec3h", true, true, true, true},
-        {"mat2x2f", true, true, true, false},
-        {"mat3x4h", true, true, true, true},
-        {"atomic<i32>", true, false, true, false},
-        {"atomic<u32>", true, false, true, false},
-        {"array<vec4<bool>>", false, false, false, false},
-        {"array<vec4<bool>, 4>", false, true, true, false},
-        {"array<vec4u>", true, false, false, false},
-        {"array<vec4u, 4>", true, true, true, false},
-        {"array<vec4u, array_size_const>", true, true, true, false},
-        {"array<vec4u, array_size_override>", false, false, true, false},
-        {"S_u32", true, true, true, false},
-        {"S_bool", false, true, true, false},
-        {"S_S_bool", false, true, true, false},
-        {"S_array_vec4u", true, false, false, false},
-        {"S_array_vec4u_4", true, true, true, false},
-        {"S_array_bool_4", false, true, true, false},
-        {"ptr<function, u32>", false, false, false, false},
-        {"sampler", false, false, false, false},
-        {"texture_2d<f32>", false, false, false, false},
+        {"bool", false, true, true, false, false},
+        {"i32", true, true, true, false, false},
+        {"u32", true, true, true, false, false},
+        {"f32", true, true, true, false, false},
+        {"f16", true, true, true, true, false},
+        {"vec2<bool>", false, true, true, false, false},
+        {"vec3i", true, true, true, false, false},
+        {"vec4u", true, true, true, false, false},
+        {"vec2f", true, true, true, false, false},
+        {"vec3h", true, true, true, true, false},
+        {"mat2x2f", true, true, true, false, false},
+        {"mat3x4h", true, true, true, true, false},
+        {"atomic<i32>", true, false, true, false, false},
+        {"atomic<u32>", true, false, true, false, false},
+        {"array<vec4<bool>>", false, false, false, false, false},
+        {"array<vec4<bool>, 4>", false, true, true, false, false},
+        {"array<vec4u>", true, false, false, false, false},
+        {"array<vec4u, 4>", true, true, true, false, false},
+        {"array<vec4u, array_size_const>", true, true, true, false, false},
+        {"array<vec4u, array_size_override>", false, false, true, false, false},
+        {"S_u32", true, true, true, false, false},
+        {"S_bool", false, true, true, false, false},
+        {"S_S_bool", false, true, true, false, false},
+        {"S_array_vec4u", true, false, false, false, false},
+        {"S_array_vec4u_4", true, true, true, false, false},
+        {"S_array_bool_4", false, true, true, false, false},
+        {"ptr<function, u32>", false, false, false, false, false},
+        {"sampler", false, false, false, false, false},
+        {"texture_2d<f32>", false, false, false, false, false},
+        // Buffers
+        {"buffer", true, false, false, false, true},
+        {"buffer<128>", true, false, true, false, true},
+        {"buffer<array_size_override>", false, false, true, false, true},
     };
     return types;
 }
@@ -225,8 +236,30 @@ static const TypeInfo& findType(const std::string& name) {
             return ti;
         }
     }
-    static const TypeInfo dummy{"", false, false, false, false};
+    static const TypeInfo dummy{"", false, false, false, false, false};
     return dummy;
+}
+
+// Mirrors upstream kImmediateTypesWithArray.
+static bool isImmediateTypeWithArray(const std::string& name) {
+    static const std::vector<std::string> types = {
+        "array<vec4<bool>>",
+        "array<vec4<bool>, 4>",
+        "array<vec4u>",
+        "array<vec4u, 4>",
+        "array<vec4u, array_size_const>",
+        "array<vec4u, array_size_override>",
+        "S_array_vec4u",
+        "S_array_vec4u_4",
+        "S_array_bool_4",
+    };
+    return std::find(types.begin(), types.end(), name) != types.end();
+}
+
+static bool isImmediateStoreType(const std::string& typeName) {
+    const TypeInfo& type = findType(typeName);
+    return type.isHostShareable && type.isConstructible && type.isFixedFootprint &&
+           !isImmediateTypeWithArray(typeName);
 }
 
 static bool containsStr(const std::string& haystack, const std::string& needle) {
@@ -234,8 +267,10 @@ static bool containsStr(const std::string& haystack, const std::string& needle) 
 }
 
 // Common struct/alias declaration preamble used by module/function scope tests.
-static std::string typePreamble(const std::string& type, bool requiresF16) {
-    return std::string(requiresF16 ? "enable f16;" : "") +
+static std::string typePreamble(const std::string& type,
+                                bool requiresF16,
+                                const std::string& featureHeader = "") {
+    return featureHeader + std::string(requiresF16 ? "enable f16;" : "") +
            "\n    const array_size_const = 4;"
            "\n    override array_size_override = 4;\n"
            "\n    struct S_u32 { a : u32 }"
@@ -253,7 +288,7 @@ CTS_TEST(g, "module_scope_types")
     .params([](ParamsBuilder u) {
         return u.combine("type", typeNames())
             .combine("kind", {"comment", "handle", "private", "storage_ro", "storage_rw",
-                              "uniform", "workgroup"})
+                              "uniform", "workgroup", "immediate"})
             .combine("via_alias", {Value(false), Value(true)});
     })
     .fn([](ShaderValidationTest& t) {
@@ -261,6 +296,9 @@ CTS_TEST(g, "module_scope_types")
         const std::string kind = t.param<std::string>("kind");
         const bool viaAlias = t.param<bool>("via_alias");
         const TypeInfo& type = findType(typeName);
+        if (kind == "immediate") {
+            skipIfImmediateDataNotSupported(t);
+        }
         if (type.requiresF16) {
             t.skipIfDeviceDoesNotHaveFeature(WGPUFeatureName_ShaderF16, "shader-f16");
         }
@@ -285,15 +323,23 @@ CTS_TEST(g, "module_scope_types")
             shouldPass = type.isHostShareable;
         } else if (kind == "uniform") {
             decl = "@group(0) @binding(0) var<uniform> foo : ";
-            shouldPass = type.isHostShareable && type.isConstructible;
+            shouldPass =
+                type.isHostShareable && (type.isConstructible || typeName == "buffer<128>");
         } else if (kind == "workgroup") {
             decl = "var<workgroup> foo : ";
             shouldPass = type.isFixedFootprint;
+        } else if (kind == "immediate") {
+            decl = "var<immediate> foo : ";
+            shouldPass = isImmediateStoreType(typeName);
         }
 
+        const std::string featureHeader =
+            kind == "immediate" ? requiredLanguageFeatureHeader("immediate") : "";
+
         const std::string wgsl =
-            typePreamble(typeName, type.requiresF16) + decl + " " +
+            typePreamble(typeName, type.requiresF16, featureHeader) + decl + " " +
             (viaAlias ? "MyType" : typeName) + ";\n    ";
+        shouldPass = shouldPass && (!type.requiresBufferView || t.hasLanguageFeature("buffer_view"));
         t.expectCompileResult(shouldPass, wgsl);
     });
 
@@ -326,6 +372,7 @@ CTS_TEST(g, "function_scope_types")
         const std::string wgsl =
             typePreamble(typeName, type.requiresF16) + "fn foo() {\n      " + decl +
             " " + (viaAlias ? "MyType" : typeName) + ";\n    }";
+        shouldPass = shouldPass && (!type.requiresBufferView || t.hasLanguageFeature("buffer_view"));
         t.expectCompileResult(shouldPass, wgsl);
     });
 
@@ -491,7 +538,7 @@ CTS_TEST(g, "binding_point_on_resources")
 CTS_TEST(g, "binding_point_on_non_resources")
     .desc("Test that non-resource variables cannot have either @group or @binding attributes.")
     .params([](ParamsBuilder u) {
-        return u.combine("addrspace", {"private", "workgroup"})
+        return u.combine("addrspace", {"private", "workgroup", "immediate"})
             .combine("group", {"", "@group(0)"})
             .combine("binding", {"", "@binding(0)"});
     })
@@ -499,9 +546,14 @@ CTS_TEST(g, "binding_point_on_non_resources")
         const std::string addrspace = t.param<std::string>("addrspace");
         const std::string group = t.param<std::string>("group");
         const std::string binding = t.param<std::string>("binding");
+        if (addrspace == "immediate") {
+            skipIfImmediateDataNotSupported(t);
+        }
         const bool shouldPass = group.empty() && binding.empty();
+        const std::string header =
+            addrspace == "immediate" ? requiredLanguageFeatureHeader("immediate") : "";
         const std::string wgsl =
-            group + " " + binding + " var<" + addrspace + "> foo : i32;";
+            header + group + " " + binding + " var<" + addrspace + "> foo : i32;";
         t.expectCompileResult(shouldPass, wgsl);
     });
 
@@ -571,7 +623,7 @@ CTS_TEST(g, "address_space_access_mode")
     .desc("Test that only storage accepts an access mode")
     .params([](ParamsBuilder u) {
         return u.combine("address_space",
-                         {"private", "storage", "uniform", "function", "workgroup"})
+                         {"private", "storage", "uniform", "function", "workgroup", "immediate"})
             .combine("access_mode", {"", "read", "write", "read_write"})
             .combine("trailing_comma", {Value(true), Value(false)});
     })
@@ -579,9 +631,13 @@ CTS_TEST(g, "address_space_access_mode")
         const std::string address_space = t.param<std::string>("address_space");
         const std::string access_mode = t.param<std::string>("access_mode");
         const bool trailing_comma = t.param<bool>("trailing_comma");
+        if (address_space == "immediate") {
+            skipIfImmediateDataNotSupported(t);
+        }
 
         std::string fdecl;
         std::string mdecl;
+        std::string header;
         bool shouldPass = access_mode.empty();
         std::string suffix;
         if (access_mode.empty()) {
@@ -601,9 +657,12 @@ CTS_TEST(g, "address_space_access_mode")
             mdecl = "var<workgroup" + suffix + "> x : u32;";
         } else if (address_space == "function") {
             fdecl = "var<function" + suffix + "> x : u32;";
+        } else if (address_space == "immediate") {
+            header = requiredLanguageFeatureHeader("immediate");
+            mdecl = "var<immediate" + suffix + "> x : u32;";
         }
         const std::string code =
-            mdecl + "\n    fn foo() {\n      " + fdecl + "\n    }";
+            header + mdecl + "\n    fn foo() {\n      " + fdecl + "\n    }";
         t.expectCompileResult(shouldPass, code);
     });
 
@@ -669,6 +728,7 @@ CTS_TEST(g, "explicit_access_mode")
         p.explicitAccess = t.param<bool>("explicitAccess");
         p.accessMode = t.param<std::string>("accessMode");
         p.stage = t.param<std::string>("stage");
+        skipIfAddressSpaceNotSupported(t, p.addressSpace);
         const std::string prog = getVarDeclShader(p);
         const AddressSpaceInfo& info = addressSpaceInfo(p.addressSpace);
         const bool ok = p.explicitSpace && info.spellAccessMode != Requirement::kNever &&
@@ -692,6 +752,7 @@ CTS_TEST(g, "implicit_access_mode")
         p.explicitAccess = t.param<bool>("explicitAccess");
         p.accessMode = t.param<std::string>("accessMode");
         p.stage = t.param<std::string>("stage");
+        skipIfAddressSpaceNotSupported(t, p.addressSpace);
         const std::string prog = getVarDeclShader(p);
         // 7.3 var Declarations: "The access mode always has a default value,.."
         t.expectCompileResult(true, prog);
@@ -713,6 +774,7 @@ CTS_TEST(g, "read_access")
         p.explicitAccess = t.param<bool>("explicitAccess");
         p.accessMode = t.param<std::string>("accessMode");
         p.stage = t.param<std::string>("stage");
+        skipIfAddressSpaceNotSupported(t, p.addressSpace);
         const std::string prog = getVarDeclShader(p, "let copy = x;");
         t.expectCompileResult(supportsRead(p.addressSpace, p.accessMode), prog);
     });
@@ -733,6 +795,7 @@ CTS_TEST(g, "write_access")
         p.explicitAccess = t.param<bool>("explicitAccess");
         p.accessMode = t.param<std::string>("accessMode");
         p.stage = t.param<std::string>("stage");
+        skipIfAddressSpaceNotSupported(t, p.addressSpace);
         const std::string prog = getVarDeclShader(p, "x = 0;");
         t.expectCompileResult(supportsWrite(p.addressSpace, p.accessMode), prog);
     });

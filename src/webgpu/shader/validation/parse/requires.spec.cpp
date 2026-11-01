@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause
-// Ported from gpuweb/cts src/webgpu/shader/validation/parse/requires.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85 (see docs/UPSTREAM.md).
+// Ported from gpuweb/cts src/webgpu/shader/validation/parse/requires.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
 // Upstream CTS: Copyright (c) 2022 The WebGPU CTS Contributors, BSD-3-Clause.
 // Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
 
@@ -108,6 +108,10 @@ static const std::vector<std::string>& kKnownWGSLLanguageFeatures() {
         "swizzle_assignment",
         "linear_indexing",
         "texture_formats_tier1",
+        "immediate_address_space",
+        "fragment_depth",
+        "buffer_view",
+        "unrestricted_aliasing",
     };
     return v;
 }
@@ -129,6 +133,23 @@ CTS_TEST(g, "wgsl_matches_api")
         const std::string feature = t.param<std::string>("feature");
         const std::string code = "requires " + feature + ";";
         t.expectCompileResult(t.hasLanguageFeature(feature), code);
+    });
+
+CTS_TEST(g, "have_all_language_features")
+    .desc("The spec technically requires support for all WGSL language features listed in the "
+          "spec.\n    This test enforces that. It should be the ONLY test that fails when a new "
+          "feature is\n    unavailable - others should skip themselves.")
+    .params([](ParamsBuilder u) {
+        return u.combine("feature", knownFeatureValues());
+    })
+    .fn([](ShaderValidationTest& t) {
+        const std::string feature = t.param<std::string>("feature");
+        // First check that the API exposes the feature.
+        if (!t.hasLanguageFeature(feature)) {
+            t.fail("the API does not report WGSL language feature: " + feature);
+        }
+        // If it does, then also check that WGSL allows it.
+        t.expectCompileResult(true, "requires " + feature + ";");
     });
 
 }  // namespace

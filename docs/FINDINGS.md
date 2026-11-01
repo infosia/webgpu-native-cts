@@ -122,7 +122,7 @@ port-oracle quirk the Dawn oracle fails identically; Metal + Vulkan) and the Vul
 **F-111**, **F-129** (denormal `fwidth`), **F-141**, all in `expectations/yawgpu-vulkan.txt`. No yawgpu
 defect is masked.
 
-**Open — Dawn (oracle):** none. The former **F-130** override-shift divergence **no longer reproduces** on
+**Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet). The former **F-130** override-shift divergence **no longer reproduces** on
 the current Dawn build (`fail=0`); Dawn now fails only the 2 shared `index_buffer_format_dirtying`
 port-oracle cases.
 
@@ -135,6 +135,18 @@ F-133, F-134, F-136), the immediates / unrequestable-feature divergences (F-154)
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
 Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139, F-158), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
+
+---
+
+## F-159 — Dawn `v20261030.184100` does not report `fragment_depth` or `unrestricted_aliasing` — OPEN (expected)
+
+`webgpu:shader,validation,parse,requires:have_all_language_features` fails on Dawn for
+`feature="fragment_depth"` and `feature="unrestricted_aliasing"`: "the API does not report WGSL
+language feature". Upstream's test requires every known feature and says it should be the only test
+that fails when one is missing. Dawn's own `webgpu-cts/expectations.txt` suppresses both cases. Tint
+has `fragment_depth` as an unsafe experimental feature, and no backend header has an enumerator for
+`unrestricted_aliasing`. Both are in `expectations/dawn.txt`. Remove each entry when Dawn reports the
+feature.
 
 ---
 
