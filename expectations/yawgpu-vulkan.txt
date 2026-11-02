@@ -57,14 +57,6 @@ webgpu:shader,execution,expression,call,builtin,fwidth:f32:*
 webgpu:shader,execution,expression,call,builtin,fwidthFine:f32:*
 webgpu:shader,execution,expression,call,builtin,fwidthCoarse:f32:*
 
-# F-139: depth_clip_clamp (depth_test_input_clamped:unclippedDepth=false and
-# depth_clamp_and_clip:writeDepth=true) fails ONLY through MoltenVK, and PASSES on native Vulkan,
-# so it is intentionally NOT xfail'd here (listing it would xpass on the authoritative native run).
-# yawgpu's Vulkan HAL maps frag_depth clamp + primitive clipping correctly for native Vulkan
-# (depthClampEnable=true + VK_EXT_depth_clip_enable); MoltenVK does not honor it (Metal clamps
-# shader [[depth]] only to [0,1] and collapses depthClampEnable to MTLDepthClipMode.Clamp). Per
-# docs/06-build-and-run.md, MoltenVK is non-authoritative Vulkan coverage. See memory f045-frag-depth-clamp.
-
 # F-141: memory_model,coherence:corr (atomic_storage, intra_workgroup) -- NOT a yawgpu defect.
 # This NVIDIA RTX 5060 Ti reliably (4/4) exhibits a storage-atomic intra-workgroup memory-ordering
 # relaxation that WebGPU's memory model disallows ("disallowed weak behavior observed",
@@ -86,5 +78,5 @@ webgpu:shader,execution,memory_model,coherence:corr:memType="atomic_storage";tes
 webgpu:shader,execution,memory_model,coherence:corr:memType="atomic_workgroup";testType="intra_workgroup"
 
 # F-158: seven subgroupShuffle cases fail ONLY through MoltenVK ("expected N, got 0", since Tint
-# d71bca28b3) and PASS on native Windows Vulkan, so, like F-139, they are intentionally NOT xfail'd
+# d71bca28b3) and PASS on native Windows Vulkan, so they are intentionally NOT xfail'd
 # here (listing them would xpass on the authoritative native run). See docs/FINDINGS.md F-158.

@@ -98,8 +98,8 @@ was a real yawgpu over-strict limit-relationship check, fixed in yawgpu (`e7eba4
 harness — yawgpu was correct. `shader/execution` is unaffected by the fixes and stays `fail=0 crash=0` — the
 whole-suite sweep on `e7eba41` is pass 822,209 / skip 22,377, identical to the pre-fix count.
 
-MoltenVK (non-authoritative Vulkan coverage on macOS) still shows translation artifacts (**F-104**, **F-070**,
-**F-139**) that are green on both native Metal and native Vulkan — see those findings.
+MoltenVK (non-authoritative Vulkan coverage on macOS) still shows translation artifacts (**F-104**, **F-070**)
+that are green on both native Metal and native Vulkan — see those findings.
 
 ---
 
@@ -139,7 +139,7 @@ F-084, F-088), and the naga-lineage shader findings that yawgpu resolved by movi
 F-133, F-134, F-136), the immediates / unrequestable-feature divergences (F-154), and the `v29.0.1.1` `mapAsync` `WGPU_WHOLE_MAP_SIZE` regression (F-155, fixed upstream but unreleased).
 
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
-Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-139, F-158), all green on both
+Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-158), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 **Open — NVIDIA driver:** F-165 (shader compiler crash on `bufferArrayView` workgroup f16 aliasing, intermittent).
@@ -328,7 +328,7 @@ invocation"), which bounds shuffle IDs with `OpGroupNonUniformBallotFindMSB`. Th
 
 Native Windows Vulkan passes, and native Metal does not use this path and passes, so this is a MoltenVK
 defect, not a yawgpu or Tint one. Dawn on MoltenVK could not be compared: its Vulkan backend reports no
-adapter there. Like F-139, the cases are intentionally not in `expectations/yawgpu-vulkan.txt`: listing
+adapter there. The cases are intentionally not in `expectations/yawgpu-vulkan.txt`: listing
 them would `xpass` on the authoritative native run. They still fail in a MoltenVK sweep.
 
 ---
@@ -551,7 +551,11 @@ Skipped — never assigned. The sequence runs F-138 → F-139 → **F-141**; no 
 
 ---
 
-## F-139 — yawgpu: `depth_clip_clamp` frag_depth viewport clamp — MoltenVK-only artifact, NOT a yawgpu defect
+## F-139 — yawgpu: `depth_clip_clamp` frag_depth viewport clamp — MoltenVK-only artifact, NOT a yawgpu defect — RESOLVED
+
+Resolved by yawgpu Block 126 (`a0188b2`), which clamps `frag_depth` in the Vulkan shader under Dawn's condition instead of
+relying on the fixed-function clamp. On yawgpu `be8fbff` through MoltenVK, `depth_clip_clamp` passes 4 of 4 cases
+(2026-11-03). Native Vulkan was not re-run. The report below is the state before the fix.
 
 **MoltenVK-only translation artifact** (`1b2bd92`, 2026-06-27) — `api,operation,rendering,depth_clip_clamp:{depth_test_input_clamped:unclippedDepth=false, depth_clamp_and_clip:writeDepth=true}` (2 cases) fail **only through MoltenVK**. WebGPU requires shader-written `frag_depth` clamped to the viewport `[minDepth,maxDepth]` (and out-of-`[0,1]` primitives clipped); yawgpu's Vulkan HAL does this correctly on **native Vulkan** (`depthClampEnable` + `VK_EXT_depth_clip_enable`), and its Metal backend via an in-shader clamp transform (Tint MSL `clamp_frag_depth`). MoltenVK clamps Metal `[[depth]]` only to `[0,1]` and collapses `depthClampEnable` to `MTLDepthClipMode.Clamp` (defeating the clip), so these fail under translation only. Green on native Metal **and** native Vulkan. `xfail` in `expectations/yawgpu-vulkan.txt`; optional follow-up = port the in-shader clamp to the SPIR-V path. See memory `f045-frag-depth-clamp`.
 

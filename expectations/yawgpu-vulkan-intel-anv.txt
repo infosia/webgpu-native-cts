@@ -50,15 +50,6 @@ webgpu:api,validation,render_pipeline,misc:external_texture:isAsync=true
 # backend defect; also listed in expectations/yawgpu.txt (Metal). See docs/FINDINGS.md.
 webgpu:api,validation,encoding,cmds,render,draw:index_buffer_format_dirtying:*
 
-# F-139: depth_clip_clamp (depth_test_input_clamped:unclippedDepth=false and
-# depth_clamp_and_clip:writeDepth=true) fails ONLY through MoltenVK, and PASSES on native Vulkan,
-# so it is intentionally NOT xfail'd here (listing it would xpass on the authoritative native run).
-# yawgpu's Vulkan HAL maps frag_depth clamp + primitive clipping correctly for native Vulkan
-# (depthClampEnable=true + VK_EXT_depth_clip_enable); MoltenVK does not honor it (Metal clamps
-# shader [[depth]] only to [0,1] and collapses depthClampEnable to MTLDepthClipMode.Clamp). Per
-# docs/06-build-and-run.md, MoltenVK is non-authoritative Vulkan coverage. See memory f045-frag-depth-clamp.
-
-
 # F-147: Haswell hardware cannot sample multisampled integer images
 # (sampledImageIntegerSampleCounts = 1_BIT). yawgpu 37f6a70 fails these with a clean
 # device error (see FINDINGS.md F-147); the cases are unimplementable on this host.
