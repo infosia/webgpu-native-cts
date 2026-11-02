@@ -551,11 +551,17 @@ Skipped — never assigned. The sequence runs F-138 → F-139 → **F-141**; no 
 
 ---
 
-## F-139 — yawgpu: `depth_clip_clamp` frag_depth viewport clamp — MoltenVK-only artifact, NOT a yawgpu defect — RESOLVED
+## F-139 — yawgpu: `depth_clip_clamp` frag_depth viewport clamp — yawgpu defect on Vulkan without `VK_EXT_depth_clip_enable`, surfaced via MoltenVK — RESOLVED
 
 Resolved by yawgpu Block 126 (`a0188b2`), which clamps `frag_depth` in the Vulkan shader under Dawn's condition instead of
 relying on the fixed-function clamp. On yawgpu `be8fbff` through MoltenVK, `depth_clip_clamp` passes 4 of 4 cases
-(2026-11-03). Native Vulkan was not re-run. The report below is the state before the fix.
+(2026-11-03). Native Vulkan was not re-run.
+
+**Reclassified.** The original report below called this a MoltenVK-only artifact. Block 126 showed it is a yawgpu
+defect: without `VK_EXT_depth_clip_enable`, yawgpu turned `depthClampEnable` off and wrote unclamped `frag_depth`, on
+any Vulkan driver, which violates WebGPU's clamp rule. MoltenVK exposed it because it does not offer the extension
+(`vulkaninfo`, Apple M2, SDK 1.3.296); the native Vulkan runs passed, so their drivers presumably offer it. The original report also said the cases were `xfail` in
+`expectations/yawgpu-vulkan.txt`; they never were. The report below is the state before the fix.
 
 **MoltenVK-only translation artifact** (`1b2bd92`, 2026-06-27) — `api,operation,rendering,depth_clip_clamp:{depth_test_input_clamped:unclippedDepth=false, depth_clamp_and_clip:writeDepth=true}` (2 cases) fail **only through MoltenVK**. WebGPU requires shader-written `frag_depth` clamped to the viewport `[minDepth,maxDepth]` (and out-of-`[0,1]` primitives clipped); yawgpu's Vulkan HAL does this correctly on **native Vulkan** (`depthClampEnable` + `VK_EXT_depth_clip_enable`), and its Metal backend via an in-shader clamp transform (Tint MSL `clamp_frag_depth`). MoltenVK clamps Metal `[[depth]]` only to `[0,1]` and collapses `depthClampEnable` to `MTLDepthClipMode.Clamp` (defeating the clip), so these fail under translation only. Green on native Metal **and** native Vulkan. `xfail` in `expectations/yawgpu-vulkan.txt`; optional follow-up = port the in-shader clamp to the SPIR-V path. See memory `f045-frag-depth-clamp`.
 
