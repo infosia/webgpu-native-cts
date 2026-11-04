@@ -128,7 +128,7 @@ swept 2026-11-01: on Linux `fail=2 crash=0` with expectations, those same 2 case
 fails, 29 of them carried in `expectations/yawgpu-vulkan.txt` and the other 2 those same cases, and 1 intermittent
 crash attributed to the NVIDIA driver (F-165).
 
-**Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a compile-time zero value). The former **F-130** override-shift divergence **no longer reproduces** on
+**Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a compile-time zero value on Metal; yawgpu fails the same cases). The former **F-130** override-shift divergence **no longer reproduces** on
 the current Dawn build (`fail=0`); Dawn now fails only the 2 shared `index_buffer_format_dirtying`
 port-oracle cases.
 
@@ -283,7 +283,7 @@ yawgpu declares `WGPUVertexFormat_Snorm10_10_10_2` but does not implement it.
 
 ---
 
-## F-160 — Dawn/Metal: `atomicStoreMax`/`atomicStoreMin` return wrong data when the stored value is a compile-time zero — OPEN
+## F-160 — Metal: `atomicStoreMax`/`atomicStoreMin` return wrong data when the stored value is a compile-time zero — OPEN (Dawn and yawgpu)
 
 Found 2026-11-01 on Dawn `v20261030.184100`, Apple M2 / Metal.
 `webgpu:shader,execution,expression,call,builtin,atomics,atomicStore{Max,Min}:store_{max,min}_basic`
@@ -295,8 +295,12 @@ zero-initialized buffer, so the correct result is `[0, 0]`. `atomicStoreMin` ret
 Cases that also store zero at run time pass, for example `workgroupSize=1;dispatchSize=1;rndMultiplyX=1;rndMultiplyY=1`,
 so the trigger is the zero being known at compile time. The port's shader and expected values match
 upstream. Dawn's `webgpu-cts/expectations.txt` has no entry for this. Whether the fault is in Tint's MSL
-output or in the Metal compiler is unconfirmed; yawgpu was not run. The cases are in
-`expectations/dawn.txt`.
+output or in the Metal compiler is unconfirmed. The cases are in `expectations/dawn.txt`.
+
+yawgpu advertises `atomic-vec2u-min-max` since Block 141 (`13c74c7`, 2026-11-05). On the same M2 it fails
+the same 72 cases and passes the other 1,728; one Max case can pass when the random result happens to be
+zero. yawgpu compiles WGSL with the same Tint, so this is shared with the oracle, not a yawgpu defect. The
+cases are also in `expectations/yawgpu.txt`.
 
 ---
 
