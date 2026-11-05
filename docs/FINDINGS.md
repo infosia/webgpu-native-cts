@@ -77,7 +77,7 @@ the post-fix state.
 |---------|-----:|------:|---------|
 | **Dawn** (oracle, Tint) | **2**¹ | 0 | fully green — pass **1,990,994** / skip 104,942. ¹the only fails are the 2 `index_buffer_format_dirtying` cases (see ¹ below) |
 | **yawgpu — native Metal** (Tint, **re-swept 2026-07-02, post-fix**) | **2**¹ | 0 | green — `fail=0` on `api/operation` (228,600) + `shader/validation` (646,773) + `shader/execution` (822,209)³; the only 2 fails are the shared `index_buffer_format_dirtying` `xfail`s in `api/validation` (292,960 pass). **Fail profile byte-identical to the Dawn oracle again** after resolving **F-142** (5, fixed in yawgpu `e7eba41`) + **F-143** (14, a CTS-harness probe gap — yawgpu was correct). |
-| **yawgpu — native Vulkan** (Windows / NVIDIA RTX 5060 Ti, Tint; for the 2026-11-01 re-sweep see the [README](../README.md#test-results)) | **0** | 0 | green — same `fail=0 crash=0` as Metal, modulo documented **non-defect** `xfail`s: **F-085** (per-sample), **F-111** (external-texture), **F-129** (denormal `fwidth`), **F-141** (NVIDIA memory-model). The last two real Vulkan defects **F-127** + **F-138** are resolved (`bd21cfb`) |
+| **yawgpu — native Vulkan** (Windows / NVIDIA RTX 5060 Ti, Tint; for the 2026-11-01 re-sweep see the [README](../README.md#test-results)) | **0** | 0 | green — same `fail=0 crash=0` as Metal, modulo documented **non-defect** `xfail`s: **F-085** (per-sample), **F-129** (denormal `fwidth`), **F-141** (NVIDIA memory-model). The last two real Vulkan defects **F-127** + **F-138** are resolved (`bd21cfb`) |
 | **wgpu-native** (naga, Metal, `--isolate`²) | **6,858** | **38,565** | bring-up reference — fresh sweep 2026-06-28: pass 154,932 / skip 67,138. **Panic-dominated** crash by area: `api` 7,028 + `shader/execution` 31,537; fail by area: `api` 4,967 + `shader/validation` 1,693 (naga-lineage). Carries the F-001…F-021 panics + naga-lineage **F-124/F-129/F-133/F-134/F-136**; not triaged to `fail=0` |
 
 ¹ The 2 fails on **both** Dawn and yawgpu are `draw,index_buffer_format_dirtying`: the CTS oracle expects the
@@ -748,9 +748,9 @@ any Vulkan driver, which violates WebGPU's clamp rule. MoltenVK exposed it becau
 
 ---
 
-## F-111 — yawgpu Vulkan: external textures unsupported (uncaptured error where validation expected) — native Vulkan
+## F-111 — yawgpu Vulkan: external textures unsupported (uncaptured error where validation expected) — native Vulkan — RESOLVED
 
-**RESOLVED** (feature gap, 2026-06-15) — naga SPIR-V doesn't lower `texture_external` on Vulkan; capability-gated skip, 2 cases xfail in `expectations/yawgpu-vulkan.txt`; Metal has full support.
+**RESOLVED by yawgpu Block 146** (2026-11-05, yawgpu `fa447be`) — yawgpu now implements external textures on Vulkan: each `texture_external` expands to plane0, plane1 and a params uniform buffer (Dawn's binding expansion), and Tint's multiplanar transform gets the matching SPIR-V map. Both `api,validation,render_pipeline,misc:external_texture` cases pass on Windows native Vulkan (NVIDIA RTX 5060 Ti); their `xfail` entries are dropped from `expectations/yawgpu-vulkan.txt` and `expectations/yawgpu-vulkan-intel-anv.txt`. History: 2026-06-15 it was a feature gap (naga SPIR-V did not lower `texture_external`), later a deliberate yawgpu rejection on Vulkan; both cases were carried as `xfail`.
 
 ---
 
