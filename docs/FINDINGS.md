@@ -65,7 +65,10 @@ still open on wgpu-native); see git history for the full naga-era root-cause ana
 
 ---
 
-## Cross-backend sweep — current (Tint baseline; yawgpu-Metal re-swept 2026-07-02, others 2026-06-28)
+## Cross-backend sweep — 642-file baseline (yawgpu-Metal 2026-07-02, others 2026-06-28)
+
+> Superseded by the `d116bcc` re-baseline (657 files). For the current state see **Status** below and the
+> [README](../README.md#test-results).
 
 The full ported suite (642 files) at the current backends. yawgpu's WGSL frontend is now Tint (see the
 migration section above), so its shader behaviour is Dawn-equivalent. **yawgpu-Metal was re-swept 2026-07-02
@@ -103,36 +106,30 @@ that are green on both native Metal and native Vulkan — see those findings.
 
 ---
 
-## Status — current state & open findings
+## Status — current state & open findings (2026-11-05)
 
-**yawgpu (primary subject): no open implementation defects (2026-07-02, both re-sweep findings resolved).**
-A yawgpu update (real hardware-limit reporting + `subgroups` exposure) raised Metal coverage to Dawn's
-level (skip 419,190 → 105,394) and, with the wider coverage, briefly surfaced 19 fails that are now all
-resolved: **F-142** (5 `requestDevice:limits,supported`) was a **real yawgpu over-strict limit-relationship
-check**, fixed in yawgpu (commit `e7eba41`); **F-143** (14 subgroup `requires` + `uniform_subgroup_ops`)
-was a **CTS-harness gap** (the non-Dawn `hasLanguageFeature` probe lacked a `subgroup_id`/`subgroup_uniformity`
-case → returned `false` → inverted the expected result), fixed in the harness — yawgpu was correct and
-unchanged. With both fixed, yawgpu-Metal is **byte-identical to the Dawn oracle** again (only the 2 shared
-`draw,index_buffer_format_dirtying` `xfail`s). The residual **coverage** (skip-count) gap vs Dawn was also
-root-caused and closed: 427 of the 452 extra skips were **F-144**, a harness artifact (three
-`shader/execution` language-feature gates compiled out on non-Dawn builds) — fixed 2026-07-02 and verified
-per-file to Dawn parity; yawgpu was again correct and unchanged. Native **Vulkan** last swept 2026-06-28: `fail=0` modulo the
-documented `xfail`s. Carried **non-defects**: the 2 `draw,index_buffer_format_dirtying` cases (a CTS
-port-oracle quirk the Dawn oracle fails identically; Metal + Vulkan) and the Vulkan-only `xfail`s **F-085**,
-**F-111**, **F-129** (denormal `fwidth`), **F-141**, all in `expectations/yawgpu-vulkan.txt`. No yawgpu
-defect is masked.
+Suite at upstream CTS `d116bcc` (657 files); Dawn oracle `v20261030.184100`. Per-area counts are in the
+[README](../README.md#test-results).
 
-**Open — yawgpu:** none. F-161 to F-164, from the `d116bcc` sweep on `ea67149`, were fixed by yawgpu Block 119
-(`9977e34`), apart from the 2 `have_all_language_features` cases shared with Dawn (F-159). Native **Vulkan** last
-swept 2026-11-01: on Linux `fail=2 crash=0` with expectations, those same 2 cases. On Windows the raw sweep has 31
-fails, 29 of them carried in `expectations/yawgpu-vulkan.txt` and the other 2 those same cases, and 1 intermittent
-crash attributed to the NVIDIA driver (F-165).
+**Dawn (oracle), Metal:** last full sweep 2026-11-01: pass 2,109,506 / skip 147,876 / fail 2 / crash 0, plus
+74 `xfail` (F-159, F-160). The 2 fails are the `index_buffer_format_dirtying` port-oracle quirk (¹ above).
 
-**Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a compile-time zero value on Metal; yawgpu fails the same cases). The former **F-130** override-shift divergence **no longer reproduces** on
-the current Dawn build (`fail=0`); Dawn now fails only the 2 shared `index_buffer_format_dirtying`
-port-oracle cases.
+**yawgpu, Metal:** no open defects. F-161 to F-164 from the 2026-11-01 sweep are resolved. Carried in
+`expectations/yawgpu.txt`: `index_buffer_format_dirtying` and F-160 (shared with Dawn). The 2 F-159 cases fail as on
+Dawn and are not listed.
 
-**Open — wgpu-native (naga-based bring-up reference, not triaged to `fail=0`):** the panic-heavy validation
+**yawgpu, native Vulkan:** last swept 2026-11-01 on `9977e34`, Linux and Windows / NVIDIA RTX 5060 Ti: with
+expectations, only the 2 F-159 cases fail; Windows also had 1 intermittent driver crash (F-165). Carried in
+`expectations/yawgpu-vulkan.txt`: `index_buffer_format_dirtying`, F-085, F-129 (denormal `fwidth`), F-141 and F-152.
+F-111 and F-139 were resolved after that sweep; F-111 was confirmed on Windows native Vulkan, F-139 only through
+MoltenVK.
+
+**Open — yawgpu:** none.
+
+**Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a
+compile-time zero value on Metal; yawgpu fails the same cases).
+
+**Open — wgpu-native (naga-based bring-up reference, not triaged to `fail=0`; not swept at `d116bcc`):** the panic-heavy validation
 surface (F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027, F-028, F-036, F-052, F-056,
 F-097, F-113), the `zero_init`/`robust_access`/`memory_layout` naga gaps (F-070, F-071, F-075, F-078,
 F-084, F-088), and the naga-lineage shader findings that yawgpu resolved by moving to Tint (F-124, F-129,

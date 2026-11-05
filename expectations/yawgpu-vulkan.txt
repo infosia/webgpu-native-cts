@@ -37,8 +37,7 @@ webgpu:api,validation,encoding,cmds,render,draw:index_buffer_format_dirtying:*
 # (F-104/F-090-class), not a yawgpu/naga defect. The separate `discard`+derivative SPIR-V gap (sub-cause 1)
 # was a real defect and is FIXED in yawgpu's naga fork (demote-to-helper), so it is not listed here.
 # Drop these if the upstream gpuweb/cts fwidth acceptance interval is widened for denormals.
-# NVIDIA-host-specific: these PASS on Intel/ANV (xpass confirmed 2026-07-04), so the Intel host
-# file expectations/yawgpu-vulkan-intel-anv.txt omits them.
+# NVIDIA-host-specific: these PASS on Intel/ANV (xpass confirmed 2026-07-04).
 webgpu:shader,execution,expression,call,builtin,fwidth:f32:*
 webgpu:shader,execution,expression,call,builtin,fwidthFine:f32:*
 webgpu:shader,execution,expression,call,builtin,fwidthCoarse:f32:*
@@ -51,8 +50,7 @@ webgpu:shader,execution,expression,call,builtin,fwidthCoarse:f32:*
 # memory-model property, not yawgpu and not a CTS-port oracle bug. Distinct from F-112 (atomic_workgroup
 # corr, a real yawgpu defect, RESOLVED). Unchanged by yawgpu bd21cfb's VK_KHR_vulkan_memory_model.
 # Drop if the NVIDIA driver or the upstream CTS corr tuning changes (would xpass). See docs/FINDINGS.md F-141.
-# NVIDIA-host-specific: passes on Intel/ANV (xpass confirmed 2026-07-04); omitted from
-# expectations/yawgpu-vulkan-intel-anv.txt.
+# NVIDIA-host-specific: passes on Intel/ANV (xpass confirmed 2026-07-04).
 webgpu:shader,execution,memory_model,coherence:corr:memType="atomic_storage";testType="intra_workgroup"
 # F-152: the same corr test on the WORKGROUP memType -- NOT a yawgpu defect. On the Linux /
 # NVIDIA RTX 5060 Ti host (driver 595.91) this variant reliably observes the disallowed weak
