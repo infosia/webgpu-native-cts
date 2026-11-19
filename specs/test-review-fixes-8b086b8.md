@@ -189,9 +189,29 @@ snap only if upstream has the equivalent; otherwise port upstream's handling of 
 ambiguity. Tolerances and the software model stay; if a test now fails on Dawn because of a model or
 tolerance gap that upstream handles, port upstream's handling rather than altering the inputs.
 
+### T11 — Per-texel colour data in cube textures (batch F)
+
+Found while implementing T10. `executeCase()` fills cube and cube-array colour textures with one value
+per mip level (`constantForCube` → `makeTextureData(..., constant)` in `texture_utils.cpp`), so colour
+cube sampling cannot detect a wrong face, a wrong texel, or wrong wrapping across face edges. Upstream
+fills every texture, cubes included, with random texels (`createTextureWithRandomDataAndGetTexels`),
+and its software model handles cube faces and edges per texel. Fill cube textures with per-texel data
+the same way as the other dimensions, and make the model sample cube faces per texel (T9 already did
+this for depth cubes through `wrapFaceCoordToCubeFaceAtEdgeBoundaries`; reuse it). If Dawn then fails
+cube-edge cases, compare with upstream's model (`softwareTextureReadMipLevel` / cube corner handling)
+before calling it a finding.
+
+### T12 — Compressed formats in `textureLoad:sampled_3d` (batch F)
+
+`textureLoadFormatCompatibleWith3D()` calls the shared `textureFormatAndDimensionPossiblyCompatible`
+and then also excludes BC and ASTC formats. Upstream's `sampled_3d` uses only the shared predicate,
+so it enumerates BC and ASTC 3D textures (136 records were missing from the T10 comparison). Drop the
+extra exclusion and make the textureLoad 3D fill and expected-value path handle compressed 3D
+textures (block layout per depth slice, `materializeCompressedTexels` for 3D).
+
 ## Scope
 
-**In:** T1-T10 above, with unit tests for T1.
+**In:** T1-T12 above, with unit tests for T1.
 
 **Out:**
 - Removing upstream cases or renaming tests. Query names and parameters stay identical to upstream,
@@ -229,7 +249,10 @@ tolerance gap that upstream handles, port upstream's handling rather than alteri
 - [ ] T10: for a sample of cases per builtin (at least one per `method` and per builtin), the
       generated call arguments equal upstream's, shown by a script comparing against upstream's
       generator run in node; `--list-cases 'webgpu:*'` is unchanged.
-- [ ] Apart from T2, T4, T6, T7.1 and T8, `cts --list-cases 'webgpu:*'` is unchanged; REPORT.md lists
+- [ ] T11: no cube or cube-array texture in the texture builtin tests is filled with a single value
+      per mip level; `--list-cases 'webgpu:*'` is unchanged by T11.
+- [ ] T12: `textureLoad:sampled_3d` enumerates exactly upstream's cases and subcases.
+- [ ] Apart from T2, T4, T6, T7.1, T8 and T12, `cts --list-cases 'webgpu:*'` is unchanged; REPORT.md lists
       every test whose case list changed.
 
 ## Verification
