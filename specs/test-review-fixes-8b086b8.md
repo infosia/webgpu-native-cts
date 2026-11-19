@@ -164,9 +164,34 @@ Port this so the software model samples per-texel depth values through the same 
 and filtering code the color path uses. Remove `depthValue()` and the per-subresource clear once
 nothing uses them. Parameters and case lists stay unchanged.
 
+### T10 — Port the upstream sample-point generators (batch E)
+
+Found while reviewing T9. Native `generateCalls()` in `texture_sampling/texture_utils.cpp` is a
+native design, not a port of upstream's `generateTextureBuiltinInputs{1D,2D,3D}` /
+`generateSamplePointsCube` (`<cts>/.../call/builtin/texture_utils.ts`, around lines 4000-4600). The
+test parameters match upstream, but the calls each case makes do not:
+
+| Argument | Upstream | Native |
+|---|---|---|
+| `depthRef` | 0, 0.5 or 1 (`makeRandValue(...)/2`), so `equal`/`not-equal` are tested | 8 fixed values strictly inside (0, 1); `equal` is always false |
+| coords | hashed per call from the `hashInputs`, per `method` (`texel-centre`, `spiral`, `cube-edges`, …), including outside [0, 1] for address modes | own spiral / texel-centre formulas |
+| `ddx`/`ddy` | `makeGradient(7)` / `makeGradient(8)` in every axis | x only; `ddy` is always 0 |
+| bias | `makeBiasAndDerivativeMult` (including the extreme-bias branches) | 6 fixed values |
+| offset | `makeIntHashValueRepeatable(-8, 8, i, 3 + j)` per axis | `offsetForCallIndex(i)` |
+| component | hashed in [0, numComponents) | check native |
+| mip level, sample index, array index | `makeRangeValue(...)` | `i % n` |
+
+Port the upstream generators and their hash helpers (`makeRandValue`, `makeRangeValue`,
+`makeIntHashValue*`, `hashU32`, which T9 already ported as `upstreamHashU32()`) so every call argument
+equals upstream's for the same parameters, and use them in every texture builtin that upstream drives
+with them (textureSample*, textureGather*, textureLoad where applicable). Keep the native gather 0.75
+snap only if upstream has the equivalent; otherwise port upstream's handling of footprint
+ambiguity. Tolerances and the software model stay; if a test now fails on Dawn because of a model or
+tolerance gap that upstream handles, port upstream's handling rather than altering the inputs.
+
 ## Scope
 
-**In:** T1-T9 above, with unit tests for T1.
+**In:** T1-T10 above, with unit tests for T1.
 
 **Out:**
 - Removing upstream cases or renaming tests. Query names and parameters stay identical to upstream,
@@ -201,6 +226,9 @@ nothing uses them. Parameters and case lists stay unchanged.
 - [ ] T9: `depthValue(` no longer appears in `src/webgpu`; within one mip level of a depth texture
       used by these tests at least two texels hold different values (shown by a unit test or an
       assertion in the fill helper); `--list-cases 'webgpu:*'` is unchanged.
+- [ ] T10: for a sample of cases per builtin (at least one per `method` and per builtin), the
+      generated call arguments equal upstream's, shown by a script comparing against upstream's
+      generator run in node; `--list-cases 'webgpu:*'` is unchanged.
 - [ ] Apart from T2, T4, T6, T7.1 and T8, `cts --list-cases 'webgpu:*'` is unchanged; REPORT.md lists
       every test whose case list changed.
 
