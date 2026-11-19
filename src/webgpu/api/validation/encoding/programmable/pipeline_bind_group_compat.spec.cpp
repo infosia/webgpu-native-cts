@@ -525,8 +525,18 @@ CTS_TEST(testGroup, "bgl_visibility_mismatch")
                 .expand("call", [](const ParamRecord& p) { return filteredCompatCallsForParams(valueAs<std::string>(*findParam(p, "encoderType"))); })
                 .combine("callWithZero", {true, false})
                 .beginSubcases()
-                .combine("bgVisibility", {1, 2, 4, 3, 5, 6, 7})
-                .combine("plVisibility", {1, 2, 4, 6})
+                // kShaderStageCombinations: every subset of VERTEX | FRAGMENT | COMPUTE, including none.
+                .combine("bgVisibility", {0, 1, 2, 3, 4, 5, 6, 7})
+                .expand("plVisibility", [](const ParamRecord& p) {
+                    if (valueAs<std::string>(*findParam(p, "encoderType")) == "compute pass") {
+                        return std::vector<Value>{static_cast<int64_t>(WGPUShaderStage_Compute)};
+                    }
+                    return std::vector<Value>{
+                        static_cast<int64_t>(WGPUShaderStage_Vertex),
+                        static_cast<int64_t>(WGPUShaderStage_Fragment),
+                        static_cast<int64_t>(WGPUShaderStage_Vertex | WGPUShaderStage_Fragment),
+                    };
+                })
                 .combine("useU32Array", {false, true});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
@@ -538,8 +548,10 @@ CTS_TEST(testGroup, "bgl_visibility_mismatch")
         WGPUBindGroup bindGroup = createBindGroup(t, bgLayout, {bufferResource(t, 0)});
         WGPUBindGroupLayout plLayout = createLayout(t, {bufferEntry(0, plVisibility, dynamic)});
         WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, {plLayout});
-        WGPUComputePipeline compute = createComputePipeline(t, pipelineLayout);
-        WGPURenderPipeline render = createRenderPipeline(t, pipelineLayout);
+        // Create only the pipeline the encoder uses, as upstream does.
+        const bool computePass = encoderType == "compute pass";
+        WGPUComputePipeline compute = computePass ? createComputePipeline(t, pipelineLayout) : nullptr;
+        WGPURenderPipeline render = computePass ? nullptr : createRenderPipeline(t, pipelineLayout);
         runCompatibility(t, encoderType, compute, render, {bindGroup}, dynamic ? std::vector<uint32_t>{0} : std::vector<uint32_t>{}, t.param<std::string>("call"), t.param<bool>("callWithZero"), bgVisibility == plVisibility);
     });
 

@@ -20,8 +20,9 @@ CTS_TEST(testGroup, "sampled_1d_coords")
         return u.combine("format", allTextureFormats())
             .filter(isPotentiallyFilterableAndFillable)
             .filter(isSampled1DColorTextureFormatParam)
+            // Upstream does not filter linear filtering by format here; unfilterable formats are
+            // skipped at run time (executeCase).
             .combine("filt", {"nearest", "linear"})
-            .filter(isFilterNearestOrFormatPossiblyFilterableAsTextureF32)
             .combine("modeU", shortAddressModes())
             .beginSubcases()
             .combine("samplePoints", samplePointMethods());

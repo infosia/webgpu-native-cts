@@ -89,6 +89,15 @@ class ParamsBuilder {
 
     /// Materializes the configured operations into the final list of cases (with subcases).
     std::vector<ExpandedCase> expand() const;
+    /// Materializes only the case-level parameter records (the operations before
+    /// `beginSubcases()`), without running any subcase operation.
+    std::vector<ParamRecord> expandCaseParams() const;
+    /// Expands the subcases of one case record produced by `expandCaseParams()`. Returns
+    /// nullopt when subcase operations exist but filter every subcase out (the case is dropped,
+    /// as in `expand()`); a builder with no subcase operations yields the case with no subcases.
+    std::optional<ExpandedCase> expandSubcases(ParamRecord caseRecord) const;
+    /// True if any operation was added after `beginSubcases()`.
+    bool hasSubcaseOps() const;
 
   private:
     struct Op {

@@ -142,9 +142,28 @@ inline double nextAfterF16Positive(double val) {
     return f16BitsToDouble(bits);
 }
 
+// ---- Saturating double -> int64 conversion ---------------------------------------
+// static_cast<int64_t>(double) is undefined for NaN and out-of-range values. This clamps the way
+// AArch64's FCVTZS does (NaN -> 0, saturate at the int64 limits) and truncates otherwise, so callers
+// keep the result they got on the Apple Silicon oracle without the undefined behaviour.
+inline int64_t saturatingDoubleToI64(double x) {
+    if (std::isnan(x)) {
+        return 0;
+    }
+    if (x >= 9223372036854775808.0) {  // 2^63
+        return INT64_MAX;
+    }
+    if (x < -9223372036854775808.0) {  // -2^63
+        return INT64_MIN;
+    }
+    return static_cast<int64_t>(x);
+}
+
 // ---- withPoint(x): JS Number.toString()-style + ensure decimal point --------
 inline std::string numberToString(double x) {
-    if (x == static_cast<double>(static_cast<long long>(x)) && std::abs(x) < 1e15) {
+    // Check the magnitude before converting: casting a non-finite or out-of-range double to an
+    // integer is undefined behaviour.
+    if (std::isfinite(x) && std::abs(x) < 1e15 && x == std::trunc(x)) {
         // Integral magnitude: print as integer (JS prints integers without ".0").
         return std::to_string(static_cast<long long>(x));
     }
@@ -182,11 +201,11 @@ inline std::string elementWgsl(ScalarKind k, double v) {
         case ScalarKind::Bool:
             return v != 0.0 ? "true" : "false";
         case ScalarKind::AbstractInt:
-            return std::to_string(static_cast<long long>(v));
+            return std::to_string(saturatingDoubleToI64(v));
         case ScalarKind::I32:
-            return "i32(" + std::to_string(static_cast<long long>(v)) + ")";
+            return "i32(" + std::to_string(saturatingDoubleToI64(v)) + ")";
         case ScalarKind::U32:
-            return std::to_string(static_cast<long long>(v)) + "u";
+            return std::to_string(saturatingDoubleToI64(v)) + "u";
         case ScalarKind::AbstractFloat:
             return withPoint(v);
         case ScalarKind::F32:
@@ -223,10 +242,10 @@ inline std::string typeWgsl(const Type& ty) { return ty.toString(); }
 // and the override constant would carry a negative (not representable in u32).
 inline double wrapIntegerElement(ScalarKind k, double value) {
     if (k == ScalarKind::U32) {
-        return static_cast<double>(static_cast<uint32_t>(static_cast<int64_t>(value)));
+        return static_cast<double>(static_cast<uint32_t>(saturatingDoubleToI64(value)));
     }
     if (k == ScalarKind::I32) {
-        return static_cast<double>(static_cast<int32_t>(static_cast<int64_t>(value)));
+        return static_cast<double>(static_cast<int32_t>(saturatingDoubleToI64(value)));
     }
     return value;
 }

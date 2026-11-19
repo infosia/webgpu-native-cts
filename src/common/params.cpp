@@ -4,6 +4,7 @@
 #include <array>
 #include <charconv>
 #include <cstdlib>
+#include <optional>
 #include <sstream>
 #include <system_error>
 
@@ -183,13 +184,11 @@ ParamsBuilder ParamsBuilder::beginSubcases() const {
     return copy;
 }
 
-std::vector<ParamsBuilder::ExpandedCase> ParamsBuilder::expand() const {
+std::vector<ParamRecord> ParamsBuilder::expandCaseParams() const {
     std::vector<ParamRecord> cases(1);
-    bool hasSubcaseOps = false;
 
     for (const Op& op : ops_) {
         if (op.subcase) {
-            hasSubcaseOps = true;
             continue;
         }
         if (op.kind == Op::Kind::Filter) {
@@ -235,87 +234,106 @@ std::vector<ParamsBuilder::ExpandedCase> ParamsBuilder::expand() const {
             cases = std::move(next);
         }
     }
+    return cases;
+}
 
+bool ParamsBuilder::hasSubcaseOps() const {
+    for (const Op& op : ops_) {
+        if (op.subcase) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<ParamsBuilder::ExpandedCase> ParamsBuilder::expandSubcases(ParamRecord caseRecord) const {
+    if (!hasSubcaseOps()) {
+        return ExpandedCase{std::move(caseRecord), {}};
+    }
+
+    std::vector<ParamRecord> subcases(1, caseRecord);
+    for (const Op& op : ops_) {
+        if (!op.subcase) {
+            continue;
+        }
+        if (op.kind == Op::Kind::Filter) {
+            subcases.erase(
+                std::remove_if(subcases.begin(), subcases.end(), [&](const ParamRecord& record) {
+                    return !op.predicate(record);
+                }),
+                subcases.end());
+        } else if (op.kind == Op::Kind::CombineWithParams) {
+            for (const ParamRecord& additions : op.records) {
+                for (const auto& addition : additions) {
+                    abortOnCaseKeyCollision(caseRecord, addition.first);
+                }
+            }
+            std::vector<ParamRecord> next;
+            next.reserve(subcases.size() * op.records.size());
+            for (ParamRecord& record : subcases) {
+                for (size_t i = 0; i < op.records.size(); ++i) {
+                    const ParamRecord& additions = op.records[i];
+                    ParamRecord copy = i + 1 == op.records.size() ? std::move(record) : record;
+                    copy.insert(copy.end(), additions.begin(), additions.end());
+                    next.push_back(std::move(copy));
+                }
+            }
+            subcases = std::move(next);
+        } else if (op.kind == Op::Kind::Expand) {
+            abortOnCaseKeyCollision(caseRecord, op.key);
+            std::vector<ParamRecord> next;
+            for (ParamRecord& record : subcases) {
+                std::vector<Value> values = op.expander(record);
+                for (size_t i = 0; i < values.size(); ++i) {
+                    ParamRecord copy = i + 1 == values.size() ? std::move(record) : record;
+                    copy.emplace_back(op.key, std::move(values[i]));
+                    next.push_back(std::move(copy));
+                }
+            }
+            subcases = std::move(next);
+        } else {
+            abortOnCaseKeyCollision(caseRecord, op.key);
+            std::vector<ParamRecord> next;
+            next.reserve(subcases.size() * op.values.size());
+            for (ParamRecord& record : subcases) {
+                for (size_t i = 0; i < op.values.size(); ++i) {
+                    const Value& value = op.values[i];
+                    ParamRecord copy = i + 1 == op.values.size() ? std::move(record) : record;
+                    copy.emplace_back(op.key, value);
+                    next.push_back(std::move(copy));
+                }
+            }
+            subcases = std::move(next);
+        }
+    }
+
+    if (subcases.empty()) {
+        return std::nullopt;
+    }
+
+    std::vector<ParamRecord> subcaseOnlyRecords;
+    subcaseOnlyRecords.reserve(subcases.size());
+    for (ParamRecord& subcase : subcases) {
+        ParamRecord subcaseOnly;
+        for (auto& param : subcase) {
+            if (!recordHasKey(caseRecord, param.first)) {
+                subcaseOnly.push_back(std::move(param));
+            }
+        }
+        subcaseOnlyRecords.push_back(std::move(subcaseOnly));
+    }
+    return ExpandedCase{std::move(caseRecord), std::move(subcaseOnlyRecords)};
+}
+
+std::vector<ParamsBuilder::ExpandedCase> ParamsBuilder::expand() const {
+    std::vector<ParamRecord> cases = expandCaseParams();
     std::vector<ExpandedCase> expanded;
     expanded.reserve(cases.size());
     for (ParamRecord& caseRecord : cases) {
-        if (!hasSubcaseOps) {
-            expanded.push_back(ExpandedCase{std::move(caseRecord), {}});
-            continue;
+        std::optional<ExpandedCase> expandedCase = expandSubcases(std::move(caseRecord));
+        if (expandedCase) {
+            expanded.push_back(std::move(*expandedCase));
         }
-
-        std::vector<ParamRecord> subcases(1, caseRecord);
-        for (const Op& op : ops_) {
-            if (!op.subcase) {
-                continue;
-            }
-            if (op.kind == Op::Kind::Filter) {
-                subcases.erase(
-                    std::remove_if(subcases.begin(), subcases.end(), [&](const ParamRecord& record) {
-                        return !op.predicate(record);
-                    }),
-                    subcases.end());
-            } else if (op.kind == Op::Kind::CombineWithParams) {
-                for (const ParamRecord& additions : op.records) {
-                    for (const auto& addition : additions) {
-                        abortOnCaseKeyCollision(caseRecord, addition.first);
-                    }
-                }
-                std::vector<ParamRecord> next;
-                next.reserve(subcases.size() * op.records.size());
-                for (ParamRecord& record : subcases) {
-                    for (size_t i = 0; i < op.records.size(); ++i) {
-                        const ParamRecord& additions = op.records[i];
-                        ParamRecord copy = i + 1 == op.records.size() ? std::move(record) : record;
-                        copy.insert(copy.end(), additions.begin(), additions.end());
-                        next.push_back(std::move(copy));
-                    }
-                }
-                subcases = std::move(next);
-            } else if (op.kind == Op::Kind::Expand) {
-                abortOnCaseKeyCollision(caseRecord, op.key);
-                std::vector<ParamRecord> next;
-                for (ParamRecord& record : subcases) {
-                    std::vector<Value> values = op.expander(record);
-                    for (size_t i = 0; i < values.size(); ++i) {
-                        ParamRecord copy = i + 1 == values.size() ? std::move(record) : record;
-                        copy.emplace_back(op.key, std::move(values[i]));
-                        next.push_back(std::move(copy));
-                    }
-                }
-                subcases = std::move(next);
-            } else {
-                abortOnCaseKeyCollision(caseRecord, op.key);
-                std::vector<ParamRecord> next;
-                next.reserve(subcases.size() * op.values.size());
-                for (ParamRecord& record : subcases) {
-                    for (size_t i = 0; i < op.values.size(); ++i) {
-                        const Value& value = op.values[i];
-                        ParamRecord copy = i + 1 == op.values.size() ? std::move(record) : record;
-                        copy.emplace_back(op.key, value);
-                        next.push_back(std::move(copy));
-                    }
-                }
-                subcases = std::move(next);
-            }
-        }
-
-        if (subcases.empty()) {
-            continue;
-        }
-
-        std::vector<ParamRecord> subcaseOnlyRecords;
-        subcaseOnlyRecords.reserve(subcases.size());
-        for (ParamRecord& subcase : subcases) {
-            ParamRecord subcaseOnly;
-            for (auto& param : subcase) {
-                if (!recordHasKey(caseRecord, param.first)) {
-                    subcaseOnly.push_back(std::move(param));
-                }
-            }
-            subcaseOnlyRecords.push_back(std::move(subcaseOnly));
-        }
-        expanded.push_back(ExpandedCase{std::move(caseRecord), std::move(subcaseOnlyRecords)});
     }
     return expanded;
 }

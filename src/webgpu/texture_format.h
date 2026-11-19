@@ -218,8 +218,6 @@ inline constexpr std::array<WGPUTextureFormat, 43> kRegularTextureFormats = {
     WGPUTextureFormat_RGB10A2Unorm, WGPUTextureFormat_RG11B10Ufloat, WGPUTextureFormat_RGB9E5Ufloat,
 };
 
-inline constexpr std::array<WGPUTextureFormat, kRegularTextureFormats.size()> kColorTextureFormats = kRegularTextureFormats;
-
 inline constexpr std::array<WGPUTextureFormat, 6> kDepthStencilFormats = {
     WGPUTextureFormat_Stencil8,
     WGPUTextureFormat_Depth16Unorm,
@@ -266,6 +264,21 @@ inline constexpr std::array<WGPUTextureFormat, kCompressedTextureFormatInfos.siz
     WGPUTextureFormat_ASTC10x10Unorm, WGPUTextureFormat_ASTC10x10UnormSrgb, WGPUTextureFormat_ASTC12x10Unorm,
     WGPUTextureFormat_ASTC12x10UnormSrgb, WGPUTextureFormat_ASTC12x12Unorm, WGPUTextureFormat_ASTC12x12UnormSrgb,
 };
+
+// Upstream kColorTextureFormats (format_info.ts): the regular formats followed by the compressed
+// (BC, ETC2, ASTC) formats, in that order.
+inline constexpr std::array<WGPUTextureFormat, kRegularTextureFormats.size() + kCompressedTextureFormats.size()>
+    kColorTextureFormats = [] {
+        std::array<WGPUTextureFormat, kRegularTextureFormats.size() + kCompressedTextureFormats.size()> formats{};
+        std::size_t index = 0;
+        for (WGPUTextureFormat format : kRegularTextureFormats) {
+            formats[index++] = format;
+        }
+        for (WGPUTextureFormat format : kCompressedTextureFormats) {
+            formats[index++] = format;
+        }
+        return formats;
+    }();
 
 inline constexpr std::array<WGPUTextureFormat, 59> kOptionalTextureFormats = {
     WGPUTextureFormat_R16Unorm, WGPUTextureFormat_R16Snorm, WGPUTextureFormat_RG16Unorm,

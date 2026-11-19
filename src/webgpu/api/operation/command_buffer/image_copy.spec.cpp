@@ -246,12 +246,8 @@ std::vector<uint8_t> generateData(size_t size, uint32_t start = 0) {
     return data;
 }
 
-// Upstream's kColorTextureFormats: the regular and the compressed formats.
 std::vector<Value> colorFormatValues() {
-    std::vector<Value> values = formatIdentifierValues(kRegularTextureFormats);
-    const std::vector<Value> compressed = formatIdentifierValues(kCompressedTextureFormats);
-    values.insert(values.end(), compressed.begin(), compressed.end());
-    return values;
+    return formatIdentifierValues(kColorTextureFormats);
 }
 
 std::vector<Value> depthStencilFormatValues() {

@@ -445,15 +445,29 @@ bool isConst(const Fixture& t) {
     return cfgInputSource(t) == InputSource::Const;
 }
 
-// Builds a bitcast expression builder mirroring upstream's bitcastBuilder: the destination type
-// becomes vecN<canonicalDestType> when vectorize is set, otherwise canonicalDestType. The 'alias'
-// param is a pure rename of the destination type and does not affect results, so it is ignored.
-ExpressionBuilder bitcastBuilder(const std::string& canonicalDestType, int vectorize) {
+// Mirrors upstream bitcastBuilder(): the destination type becomes vecN<canonicalDestType> when
+// vectorize is set, otherwise canonicalDestType. When the 'alias' param is true the shader also
+// predeclares `alias myalias = <destType>;`; the bitcast still spells the canonical type.
+void runBitcast(
+    AllFeaturesMaxLimitsGpuTest& t,
+    const std::string& canonicalDestType,
+    int destVectorize,
+    const std::vector<ExprType>& parameterTypes,
+    ExprType resultType,
+    InputSource inputSource,
+    int vectorize,
+    const std::vector<Case>& cases) {
     std::string destType = canonicalDestType;
-    if (vectorize != 0) {
-        destType = "vec" + std::to_string(vectorize) + "<" + canonicalDestType + ">";
+    if (destVectorize != 0) {
+        destType = "vec" + std::to_string(destVectorize) + "<" + canonicalDestType + ">";
     }
-    return builtin("bitcast<" + destType + ">");
+    const ExpressionBuilder builder = builtin("bitcast<" + destType + ">");
+    if (t.hasParam("alias") && t.param<bool>("alias")) {
+        runWithPredeclaration(t, builder, "alias myalias = " + destType + ";", parameterTypes, resultType,
+                              inputSource, vectorize, cases);
+    } else {
+        run(t, builder, parameterTypes, resultType, inputSource, vectorize, cases);
+    }
 }
 
 void requireF16(AllFeaturesMaxLimitsGpuTest& t) {
@@ -472,7 +486,7 @@ CTS_TEST(testGroup, "i32_to_i32").params(inputSourceVectorizeAliasParams).fn([](
     for (int32_t e : fullI32Range()) {
         cases.push_back({{i32(e)}, i32(e)});
     }
-    run(t, bitcastBuilder("i32", cfgVectorize(t)), {scalarType(ScalarKind::I32)},
+    runBitcast(t, "i32", cfgVectorize(t), {scalarType(ScalarKind::I32)},
         scalarType(ScalarKind::I32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -481,7 +495,7 @@ CTS_TEST(testGroup, "u32_to_u32").params(inputSourceVectorizeAliasParams).fn([](
     for (uint32_t e : fullU32Range()) {
         cases.push_back({{u32(e)}, u32(e)});
     }
-    run(t, bitcastBuilder("u32", cfgVectorize(t)), {scalarType(ScalarKind::U32)},
+    runBitcast(t, "u32", cfgVectorize(t), {scalarType(ScalarKind::U32)},
         scalarType(ScalarKind::U32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -499,7 +513,7 @@ CTS_TEST(testGroup, "f32_to_f32").params(inputSourceVectorizeAliasParams).fn([](
         const uint32_t bits = f32AsU32(f);
         cases.push_back({{f32Bits(bits)}, f32Bits(bits), {f32ResultFromValue(f, bits)}});
     }
-    run(t, bitcastBuilder("f32", cfgVectorize(t)), {scalarType(ScalarKind::F32)},
+    runBitcast(t, "f32", cfgVectorize(t), {scalarType(ScalarKind::F32)},
         scalarType(ScalarKind::F32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -509,7 +523,7 @@ CTS_TEST(testGroup, "u32_to_i32").params(inputSourceVectorizeAliasParams).fn([](
     for (uint32_t e : fullU32Range()) {
         cases.push_back({{u32(e)}, i32Bits(e)});
     }
-    run(t, bitcastBuilder("i32", cfgVectorize(t)), {scalarType(ScalarKind::U32)},
+    runBitcast(t, "i32", cfgVectorize(t), {scalarType(ScalarKind::U32)},
         scalarType(ScalarKind::I32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -537,7 +551,7 @@ CTS_TEST(testGroup, "f32_to_i32").params(inputSourceVectorizeAliasParams).fn([](
         }
         cases.push_back({{f32Bits(bits)}, i32Bits(bits), {ee}});
     }
-    run(t, bitcastBuilder("i32", cfgVectorize(t)), {scalarType(ScalarKind::F32)},
+    runBitcast(t, "i32", cfgVectorize(t), {scalarType(ScalarKind::F32)},
         scalarType(ScalarKind::I32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -547,7 +561,7 @@ CTS_TEST(testGroup, "i32_to_u32").params(inputSourceVectorizeAliasParams).fn([](
     for (int32_t e : fullI32Range()) {
         cases.push_back({{i32(e)}, u32(static_cast<uint32_t>(e))});
     }
-    run(t, bitcastBuilder("u32", cfgVectorize(t)), {scalarType(ScalarKind::I32)},
+    runBitcast(t, "u32", cfgVectorize(t), {scalarType(ScalarKind::I32)},
         scalarType(ScalarKind::U32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -575,7 +589,7 @@ CTS_TEST(testGroup, "f32_to_u32").params(inputSourceVectorizeAliasParams).fn([](
         }
         cases.push_back({{f32Bits(bits)}, u32(bits), {ee}});
     }
-    run(t, bitcastBuilder("u32", cfgVectorize(t)), {scalarType(ScalarKind::F32)},
+    runBitcast(t, "u32", cfgVectorize(t), {scalarType(ScalarKind::F32)},
         scalarType(ScalarKind::U32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -600,7 +614,7 @@ CTS_TEST(testGroup, "i32_to_f32").params(inputSourceVectorizeAliasParams).fn([](
         }
         cases.push_back({{i32Bits(u)}, f32Bits(u), {f32ResultFromValue(static_cast<double>(f), u)}});
     }
-    run(t, bitcastBuilder("f32", cfgVectorize(t)), {scalarType(ScalarKind::I32)},
+    runBitcast(t, "f32", cfgVectorize(t), {scalarType(ScalarKind::I32)},
         scalarType(ScalarKind::F32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -621,7 +635,7 @@ CTS_TEST(testGroup, "u32_to_f32").params(inputSourceVectorizeAliasParams).fn([](
         }
         cases.push_back({{u32(u)}, f32Bits(u), {f32ResultFromValue(static_cast<double>(f), u)}});
     }
-    run(t, bitcastBuilder("f32", cfgVectorize(t)), {scalarType(ScalarKind::U32)},
+    runBitcast(t, "f32", cfgVectorize(t), {scalarType(ScalarKind::U32)},
         scalarType(ScalarKind::F32), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -642,7 +656,7 @@ CTS_TEST(testGroup, "f16_to_f16").params(inputSourceVectorizeAliasParams).fn([](
     for (uint16_t h : vals) {
         cases.push_back({{f16Bits(h)}, f16Bits(h), {f16ResultFromBits(h)}});
     }
-    run(t, bitcastBuilder("f16", cfgVectorize(t)), {scalarType(ScalarKind::F16)},
+    runBitcast(t, "f16", cfgVectorize(t), {scalarType(ScalarKind::F16)},
         scalarType(ScalarKind::F16), cfgInputSource(t), cfgVectorize(t), cases);
 });
 
@@ -702,18 +716,18 @@ void addScalarToVec2hCases(
         // expected placeholder (overridden by acceptance).
         cases.push_back({{in}, vec2(f16Bits(0), f16Bits(0)), vec2f16AcceptFromU32(u)});
     }
-    run(t, builtin(destType), {scalarType(paramKind)}, vecType(2, ScalarKind::F16),
+    runBitcast(t, destType, 0, {scalarType(paramKind)}, vecType(2, ScalarKind::F16),
         cfgInputSource(t), 0, cases);
 }
 
 CTS_TEST(testGroup, "i32_to_vec2h").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addScalarToVec2hCases(t, ScalarKind::I32, "bitcast<vec2<f16>>");
+    addScalarToVec2hCases(t, ScalarKind::I32, "vec2<f16>");
 });
 
 CTS_TEST(testGroup, "u32_to_vec2h").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addScalarToVec2hCases(t, ScalarKind::U32, "bitcast<vec2<f16>>");
+    addScalarToVec2hCases(t, ScalarKind::U32, "vec2<f16>");
 });
 
 // f32 -> vec2<f16>. f32 range: f32RangeWithInfAndNaN ++ u32RangeForF16Vec2(reinterpreted as f32).
@@ -754,7 +768,7 @@ CTS_TEST(testGroup, "f32_to_vec2h").params(inputSourceAliasParams).fn([](AllFeat
         }
         cases.push_back({{f32Bits(u)}, vec2(f16Bits(0), f16Bits(0)), acc});
     }
-    run(t, builtin("bitcast<vec2<f16>>"), {scalarType(ScalarKind::F32)}, vecType(2, ScalarKind::F16),
+    runBitcast(t, "vec2<f16>", 0, {scalarType(ScalarKind::F32)}, vecType(2, ScalarKind::F16),
         cfgInputSource(t), 0, cases);
 });
 
@@ -795,18 +809,18 @@ void addVec2ToVec4hCases(
                          vec4(f16Bits(0), f16Bits(0), f16Bits(0), f16Bits(0)),
                          vec4f16AcceptFromU32x2(a, b)});
     }
-    run(t, builtin(destType), {vecType(2, paramKind)}, vecType(4, ScalarKind::F16),
+    runBitcast(t, destType, 0, {vecType(2, paramKind)}, vecType(4, ScalarKind::F16),
         cfgInputSource(t), 0, cases);
 }
 
 CTS_TEST(testGroup, "vec2i_to_vec4h").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addVec2ToVec4hCases(t, ScalarKind::I32, "bitcast<vec4<f16>>");
+    addVec2ToVec4hCases(t, ScalarKind::I32, "vec4<f16>");
 });
 
 CTS_TEST(testGroup, "vec2u_to_vec4h").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addVec2ToVec4hCases(t, ScalarKind::U32, "bitcast<vec4<f16>>");
+    addVec2ToVec4hCases(t, ScalarKind::U32, "vec4<f16>");
 });
 
 // vec2f -> vec4h. f32 range as in f32_to_vec2h.
@@ -857,7 +871,7 @@ CTS_TEST(testGroup, "vec2f_to_vec4h").params(inputSourceAliasParams).fn([](AllFe
         cases.push_back({{vec2(f32Bits(a), f32Bits(b))},
                          vec4(f16Bits(0), f16Bits(0), f16Bits(0), f16Bits(0)), acc});
     }
-    run(t, builtin("bitcast<vec4<f16>>"), {vecType(2, ScalarKind::F32)}, vecType(4, ScalarKind::F16),
+    runBitcast(t, "vec4<f16>", 0, {vecType(2, ScalarKind::F32)}, vecType(4, ScalarKind::F16),
         cfgInputSource(t), 0, cases);
 });
 
@@ -946,23 +960,23 @@ void addVec2hToScalarCases(
         cases.push_back({{vec2(f16Bits(a), f16Bits(b))}, expectedPlaceholder,
                          {scalar32FromF16x2(a, b, resultKind)}});
     }
-    run(t, builtin(destType), {vecType(2, ScalarKind::F16)}, scalarType(resultKind),
+    runBitcast(t, destType, 0, {vecType(2, ScalarKind::F16)}, scalarType(resultKind),
         cfgInputSource(t), 0, cases);
 }
 
 CTS_TEST(testGroup, "vec2h_to_i32").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addVec2hToScalarCases(t, ScalarKind::I32, "bitcast<i32>");
+    addVec2hToScalarCases(t, ScalarKind::I32, "i32");
 });
 
 CTS_TEST(testGroup, "vec2h_to_u32").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addVec2hToScalarCases(t, ScalarKind::U32, "bitcast<u32>");
+    addVec2hToScalarCases(t, ScalarKind::U32, "u32");
 });
 
 CTS_TEST(testGroup, "vec2h_to_f32").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addVec2hToScalarCases(t, ScalarKind::F32, "bitcast<f32>");
+    addVec2hToScalarCases(t, ScalarKind::F32, "f32");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -1000,23 +1014,23 @@ void addVec4hToVec2Cases(
         cases.push_back({{vec4(f16Bits(e0), f16Bits(e1), f16Bits(e2), f16Bits(e3))},
                          vec2(zero, zero), acc});
     }
-    run(t, builtin(destType), {vecType(4, ScalarKind::F16)}, vecType(2, resultKind),
+    runBitcast(t, destType, 0, {vecType(4, ScalarKind::F16)}, vecType(2, resultKind),
         cfgInputSource(t), 0, cases);
 }
 
 CTS_TEST(testGroup, "vec4h_to_vec2i").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addVec4hToVec2Cases(t, ScalarKind::I32, "bitcast<vec2<i32>>");
+    addVec4hToVec2Cases(t, ScalarKind::I32, "vec2<i32>");
 });
 
 CTS_TEST(testGroup, "vec4h_to_vec2u").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addVec4hToVec2Cases(t, ScalarKind::U32, "bitcast<vec2<u32>>");
+    addVec4hToVec2Cases(t, ScalarKind::U32, "vec2<u32>");
 });
 
 CTS_TEST(testGroup, "vec4h_to_vec2f").params(inputSourceAliasParams).fn([](AllFeaturesMaxLimitsGpuTest& t) {
     requireF16(t);
-    addVec4hToVec2Cases(t, ScalarKind::F32, "bitcast<vec2<f32>>");
+    addVec4hToVec2Cases(t, ScalarKind::F32, "vec2<f32>");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -1031,7 +1045,7 @@ CTS_TEST(testGroup, "af_to_f32").params(constVectorizeParams).fn([](AllFeaturesM
         cases.push_back(
             {{abstractFloatBits(bits)}, f32Bits(bits), {f32ResultFromValue(static_cast<double>(f), bits)}});
     }
-    run(t, bitcastBuilder("f32", cfgVectorize(t)), {scalarType(ScalarKind::AbstractFloat)},
+    runBitcast(t, "f32", cfgVectorize(t), {scalarType(ScalarKind::AbstractFloat)},
         scalarType(ScalarKind::F32), InputSource::Const, cfgVectorize(t), cases);
 });
 
@@ -1053,7 +1067,7 @@ CTS_TEST(testGroup, "af_to_i32").params(constVectorizeParams).fn([](AllFeaturesM
     for (uint32_t u : kAfToIntValues) {
         cases.push_back({{abstractFloatBits(u)}, i32Bits(u)});
     }
-    run(t, bitcastBuilder("i32", cfgVectorize(t)), {scalarType(ScalarKind::AbstractFloat)},
+    runBitcast(t, "i32", cfgVectorize(t), {scalarType(ScalarKind::AbstractFloat)},
         scalarType(ScalarKind::I32), InputSource::Const, cfgVectorize(t), cases);
 });
 
@@ -1062,7 +1076,7 @@ CTS_TEST(testGroup, "af_to_u32").params(constVectorizeParams).fn([](AllFeaturesM
     for (uint32_t u : kAfToIntValues) {
         cases.push_back({{abstractFloatBits(u)}, u32(u)});
     }
-    run(t, bitcastBuilder("u32", cfgVectorize(t)), {scalarType(ScalarKind::AbstractFloat)},
+    runBitcast(t, "u32", cfgVectorize(t), {scalarType(ScalarKind::AbstractFloat)},
         scalarType(ScalarKind::U32), InputSource::Const, cfgVectorize(t), cases);
 });
 
@@ -1096,7 +1110,7 @@ CTS_TEST(testGroup, "af_to_vec2f16").params([](ParamsBuilder u) {
     for (uint32_t u : f32FiniteRangeForF16Vec2Finite()) {
         cases.push_back({{abstractFloatBits(u)}, vec2(f16Bits(0), f16Bits(0)), vec2f16AcceptFromU32(u)});
     }
-    run(t, builtin("bitcast<vec2<f16>>"), {scalarType(ScalarKind::AbstractFloat)},
+    runBitcast(t, "vec2<f16>", 0, {scalarType(ScalarKind::AbstractFloat)},
         vecType(2, ScalarKind::F16), InputSource::Const, 0, cases);
 });
 
@@ -1112,7 +1126,7 @@ CTS_TEST(testGroup, "vec2af_to_vec4f16").params([](ParamsBuilder u) {
                          vec4(f16Bits(0), f16Bits(0), f16Bits(0), f16Bits(0)),
                          vec4f16AcceptFromU32x2(a, b)});
     }
-    run(t, builtin("bitcast<vec4<f16>>"), {vecType(2, ScalarKind::AbstractFloat)},
+    runBitcast(t, "vec4<f16>", 0, {vecType(2, ScalarKind::AbstractFloat)},
         vecType(4, ScalarKind::F16), InputSource::Const, 0, cases);
 });
 
@@ -1125,7 +1139,7 @@ CTS_TEST(testGroup, "ai_to_i32").params(constVectorizeAliasParams).fn([](AllFeat
     for (int32_t e : fullI32Range()) {
         cases.push_back({{abstractInt(e)}, i32(e)});
     }
-    run(t, bitcastBuilder("i32", cfgVectorize(t)), {scalarType(ScalarKind::AbstractInt)},
+    runBitcast(t, "i32", cfgVectorize(t), {scalarType(ScalarKind::AbstractInt)},
         scalarType(ScalarKind::I32), InputSource::Const, cfgVectorize(t), cases);
 });
 
@@ -1135,7 +1149,7 @@ CTS_TEST(testGroup, "ai_to_u32").params(constVectorizeAliasParams).fn([](AllFeat
     for (uint32_t e : fullU32Range()) {
         cases.push_back({{abstractInt(static_cast<int32_t>(e))}, u32(e)});
     }
-    run(t, bitcastBuilder("u32", cfgVectorize(t)), {scalarType(ScalarKind::AbstractInt)},
+    runBitcast(t, "u32", cfgVectorize(t), {scalarType(ScalarKind::AbstractInt)},
         scalarType(ScalarKind::U32), InputSource::Const, cfgVectorize(t), cases);
 });
 
@@ -1160,7 +1174,7 @@ CTS_TEST(testGroup, "ai_to_f32").params(constVectorizeAliasParams).fn([](AllFeat
         cases.push_back({{abstractInt(static_cast<int32_t>(u))}, f32Bits(u),
                          {f32ResultFromValue(static_cast<double>(f), u)}});
     }
-    run(t, bitcastBuilder("f32", cfgVectorize(t)), {scalarType(ScalarKind::AbstractInt)},
+    runBitcast(t, "f32", cfgVectorize(t), {scalarType(ScalarKind::AbstractInt)},
         scalarType(ScalarKind::F32), InputSource::Const, cfgVectorize(t), cases);
 });
 
@@ -1175,7 +1189,7 @@ CTS_TEST(testGroup, "ai_to_vec2h").params(constAliasParams).fn([](AllFeaturesMax
         cases.push_back({{abstractInt(static_cast<int32_t>(u))}, vec2(f16Bits(0), f16Bits(0)),
                          vec2f16AcceptFromU32(u)});
     }
-    run(t, builtin("bitcast<vec2<f16>>"), {scalarType(ScalarKind::AbstractInt)},
+    runBitcast(t, "vec2<f16>", 0, {scalarType(ScalarKind::AbstractInt)},
         vecType(2, ScalarKind::F16), InputSource::Const, 0, cases);
 });
 
@@ -1195,7 +1209,7 @@ CTS_TEST(testGroup, "vec2ai_to_vec4h").params(constAliasParams).fn([](AllFeature
                          vec4(f16Bits(0), f16Bits(0), f16Bits(0), f16Bits(0)),
                          vec4f16AcceptFromU32x2(a, b)});
     }
-    run(t, builtin("bitcast<vec4<f16>>"), {vecType(2, ScalarKind::AbstractInt)},
+    runBitcast(t, "vec4<f16>", 0, {vecType(2, ScalarKind::AbstractInt)},
         vecType(4, ScalarKind::F16), InputSource::Const, 0, cases);
 });
 

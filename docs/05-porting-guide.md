@@ -58,6 +58,13 @@ tracks a known CTS revision.
 Keep the **order** of `combine`/`expand`/`filter` identical to upstream — order affects the query
 param order and therefore identity.
 
+Port every parameter's effect, not just its name. A parameter the body ignores turns its cases into
+repeats of each other (the `8b086b8` review found async-pipeline flags, `bitcast` aliases and request
+await flags ignored this way). The one accepted exception is a distinction the C API cannot express:
+upstream `createTexture` tests pass `size` as sequences of different lengths to test default values,
+and `WGPUExtent3D` always has three fields, so those native cases build the same descriptor. They are
+kept for query parity with upstream.
+
 ## 3. Expectations mapping
 
 | Upstream | Port |

@@ -77,14 +77,7 @@ WGPUTextureDimension parseDimension(const std::string& dimension) {
 }
 
 bool formatAndDimensionPossiblyCompatible(WGPUTextureDimension dimension, WGPUTextureFormat format) {
-    if (dimension == WGPUTextureDimension_1D && isCompressedTextureFormat(format)) {
-        return false;
-    }
-    if (dimension == WGPUTextureDimension_3D &&
-        (isCompressedTextureFormat(format) || isDepthOrStencilTextureFormat(format))) {
-        return false;
-    }
-    return true;
+    return textureFormatAndDimensionPossiblyCompatible(dimension, format);
 }
 
 bool depthStencilSupported(const ParamRecord& p) {

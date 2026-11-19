@@ -61,9 +61,9 @@ CTS_TEST(g, "values")
             const int64_t bb = brv.i;
             const int64_t vecSize = ty.width;
             // ab = a * b ; ab * vecSize. Each product OOB of int64 fails the check.
+            // Stop before the multiplication once overflow is known: a signed overflow is undefined.
             const bool abOOB = b::i64MulOOB(a, bb);
-            const int64_t ab = a * bb;  // wraps; only meaningful when not OOB.
-            const bool abVecOOB = abOOB || b::i64MulOOB(ab, vecSize);
+            const bool abVecOOB = abOOB || b::i64MulOOB(a * bb, vecSize);
             checksPassed = !abOOB && !abVecOOB;
         } else {
             const double a = rvNum(arv);

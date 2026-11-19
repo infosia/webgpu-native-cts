@@ -25,6 +25,7 @@
 #include "cts/gpu.h"
 #include "cts/test.h"
 #include "webgpu/capability_info.h"
+#include "webgpu/shader/validation/expression/call/builtin/const_override_builtin.h"
 #include "webgpu/texture_format.h"
 #include "webgpu/util/enum_strings.h"
 #include "webgpu/util/texel_data.h"
@@ -77,6 +78,105 @@ CTS_TEST(casePlanGroup, "alpha")
 CTS_TEST(casePlanGroup, "beta")
     .desc("case-plan beta")
     .fn([](cts::Fixture& fixture) { (void)fixture; });
+
+int gCaseSelectSubcaseExpansions = 0;
+
+cts::TestGroup<cts::Fixture> caseSelectGroup =
+    cts::MakeTestGroup<cts::Fixture>("unittest,case_select", "case-selection unit tests");
+
+CTS_TEST(caseSelectGroup, "counted")
+    .desc("counts subcase expansions")
+    .params([](cts::ParamsBuilder u) {
+        return u.combine("a", {0, 1, 2})
+            .beginSubcases()
+            .expand("s", [](const cts::ParamRecord& params) {
+                ++gCaseSelectSubcaseExpansions;
+                const int a = cts::valueAs<int>(*cts::findParam(params, "a"));
+                return std::vector<cts::Value>{cts::Value(a * 10), cts::Value(a * 10 + 1)};
+            });
+    })
+    .fn([](cts::Fixture& fixture) { (void)fixture; });
+
+void testCaseQuerySelectsOnlyThatCase() {
+    gCaseSelectSubcaseExpansions = 0;
+    const std::vector<cts::CaseRun> one =
+        cts::collectCases({cts::parseQuery("webgpu:unittest,case_select:counted:a=1")}, false, nullptr);
+    require(one.size() == 1, "case query selects exactly one case");
+    require(one[0].query == "webgpu:unittest,case_select:counted:a=1", "case query selects the named case");
+    require(one[0].subcases.size() == 2, "selected case keeps its subcases");
+    require(
+        cts::valueAs<int>(*cts::findParam(one[0].subcases[0], "s")) == 10
+            && cts::valueAs<int>(*cts::findParam(one[0].subcases[1], "s")) == 11,
+        "selected case subcase values");
+    require(gCaseSelectSubcaseExpansions == 1, "subcase expander runs only for the selected case");
+
+    gCaseSelectSubcaseExpansions = 0;
+    const std::vector<cts::CaseRun> all =
+        cts::collectCases({cts::parseQuery("webgpu:unittest,case_select:counted:*")}, false, nullptr);
+    require(all.size() == 3, "wildcard query selects every case");
+    require(gCaseSelectSubcaseExpansions == 3, "wildcard query expands every case's subcases");
+
+    gCaseSelectSubcaseExpansions = 0;
+    const std::vector<cts::CaseRun> none =
+        cts::collectCases({cts::parseQuery("webgpu:unittest,case_select:counted:a=7")}, false, nullptr);
+    require(none.empty(), "unmatched case query selects nothing");
+    require(gCaseSelectSubcaseExpansions == 0, "unmatched case query expands no subcases");
+}
+
+// T5 boundary inputs: these previously hit undefined behaviour (an out-of-range double -> integer
+// cast, a signed negation of INT64_MIN). Run the binary under -fsanitize=undefined to check.
+void testShaderValidationBoundaryInputs() {
+    namespace scb = cts::shader_validation::builtin;
+    namespace scv = cts::shader_validation::binary;
+    const double maxF32 = 3.4028234663852886e38;
+    require(scv::numberToString(maxF32) == "3.4028234663852886e+38", "numberToString largest finite f32");
+    require(scv::withPoint(maxF32) == "3.4028234663852886e+38", "withPoint largest finite f32");
+    require(scv::numberToString(-0.0) == "0", "numberToString negative zero");
+    require(scv::numberToString(42.0) == "42", "numberToString integral value");
+    require(scv::saturatingDoubleToI64(9223372036854775808.0) == INT64_MAX, "saturating cast upper limit");
+    require(scv::saturatingDoubleToI64(-1e300) == INT64_MIN, "saturating cast lower limit");
+    require(scv::saturatingDoubleToI64(std::nan("")) == 0, "saturating cast NaN");
+    require(scb::mulDivS64(scb::kI64Min, 1, 1) == scb::kI64Min, "mulDivS64 INT64_MIN");
+    const std::vector<int64_t> range = scb::linearRangeBigInt(scb::kI64Max - 10, scb::kI64Max, 25);
+    require(range.front() == scb::kI64Max - 10 && range.back() == scb::kI64Max, "linearRangeBigInt near INT64_MAX");
+    // The abstract-int dot validator's overflow checks: a*b overflows, so a*b must not be evaluated.
+    const std::vector<int64_t> operands{scb::kI64Max, 2};
+    const int64_t a = operands[0];
+    const int64_t bb = operands[1];
+    const bool abOOB = scb::i64MulOOB(a, bb);
+    const bool abVecOOB = abOOB || scb::i64MulOOB(a * bb, 4);
+    require(abOOB && abVecOOB, "abstract-int dot overflow is detected");
+}
+
+void testBaselineKeepsWorstStatus() {
+    const std::string baselinePath = "cts_unittests_baseline_worst.jsonl";
+    const std::string failLine = cts::resultJsonLine(
+        cts::SubcaseResult{"webgpu:a,b:failpass:*", cts::TestStatus::Fail, "boom"}, false);
+    const std::string passLine = cts::resultJsonLine(
+        cts::SubcaseResult{"webgpu:a,b:failpass:*", cts::TestStatus::Pass, ""}, false);
+    const std::string passLine2 = cts::resultJsonLine(
+        cts::SubcaseResult{"webgpu:a,b:passfail:*", cts::TestStatus::Pass, ""}, false);
+    const std::string failLine2 = cts::resultJsonLine(
+        cts::SubcaseResult{"webgpu:a,b:passfail:*", cts::TestStatus::Fail, "boom"}, false);
+    const std::string skipLine = cts::resultJsonLine(
+        cts::SubcaseResult{"webgpu:a,b:skippass:*", cts::TestStatus::Skip, ""}, false);
+    const std::string passLine3 = cts::resultJsonLine(
+        cts::SubcaseResult{"webgpu:a,b:skippass:*", cts::TestStatus::Pass, ""}, false);
+    {
+        std::ofstream out(baselinePath);
+        out << failLine << "\n" << passLine << "\n";
+        out << passLine2 << "\n" << failLine2 << "\n";
+        out << skipLine << "\n" << passLine3 << "\n";
+    }
+    const std::unordered_map<std::string, std::string> baseline = cts::loadBaseline(baselinePath);
+    std::remove(baselinePath.c_str());
+    require(baseline.at("webgpu:a,b:failpass:*") == "fail", "baseline fail then pass loads as fail");
+    require(baseline.at("webgpu:a,b:passfail:*") == "fail", "baseline pass then fail loads as fail");
+    require(baseline.at("webgpu:a,b:skippass:*") == "skip", "baseline keeps the first non-bad status");
+    require(
+        cts::classifyDelta("fail", baseline, "webgpu:a,b:failpass:*") == cts::BaselineDelta::Unchanged,
+        "unchanged multi-row failure is not a regression");
+}
 
 const cts::TestSpec* findRegisteredTest(const std::string& file, const std::string& name) {
     for (const cts::SpecFile& specFile : cts::Registry::instance().files()) {
@@ -545,8 +645,8 @@ cts::FormatSampleHook representativeFormatHook() {
     };
 }
 
-std::vector<cts::Value> colorFormatValues() {
-    return cts::formatIdentifierValues(cts::kColorTextureFormats);
+std::vector<cts::Value> regularFormatValues() {
+    return cts::formatIdentifierValues(cts::kRegularTextureFormats);
 }
 
 std::size_t totalRuns(const std::vector<cts::ParamsBuilder::ExpandedCase>& cases) {
@@ -557,9 +657,9 @@ std::size_t totalRuns(const std::vector<cts::ParamsBuilder::ExpandedCase>& cases
     return count;
 }
 
-std::size_t representativeColorFormatCount() {
+std::size_t representativeRegularFormatCount() {
     std::size_t count = 0;
-    for (WGPUTextureFormat format : cts::kColorTextureFormats) {
+    for (WGPUTextureFormat format : cts::kRegularTextureFormats) {
         count += cts::isRepresentativeTextureFormat(format) ? 1 : 0;
     }
     return count;
@@ -643,6 +743,9 @@ int main() {
     try {
         testDeviceScopedObjects();
         testParamExpansionOrderWithFilters();
+        testCaseQuerySelectsOnlyThatCase();
+        testBaselineKeepsWorstStatus();
+        testShaderValidationBoundaryInputs();
 
         cts::ParamsBuilder builder;
         auto cases = builder.combine("case", {1, 2}).beginSubcases().combine("subcase", {true, false}).expand();
@@ -736,19 +839,23 @@ int main() {
                 "readable enum params stringify");
         require(cts::valueAs<double>(cts::Value(0.5)) == 0.5, "double valueAs double");
         require(cts::valueAs<double>(cts::Value(1)) == 1.0, "double valueAs int");
-        require(cts::kColorTextureFormats.size() == 43, "color texture format count");
+        require(cts::kColorTextureFormats.size() == 43 + 52, "color texture format count");
+        require(cts::kColorTextureFormats[42] == WGPUTextureFormat_RGB9E5Ufloat
+                    && cts::kColorTextureFormats[43] == WGPUTextureFormat_BC1RGBAUnorm
+                    && cts::kColorTextureFormats.back() == WGPUTextureFormat_ASTC12x12UnormSrgb,
+                "color texture formats are the regular then the compressed formats");
         require(cts::isRepresentativeTextureFormat(WGPUTextureFormat_RGBA8Unorm),
                 "rgba8unorm is representative");
         require(!cts::isRepresentativeTextureFormat(WGPUTextureFormat_RG16Snorm),
                 "rg16snorm is not representative");
-        require(representativeColorFormatCount() == 8, "representative color format count");
+        require(representativeRegularFormatCount() == 8, "representative regular format count");
         testTryParseTextureFormat();
 
         {
             cts::FormatSampleStats stats;
             const auto sampled = cts::sampleFormatsInCases(
                 cts::ParamsBuilder()
-                    .combine("format", colorFormatValues())
+                    .combine("format", regularFormatValues())
                     .combine("mode", {1, 2, 3})
                     .expand(),
                 representativeFormatHook(),
@@ -806,7 +913,7 @@ int main() {
                 cts::ParamsBuilder()
                     .combine("case", {1})
                     .beginSubcases()
-                    .combine("format", colorFormatValues())
+                    .combine("format", regularFormatValues())
                     .expand(),
                 representativeFormatHook());
             require(sampled.size() == 1, "subcase-level format sampling keeps case");
@@ -818,7 +925,7 @@ int main() {
             }
         }
 
-        for (WGPUTextureFormat format : cts::kColorTextureFormats) {
+        for (WGPUTextureFormat format : cts::kRegularTextureFormats) {
             const cts::TexelRepresentation& repr = cts::texelRepresentation(format);
             const std::vector<uint8_t> bytes = sampleBytesForFormat(format);
             const std::vector<uint8_t> roundTrip = repr.packBits(repr.unpackBits(bytes.data(), bytes.size()));

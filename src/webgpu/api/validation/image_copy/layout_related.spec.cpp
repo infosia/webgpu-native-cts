@@ -46,10 +46,14 @@ ImageCopyType parseMethod(const std::string& method) {
     std::abort();
 }
 
+// Upstream kSizedTextureFormats: the regular, the sized depth/stencil (stencil8, depth16unorm,
+// depth32float) and the compressed formats. depth24plus and the combined depth-stencil formats have
+// no defined texel block size.
 std::vector<WGPUTextureFormat> sizedFormats() {
     std::vector<WGPUTextureFormat> formats;
     for (WGPUTextureFormat format : kAllTextureFormats) {
-        if (getBlockInfoForTextureFormat(format).bytesPerBlock > 0) {
+        const TextureFormatInfo& info = textureFormatInfo(format);
+        if (info.bytesPerBlock > 0 && !(info.hasDepth && info.hasStencil)) {
             formats.push_back(format);
         }
     }
@@ -79,10 +83,7 @@ std::string dimensionName(WGPUTextureDimension dimension) {
 }
 
 bool formatAndDimensionPossiblyCompatible(WGPUTextureDimension dimension, WGPUTextureFormat format) {
-    if (dimension == WGPUTextureDimension_1D && isCompressedTextureFormat(format)) return false;
-    if (dimension == WGPUTextureDimension_3D &&
-        (isCompressedTextureFormat(format) || isDepthOrStencilTextureFormat(format))) return false;
-    return true;
+    return textureFormatAndDimensionPossiblyCompatible(dimension, format);
 }
 
 bool formatCopyableWithMethodRecord(const ParamRecord& p) {
@@ -102,16 +103,25 @@ std::vector<Value> dimensionValues() {
     return values;
 }
 
-std::vector<Value> offsetExpander(const ParamRecord& p) {
-    WGPUTextureFormat format = parseTextureFormat(valueAs<std::string>(*findParam(p, "format")));
-    uint32_t align = isDepthOrStencilTextureFormat(format) ? 4 : getBlockInfoForTextureFormat(format).bytesPerBlock;
-    return {Value(int64_t(0)), Value(int64_t(1)), Value(int64_t(align - 1)), Value(int64_t(align)), Value(int64_t(align + 1)), Value(int64_t(2 * align))};
+// Upstream image_copy.ts valuesToTestDivisibilityBy(): every value in [0, 2n], then 3n.
+std::vector<Value> valuesToTestDivisibilityBy(uint32_t number) {
+    std::vector<Value> values;
+    for (uint32_t i = 0; i <= 2 * number; ++i) values.emplace_back(int64_t(i));
+    values.emplace_back(int64_t(3 * number));
+    return values;
 }
 
+// Upstream image_copy.ts texelBlockAlignmentTestExpanderForOffset().
+std::vector<Value> offsetExpander(const ParamRecord& p) {
+    WGPUTextureFormat format = parseTextureFormat(valueAs<std::string>(*findParam(p, "format")));
+    if (isDepthOrStencilTextureFormat(format)) return valuesToTestDivisibilityBy(4);
+    return valuesToTestDivisibilityBy(getBlockInfoForTextureFormat(format).bytesPerBlock);
+}
+
+// Upstream image_copy.ts texelBlockAlignmentTestExpanderForRowsPerImage().
 std::vector<Value> rowsPerImageExpander(const ParamRecord& p) {
     WGPUTextureFormat format = parseTextureFormat(valueAs<std::string>(*findParam(p, "format")));
-    uint32_t blockHeight = getBlockInfoForTextureFormat(format).blockHeight;
-    return {Value(int64_t(0)), Value(int64_t(1)), Value(int64_t(blockHeight - 1)), Value(int64_t(blockHeight)), Value(int64_t(blockHeight + 1)), Value(int64_t(2 * blockHeight))};
+    return valuesToTestDivisibilityBy(getBlockInfoForTextureFormat(format).blockHeight);
 }
 
 uint64_t requiredBytesInCopy(

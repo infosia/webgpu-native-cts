@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "common/query.h"
+#include "cts/format_sample.h"
 #include "cts/test.h"
 
 namespace cts {
@@ -29,5 +31,13 @@ void serializeCasePlan(
 std::vector<PlannedCase> loadCasePlan(const std::string& path);
 bool caseSelectedByShard(size_t position, const RunOptions& options);
 bool singleCasePlanMatchesRunCase(const std::vector<PlannedCase>& cases, const std::string& runCaseQuery);
+
+/// Collects the registered cases selected by `queries`, in registry order. Without
+/// `sampleFormats`, subcases are expanded only for cases whose case-level parameters match a
+/// query; with it, each selected test is fully expanded so format sampling sees every subcase.
+std::vector<CaseRun> collectCases(
+    const std::vector<Query>& queries,
+    bool sampleFormats,
+    FormatSampleStats* stats);
 
 } // namespace cts

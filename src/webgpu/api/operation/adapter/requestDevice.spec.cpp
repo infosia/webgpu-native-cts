@@ -53,6 +53,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -380,10 +381,37 @@ const FeatureNameEntry* findFeature(const std::string& name) {
 // Never destroys/releases the shared harness device.
 // ---------------------------------------------------------------------------
 
+// One wgpuAdapterRequestDevice() call whose callback may not have fired yet (a JS promise that has
+// not been awaited). Owned by OwnedAdapterContext so it outlives the callback.
+struct PendingDeviceRequest {
+    bool completed = false;
+    bool tracked = false;
+    WGPURequestDeviceStatus status = WGPURequestDeviceStatus_Error;
+    WGPUDevice device = nullptr;
+    std::string message;
+};
+
+void onPendingRequestDevice(
+    WGPURequestDeviceStatus status,
+    WGPUDevice device,
+    WGPUStringView message,
+    void* userdata1,
+    void*) {
+    auto* request = static_cast<PendingDeviceRequest*>(userdata1);
+    request->completed = true;
+    request->status = status;
+    request->device = device;
+    if (message.data != nullptr) {
+        request->message = message.length == WGPU_STRLEN ? std::string(message.data)
+                                                         : std::string(message.data, message.length);
+    }
+}
+
 struct OwnedAdapterContext {
     WGPUInstance instance = nullptr;
     WGPUAdapter adapter = nullptr;
     std::vector<WGPUDevice> devices;
+    std::vector<std::unique_ptr<PendingDeviceRequest>> pending;
 
     OwnedAdapterContext() = default;
     OwnedAdapterContext(const OwnedAdapterContext&) = delete;
@@ -399,6 +427,24 @@ struct OwnedAdapterContext {
     }
 
     ~OwnedAdapterContext() {
+        // Settle requests that were never awaited (a test failed before awaiting them) so their
+        // devices are cleaned up; the states stay alive until after the instance is released.
+        if (instance != nullptr && !pending.empty()) {
+            (void)processEventsUntil(instance, [&] {
+                for (const auto& request : pending) {
+                    if (!request->completed) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+        }
+        for (const auto& request : pending) {
+            if (request->completed && !request->tracked && request->device != nullptr) {
+                devices.push_back(request->device);
+                request->tracked = true;
+            }
+        }
         for (WGPUDevice device : devices) {
             wgpuDeviceDestroy(device);
             wgpuDeviceRelease(device);
@@ -440,6 +486,34 @@ DeviceResult requestDeviceTracked(
     DeviceResult dr = requestDeviceSync(ctx.instance, ctx.adapter, descriptor);
     ctx.track(dr.device);
     return dr;
+}
+
+// Issues requestDevice without waiting for it (an un-awaited JS promise). Settle it with
+// awaitDeviceRequest().
+PendingDeviceRequest* startDeviceRequest(
+    OwnedAdapterContext& ctx,
+    const WGPUDeviceDescriptor* descriptor) {
+    ctx.pending.push_back(std::make_unique<PendingDeviceRequest>());
+    PendingDeviceRequest* request = ctx.pending.back().get();
+    WGPURequestDeviceCallbackInfo callbackInfo = WGPU_REQUEST_DEVICE_CALLBACK_INFO_INIT;
+    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    callbackInfo.callback = onPendingRequestDevice;
+    callbackInfo.userdata1 = request;
+    (void)wgpuAdapterRequestDevice(ctx.adapter, descriptor, callbackInfo);
+    return request;
+}
+
+// Waits for a request issued by startDeviceRequest() and tracks its device like
+// requestDeviceTracked().
+DeviceResult awaitDeviceRequest(OwnedAdapterContext& ctx, PendingDeviceRequest* request) {
+    if (!processEventsUntil(ctx.instance, [&] { return request->completed; })) {
+        return DeviceResult{WGPURequestDeviceStatus_Error, nullptr, "requestDevice timed out"};
+    }
+    if (!request->tracked) {
+        ctx.track(request->device);
+        request->tracked = true;
+    }
+    return DeviceResult{request->status, request->device, request->message};
 }
 
 bool deviceHasFeatureExactlyCoreOnly(WGPUDevice device) {
@@ -591,43 +665,67 @@ CTS_TEST(g, "stale")
         const bool initialErrorUndefined = t.paramIsUndefined("initialError");
         const std::string initialError =
             initialErrorUndefined ? std::string() : t.param<std::string>("initialError");
-        // awaitInitialError / awaitSuccess control JS promise timing; on native
-        // every requestDevice is synchronous, so both branches behave the same.
-        // We keep them as case params for identity, then perform the request.
+        const bool awaitInitialError = t.param<bool>("awaitInitialError");
+        const bool awaitSuccess = t.param<bool>("awaitSuccess");
 
+        // Upstream awaits a request (`await`) or leaves it pending and checks it at the end of the
+        // test (shouldReject/shouldResolve). A request that is not awaited is still in flight when
+        // the next one is issued, so each flag combination is a distinct request sequence.
+        PendingDeviceRequest* initial = nullptr;
         if (!initialErrorUndefined) {
-            DeviceResult initial;
             if (initialError == "TypeError") {
                 // Cause a type error by requesting an unknown feature.
                 WGPUFeatureName unknown = static_cast<WGPUFeatureName>(0x7FFFFFFE);
                 WGPUDeviceDescriptor desc = WGPU_DEVICE_DESCRIPTOR_INIT;
                 desc.requiredFeatureCount = 1;
                 desc.requiredFeatures = &unknown;
-                initial = requestDeviceTracked(ctx, &desc);
+                initial = startDeviceRequest(ctx, &desc);
             } else {
                 // Cause an operation error: alignment limit not a power of two.
                 RequiredLimits req;
                 setLimit(req, "minUniformBufferOffsetAlignment", 255);
                 WGPUDeviceDescriptor desc = WGPU_DEVICE_DESCRIPTOR_INIT;
                 desc.requiredLimits = req.finalize();
-                initial = requestDeviceTracked(ctx, &desc);
+                initial = startDeviceRequest(ctx, &desc);
             }
-            t.expect(
-                initial.status != WGPURequestDeviceStatus_Success,
-                "stale: the initial invalid requestDevice must fail");
+            if (awaitInitialError) {
+                const DeviceResult result = awaitDeviceRequest(ctx, initial);
+                t.expect(
+                    result.status != WGPURequestDeviceStatus_Success,
+                    "stale: the initial invalid requestDevice must fail");
+            }
         }
 
         // The first valid attempt should succeed.
-        DeviceResult dr = requestDeviceTracked(ctx, nullptr);
-        t.expect(
-            dr.status == WGPURequestDeviceStatus_Success && dr.device != nullptr,
-            "stale: the first valid requestDevice must succeed");
+        PendingDeviceRequest* success = startDeviceRequest(ctx, nullptr);
+        if (awaitSuccess) {
+            const DeviceResult result = awaitDeviceRequest(ctx, success);
+            t.expect(
+                result.status == WGPURequestDeviceStatus_Success && result.device != nullptr,
+                "stale: the first valid requestDevice must succeed");
+        }
 
         // Since the adapter is consumed now, requesting another device is not
         // possible anymore (upstream: shouldReject 'OperationError').
-        DeviceResult dr2 = requestDeviceTracked(ctx, nullptr);
+        PendingDeviceRequest* consumed = startDeviceRequest(ctx, nullptr);
+
+        // Settle the requests that were not awaited, as upstream's shouldReject/shouldResolve
+        // do at the end of the test.
+        if (initial != nullptr && !awaitInitialError) {
+            const DeviceResult result = awaitDeviceRequest(ctx, initial);
+            t.expect(
+                result.status != WGPURequestDeviceStatus_Success,
+                "stale: the initial invalid requestDevice must fail");
+        }
+        if (!awaitSuccess) {
+            const DeviceResult result = awaitDeviceRequest(ctx, success);
+            t.expect(
+                result.status == WGPURequestDeviceStatus_Success && result.device != nullptr,
+                "stale: the first valid requestDevice must succeed");
+        }
+        const DeviceResult consumedResult = awaitDeviceRequest(ctx, consumed);
         t.expect(
-            dr2.status != WGPURequestDeviceStatus_Success,
+            consumedResult.status != WGPURequestDeviceStatus_Success,
             "stale: requesting a device on a consumed adapter must fail");
     });
 

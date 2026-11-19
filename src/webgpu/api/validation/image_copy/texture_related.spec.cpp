@@ -57,10 +57,16 @@ std::vector<Value> dimensionValues() {
     return values;
 }
 
+// Upstream kSizedTextureFormats: the regular, the sized depth/stencil (stencil8, depth16unorm,
+// depth32float) and the compressed formats. depth24plus and the combined depth-stencil formats have
+// no defined texel block size.
 std::vector<WGPUTextureFormat> sizedFormats() {
     std::vector<WGPUTextureFormat> formats;
     for (WGPUTextureFormat format : kAllTextureFormats) {
-        if (getBlockInfoForTextureFormat(format).bytesPerBlock > 0) formats.push_back(format);
+        const TextureFormatInfo& info = textureFormatInfo(format);
+        if (info.bytesPerBlock > 0 && !(info.hasDepth && info.hasStencil)) {
+            formats.push_back(format);
+        }
     }
     return formats;
 }
@@ -78,10 +84,7 @@ std::vector<Value> colorFormatValues() {
 }
 
 bool formatAndDimensionPossiblyCompatible(WGPUTextureDimension dimension, WGPUTextureFormat format) {
-    if (dimension == WGPUTextureDimension_1D && isCompressedTextureFormat(format)) return false;
-    if (dimension == WGPUTextureDimension_3D &&
-        (isCompressedTextureFormat(format) || isDepthOrStencilTextureFormat(format))) return false;
-    return true;
+    return textureFormatAndDimensionPossiblyCompatible(dimension, format);
 }
 
 bool formatCopyableWithMethodRecord(const ParamRecord& p) {
@@ -105,14 +108,25 @@ WGPUExtent3D virtualMipSize(WGPUTextureDimension dimension, WGPUExtent3D size, u
     return mip;
 }
 
+// Upstream image_copy.ts valuesToTestDivisibilityBy(): every value in [0, 2n], then 3n.
+std::vector<Value> valuesToTestDivisibilityBy(uint32_t number) {
+    std::vector<Value> values;
+    for (uint32_t i = 0; i <= 2 * number; ++i) values.emplace_back(int64_t(i));
+    values.emplace_back(int64_t(3 * number));
+    return values;
+}
+
+// Upstream image_copy.ts texelBlockAlignmentTestExpanderForValueToCoordinate().
 std::vector<Value> valueToCoordinateExpander(const ParamRecord& p) {
     WGPUTextureFormat format = parseTextureFormat(valueAs<std::string>(*findParam(p, "format")));
     const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
-    std::string key = valueAs<std::string>(*findParam(p, "coordinateToTest"));
-    uint32_t align = (key == "y" || key == "height") ? info.blockHeight : info.blockWidth;
-    return {Value(int64_t(0)), Value(int64_t(1)), Value(int64_t(align - 1)), Value(int64_t(align)), Value(int64_t(align + 1)), Value(int64_t(2 * align))};
+    const std::string key = valueAs<std::string>(*findParam(p, "coordinateToTest"));
+    if (key == "x" || key == "width") return valuesToTestDivisibilityBy(info.blockWidth);
+    if (key == "y" || key == "height") return valuesToTestDivisibilityBy(info.blockHeight);
+    return valuesToTestDivisibilityBy(1);
 }
 
+// Upstream image_copy.ts ImageCopyTest.createAlignedTexture().
 WGPUTexture createAlignedTexture(
     AllFeaturesMaxLimitsGpuTest& t,
     WGPUTextureFormat format,
@@ -120,15 +134,11 @@ WGPUTexture createAlignedTexture(
     WGPUOrigin3D origin,
     WGPUTextureDimension dimension) {
     const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
-    WGPUExtent3D size = {
-        std::max(info.blockWidth, static_cast<uint32_t>(alignTo(origin.x + copySize.width + info.blockWidth, info.blockWidth))),
-        std::max(info.blockHeight, static_cast<uint32_t>(alignTo(origin.y + copySize.height + info.blockHeight, info.blockHeight))),
-        std::max(1u, origin.z + copySize.depthOrArrayLayers + 1),
+    const WGPUExtent3D size = {
+        static_cast<uint32_t>(alignTo(std::max(1u, copySize.width + origin.x), info.blockWidth)),
+        static_cast<uint32_t>(alignTo(std::max(1u, copySize.height + origin.y), info.blockHeight)),
+        std::max(1u, copySize.depthOrArrayLayers + origin.z),
     };
-    if (dimension == WGPUTextureDimension_1D) {
-        size.height = 1;
-        size.depthOrArrayLayers = 1;
-    }
     WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
     desc.size = size;
     desc.dimension = dimension;

@@ -192,8 +192,8 @@ inline int64_t mulDivS64(int64_t a, int64_t b, int64_t c) {
             }
         }
     }
-    const int64_t res = static_cast<int64_t>(q);
-    return neg ? -res : res;
+    // Negate in unsigned arithmetic: negating a signed INT64_MIN is undefined.
+    return static_cast<int64_t>(neg ? (~q + 1ull) : q);
 }
 
 inline int64_t lerpBigInt(int64_t a, int64_t b, int idx, int steps) {
@@ -208,7 +208,9 @@ inline int64_t lerpBigInt(int64_t a, int64_t b, int idx, int steps) {
     if ((a <= 0 && b >= 0) || (a >= 0 && b <= 0)) {
         return mulDivS64(b, bigIdx, bigStepsM1) + (a - mulDivS64(a, bigIdx, bigStepsM1));
     }
-    const int64_t x = a + mulDivS64(b, bigIdx, bigStepsM1) - mulDivS64(a, bigIdx, bigStepsM1);
+    // a and b share a sign, so the difference of the two scaled terms fits int64 and a + difference
+    // lies between a and b. Upstream evaluates this in BigInt; `a + b*i/s` alone can overflow.
+    const int64_t x = a + (mulDivS64(b, bigIdx, bigStepsM1) - mulDivS64(a, bigIdx, bigStepsM1));
     if (!(b > a)) {
         return std::max(b, x);
     }
@@ -420,8 +422,9 @@ inline std::vector<RangeValue> fullRangeForType(const Type& type, int count = 25
     return out;
 }
 
-// unique(...arrays) preserving first-seen order. Floats compared by bit pattern
-// (matches JS Set identity for distinct numbers); ints by value.
+// unique(...arrays) preserving first-seen order, like upstream's JS `Set`: numbers are compared with
+// SameValueZero (+0 and -0 are one value, every NaN is one value, everything else by bit pattern);
+// ints by value.
 inline std::vector<RangeValue> uniqueRanges(const std::vector<std::vector<RangeValue>>& arrays) {
     std::vector<RangeValue> out;
     std::set<int64_t> seenI;
@@ -434,7 +437,11 @@ inline std::vector<RangeValue> uniqueRanges(const std::vector<std::vector<RangeV
                 }
             } else {
                 uint64_t bits;
-                std::memcpy(&bits, &rv.d, sizeof(bits));
+                const double key = rv.d == 0.0 ? 0.0 : rv.d;  // -0 -> +0
+                std::memcpy(&bits, &key, sizeof(bits));
+                if (std::isnan(rv.d)) {
+                    bits = 0x7ff8000000000000ull;  // one key for every NaN
+                }
                 if (seenD.insert(bits).second) {
                     out.push_back(rv);
                 }
@@ -562,7 +569,7 @@ inline BuiltinValue createBuiltinValue(const Type& type, const RangeValue& rv) {
         v.elements.assign(static_cast<size_t>(n), q);
     } else {
         v.isInt = true;
-        int64_t iv = rv.isInt ? rv.i : static_cast<int64_t>(rv.d);
+        int64_t iv = rv.isInt ? rv.i : bt::saturatingDoubleToI64(rv.d);
         // i32/u32 wrap; abstract-int exact.
         if (k == ScalarKind::I32) {
             iv = static_cast<int32_t>(iv);
@@ -588,7 +595,7 @@ inline BuiltinValue createBuiltinValueVec(const Type& type, const std::vector<Ra
     } else {
         v.isInt = true;
         for (const RangeValue& rv : elems) {
-            int64_t iv = rv.isInt ? rv.i : static_cast<int64_t>(rv.d);
+            int64_t iv = rv.isInt ? rv.i : bt::saturatingDoubleToI64(rv.d);
             if (k == ScalarKind::I32) {
                 iv = static_cast<int32_t>(iv);
             } else if (k == ScalarKind::U32) {

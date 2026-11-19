@@ -85,14 +85,50 @@ bool isColorFloatLikeFormat(WGPUTextureFormat format) {
     return id.find("uint") == std::string_view::npos && id.find("sint") == std::string_view::npos;
 }
 
+// Upstream format_info.ts is32Float().
+bool is32FloatFormat(WGPUTextureFormat format) {
+    return format == WGPUTextureFormat_R32Float || format == WGPUTextureFormat_RG32Float
+        || format == WGPUTextureFormat_RGBA32Float;
+}
+
+// The color formats upstream format_info.ts types 'unfilterable-float': the 16-bit unorm/snorm
+// formats and the 32-bit float formats.
+bool isUnfilterableFloatColorFormat(WGPUTextureFormat format) {
+    switch (format) {
+        case WGPUTextureFormat_R16Unorm:
+        case WGPUTextureFormat_R16Snorm:
+        case WGPUTextureFormat_RG16Unorm:
+        case WGPUTextureFormat_RG16Snorm:
+        case WGPUTextureFormat_RGBA16Unorm:
+        case WGPUTextureFormat_RGBA16Snorm:
+            return true;
+        default:
+            return is32FloatFormat(format);
+    }
+}
+
+// True if the format's sample type is 'float' (upstream getTextureFormatType() === 'float'): a
+// non-integer color format that is not 'unfilterable-float'.
+bool isFloatSampleTypeFormat(WGPUTextureFormat format) {
+    return isColorFloatLikeFormat(format) && !isUnfilterableFloatColorFormat(format);
+}
+
+// Upstream format_info.ts isTextureFormatPossiblyFilterableAsTextureF32():
+// `info.color?.type === 'float' || is32Float(format)`. Depth formats are not filterable as
+// texture_xxx<f32>; the 32-bit float formats are, once 'float32-filterable' is enabled.
 bool isPossiblyFilterableAsTextureF32(WGPUTextureFormat format) {
-    if (isDepthFormat(format)) {
+    return isFloatSampleTypeFormat(format) || is32FloatFormat(format);
+}
+
+// Upstream format_info.ts isTextureFormatFilterable().
+bool isTextureFormatFilterableOnDevice(WGPUDevice device, WGPUTextureFormat format) {
+    if (isFloatSampleTypeFormat(format)) {
         return true;
     }
-    if (!isColorFloatLikeFormat(format)) {
-        return false;
+    if (is32FloatFormat(format)) {
+        return wgpuDeviceHasFeature(device, WGPUFeatureName_Float32Filterable) != WGPU_FALSE;
     }
-    return std::string_view(textureFormatInfo(format).identifier).find("32float") == std::string_view::npos;
+    return false;
 }
 
 bool containsFormatToken(WGPUTextureFormat format, std::string_view token) {
@@ -1886,6 +1922,11 @@ int64_t f32UlpDistance(float a, float b) {
 
 void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     t.skipIfTextureFormatNotSupported(c.format);
+    // Upstream skipIfTextureFormatNotSupportedOrNeedsFilteringAndIsUnfilterable(): a linear
+    // filter needs a filterable format (the 32-bit float formats need 'float32-filterable').
+    if (!c.isDepth && c.filt == "linear" && !isTextureFormatFilterableOnDevice(t.device(), c.format)) {
+        t.skip(std::string(textureFormatIdentifier(c.format)) + " is not filterable");
+    }
     c.baseSize = adjustedBaseSizeForFormat(c);
     if (c.textureDimension == WGPUTextureDimension_3D && isBCTextureFormat(c.format)
         && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureCompressionBCSliced3D)) {
@@ -2494,7 +2535,7 @@ WGPUTextureSampleType metadataSampleType(WGPUTextureFormat format, WGPUTextureAs
     if (formatLooksSint(format)) {
         return WGPUTextureSampleType_Sint;
     }
-    if (samples > 1 || !isPossiblyFilterableAsTextureF32(format)) {
+    if (samples > 1 || !isFloatSampleTypeFormat(format)) {
         return WGPUTextureSampleType_UnfilterableFloat;
     }
     return WGPUTextureSampleType_Float;
@@ -4000,6 +4041,12 @@ const SamplingPipelineBundle& gatherPipelineForDevice(AllFeaturesMaxLimitsGpuTes
 
 void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     t.skipIfTextureFormatNotSupported(c.format);
+    // Upstream textureGather.spec.ts skipIfTextureFormatNotSupportedOrNeedsFilteringAndIsUnfilterable():
+    // a linear sampler needs a filterable format; r32float/rg32float/rgba32float need
+    // 'float32-filterable'.
+    if (!c.isDepth && c.filt == "linear" && !isTextureFormatFilterableOnDevice(t.device(), c.format)) {
+        t.skip(std::string(textureFormatIdentifier(c.format)) + " is not filterable");
+    }
     if (c.viewDimension == WGPUTextureViewDimension_Cube || c.viewDimension == WGPUTextureViewDimension_CubeArray) {
         t.skipIfTextureViewDimensionNotSupported(c.viewDimension);
     }

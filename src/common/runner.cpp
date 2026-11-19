@@ -232,6 +232,26 @@ bool isBadEffectiveStatus(const std::string& status) {
     return status == "fail" || status == "crash";
 }
 
+// Folds one row's effective status into the per-query map. A query reported by several rows
+// (one per subcase) keeps the first status unless a later row is bad (fail/crash) and the kept one
+// is not: a bad status is never replaced by a good one. Shared by the current run and the baseline
+// loader so both sides of a --baseline comparison aggregate identically. Returns true when the
+// query was seen for the first time.
+bool mergeEffectiveStatus(
+    std::unordered_map<std::string, std::string>& statuses,
+    const std::string& query,
+    const std::string& effective) {
+    auto found = statuses.find(query);
+    if (found == statuses.end()) {
+        statuses.emplace(query, effective);
+        return true;
+    }
+    if (!isBadEffectiveStatus(found->second) && isBadEffectiveStatus(effective)) {
+        found->second = effective;
+    }
+    return false;
+}
+
 } // namespace
 
 ExpectationSet loadExpectations(const std::string& path) {
@@ -286,7 +306,7 @@ std::unordered_map<std::string, std::string> loadBaseline(const std::string& pat
             effective = jsonStringField(line, "status");
         }
         if (effective) {
-            baseline[*query] = *effective;
+            mergeEffectiveStatus(baseline, *query, *effective);
         }
     }
     return baseline;
@@ -341,10 +361,6 @@ void printTestListLine(const std::string& file, const TestSpec& test, bool sampl
     std::cout << "\n";
 }
 
-std::vector<CaseRun> collectCases(
-    const std::vector<Query>& queries,
-    bool sampleFormats,
-    FormatSampleStats* stats);
 std::vector<SubcaseResult> runCase(const CaseRun& c);
 
 size_t expandedCaseExpectedResultCount(const ParamsBuilder::ExpandedCase& c) {
@@ -425,6 +441,8 @@ std::vector<SubcaseResult> collectRuns(
     return results;
 }
 
+} // namespace
+
 std::vector<CaseRun> collectCases(
     const std::vector<Query>& queries,
     bool sampleFormats,
@@ -439,13 +457,36 @@ std::vector<CaseRun> collectCases(
             if (!testSelected) {
                 continue;
             }
-            auto cases = sampledExpandedCases(test, sampleFormats, stats);
-            for (auto& c : cases) {
-                bool selected = false;
+            const auto caseSelected = [&](const ParamRecord& params) {
                 for (const Query& q : queries) {
-                    selected = selected || queryMatchesCase(q, file.path, test.name, c.params);
+                    if (queryMatchesCase(q, file.path, test.name, params)) {
+                        return true;
+                    }
                 }
-                if (!selected) {
+                return false;
+            };
+            std::vector<ParamsBuilder::ExpandedCase> cases;
+            if (sampleFormats) {
+                // Format sampling decides per test, from every case's subcases, whether the test is
+                // thinned; expanding only the selected cases would change which cases it keeps.
+                cases = sampledExpandedCases(test, sampleFormats, stats);
+            } else {
+                // Mirror upstream (test_group.ts iterate()): filter on the case-level parameters
+                // first and expand subcases only for the selected cases.
+                const ParamsBuilder builder = buildParams(test);
+                for (ParamRecord& caseParams : builder.expandCaseParams()) {
+                    if (!caseSelected(caseParams)) {
+                        continue;
+                    }
+                    std::optional<ParamsBuilder::ExpandedCase> expanded =
+                        builder.expandSubcases(std::move(caseParams));
+                    if (expanded) {
+                        cases.push_back(std::move(*expanded));
+                    }
+                }
+            }
+            for (auto& c : cases) {
+                if (!caseSelected(c.params)) {
                     continue;
                 }
                 std::string query = caseQuery(file.path, test.name, c.params);
@@ -463,6 +504,8 @@ std::vector<CaseRun> collectCases(
     }
     return runs;
 }
+
+namespace {
 
 std::vector<SubcaseResult> runCase(const CaseRun& c) {
     static std::optional<std::string> previousFile;
@@ -2042,14 +2085,8 @@ void mergeCurrentEffective(
     std::vector<std::string>& order,
     const std::string& query,
     const std::string& effective) {
-    auto found = current.find(query);
-    if (found == current.end()) {
-        current.emplace(query, effective);
+    if (mergeEffectiveStatus(current, query, effective)) {
         order.push_back(query);
-        return;
-    }
-    if (!isBadEffectiveStatus(found->second) && isBadEffectiveStatus(effective)) {
-        found->second = effective;
     }
 }
 
