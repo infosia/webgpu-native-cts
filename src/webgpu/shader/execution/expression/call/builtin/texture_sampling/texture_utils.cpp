@@ -1920,6 +1920,35 @@ int64_t f32UlpDistance(float a, float b) {
     return diff < 0 ? -diff : diff;
 }
 
+// The software copy of a depth texture filled by initializeDepthTexture(), as single-channel
+// R32Float texels (D, 0, 0, 1), so a depth format sampled through texture_*<f32> takes the color
+// sampling path (addressing, cube faces, LOD clamps, mip selection) like any other format.
+std::vector<MipData> makeDepthAsColorTexelData(const TextureCase& c) {
+    std::vector<MipData> mips;
+    mips.reserve(c.mipLevelCount);
+    for (uint32_t mip = 0; mip < c.mipLevelCount; ++mip) {
+        MipData mipData;
+        mipData.format = WGPUTextureFormat_R32Float;
+        mipData.layout = getTextureCopyLayout(WGPUTextureFormat_R32Float, c.textureDimension, c.baseSize, mip);
+        mipData.size = mipData.layout.mipSize;
+        mipData.data.assign(static_cast<size_t>(mipData.layout.byteLength), 0);
+        for (uint32_t z = 0; z < mipData.size.depthOrArrayLayers; ++z) {
+            const float depth = static_cast<float>(depthValue(mip, z));
+            for (uint32_t y = 0; y < mipData.size.height; ++y) {
+                for (uint32_t x = 0; x < mipData.size.width; ++x) {
+                    const uint64_t offset = (static_cast<uint64_t>(z) * mipData.layout.rowsPerImage
+                                                + static_cast<uint64_t>(y))
+                            * mipData.layout.bytesPerRow
+                        + static_cast<uint64_t>(x) * sizeof(float);
+                    std::memcpy(mipData.data.data() + offset, &depth, sizeof(float));
+                }
+            }
+        }
+        mips.push_back(std::move(mipData));
+    }
+    return mips;
+}
+
 void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     t.skipIfTextureFormatNotSupported(c.format);
     // Upstream skipIfTextureFormatNotSupportedOrNeedsFilteringAndIsUnfilterable(): a linear
@@ -1946,6 +1975,12 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         t.skipIfTextureFormatAndDimensionNotCompatible(c.format, WGPUTextureDimension_3D);
     }
 
+    // A depth format in a sampled-texture test: upstream samples it as texture_*<f32> over the
+    // depth aspect (nearest filtering only; the params exclude linear). The texture is filled like
+    // the texture_depth_* path and its expected values come from the depth aspect.
+    const bool colorViewOfDepth = !c.isDepth && isDepthFormat(c.format);
+    const bool useDepthInit = c.isDepth || colorViewOfDepth;
+
     WGPUTextureDescriptor textureDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
     textureDesc.size = c.baseSize;
     textureDesc.mipLevelCount = c.mipLevelCount;
@@ -1953,15 +1988,18 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     textureDesc.dimension = c.textureDimension;
     textureDesc.format = c.format;
     textureDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
-    if (c.isDepth) {
+    if (useDepthInit) {
         textureDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment;
     }
     WGPUTexture texture = t.createTextureTracked(textureDesc);
 
     const bool constantForCube = isCubeKind(c.kind);
     std::vector<MipData> mips;
-    if (c.isDepth) {
+    if (useDepthInit) {
         initializeDepthTexture(t, texture, c);
+        if (colorViewOfDepth) {
+            mips = makeDepthAsColorTexelData(c);
+        }
     } else if (isCompressedTextureFormat(c.format)) {
         std::vector<MipData> compressedMips = makeCompressedTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount);
         uploadColorTexture(t, texture, c, compressedMips);
@@ -1973,11 +2011,12 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
 
     WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
     viewDesc.dimension = c.viewDimension;
-    viewDesc.format = c.isDepth ? WGPUTextureFormat_Undefined : c.format;
+    viewDesc.format = c.isDepth ? WGPUTextureFormat_Undefined
+        : (colorViewOfDepth ? viewFormatForAspect(c.format, WGPUTextureAspect_DepthOnly) : c.format);
     viewDesc.baseMipLevel = c.baseMipLevel;
     viewDesc.mipLevelCount = c.mipLevelCount - c.baseMipLevel;
     viewDesc.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
-    if (c.isDepth) {
+    if (useDepthInit) {
         viewDesc.aspect = WGPUTextureAspect_DepthOnly;
     }
     WGPUTextureView view = t.createViewTracked(texture, viewDesc);
@@ -2005,12 +2044,21 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
             expected.push_back(softwareSampleDepthCompare(call, c, mipWeights));
         } else if (c.isDepth) {
             expected.push_back(softwareSampleDepth(call, c, mipWeights));
+        } else if (colorViewOfDepth) {
+            expected.push_back(softwareSampleColor(mips, WGPUTextureFormat_R32Float, call, c, mipWeights));
         } else if (c.baseClampToEdge) {
             expected.push_back(sampleColorOneMip(mips[0], c.format, call, c));
         } else {
             expected.push_back(softwareSampleColor(mips, c.format, call, c, mipWeights));
         }
     }
+    // Upstream getComponentsToCheck(): a depth texture read through texture_*<f32> is (D, ?, ?, ?)
+    // (https://gpuweb.github.io/gpuweb/#reading-depth-stencil), or (D, 0, 0, 1) with
+    // 'texture-component-swizzle'. Without the feature only the R component is checked.
+    const size_t componentsToCheck = colorViewOfDepth
+            && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureComponentSwizzle)
+        ? 1u
+        : 4u;
 
     const std::string wgsl = c.stage == "compute"
         ? buildComputeWgsl(static_cast<uint32_t>(calls.size()), c)
@@ -2104,7 +2152,7 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
             }
             const double tolerance = c.maxFractionalDiff.value_or(comparisonToleranceForFormat(c.format, c.filt));
             for (size_t i = 0; i < calls.size(); ++i) {
-                for (size_t component = 0; component < 4; ++component) {
+                for (size_t component = 0; component < componentsToCheck; ++component) {
                     const size_t byteOffset = c.stage == "compute"
                         ? (i * 4u + component) * sizeof(float)
                         : i * 16u + component * sizeof(float);
@@ -3777,12 +3825,25 @@ WGPUTextureSampleType gatherTextureSampleType(const TextureCase& c) {
     if (gatherFormatIsSint(c.format)) {
         return WGPUTextureSampleType_Sint;
     }
-    // Depth formats reaching the color path (texture_2d<f32> over a depth
-    // texture) are unfilterable. Gather always uses a non-filtering sampler.
-    if (isDepthFormat(c.format)) {
+    // Upstream texture_utils.ts doTextureCalls(): a filtering sampler needs a 'float' binding
+    // (the case is skipped unless the format is filterable on the device, which covers *32float
+    // under 'float32-filterable'). Otherwise the format's own sample type is used: depth formats
+    // reaching the color path (texture_2d<f32> over a depth texture) and the unfilterable color
+    // formats bind as 'unfilterable-float'.
+    if (c.filt == "linear") {
+        return WGPUTextureSampleType_Float;
+    }
+    if (isDepthFormat(c.format) || isUnfilterableFloatColorFormat(c.format)) {
         return WGPUTextureSampleType_UnfilterableFloat;
     }
     return WGPUTextureSampleType_Float;
+}
+
+WGPUSamplerBindingType gatherSamplerBindingType(const TextureCase& c) {
+    if (c.comparisonSampler) {
+        return WGPUSamplerBindingType_Comparison;
+    }
+    return c.filt == "linear" ? WGPUSamplerBindingType_Filtering : WGPUSamplerBindingType_NonFiltering;
 }
 
 // Returns the four gather corner texels (component values) for one call. For
@@ -3958,9 +4019,7 @@ WGPUBindGroupLayout createGatherBindGroupLayout(WGPUDevice device, const Texture
     entries[1].binding = 1;
     entries[1].visibility = visibility;
     entries[1].sampler = WGPU_SAMPLER_BINDING_LAYOUT_INIT;
-    entries[1].sampler.type = c.comparisonSampler
-        ? WGPUSamplerBindingType_Comparison
-        : WGPUSamplerBindingType_NonFiltering;
+    entries[1].sampler.type = gatherSamplerBindingType(c);
     entries[2].binding = 2;
     entries[2].visibility = WGPUShaderStage_Compute;
     entries[2].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
@@ -4026,7 +4085,7 @@ const SamplingPipelineBundle& gatherPipelineForDevice(AllFeaturesMaxLimitsGpuTes
     // sampled as unfilterable-float). Include them in the cache key.
     std::ostringstream keyStream;
     keyStream << wgsl << "\n// bgl: sampleType=" << static_cast<int>(gatherTextureSampleType(c))
-              << " comparison=" << (c.comparisonSampler ? 1 : 0)
+              << " sampler=" << static_cast<int>(gatherSamplerBindingType(c))
               << " view=" << static_cast<int>(c.viewDimension);
     const std::string key = keyStream.str();
     auto it = deviceCache.find(key);
@@ -4127,12 +4186,13 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     samplerDesc.addressModeU = c.modeU;
     samplerDesc.addressModeV = c.modeV;
     samplerDesc.addressModeW = c.modeW;
-    // Gather ignores min/mag/mip filtering (it always emits the four corner
-    // texels of level 0). Use a non-filtering sampler so the binding is valid
-    // for every format, including uint/sint/unfilterable-float.
-    samplerDesc.minFilter = WGPUFilterMode_Nearest;
-    samplerDesc.magFilter = WGPUFilterMode_Nearest;
-    samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    // Gather results do not depend on min/mag/mip filtering (it always emits the four corner
+    // texels of level 0), but upstream binds a sampler with the case's filter: a linear case
+    // checks that a filtering sampler binds with the format (*32float under
+    // 'float32-filterable').
+    samplerDesc.minFilter = filterModeFromString(c.filt);
+    samplerDesc.magFilter = filterModeFromString(c.filt);
+    samplerDesc.mipmapFilter = c.filt == "linear" ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
     if (c.comparisonSampler) {
         samplerDesc.compare = compareFunctionFromString(c.compare);
     }
@@ -4762,11 +4822,6 @@ bool isStage1Sampled2DSupported(const ParamRecord& record) {
 bool isIncrement2SampledFormatSupported(const ParamRecord& record) {
     const WGPUTextureFormat format = paramFormat(record);
     return isUncompressed(format) && isColorFloatLikeFormat(format);
-}
-
-bool isSampledColorTextureFormatParam(const ParamRecord& record) {
-    const WGPUTextureFormat format = paramFormat(record);
-    return isColorTextureFormat(format);
 }
 
 bool isSampled1DColorTextureFormatParam(const ParamRecord& record) {

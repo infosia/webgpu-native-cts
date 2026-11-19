@@ -31,7 +31,6 @@ bool cubeEdgesOnlyForCube(const ParamRecord& record);
 bool cubeOffsetsUnsupported(const ParamRecord& record);
 bool isStage1Sampled2DSupported(const ParamRecord& record);
 bool isIncrement2SampledFormatSupported(const ParamRecord& record);
-bool isSampledColorTextureFormatParam(const ParamRecord& record);
 bool isSampled1DColorTextureFormatParam(const ParamRecord& record);
 bool isComputeStage(const ParamRecord& record);
 bool isStorageReadWriteFormatParam(const ParamRecord& record);

@@ -126,7 +126,7 @@ must match.
 
 Found while implementing T4.
 
-1. **Depth formats in the `textureSample*` color tests.** Native drops the five depth formats from 15
+1. **Depth formats in the `textureSample*` color tests.** Native drops the five depth formats from 20
    tests (`textureSample`, `textureSampleBias`, `textureSampleGrad`, `textureSampleLevel`:
    `sampled_*` / `arrayed_*` / `lodClamp` variants) with its own `isSampledColorTextureFormatParam`
    filter. Upstream enumerates them with `filt="nearest"` and samples them as `texture_*<f32>` over
@@ -170,7 +170,7 @@ Found while implementing T4.
 - [ ] T6: `bgl_visibility_mismatch` enumerates 832 subcases.
 - [ ] T7: `atan2:values` subcase count drops by 940; `bitcast` alias cases produce WGSL with an alias
       declaration; `requestDevice:stale` issues overlapping requests when an await flag is false.
-- [ ] T8: the 15 `textureSample*` tests enumerate exactly upstream's case and subcase counts, and
+- [ ] T8: the 20 `textureSample*` tests enumerate exactly upstream's case and subcase counts, and
       `textureGather` binds a sampler with the case's filter.
 - [ ] Apart from T2, T4, T6, T7.1 and T8, `cts --list-cases 'webgpu:*'` is unchanged; REPORT.md lists
       every test whose case list changed.

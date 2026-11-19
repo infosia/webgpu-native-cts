@@ -17,7 +17,6 @@ TestGroup<AllFeaturesMaxLimitsGpuTest> testGroup = MakeTestGroup<AllFeaturesMaxL
 CTS_TEST(testGroup, "sampled_2d_coords")
     .params([](ParamsBuilder u) {
         return addSampledTextureCommonParams(u, true, true)
-            .filter(isSampledColorTextureFormatParam)
             .combine("offset", {false, true})
             .beginSubcases()
             .combine("samplePoints", samplePointMethods());
@@ -27,7 +26,6 @@ CTS_TEST(testGroup, "sampled_2d_coords")
 CTS_TEST(testGroup, "sampled_3d_coords")
     .params([](ParamsBuilder u) {
         return addSampledTextureCommonParams(u, true, true)
-            .filter(isSampledColorTextureFormatParam)
             .combine("dim", {"3d", "cube"})
             .combine("modeW", shortAddressModes())
             .combine("offset", {false, true})
@@ -41,7 +39,6 @@ CTS_TEST(testGroup, "sampled_3d_coords")
 CTS_TEST(testGroup, "sampled_array_2d_coords")
     .params([](ParamsBuilder u) {
         return addSampledTextureCommonParams(u, true, true)
-            .filter(isSampledColorTextureFormatParam)
             .combine("offset", {false, true})
             .beginSubcases()
             .combine("samplePoints", samplePointMethods())
@@ -53,7 +50,6 @@ CTS_TEST(testGroup, "sampled_array_2d_coords")
 CTS_TEST(testGroup, "sampled_array_3d_coords")
     .params([](ParamsBuilder u) {
         return addSampledTextureCommonParams(u, false, false)
-            .filter(isSampledColorTextureFormatParam)
             .combine("mode", shortAddressModes())
             .beginSubcases()
             .combine("samplePoints", cubeSamplePointMethods())
