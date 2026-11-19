@@ -209,9 +209,26 @@ so it enumerates BC and ASTC 3D textures (136 records were missing from the T10 
 extra exclusion and make the textureLoad 3D fill and expected-value path handle compressed 3D
 textures (block layout per depth slice, `materializeCompressedTexels` for 3D).
 
+### T13 — No constant-filled textures left in the texture builtin helpers (batch G)
+
+Found while implementing T11. `textureLoad` on `stencil8` uploads all-zero texels, so a backend that
+returns zero passes (the false-pass-on-zero pattern). Audit every texture the texture builtin helpers
+(`texture_sampling/texture_utils.cpp`) create for a test and fill per texel wherever upstream fills
+with random data, including:
+
+- the stencil aspect for `textureLoad` (stencil8 and combined depth-stencil formats), using the T9
+  stencil generator; multisampled stencil textures are filled by rendering one bit plane per draw, as
+  T9 does, since copies cannot write them;
+- any remaining path that clears a texture to a constant (`stencilClearValue = 0`,
+  `depthClearValue = 0.5`, colour clears) for data a test then reads, unless upstream also uses a
+  constant there.
+
+Each fill helper fails the test if a mip level with at least two texels holds one value. Where
+upstream's own test uses a constant on purpose, keep it and say so in the report.
+
 ## Scope
 
-**In:** T1-T12 above, with unit tests for T1.
+**In:** T1-T13 above, with unit tests for T1.
 
 **Out:**
 - Removing upstream cases or renaming tests. Query names and parameters stay identical to upstream,
@@ -252,6 +269,8 @@ textures (block layout per depth slice, `materializeCompressedTexels` for 3D).
 - [ ] T11: no cube or cube-array texture in the texture builtin tests is filled with a single value
       per mip level; `--list-cases 'webgpu:*'` is unchanged by T11.
 - [ ] T12: `textureLoad:sampled_3d` enumerates exactly upstream's cases and subcases.
+- [ ] T13: every texture a texture builtin test reads holds per-texel data, unless upstream uses a
+      constant for that texture (each such exception listed in the report); `--list-cases` unchanged.
 - [ ] Apart from T2, T4, T6, T7.1, T8 and T12, `cts --list-cases 'webgpu:*'` is unchanged; REPORT.md lists
       every test whose case list changed.
 
