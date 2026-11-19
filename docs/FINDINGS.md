@@ -182,6 +182,34 @@ comment, not checked against an upstream checkout.
 
 ---
 
+## F-167 — Metal (Apple M2): `textureSampleBias` with offset + repeat/mirror on non-block-aligned compressed mips — OPEN (Dawn; matches Dawn's own expectations)
+
+**METAL / APPLE GPU ACCURACY** (found 2026-11-20, Dawn `v20261030.184100`, CTS `d116bcc`, Apple M2).
+Exposed once the suite ported upstream's sample-point generators (spec
+`specs/test-review-fixes-8b086b8.md`, T10). Before that the native generator never produced these
+calls.
+
+`webgpu:shader,execution,expression,call,builtin,textureSampleBias:{sampled_2d_coords,arrayed_2d_coords}`
+fails in 1,004 cases (2,788 subcases), deterministically across runs. Every failure has:
+
+- a compressed format whose block does not divide the test texture's lower mip levels: bc*, etc2/eac
+  and astc up to 10x5, on the 12×12 (15-high for ×5 ASTC) textures that upstream's `minBlocks: 3`
+  sizing produces, so levels 1-2 are 6×6 and 3×3 texels;
+- `offset=true`, with a call whose coordinate wraps (`modeU` or `modeV` = `repeat`/`mirror`); the
+  same format with `clamp`/`clamp` passes, and every `offset=false` case passes;
+- a sample on one of those non-block-aligned levels, typically reached through the ±25 extreme bias.
+
+The port's software model applies the offset and then the address mode over the virtual mip size, as
+upstream's does. Dawn's own `webgpu-cts/expectations.txt` marks every `textureSampleBias` test as
+failing on Mac M2 (`crbug.com/407076135`) and lists the same `offset=true; modeU="c"; modeV="r"`
+pattern as failing on Mac AMD (`crbug.com/407109059`). The defect is attributed to Metal sampling,
+not to Dawn's translation; it was not cross-checked on yawgpu or MoltenVK.
+
+`expectations/dawn.txt` lists the 849 cases in which every subcase fails. The other 155 cases also
+have passing subcases and are left visible as failures, per the case-level expectation rule.
+
+---
+
 ## F-166 — wgpu-native: `wgpuDevice{Render,Compute}PipelineAsync` are unimplemented — OPEN (expected aborts, not yet run)
 
 **wgpu-native GAP** (found 2026-11-20 from source, wgpu-native `6aed509`). Both entry points are

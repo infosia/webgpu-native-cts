@@ -33,6 +33,7 @@
 #include "webgpu/util/texture_layout.h"
 #include "webgpu/util/texture_ok.h"
 #include "webgpu/util/write_buffer.h"
+#include "webgpu/shader/execution/expression/call/builtin/texture_sampling/sample_points.h"
 
 namespace {
 
@@ -737,6 +738,138 @@ void testDeviceScopedObjects() {
             "release destroys distinct slots in reverse creation order");
 }
 
+
+// T10: the sample-point generators (texture_sampling/sample_points.h) reproduce upstream's
+// generateTextureBuiltinInputs{1D,2D,3D} / generateSamplePointsCube. The expected values were
+// produced by upstream's generators (d116bcc) run in node for the named test cases.
+void testTextureBuiltinSamplePoints() {
+    namespace sp = cts::texture_utils::sample_points;
+    const auto closeEnough = [](double a, double b) {
+        // derivativeMult is 2^level: Math.pow and std::pow may differ in the last bit.
+        return a == b || std::abs(a - b) <= 1e-15 * std::max(std::abs(a), std::abs(b));
+    };
+    const auto vecEq = [](const std::vector<double>& a, std::initializer_list<double> b) {
+        return a == std::vector<double>(b);
+    };
+    const auto sampler = [](sp::BuiltinInputArgs& a, const char* filter, const char* mipmap, const char* u, const char* v, const char* w) {
+        a.hasSampler = true;
+        a.minFilter = filter;
+        a.mipmapFilter = mipmap;
+        a.addressModeU = u;
+        a.addressModeV = v;
+        a.addressModeW = w;
+    };
+    {
+        // textureSampleBias:sampled_2d_coords format=r8unorm filt=nearest modeU=c modeV=c offset=false texel-centre
+        sp::BuiltinInputArgs a;
+        a.method = "texel-centre";
+        a.size = {{8, 8, 1}};
+        a.mipLevelCount = 3;
+        sampler(a, "nearest", "nearest", "clamp-to-edge", "clamp-to-edge", "");
+        a.bias = true;
+        a.hashInputs = {731, 1232, 99, 99, 754, 0};
+        const auto calls = sp::generateTextureBuiltinInputs(2, 50, a);
+        require(calls.size() == 50, "samplePoints bias count");
+        require(vecEq(calls[3].coords, {0.4375, 0.5625}), "samplePoints bias coords");
+        require(calls[3].bias == 25.0, "samplePoints bias value");
+        require(closeEnough((*calls[3].derivativeMult)[0], 7.682461166814555e-06) && (*calls[3].derivativeMult)[1] == 0.0,
+            "samplePoints bias derivativeMult");
+    }
+    {
+        // textureSampleGrad:sampled_3d_coords format=r8unorm dim=3d texel-centre (no mipmapFilter)
+        sp::BuiltinInputArgs a;
+        a.method = "texel-centre";
+        a.dimension = "3d";
+        a.size = {{8, 8, 8}};
+        a.mipLevelCount = 3;
+        sampler(a, "nearest", "", "clamp-to-edge", "clamp-to-edge", "clamp-to-edge");
+        a.grad = true;
+        a.hashInputs = {731, 151, 1232, 99, 99, 99, 754, 0};
+        const auto calls = sp::generateTextureBuiltinInputs(3, 50, a);
+        require(vecEq(calls[3].coords, {0.4375, 0.5625, 0.6875}), "samplePoints grad coords");
+        require(vecEq(*calls[3].ddx, {-2.237927830661647, -0.17969929380342364, 2.9495719709666446}), "samplePoints grad ddx");
+        require(vecEq(*calls[3].ddy, {-4.064239362836815, -3.07222454843577, -1.1307222278555855}), "samplePoints grad ddy");
+    }
+    {
+        // textureGather:sampled_2d_coords stage=c format=r8unorm C=i32 texel-centre
+        sp::BuiltinInputArgs a;
+        a.method = "texel-centre";
+        a.textureBuiltin = "textureGather";
+        a.size = {{8, 8, 1}};
+        a.mipLevelCount = 3;
+        sampler(a, "nearest", "nearest", "clamp-to-edge", "clamp-to-edge", "");
+        a.component = true;
+        a.hashInputs = {99, 731, 206, 1232, 99, 99, 754, 0};
+        const auto calls = sp::generateTextureBuiltinInputs(2, 50, a);
+        require(vecEq(calls[3].coords, {0.46875, 0.59375}), "samplePoints gather coords");
+        require(calls[3].component == 1.0, "samplePoints gather component");
+    }
+    {
+        // textureSampleLevel:sampled_array_3d_coords stage=c format=r8unorm mode=c A=i32 spiral
+        sp::BuiltinInputArgs a;
+        a.method = "spiral";
+        a.size = {{32, 32, 24}};
+        a.mipLevelCount = 3;
+        sampler(a, "nearest", "nearest", "clamp-to-edge", "clamp-to-edge", "clamp-to-edge");
+        a.mipLevel = sp::RangeDef{3, "f32"};
+        a.arrayIndex = sp::RangeDef{4, "i32"};
+        a.hashInputs = {99, 731, 1003, 206, 651, 99, 754};
+        const auto calls = sp::generateSamplePointsCube(50, a);
+        require(vecEq(calls[7].coords, {-0.454175344306175, 0.23965710050104438, 0.8580729752205226}), "samplePoints cube coords");
+        require(calls[7].mipLevel == 0.35923344059847295, "samplePoints cube mipLevel");
+        require(calls[7].arrayIndex == 0.0, "samplePoints cube arrayIndex");
+    }
+    {
+        // textureSample:sampled_3d_coords format=r8snorm dim=cube modeU=m modeV=r modeW=c cube-edges
+        sp::BuiltinInputArgs a;
+        a.method = "cube-edges";
+        a.size = {{8, 8, 6}};
+        sampler(a, "nearest", "nearest", "mirror-repeat", "repeat", "clamp-to-edge");
+        a.derivatives = true;
+        a.hashInputs = {729, 415, 980, 109, 114, 99, 754, 0};
+        const auto calls = sp::generateSamplePointsCube(50, a);
+        require(calls.size() == 24, "samplePoints cube-edges count");
+        require(vecEq(calls[7].coords, {-0.6816174482400568, -0.04848324945640572, 0.7301006976964626}), "samplePoints cube-edges coords");
+        require(closeEnough((*calls[7].derivativeMult)[1], 0.5358867312681466), "samplePoints cube-edges derivativeMult");
+    }
+    {
+        // textureSampleCompare:2d_coords format=depth16unorm compare=never spiral
+        sp::BuiltinInputArgs a;
+        a.method = "spiral";
+        a.textureBuiltin = "textureSampleCompare";
+        a.size = {{16, 16, 1}};
+        a.mipLevelCount = 3;
+        a.depthOrStencilFormat = true;
+        sampler(a, "nearest", "nearest", "clamp-to-edge", "clamp-to-edge", "");
+        a.derivatives = true;
+        a.depthRef = true;
+        a.hashInputs = {1197, 651, 99, 99, 754, 0};
+        const auto calls = sp::generateTextureBuiltinInputs(2, 50, a);
+        require(vecEq(calls[7].coords, {0.453125, 0.703125}), "samplePoints compare coords");
+        require(closeEnough((*calls[7].derivativeMult)[0], 7.464263932294459), "samplePoints compare derivativeMult");
+        require(calls[7].depthRef == 0.0, "samplePoints compare depthRef");
+    }
+    {
+        // textureLoad:arrayed stage=c format=r8unorm C=i32 A=u32 L=u32 depthOrArrayLayers=1 texel-centre
+        sp::BuiltinInputArgs a;
+        a.method = "texel-centre";
+        a.size = {{8, 8, 1}};
+        a.mipLevelCount = 4;
+        a.mipLevel = sp::RangeDef{4, "u32"};
+        a.arrayIndex = sp::RangeDef{1, "u32"};
+        a.hashInputs = {99, 731, 1232, 206, 218, 218};
+        const auto calls = sp::generateTextureBuiltinInputs(2, 50, a);
+        require(vecEq(calls[3].coords, {0.4375, 0.5625}) && calls[3].mipLevel == 0.0 && calls[3].arrayIndex == 0.0,
+            "samplePoints load call");
+    }
+    // hashU32 over JavaScript numbers (values from node): an `undefined` input (NaN), fractional,
+    // large and negative inputs.
+    require(sp::jsHashU32(std::vector<double>{sp::hashInputUndefined()}) == 0.0, "hashU32 undefined");
+    require(sp::jsHashU32(std::vector<double>{99, sp::hashInputUndefined(), 7}) == 18645525.0, "hashU32 undefined middle");
+    require(sp::jsHashU32(std::vector<double>{0.25, 1e10, -3}) == 2428909787.0, "hashU32 fractional/large/negative");
+}
+
+
 } // namespace
 
 int main() {
@@ -746,6 +879,7 @@ int main() {
         testCaseQuerySelectsOnlyThatCase();
         testBaselineKeepsWorstStatus();
         testShaderValidationBoundaryInputs();
+        testTextureBuiltinSamplePoints();
 
         cts::ParamsBuilder builder;
         auto cases = builder.combine("case", {1, 2}).beginSubcases().combine("subcase", {true, false}).expand();

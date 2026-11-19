@@ -5,6 +5,8 @@
 
 #include "webgpu/shader/execution/expression/call/builtin/texture_sampling/texture_utils.h"
 
+#include "webgpu/shader/execution/expression/call/builtin/texture_sampling/sample_points.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -300,14 +302,6 @@ uint64_t nestedCacheEntryCount(
     return count;
 }
 
-double implicitMipLevelForCall(uint32_t index, uint32_t mipLevelCount) {
-    if (mipLevelCount <= 1) {
-        return 0.0;
-    }
-    static constexpr std::array<double, 6> kMipLevels = {{0.20, 0.80, 1.20, 1.80, 0.35, 1.65}};
-    return std::min(kMipLevels[index % kMipLevels.size()], static_cast<double>(mipLevelCount - 1u));
-}
-
 double rand01(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
     return static_cast<double>(hashU32({a, b, c, d})) / 4294967296.0;
 }
@@ -351,16 +345,24 @@ struct Vec3 {
     double z = 0.0;
 };
 
+// One texture builtin call, from the upstream sample-point generators (sample_points.h).
 struct SampleCall {
     Vec3 coords;
+    // The level argument (textureSampleLevel); for the other builtins the software model replaces
+    // it with the level it selects (expectedLevelForCall()).
     double level = 0.0;
-    Vec3 derivativeMult{1.0, 0.0, 0.0};
+    // Multiplies derivativeBase in the implicit-derivative builtins; upstream uses 1 when the call
+    // has none.
+    Vec3 derivativeMult{1.0, 1.0, 1.0};
     Vec3 ddx{0.0, 0.0, 0.0};
     Vec3 ddy{0.0, 0.0, 0.0};
     double bias = 0.0;
     double depthRef = 0.0;
     std::optional<std::array<int32_t, 3>> offset;
-    std::optional<uint32_t> arrayIndex;
+    // May be outside [0, layers): i32 indices start at -1 and both types reach the layer count.
+    std::optional<int32_t> arrayIndex;
+    // textureGather component.
+    std::optional<int32_t> component;
 };
 
 struct MipData {
@@ -439,16 +441,29 @@ struct TextureCase {
     bool baseClampToEdge = false;
     bool gather = false;
     bool gatherCompare = false;
-    int gatherComponent = 0;
+    // WGSL literal suffix of the textureGather component ('i' or 'u', from the C param).
+    std::string gatherComponentType = "u";
     std::string gatherResultType = "f32";
-    // Keep baseSize as given instead of block-aligning every mip level; only for formats and sizes
-    // the device accepts ('texture-compression-unaligned').
-    bool unalignedBaseSize = false;
     // When not empty, these are the sample coordinates, all at level 0.
     std::vector<Vec3> explicitCoords;
     // When set, a component passes if it is within this of the expected value or within 3 f32 ULPs
     // of it (upstream's texelsApproximatelyEqual), instead of comparisonToleranceForFormat.
     std::optional<double> maxFractionalDiff;
+
+    // --- Inputs of upstream's sample-point generator call (sample_points.h) ---
+    // The test's hashInputs, already converted to numbers.
+    std::vector<double> hashInputs;
+    std::optional<sample_points::RangeDef> mipLevelRange;
+    std::optional<sample_points::RangeDef> arrayIndexRange;
+    bool genDerivatives = false;
+    bool genGrad = false;
+    bool genBias = false;
+    bool genComponent = false;
+    bool genDepthRef = false;
+    // False when the test's sampler descriptor leaves minFilter / mipmapFilter undefined.
+    bool samplerHasFilter = true;
+    // False when the test's sampler descriptor sets minFilter but leaves mipmapFilter undefined.
+    bool samplerHasMipmapFilter = true;
 };
 
 bool isCubeKind(SampleKind kind) {
@@ -634,30 +649,6 @@ uint32_t randomStencilTexelValue(WGPUExtent3D mipSize, uint32_t mipLevel, uint32
     return upstreamHashU32({x, y, z, sampleIndex, kStencilComponentCharCode, mipLevel, mipSize.width,
                             mipSize.height, mipSize.depthOrArrayLayers})
         & 0xffu;
-}
-
-WGPUExtent3D adjustedBaseSizeForFormat(const TextureCase& c) {
-    WGPUExtent3D size = c.baseSize;
-    if (!isCompressedTextureFormat(c.format) || c.unalignedBaseSize) {
-        return size;
-    }
-    const TextureBlockInfo info = getBlockInfoForTextureFormat(c.format);
-    // Keep all three tested mip levels block-aligned. For cube/cube-array,
-    // the square side must satisfy both block dimensions.
-    const uint32_t widthMultiple = info.blockWidth << (c.mipLevelCount - 1u);
-    const uint32_t heightMultiple = info.blockHeight << (c.mipLevelCount - 1u);
-    const uint32_t squareMultiple = lcmU32(widthMultiple, heightMultiple);
-    size.width = alignToU32(std::max(size.width, widthMultiple), widthMultiple);
-    if (c.textureDimension != WGPUTextureDimension_1D) {
-        size.height = alignToU32(std::max(size.height, heightMultiple), heightMultiple);
-    }
-    if (c.viewDimension == WGPUTextureViewDimension_Cube || c.viewDimension == WGPUTextureViewDimension_CubeArray) {
-        const uint32_t largest = std::max(size.width, size.height);
-        const uint32_t side = alignToU32(largest, squareMultiple);
-        size.width = side;
-        size.height = side;
-    }
-    return size;
 }
 
 std::vector<MipData> makeCompressedTextureData(WGPUTextureFormat format, WGPUTextureDimension dimension, WGPUExtent3D baseSize, uint32_t mipLevelCount) {
@@ -894,17 +885,30 @@ std::array<double, 4> loadAddressedTexel(
     return {applyCompareToDepth(texel[0], depthCompare->compare, depthCompare->depthRef), 0.0, 0.0, 1.0};
 }
 
+// The first texture layer a call reads: the array index clamped to [0, arrayCount - 1] (upstream
+// softwareTextureReadMipLevel), times 6 for cube arrays.
+int32_t clampedArrayLayer(const SampleCall& call, const TextureCase& c) {
+    if (!c.useArrayIndex || !call.arrayIndex.has_value()) {
+        return 0;
+    }
+    const bool cube = isCubeKind(c.kind);
+    const int32_t layers = static_cast<int32_t>(c.baseSize.depthOrArrayLayers);
+    const int32_t arrayCount = std::max(1, cube ? layers / 6 : layers);
+    const int32_t index = std::clamp(*call.arrayIndex, 0, arrayCount - 1);
+    return cube ? index * 6 : index;
+}
+
 std::array<double, 4> sampleColorOneMip(
     const MipData& mip,
     WGPUTextureFormat format,
     SampleCall call,
     const TextureCase& c,
     const DepthCompare* depthCompare = nullptr) {
+    call.arrayIndex = clampedArrayLayer(call, c);
     if (isCubeKind(c.kind)) {
         const Vec3 faceCoord = normalizedCubeToFaceCoord(call.coords);
-        const uint32_t arrayBase = c.useArrayIndex ? (*call.arrayIndex) * 6u : 0u;
         call.coords = Vec3{faceCoord.x, faceCoord.y, 0.0};
-        call.arrayIndex = arrayBase + static_cast<uint32_t>(faceCoord.z);
+        call.arrayIndex = *call.arrayIndex + static_cast<int32_t>(faceCoord.z);
     }
 
     const int32_t ox = call.offset ? (*call.offset)[0] : 0;
@@ -952,6 +956,15 @@ std::array<double, 4> sampleColorOneMip(
     return mixTexel(zA, zB, tz);
 }
 
+// The sampler's mipmapFilter: the case's filter, or nearest (the default) when the test's
+// sampler leaves it undefined.
+WGPUMipmapFilterMode mipmapFilterOf(const TextureCase& c) {
+    if (!c.samplerHasFilter || !c.samplerHasMipmapFilter) {
+        return WGPUMipmapFilterMode_Nearest;
+    }
+    return c.filt == "linear" ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
+}
+
 std::array<double, 4> softwareSampleColor(
     const std::vector<MipData>& mips,
     WGPUTextureFormat format,
@@ -962,7 +975,7 @@ std::array<double, 4> softwareSampleColor(
     const double clampedLevel = std::clamp(call.level, c.lodMinClamp, c.lodMaxClamp);
     const double level = std::clamp(clampedLevel, 0.0, static_cast<double>(c.mipLevelCount - c.baseMipLevel - 1u));
     const uint32_t baseMip = c.baseMipLevel + static_cast<uint32_t>(std::floor(level));
-    if (filterModeFromString(c.filt) == WGPUFilterMode_Nearest) {
+    if (mipmapFilterOf(c) == WGPUMipmapFilterMode_Nearest) {
         const double mix = calibratedMixWeight(weights.nearest, level);
         const uint32_t mip = std::min<uint32_t>(baseMip + (mix >= 0.5 ? 1u : 0u), c.mipLevelCount - 1u);
         return sampleColorOneMip(mips[mip], format, call, c, depthCompare);
@@ -997,14 +1010,6 @@ std::array<double, 4> softwareSampleDepthCompare(
     depthCompare.compare = compareFunctionFromString(c.compare);
     depthCompare.depthRef = call.depthRef;
     return softwareSampleColor(depthMips, WGPUTextureFormat_R32Float, call, c, weights, &depthCompare);
-}
-
-std::string wgslFloat(double value) {
-    std::ostringstream out;
-    out.setf(std::ios::fixed);
-    out.precision(8);
-    out << value;
-    return out.str();
 }
 
 WGPUTextureFormat viewFormatForAspect(WGPUTextureFormat format, WGPUTextureAspect aspect) {
@@ -1106,19 +1111,12 @@ std::string coordParamExprForSample(std::string_view param, const TextureCase& c
     return "(" + coordParamExpr(param, c) + " + derivativeBase * " + derivativeMultParamExpr(param, c) + ")";
 }
 
-std::array<int32_t, 3> offsetForCallIndex(uint32_t i) {
-    return {
-        static_cast<int32_t>(i % 3u) - 1,
-        static_cast<int32_t>((i / 3u) % 3u) - 1,
-        static_cast<int32_t>((i / 9u) % 3u) - 1,
-    };
-}
-
-std::string offsetExprForCallIndex(uint32_t i, const TextureCase& c) {
-    if (!c.useOffset) {
+// The constant offset argument of one call (upstream bakes each call's offset into the shader).
+std::string offsetExprForCall(const SampleCall& call, const TextureCase& c) {
+    if (!c.useOffset || !call.offset.has_value()) {
         return {};
     }
-    const std::array<int32_t, 3> offset = offsetForCallIndex(i);
+    const std::array<int32_t, 3>& offset = *call.offset;
     std::ostringstream out;
     if (c.textureDimension == WGPUTextureDimension_3D) {
         out << ", vec3i(" << offset[0] << ", " << offset[1] << ", " << offset[2] << ")";
@@ -1191,7 +1189,8 @@ void writeSampleParamsHeader(std::ostringstream& wgsl) {
          << "@group(0) @binding(3) var<storage, read> params: array<SampleParams>;\n";
 }
 
-std::string buildComputeWgsl(uint32_t callCount, const TextureCase& c) {
+std::string buildComputeWgsl(const std::vector<SampleCall>& calls, const TextureCase& c) {
+    const uint32_t callCount = static_cast<uint32_t>(calls.size());
     std::ostringstream wgsl;
     wgsl << "// texture-sampling structural shader; stage=" << c.stage << "; filter=" << c.filt << "\n"
          << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
@@ -1206,14 +1205,14 @@ std::string buildComputeWgsl(uint32_t callCount, const TextureCase& c) {
     if (usesUnconditionalCallSelection(c)) {
         wgsl << "  var result = vec4f(0.0);\n";
         for (uint32_t i = 0; i < callCount; ++i) {
-            wgsl << "  let call" << i << " = " << sampleExprFromParams("p", c, offsetExprForCallIndex(i, c)) << ";\n"
+            wgsl << "  let call" << i << " = " << sampleExprFromParams("p", c, offsetExprForCall(calls[i], c)) << ";\n"
                  << "  result = select(result, call" << i << ", i == " << i << "u);\n";
         }
         wgsl << "  out[i] = result;\n";
     } else if (c.useOffset) {
         for (uint32_t i = 0; i < callCount; ++i) {
             wgsl << "  if (i == " << i << "u) { out[" << i << "] = "
-                 << sampleExprFromParams("p", c, offsetExprForCallIndex(i, c)) << "; }\n";
+                 << sampleExprFromParams("p", c, offsetExprForCall(calls[i], c)) << "; }\n";
         }
     } else {
         wgsl << "  out[i] = " << sampleExprFromParams("p", c) << ";\n";
@@ -1222,7 +1221,8 @@ std::string buildComputeWgsl(uint32_t callCount, const TextureCase& c) {
     return wgsl.str();
 }
 
-std::string buildRenderWgsl(uint32_t callCount, const TextureCase& c) {
+std::string buildRenderWgsl(const std::vector<SampleCall>& calls, const TextureCase& c) {
+    const uint32_t callCount = static_cast<uint32_t>(calls.size());
     std::ostringstream wgsl;
     const std::string derivativeType = c.textureDimension == WGPUTextureDimension_1D
         ? "f32"
@@ -1246,14 +1246,14 @@ std::string buildRenderWgsl(uint32_t callCount, const TextureCase& c) {
     if (usesUnconditionalCallSelection(c)) {
         wgsl << "  var result = vec4f(0.0);\n";
         for (uint32_t i = 0; i < callCount; ++i) {
-            wgsl << "  let call" << i << " = " << sampleExprFromParams("p", c, offsetExprForCallIndex(i, c)) << ";\n"
+            wgsl << "  let call" << i << " = " << sampleExprFromParams("p", c, offsetExprForCall(calls[i], c)) << ";\n"
                  << "  result = select(result, call" << i << ", i == " << i << "u);\n";
         }
         wgsl << "  return result;\n";
     } else if (c.useOffset) {
         for (uint32_t i = 0; i < callCount; ++i) {
             wgsl << "  if (i == " << i << "u) { return "
-                 << sampleExprFromParams("p", c, offsetExprForCallIndex(i, c)) << "; }\n";
+                 << sampleExprFromParams("p", c, offsetExprForCall(calls[i], c)) << "; }\n";
         }
         wgsl << "  return vec4f(0.0);\n";
     } else {
@@ -1292,6 +1292,123 @@ std::string buildRenderWgsl(uint32_t callCount, const TextureCase& c) {
     return wgsl.str();
 }
 
+std::string addressModeName(WGPUAddressMode mode) {
+    switch (mode) {
+        case WGPUAddressMode_Repeat:
+            return "repeat";
+        case WGPUAddressMode_MirrorRepeat:
+            return "mirror-repeat";
+        default:
+            return "clamp-to-edge";
+    }
+}
+
+std::string textureDimensionName(WGPUTextureDimension dimension) {
+    switch (dimension) {
+        case WGPUTextureDimension_1D:
+            return "1d";
+        case WGPUTextureDimension_3D:
+            return "3d";
+        default:
+            return "2d";
+    }
+}
+
+// Number of coordinate components the generator produces for this case.
+uint32_t coordComponentCount(const TextureCase& c) {
+    if (isCubeKind(c.kind) || c.textureDimension == WGPUTextureDimension_3D) {
+        return 3;
+    }
+    return c.textureDimension == WGPUTextureDimension_1D ? 1u : 2u;
+}
+
+// The arguments upstream passes to generateTextureBuiltinInputs{1D,2D,3D} /
+// generateSamplePointsCube for this case.
+sample_points::BuiltinInputArgs builtinInputArgsForCase(const TextureCase& c) {
+    sample_points::BuiltinInputArgs args;
+    args.method = c.samplePoints;
+    args.textureBuiltin = c.gather ? c.builtin : std::string();
+    args.dimension = textureDimensionName(c.textureDimension);
+    args.size = {{static_cast<double>(c.baseSize.width), static_cast<double>(c.baseSize.height),
+                  static_cast<double>(c.baseSize.depthOrArrayLayers)}};
+    args.mipLevelCount = static_cast<double>(c.mipLevelCount);
+    args.depthOrStencilFormat = isDepthOrStencilTextureFormat(c.format);
+    if (c.baseMipLevel != 0) {
+        args.viewBaseMipLevel = static_cast<double>(c.baseMipLevel);
+    }
+    args.hasSampler = true;
+    if (c.samplerHasFilter) {
+        args.minFilter = c.filt;
+        if (c.samplerHasMipmapFilter) {
+            args.mipmapFilter = c.filt;
+        }
+    }
+    args.addressModeU = addressModeName(c.modeU);
+    args.addressModeV = addressModeName(c.modeV);
+    args.addressModeW = addressModeName(c.modeW);
+    args.derivatives = c.genDerivatives;
+    args.grad = c.genGrad;
+    args.bias = c.genBias;
+    args.component = c.genComponent;
+    args.depthRef = c.genDepthRef;
+    args.offset = c.useOffset;
+    args.mipLevel = c.mipLevelRange;
+    args.arrayIndex = c.arrayIndexRange;
+    args.hashInputs = c.hashInputs;
+    return args;
+}
+
+std::vector<sample_points::BuiltinInput> runGenerator(const sample_points::BuiltinInputArgs& args, bool cube, uint32_t dims) {
+    std::vector<sample_points::BuiltinInput> inputs = cube
+        ? sample_points::generateSamplePointsCube(kCallCount, args)
+        : sample_points::generateTextureBuiltinInputs(dims, kCallCount, args);
+    return inputs;
+}
+
+std::vector<sample_points::BuiltinInput> generateBuiltinInputsForCase(const TextureCase& c) {
+    return runGenerator(builtinInputArgsForCase(c), isCubeKind(c.kind), coordComponentCount(c));
+}
+
+Vec3 vec3FromComponents(const std::vector<double>& v, double fill) {
+    return Vec3{
+        v.size() > 0 ? v[0] : fill,
+        v.size() > 1 ? v[1] : fill,
+        v.size() > 2 ? v[2] : fill,
+    };
+}
+
+SampleCall sampleCallFromBuiltinInput(const sample_points::BuiltinInput& input) {
+    SampleCall call;
+    call.coords = vec3FromComponents(input.coords, 0.0);
+    call.level = input.mipLevel;
+    if (input.derivativeMult.has_value()) {
+        call.derivativeMult = vec3FromComponents(*input.derivativeMult, 0.0);
+    }
+    if (input.ddx.has_value()) {
+        call.ddx = vec3FromComponents(*input.ddx, 0.0);
+    }
+    if (input.ddy.has_value()) {
+        call.ddy = vec3FromComponents(*input.ddy, 0.0);
+    }
+    call.bias = input.bias.value_or(0.0);
+    call.depthRef = input.depthRef.value_or(0.0);
+    if (input.offset.has_value()) {
+        std::array<int32_t, 3> offset = {0, 0, 0};
+        for (size_t i = 0; i < input.offset->size() && i < 3; ++i) {
+            offset[i] = static_cast<int32_t>((*input.offset)[i]);
+        }
+        call.offset = offset;
+    }
+    if (input.arrayIndex.has_value()) {
+        call.arrayIndex = static_cast<int32_t>(*input.arrayIndex);
+    }
+    if (input.component.has_value()) {
+        call.component = static_cast<int32_t>(*input.component);
+    }
+    return call;
+}
+
+// The calls of one case: upstream's generated sample points, or the case's explicit coordinates.
 std::vector<SampleCall> generateCalls(const TextureCase& c) {
     std::vector<SampleCall> calls;
     if (!c.explicitCoords.empty()) {
@@ -1303,109 +1420,10 @@ std::vector<SampleCall> generateCalls(const TextureCase& c) {
         }
         return calls;
     }
-    // For cube gather, generate interior (non-edge) face points with a 0.75
-    // sub-texel offset so the 2x2 footprint stays within a single face and is
-    // unambiguous. Upstream's cube gather likewise avoids face edges/corners,
-    // which are implementation-defined for gather.
-    const bool cubeGather = c.gather && isCubeKind(c.kind);
-    const bool cubeEdges = c.samplePoints == "cube-edges" && !cubeGather;
-    const uint32_t n = cubeEdges ? 24u : kCallCount;
-    calls.reserve(n);
-    static constexpr std::array<Vec3, 24> cubeEdgeCoords = {{
-        {1, -1.01, 0}, {1, 1.01, 0}, {1, 0, -1.01}, {1, 0, 1.01},
-        {-1, -1.01, 0}, {-1, 1.01, 0}, {-1, 0, -1.01}, {-1, 0, 1.01},
-        {-1.01, 1, 0}, {1.01, 1, 0}, {0, 1, -1.01}, {0, 1, 1.01},
-        {-1.01, -1, 0}, {1.01, -1, 0}, {0, -1, -1.01}, {0, -1, 1.01},
-        {-1.01, 0, 1}, {1.01, 0, 1}, {0, -1.01, 1}, {0, 1.01, 1},
-        {-1.01, 0, -1}, {1.01, 0, -1}, {0, -1.01, -1}, {0, 1.01, -1},
-    }};
-    for (uint32_t i = 0; i < n; ++i) {
-        SampleCall call;
-        if (cubeGather) {
-            // Pick an interior texel on a rotating face and offset by 0.75.
-            const uint32_t w = std::max(2u, c.baseSize.width);
-            const uint32_t h = std::max(2u, std::max(1u, c.baseSize.height));
-            const uint32_t face = i % 6u;
-            const uint32_t tx = 1u + (i % std::max(1u, w - 2u));
-            const uint32_t ty = 1u + ((i / 6u) % std::max(1u, h - 2u));
-            const Vec3 uvLayer{
-                (static_cast<double>(tx) + 0.75) / static_cast<double>(w),
-                (static_cast<double>(ty) + 0.75) / static_cast<double>(h),
-                (static_cast<double>(face) + 0.5) / 6.0,
-            };
-            call.coords = normalized3DTextureCoordToCubeCoord(uvLayer);
-        } else if (cubeEdges) {
-            call.coords = cubeEdgeCoords[i];
-        } else if (c.samplePoints == "texel-centre") {
-            const uint32_t x = i % c.baseSize.width;
-            const uint32_t y = (i / c.baseSize.width) % std::max(1u, c.baseSize.height);
-            const uint32_t z = (i / (c.baseSize.width * std::max(1u, c.baseSize.height)))
-                % std::max(1u, c.baseSize.depthOrArrayLayers);
-            call.coords = Vec3{
-                (static_cast<double>(x) + 0.5) / static_cast<double>(c.baseSize.width),
-                (static_cast<double>(y) + 0.5) / static_cast<double>(std::max(1u, c.baseSize.height)),
-                (static_cast<double>(z) + 0.5) / static_cast<double>(std::max(1u, c.baseSize.depthOrArrayLayers)),
-            };
-            if (isCubeKind(c.kind)) {
-                call.coords = Vec3{call.coords.x * 2.0 - 1.0, call.coords.y * 2.0 - 1.0, 1.0};
-            }
-        } else if (isCubeKind(c.kind)) {
-            const double f = static_cast<double>(i + 1u) / static_cast<double>(std::max(2u, n) - 1u);
-            const double r = 1.5 * f;
-            const double theta = 2.0 * 2.0 * 3.14159265358979323846 * f;
-            const double phi = 2.0 * 1.3 * 3.14159265358979323846 * f;
-            call.coords = Vec3{std::cos(theta) * std::sin(phi) * r, std::cos(phi) * r, std::sin(theta) * std::sin(phi) * r};
-        } else {
-            const double r = 0.13 + static_cast<double>(i % 17u) * 0.061;
-            const double theta = static_cast<double>(i) * 2.399963229728653;
-            call.coords = Vec3{0.5 + std::cos(theta) * r, 0.5 + std::sin(theta) * r, 0.0};
-        }
-        // Gather selects the 2x2 footprint of one channel. At a texel centre the
-        // footprint center lands exactly on a texel boundary (coord*W-0.5 is an
-        // integer), where the hardware may round the four texels in either
-        // direction. Snap non-cube gather coordinates to texel+0.75 so the
-        // footprint is unambiguous (matches upstream's 0.75 offset trick).
-        if (c.gather && !isCubeKind(c.kind)) {
-            const double w = static_cast<double>(c.baseSize.width);
-            const double h = static_cast<double>(std::max(1u, c.baseSize.height));
-            const double tx = std::floor(std::clamp(call.coords.x, 0.0, 1.0) * w);
-            const double ty = std::floor(std::clamp(call.coords.y, 0.0, 1.0) * h);
-            call.coords.x = (std::min(tx, w - 1.0) + 0.75) / w;
-            call.coords.y = (std::min(ty, h - 1.0) + 0.75) / h;
-        }
-        const bool gradientBuiltin = c.builtin == "textureSample" || c.builtin == "textureSampleGrad"
-            || c.builtin == "textureSampleBias" || c.builtin == "textureSampleCompare";
-        call.level = gradientBuiltin
-            ? implicitMipLevelForCall(i, c.mipLevelCount)
-            : (c.levelType == "f32" ? static_cast<double>(i % 5u) * 0.5 : static_cast<double>(i % c.mipLevelCount));
-        if (c.builtin == "textureSampleCompareLevel" || c.builtin == "textureSampleBaseClampToEdge") {
-            call.level = 0.0;
-        }
-        if (gradientBuiltin) {
-            call.derivativeMult = Vec3{std::pow(2.0, call.level), 0.0, 0.0};
-            const double dx = std::pow(2.0, call.level) / static_cast<double>(std::max(1u, c.baseSize.width));
-            call.ddx = Vec3{dx, 0.0, 0.0};
-            call.ddy = Vec3{0.0, 0.0, 0.0};
-        }
-        if (c.comparisonSampler) {
-            static constexpr std::array<double, 8> kDepthRefs = {{0.01, 0.18, 0.31, 0.44, 0.57, 0.70, 0.83, 0.96}};
-            call.depthRef = kDepthRefs[(i + static_cast<uint32_t>(compareFunctionFromString(c.compare))) % kDepthRefs.size()];
-        }
-        if (c.builtin == "textureSampleBias") {
-            static constexpr std::array<double, 6> kBiases = {{-1.0, 0.5, 1.25, -0.75, 0.0, 1.0}};
-            call.bias = kBiases[i % kBiases.size()];
-            call.level = std::clamp(call.level + std::clamp(call.bias, -16.0, 15.99), 0.0, static_cast<double>(c.mipLevelCount - 1u));
-        }
-        if (c.useOffset) {
-            call.offset = offsetForCallIndex(i);
-        }
-        if (c.useArrayIndex) {
-            const uint32_t arrayCount = c.viewDimension == WGPUTextureViewDimension_CubeArray
-                ? c.baseSize.depthOrArrayLayers / 6u
-                : c.baseSize.depthOrArrayLayers;
-            call.arrayIndex = arrayCount == 0 ? 0u : i % arrayCount;
-        }
-        calls.push_back(call);
+    const std::vector<sample_points::BuiltinInput> inputs = generateBuiltinInputsForCase(c);
+    calls.reserve(inputs.size());
+    for (const sample_points::BuiltinInput& input : inputs) {
+        calls.push_back(sampleCallFromBuiltinInput(input));
     }
     return calls;
 }
@@ -1446,7 +1464,7 @@ std::vector<SampleParamsData> makeSampleParamsData(const std::vector<SampleCall>
             0.0f,
         };
         data.indices = {
-            call.arrayIndex.value_or(0u),
+            static_cast<uint32_t>(call.arrayIndex.value_or(0)),
             0u,
             0u,
             0u,
@@ -1454,33 +1472,6 @@ std::vector<SampleParamsData> makeSampleParamsData(const std::vector<SampleCall>
         out.push_back(data);
     }
     return out;
-}
-
-WGPUBindGroupLayout createBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t, const TextureCase& c) {
-    std::array<WGPUBindGroupLayoutEntry, 3> entries = {{
-        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-    }};
-    const WGPUShaderStage visibility = stageVisibility(c.stage);
-    entries[0].binding = 0;
-    entries[0].visibility = visibility;
-    entries[0].texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
-    entries[0].texture.sampleType = textureSampleType(c.isDepth, c.filt);
-    entries[0].texture.viewDimension = c.viewDimension;
-    entries[1].binding = 1;
-    entries[1].visibility = visibility;
-    entries[1].sampler = WGPU_SAMPLER_BINDING_LAYOUT_INIT;
-    entries[1].sampler.type = samplerBindingType(c.isDepth, c.filt, c.comparisonSampler);
-    entries[2].binding = 2;
-    entries[2].visibility = WGPUShaderStage_Compute;
-    entries[2].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
-    entries[2].buffer.type = WGPUBufferBindingType_Storage;
-
-    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
-    desc.entryCount = c.stage == "compute" ? entries.size() : 2;
-    desc.entries = entries.data();
-    return t.createBindGroupLayoutTracked(desc);
 }
 
 WGPUBindGroupLayout createCachedBindGroupLayout(WGPUDevice device, const TextureCase& c) {
@@ -1580,6 +1571,18 @@ struct SamplingPipelineCache : DeviceScopedObject {
 
     ~SamplingPipelineCache() override {
         reportCacheStats("SamplingPipelineCache", nestedCacheEntryCount(byDevice), hits, misses);
+    }
+};
+
+// Compressed-texel materialization pipelines, one per texture type (the shader reads the mip size
+// with textureDimensions, so it does not depend on the texture size).
+struct MaterializePipelineCache : DeviceScopedObject {
+    std::unordered_map<WGPUDevice, std::unordered_map<std::string, SamplingPipelineBundle>> byDevice;
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+
+    ~MaterializePipelineCache() override {
+        reportCacheStats("MaterializePipelineCache", nestedCacheEntryCount(byDevice), hits, misses);
     }
 };
 
@@ -1823,58 +1826,100 @@ void uploadColorTexture(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, con
 }
 
 std::string materializeCoordWGSL(const TextureCase& c) {
-    if (c.viewDimension == WGPUTextureViewDimension_1D) {
-        return "f32(id.x) + 0.5";
-    }
     if (c.viewDimension == WGPUTextureViewDimension_3D) {
         return "vec3f((f32(id.x) + 0.5) / dims.x, (f32(id.y) + 0.5) / dims.y, (f32(id.z) + 0.5) / dims.z)";
-    }
-    if (c.viewDimension == WGPUTextureViewDimension_Cube || c.viewDimension == WGPUTextureViewDimension_CubeArray) {
-        return "cubeCoord(id.x, id.y, id.z)";
     }
     return "vec2f((f32(id.x) + 0.5) / dims.x, (f32(id.y) + 0.5) / dims.y)";
 }
 
-std::string buildMaterializeWgsl(const TextureCase& c, WGPUExtent3D mipSize) {
+// Reads every texel of one mip level (the view's only level) into `out`, nearest-sampled at texel
+// centres. The mip size comes from textureDimensions, so one pipeline serves every size.
+std::string buildMaterializeWgsl(const TextureCase& c) {
     std::ostringstream wgsl;
     wgsl << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
          << "@group(0) @binding(1) var samp: sampler;\n"
          << "@group(0) @binding(2) var<storage, read_write> out: array<vec4f>;\n"
-         << "const dims = vec3f(" << wgslFloat(static_cast<double>(mipSize.width)) << ", "
-         << wgslFloat(static_cast<double>(std::max(1u, mipSize.height))) << ", "
-         << wgslFloat(static_cast<double>(std::max(1u, mipSize.depthOrArrayLayers))) << ");\n";
-    if (c.viewDimension == WGPUTextureViewDimension_Cube || c.viewDimension == WGPUTextureViewDimension_CubeArray) {
-        wgsl << "fn faceCoord(x: u32, y: u32, face: u32) -> vec3f {\n"
-             << "  let u = (f32(x) + 0.5) / dims.x;\n"
-             << "  let v = (f32(y) + 0.5) / dims.y;\n"
-             << "  if (face == 0u) { return normalize(vec3f(1.0, 1.0 - 2.0 * v, 1.0 - 2.0 * u)); }\n"
-             << "  if (face == 1u) { return normalize(vec3f(-1.0, 1.0 - 2.0 * v, 2.0 * u - 1.0)); }\n"
-             << "  if (face == 2u) { return normalize(vec3f(2.0 * u - 1.0, 1.0, 2.0 * v - 1.0)); }\n"
-             << "  if (face == 3u) { return normalize(vec3f(2.0 * u - 1.0, -1.0, 1.0 - 2.0 * v)); }\n"
-             << "  if (face == 4u) { return normalize(vec3f(2.0 * u - 1.0, 1.0 - 2.0 * v, 1.0)); }\n"
-             << "  return normalize(vec3f(1.0 - 2.0 * u, 1.0 - 2.0 * v, -1.0));\n"
-             << "}\n"
-             << "fn cubeCoord(x: u32, y: u32, z: u32) -> vec3f { return faceCoord(x, y, z % 6u); }\n";
+         << "@compute @workgroup_size(4, 4, 1) fn main(@builtin(global_invocation_id) id: vec3u) {\n";
+    if (c.viewDimension == WGPUTextureViewDimension_1D) {
+        wgsl << "  let size = vec3u(textureDimensions(tex), 1u, 1u);\n";
+    } else if (c.viewDimension == WGPUTextureViewDimension_2DArray) {
+        wgsl << "  let size = vec3u(textureDimensions(tex), textureNumLayers(tex));\n";
+    } else if (c.viewDimension == WGPUTextureViewDimension_3D) {
+        wgsl << "  let size = textureDimensions(tex);\n";
+    } else {
+        wgsl << "  let size = vec3u(textureDimensions(tex), 1u);\n";
     }
-    wgsl << "@compute @workgroup_size(4, 4, 1) fn main(@builtin(global_invocation_id) id: vec3u) {\n"
-         << "  if (id.x >= " << mipSize.width << "u || id.y >= " << std::max(1u, mipSize.height)
-         << "u || id.z >= " << std::max(1u, mipSize.depthOrArrayLayers) << "u) { return; }\n"
-         << "  let ndx = (id.z * " << std::max(1u, mipSize.height) << "u + id.y) * " << mipSize.width << "u + id.x;\n";
+    wgsl << "  if (id.x >= size.x || id.y >= size.y || id.z >= size.z) { return; }\n"
+         << "  let dims = vec3f(size);\n"
+         << "  let ndx = (id.z * size.y + id.y) * size.x + id.x;\n";
     if (c.viewDimension == WGPUTextureViewDimension_1D) {
         wgsl << "  out[ndx] = textureLoad(tex, id.x, 0);\n";
-    } else if (c.viewDimension == WGPUTextureViewDimension_2D) {
-        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", f32(0.0));\n";
     } else if (c.viewDimension == WGPUTextureViewDimension_2DArray) {
         wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", i32(id.z), f32(0.0));\n";
-    } else if (c.viewDimension == WGPUTextureViewDimension_3D) {
-        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", f32(0.0));\n";
-    } else if (c.viewDimension == WGPUTextureViewDimension_CubeArray) {
-        wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", i32(id.z / 6u), f32(0.0));\n";
     } else {
         wgsl << "  out[ndx] = textureSampleLevel(tex, samp, " << materializeCoordWGSL(c) << ", f32(0.0));\n";
     }
     wgsl << "}\n";
     return wgsl.str();
+}
+
+SamplingPipelineBundle createMaterializePipelineBundle(WGPUDevice device, const std::string& wgsl, const TextureCase& c) {
+    SamplingPipelineBundle bundle;
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = stringView(wgsl);
+    WGPUShaderModuleDescriptor moduleDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    moduleDesc.nextInChain = &source.chain;
+    bundle.module = wgpuDeviceCreateShaderModule(device, &moduleDesc);
+
+    std::array<WGPUBindGroupLayoutEntry, 3> entries = {{
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+    }};
+    entries[0].binding = 0;
+    entries[0].visibility = WGPUShaderStage_Compute;
+    entries[0].texture = WGPU_TEXTURE_BINDING_LAYOUT_INIT;
+    entries[0].texture.sampleType = textureSampleType(c.isDepth, c.filt);
+    entries[0].texture.viewDimension = c.viewDimension;
+    entries[1].binding = 1;
+    entries[1].visibility = WGPUShaderStage_Compute;
+    entries[1].sampler = WGPU_SAMPLER_BINDING_LAYOUT_INIT;
+    entries[1].sampler.type = samplerBindingType(c.isDepth, c.filt, c.comparisonSampler);
+    entries[2].binding = 2;
+    entries[2].visibility = WGPUShaderStage_Compute;
+    entries[2].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+    entries[2].buffer.type = WGPUBufferBindingType_Storage;
+    WGPUBindGroupLayoutDescriptor layoutDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    layoutDesc.entryCount = entries.size();
+    layoutDesc.entries = entries.data();
+    bundle.bindGroupLayout = wgpuDeviceCreateBindGroupLayout(device, &layoutDesc);
+
+    WGPUPipelineLayoutDescriptor pipelineLayoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pipelineLayoutDesc.bindGroupLayoutCount = 1;
+    pipelineLayoutDesc.bindGroupLayouts = &bundle.bindGroupLayout;
+    bundle.pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &pipelineLayoutDesc);
+
+    WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+    pipelineDesc.layout = bundle.pipelineLayout;
+    pipelineDesc.compute.module = bundle.module;
+    pipelineDesc.compute.entryPoint = stringView("main");
+    bundle.computePipeline = wgpuDeviceCreateComputePipeline(device, &pipelineDesc);
+    return bundle;
+}
+
+const SamplingPipelineBundle& materializePipelineForDevice(AllFeaturesMaxLimitsGpuTest& t, const TextureCase& c) {
+    const WGPUDevice device = t.device();
+    const std::string wgsl = buildMaterializeWgsl(c);
+    auto& cache = deviceScoped<MaterializePipelineCache>();
+    auto& deviceCache = cache.byDevice[device];
+    auto it = deviceCache.find(wgsl);
+    if (it == deviceCache.end()) {
+        ++cache.misses;
+        it = deviceCache.emplace(wgsl, createMaterializePipelineBundle(device, wgsl, c)).first;
+    } else {
+        ++cache.hits;
+    }
+    return it->second;
 }
 
 std::vector<MipData> materializeCompressedTexels(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, const TextureCase& c) {
@@ -1932,17 +1977,9 @@ std::vector<MipData> materializeCompressedTexels(AllFeaturesMaxLimitsGpuTest& t,
         viewDesc.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
         WGPUTextureView view = t.createViewTracked(texture, viewDesc);
 
-        WGPUShaderModule module = t.createShaderModuleTracked(buildMaterializeWgsl(materializeCase, mipData.size));
-        WGPUBindGroupLayout bgl = createBindGroupLayout(t, materializeCase);
-        WGPUPipelineLayoutDescriptor pipelineLayoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
-        pipelineLayoutDesc.bindGroupLayoutCount = 1;
-        pipelineLayoutDesc.bindGroupLayouts = &bgl;
-        WGPUPipelineLayout pipelineLayout = t.createPipelineLayoutTracked(pipelineLayoutDesc);
-        WGPUComputePipelineDescriptor pipelineDesc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
-        pipelineDesc.layout = pipelineLayout;
-        pipelineDesc.compute.module = module;
-        pipelineDesc.compute.entryPoint = stringView("main");
-        WGPUComputePipeline pipeline = t.createComputePipelineTracked(pipelineDesc);
+        const SamplingPipelineBundle& pipelineBundle = materializePipelineForDevice(t, materializeCase);
+        const WGPUBindGroupLayout bgl = pipelineBundle.bindGroupLayout;
+        const WGPUComputePipeline pipeline = pipelineBundle.computePipeline;
 
         std::array<WGPUBindGroupEntry, 3> bgEntries = {{
             WGPU_BIND_GROUP_ENTRY_INIT,
@@ -2521,6 +2558,60 @@ std::vector<MipData> initializeDepthTextureWithRandomTexels(
     return mips;
 }
 
+// True for the builtins whose level comes from (implicit or explicit) derivatives.
+bool usesDerivativeLevel(const TextureCase& c) {
+    if (c.builtin == "textureSampleGrad") {
+        return true;
+    }
+    return (c.builtin == "textureSample" || c.builtin == "textureSampleBias" || c.builtin == "textureSampleCompare")
+        && c.stage == "fragment";
+}
+
+// The level the software model samples for one call (upstream softwareTextureRead /
+// softwareTextureReadGrad): for derivative builtins the level computed from the derivatives
+// (computeMipLevelFromGradients) plus the clamped bias, clamped to the view's levels; otherwise the
+// call's level argument.
+double expectedLevelForCall(const SampleCall& call, const TextureCase& c) {
+    if (!usesDerivativeLevel(c)) {
+        return call.level;
+    }
+    const uint32_t dims = coordComponentCount(c);
+    const sample_points::BuiltinInputArgs args = builtinInputArgsForCase(c);
+    const std::array<double, 3> textureSize = sample_points::detail::getBaseMipLevelInfo(args).baseMipLevelSize;
+    std::array<double, 3> ddx = {call.ddx.x, call.ddx.y, call.ddx.z};
+    std::array<double, 3> ddy = {call.ddy.x, call.ddy.y, call.ddy.z};
+    if (c.builtin != "textureSampleGrad") {
+        // derivativeForCall(): derivativeBase (one texel step in x / y, normalized; cube maps
+        // also step z by 1) times derivativeMult.
+        const std::array<double, 3> mult = {call.derivativeMult.x, call.derivativeMult.y, call.derivativeMult.z};
+        std::array<double, 3> baseX = {1.0 / textureSize[0], 0.0, 0.0};
+        std::array<double, 3> baseY = {0.0, 1.0 / textureSize[1], 0.0};
+        if (isCubeKind(c.kind)) {
+            baseX[2] = 1.0;
+            baseY[2] = 1.0;
+        }
+        if (dims == 1) {
+            baseY = baseX;
+        }
+        for (size_t i = 0; i < 3; ++i) {
+            ddx[i] = baseX[i] * mult[i];
+            ddy[i] = baseY[i] * mult[i];
+        }
+    }
+    double dotDDX = 0.0;
+    double dotDDY = 0.0;
+    for (size_t i = 0; i < dims; ++i) {
+        const double sx = ddx[i] * textureSize[i];
+        const double sy = ddy[i] * textureSize[i];
+        dotDDX += sx * sx;
+        dotDDY += sy * sy;
+    }
+    const double mipLevel = 0.5 * std::log2(std::max(dotDDX, dotDDY));
+    const double bias = c.builtin == "textureSampleBias" ? std::clamp(call.bias, -16.0, 15.99) : 0.0;
+    const double viewMipLevelCount = static_cast<double>(c.mipLevelCount - c.baseMipLevel);
+    return std::clamp(mipLevel + bias, 0.0, viewMipLevelCount - 1.0);
+}
+
 int64_t f32UlpDistance(float a, float b) {
     const auto ulpFromZero = [](float v) {
         uint32_t bits = 0;
@@ -2539,7 +2630,6 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     if (!c.isDepth && c.filt == "linear" && !isTextureFormatFilterableOnDevice(t.device(), c.format)) {
         t.skip(std::string(textureFormatIdentifier(c.format)) + " is not filterable");
     }
-    c.baseSize = adjustedBaseSizeForFormat(c);
     if (c.textureDimension == WGPUTextureDimension_3D && isBCTextureFormat(c.format)
         && !wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureCompressionBCSliced3D)) {
         t.skip("3D BC compressed textures require texture-compression-bc-sliced-3d");
@@ -2610,7 +2700,7 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     samplerDesc.addressModeW = c.modeW;
     samplerDesc.minFilter = filterModeFromString(c.filt);
     samplerDesc.magFilter = filterModeFromString(c.filt);
-    samplerDesc.mipmapFilter = c.filt == "linear" ? WGPUMipmapFilterMode_Linear : WGPUMipmapFilterMode_Nearest;
+    samplerDesc.mipmapFilter = mipmapFilterOf(c);
     samplerDesc.lodMinClamp = static_cast<float>(c.lodMinClamp);
     samplerDesc.lodMaxClamp = static_cast<float>(c.lodMaxClamp);
     if (c.comparisonSampler) {
@@ -2622,7 +2712,8 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     const MipMixWeights& mipWeights = mipMixWeightsForDevice(t);
     std::vector<std::array<double, 4>> expected;
     expected.reserve(calls.size());
-    for (const SampleCall& call : calls) {
+    for (SampleCall call : calls) {
+        call.level = expectedLevelForCall(call, c);
         if (c.comparisonSampler) {
             expected.push_back(softwareSampleDepthCompare(mips, call, c, mipWeights));
         } else if (c.isDepth) {
@@ -2644,8 +2735,8 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         : 4u;
 
     const std::string wgsl = c.stage == "compute"
-        ? buildComputeWgsl(static_cast<uint32_t>(calls.size()), c)
-        : buildRenderWgsl(static_cast<uint32_t>(calls.size()), c);
+        ? buildComputeWgsl(calls, c)
+        : buildRenderWgsl(calls, c);
     const SamplingPipelineBundle& pipelineBundle = samplingPipelineForDevice(t, wgsl, c);
 
     const std::vector<SampleParamsData> sampleParams = makeSampleParamsData(calls);
@@ -2750,6 +2841,21 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
                             << ": expected " << expected[i][component] << ", got " << gotValue
                             << ", diff " << diff << ", format " << textureFormatInfo(c.format).identifier
                             << ", tolerance " << tolerance << ", stage " << c.stage;
+                        // The call's arguments and the level the model sampled, for triage.
+                        const SampleCall& call = calls[i];
+                        msg << "; call: coords (" << call.coords.x << ", " << call.coords.y << ", " << call.coords.z
+                            << "), model level " << expectedLevelForCall(call, c);
+                        if (call.offset.has_value()) {
+                            msg << ", offset (" << (*call.offset)[0] << ", " << (*call.offset)[1] << ", " << (*call.offset)[2] << ")";
+                        }
+                        if (call.arrayIndex.has_value()) {
+                            msg << ", arrayIndex " << *call.arrayIndex;
+                        }
+                        if (c.builtin == "textureSampleBias") {
+                            msg << ", bias " << call.bias;
+                        }
+                        msg << ", texture " << c.baseSize.width << "x" << c.baseSize.height << "x"
+                            << c.baseSize.depthOrArrayLayers << " (" << c.mipLevelCount << " levels)";
                         return msg.str();
                     }
                 }
@@ -2764,99 +2870,253 @@ WGPUExtent3D baseSize(uint32_t width, uint32_t height, uint32_t depth) {
     return WGPUExtent3D{width, height, depth};
 }
 
-TextureCase baseSampledCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+// upstream getDepthOrArrayLayersForViewDimension().
+uint32_t depthOrArrayLayersForViewDimension(std::string_view viewDimension) {
+    if (viewDimension == "2d-array") {
+        return 4;
+    }
+    if (viewDimension == "3d") {
+        return 8;
+    }
+    if (viewDimension == "cube") {
+        return 6;
+    }
+    return 1;
+}
+
+// upstream chooseTextureSize(): a size in whole blocks, square for cube maps.
+WGPUExtent3D chooseTextureSize(uint32_t minSize, uint32_t minBlocks, WGPUTextureFormat format, std::string_view viewDimension = "2d") {
+    const TextureBlockInfo info = getBlockInfoForTextureFormat(format);
+    const uint32_t width = alignToU32(std::max(minSize, info.blockWidth * minBlocks), info.blockWidth);
+    const uint32_t height = viewDimension == "1d" ? 1u : alignToU32(std::max(minSize, info.blockHeight * minBlocks), info.blockHeight);
+    if (viewDimension == "cube" || viewDimension == "cube-array") {
+        const uint32_t blockLCM = lcmU32(info.blockWidth, info.blockHeight);
+        const uint32_t largest = std::max(width, height);
+        const uint32_t size = alignToU32(largest, blockLCM);
+        return WGPUExtent3D{size, size, viewDimension == "cube-array" ? 24u : 6u};
+    }
+    return WGPUExtent3D{width, height, depthOrArrayLayersForViewDimension(viewDimension)};
+}
+
+// upstream maxMipLevelCount({ size }) (dimension '2d': width and height only).
+uint32_t maxMipLevelCount2D(WGPUExtent3D size) {
+    const uint32_t largest = std::max(size.width, size.height);
+    uint32_t count = 1;
+    while ((largest >> count) != 0u) {
+        ++count;
+    }
+    return count;
+}
+
+// The upstream spelling of a stage / address-mode parameter value (kShortShaderStages,
+// kShortAddressModes), which is what upstream hashes.
+std::string upstreamShortParam(const std::string& value) {
+    if (value == "compute" || value == "clamp") {
+        return "c";
+    }
+    if (value == "fragment") {
+        return "f";
+    }
+    if (value == "vertex") {
+        return "v";
+    }
+    if (value == "repeat") {
+        return "r";
+    }
+    if (value == "mirror") {
+        return "m";
+    }
+    return value;
+}
+
+// Builds a test's upstream `hashInputs` array from its parameters.
+class HashInputs {
+  public:
+    explicit HashInputs(const Fixture& t) : t_(t) {}
+
+    // A string parameter (format, samplePoints, filt, A, L, C, compare, dim, ...).
+    HashInputs& str(std::string_view key) {
+        values_.push_back(sample_points::hashInputString(t_.param<std::string>(key)));
+        return *this;
+    }
+    // A stage or address-mode parameter, hashed in its upstream spelling.
+    HashInputs& shortStr(std::string_view key) {
+        values_.push_back(sample_points::hashInputString(upstreamShortParam(t_.param<std::string>(key))));
+        return *this;
+    }
+    // A string parameter that may be absent (`undefined` upstream).
+    HashInputs& optStr(std::string_view key) {
+        if (t_.hasParam(key) && !t_.paramIsUndefined(key)) {
+            return str(key);
+        }
+        values_.push_back(sample_points::hashInputUndefined());
+        return *this;
+    }
+    HashInputs& flag(std::string_view key) {
+        values_.push_back(sample_points::hashInputBool(t_.param<bool>(key)));
+        return *this;
+    }
+    HashInputs& num(std::string_view key) {
+        values_.push_back(t_.param<double>(key));
+        return *this;
+    }
+    HashInputs& lit(std::string_view value) {
+        values_.push_back(sample_points::hashInputString(value));
+        return *this;
+    }
+    std::vector<double> done() const {
+        return values_;
+    }
+
+  private:
+    const Fixture& t_;
+    std::vector<double> values_;
+};
+
+sample_points::RangeDef rangeDef(double num, std::string type) {
+    sample_points::RangeDef def;
+    def.num = num;
+    def.type = std::move(type);
+    return def;
+}
+
+// The parts every sampling case shares: format, filter, sample points and builtin.
+TextureCase samplingCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind, std::string builtin, std::string stage) {
     TextureCase c;
     c.kind = kind;
-    c.format = parseTextureFormat(t.param<std::string>("format"));
-    c.stage = t.param<std::string>("stage");
-    c.filt = t.param<std::string>("filt");
-    c.samplePoints = t.param<std::string>("samplePoints");
-    c.mipLevelCount = kMipLevelCount;
-    return c;
-}
-
-TextureCase baseTextureSampleSampledCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
-    TextureCase c;
-    c.kind = kind;
-    c.format = parseTextureFormat(t.param<std::string>("format"));
-    c.stage = "fragment";
-    c.filt = t.param<std::string>("filt");
-    c.samplePoints = t.param<std::string>("samplePoints");
-    c.mipLevelCount = kMipLevelCount;
-    c.builtin = "textureSample";
-    return c;
-}
-
-TextureCase baseTextureSampleGradSampledCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
-    TextureCase c = baseSampledCase(t, kind);
-    c.builtin = "textureSampleGrad";
-    return c;
-}
-
-TextureCase baseTextureSampleBiasSampledCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
-    TextureCase c = baseTextureSampleSampledCase(t, kind);
-    c.builtin = "textureSampleBias";
-    return c;
-}
-
-TextureCase baseDepthCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
-    TextureCase c;
-    c.kind = kind;
-    c.format = parseTextureFormat(t.param<std::string>("format"));
-    c.stage = t.param<std::string>("stage");
-    c.samplePoints = t.param<std::string>("samplePoints");
-    c.filt = "nearest";
-    c.isDepth = true;
-    c.levelType = t.param<std::string>("L");
-    c.mipLevelCount = kMipLevelCount;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    return c;
-}
-
-TextureCase baseTextureSampleDepthCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
-    TextureCase c;
-    c.kind = kind;
-    c.format = parseTextureFormat(t.param<std::string>("format"));
-    c.stage = "fragment";
-    c.samplePoints = t.param<std::string>("samplePoints");
-    c.filt = "nearest";
-    c.isDepth = true;
-    c.builtin = "textureSample";
-    c.mipLevelCount = kMipLevelCount;
-    return c;
-}
-
-TextureCase baseTextureSampleCompareCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind, std::string stage, std::string builtin) {
-    TextureCase c;
-    c.kind = kind;
-    c.format = parseTextureFormat(t.param<std::string>("format"));
+    c.format = t.hasParam("format") ? parseTextureFormat(t.param<std::string>("format")) : WGPUTextureFormat_RGBA8Unorm;
     c.stage = std::move(stage);
+    c.filt = t.hasParam("filt") ? t.param<std::string>("filt") : "nearest";
     c.samplePoints = t.param<std::string>("samplePoints");
-    c.filt = t.param<std::string>("filt");
-    c.compare = t.param<std::string>("compare");
-    c.isDepth = true;
-    c.comparisonSampler = true;
     c.builtin = std::move(builtin);
-    c.mipLevelCount = c.builtin == "textureSampleCompare" ? kMipLevelCount : kMipLevelCount;
     return c;
+}
+
+void setTextureSize2D(TextureCase& c, WGPUExtent3D size, uint32_t layers, uint32_t mipLevelCount) {
+    c.baseSize = baseSize(size.width, size.height, layers);
+    c.mipLevelCount = mipLevelCount;
+}
+
+// A cube or cube-array view of a 2d texture of `size` (from chooseTextureSize for that view).
+void setCubeTexture(TextureCase& c, WGPUExtent3D size, bool array, uint32_t mipLevelCount) {
+    c.viewDimension = array ? WGPUTextureViewDimension_CubeArray : WGPUTextureViewDimension_Cube;
+    c.textureDimension = WGPUTextureDimension_2D;
+    c.baseSize = size;
+    c.mipLevelCount = mipLevelCount;
+}
+
+void setAddressModes(TextureCase& c, AllFeaturesMaxLimitsGpuTest& t, std::string_view u, std::string_view v, std::string_view w) {
+    c.modeU = addressModeFromShort(t.param<std::string>(u));
+    c.modeV = addressModeFromShort(t.param<std::string>(v));
+    c.modeW = w.empty() ? WGPUAddressMode_ClampToEdge : addressModeFromShort(t.param<std::string>(w));
+}
+
+void setArrayIndex(TextureCase& c, AllFeaturesMaxLimitsGpuTest& t, uint32_t num) {
+    c.useArrayIndex = true;
+    c.arrayIndexType = t.param<std::string>("A");
+    c.arrayIndexRange = rangeDef(static_cast<double>(num), c.arrayIndexType);
 }
 
 TextureCase baseTextureSampleBaseClampToEdgeCase(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c;
-    c.kind = SampleKind::Sampled2D;
+    TextureCase c = samplingCase(t, SampleKind::Sampled2D, "textureSampleBaseClampToEdge", t.param<std::string>("stage"));
     c.format = WGPUTextureFormat_RGBA8Unorm;
-    c.stage = t.param<std::string>("stage");
-    c.filt = t.param<std::string>("filt");
-    c.samplePoints = t.param<std::string>("samplePoints");
-    c.builtin = "textureSampleBaseClampToEdge";
     c.baseClampToEdge = true;
     c.baseSize = baseSize(8, 8, 1);
-    c.mipLevelCount = kMipLevelCount;
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    c.mipLevelCount = 3;
+    setAddressModes(c, t, "modeU", "modeV", "");
+    c.hashInputs = HashInputs(t).str("samplePoints").shortStr("modeU").shortStr("modeV").str("filt").done();
     return c;
+}
+
+
+// The texture_depth_* textureSampleLevel tests: the sampler sets only address modes.
+TextureCase depthSampleLevelCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+    TextureCase c = samplingCase(t, kind, "textureSampleLevel", t.param<std::string>("stage"));
+    c.isDepth = true;
+    c.samplerHasFilter = false;
+    c.levelType = t.param<std::string>("L");
+    return c;
+}
+
+TextureCase textureSampleCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+    TextureCase c = samplingCase(t, kind, "textureSample", "fragment");
+    c.genDerivatives = true;
+    return c;
+}
+
+// The texture_depth_* textureSample tests: the sampler sets only address modes.
+TextureCase depthTextureSampleCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+    TextureCase c = textureSampleCase(t, kind);
+    c.isDepth = true;
+    c.samplerHasFilter = false;
+    return c;
+}
+
+TextureCase textureSampleGradCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+    TextureCase c = samplingCase(t, kind, "textureSampleGrad", t.param<std::string>("stage"));
+    c.genGrad = true;
+    return c;
+}
+
+constexpr uint32_t kMinBlocksForTextureSampleBias = 3;
+
+TextureCase textureSampleBiasCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+    TextureCase c = samplingCase(t, kind, "textureSampleBias", "fragment");
+    c.genBias = true;
+    return c;
+}
+
+TextureCase textureSampleCompareCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind, std::string stage, std::string builtin) {
+    TextureCase c = samplingCase(t, kind, std::move(builtin), std::move(stage));
+    c.compare = t.param<std::string>("compare");
+    c.isDepth = true;
+    c.comparisonSampler = true;
+    c.genDerivatives = true;
+    c.genDepthRef = true;
+    return c;
+}
+
+// Compare-level tests hash the stage first; textureSampleCompare runs in the fragment stage only.
+HashInputs compareHashStart(AllFeaturesMaxLimitsGpuTest& t, const TextureCase& c) {
+    HashInputs h(t);
+    if (c.builtin == "textureSampleCompareLevel") {
+        h.shortStr("stage");
+    }
+    return h;
+}
+
+void executeTextureSampleCompare2DCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
+    setTextureSize2D(c, chooseTextureSize(16, 4, c.format), 1, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
+    c.useOffset = t.param<bool>("offset");
+    c.hashInputs = compareHashStart(t, c).str("format").str("samplePoints").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompareCubeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
+    setCubeTexture(c, chooseTextureSize(16, 2, c.format, "cube"), false, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    c.hashInputs = compareHashStart(t, c).str("format").str("samplePoints").shortStr("mode").str("filt").str("compare").done();
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompare2DArrayCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
+    c.viewDimension = WGPUTextureViewDimension_2DArray;
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(16, 4, c.format), layers, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
+    c.useOffset = t.param<bool>("offset");
+    setArrayIndex(c, t, layers);
+    c.hashInputs = compareHashStart(t, c).str("format").str("samplePoints").str("A").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
+    executeCase(t, c);
+}
+
+void executeTextureSampleCompareCubeArrayCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
+    setCubeTexture(c, chooseTextureSize(8, 2, c.format, "cube-array"), true, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = compareHashStart(t, c).str("format").str("samplePoints").shortStr("mode").str("filt").done();
+    executeCase(t, c);
 }
 
 constexpr uint32_t kMetadataMaxMipsForTest = 3;
@@ -3579,6 +3839,12 @@ struct TextureLoadCase {
     uint32_t baseArrayLayer = 0;
     uint32_t arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
     LoadReturnKind returnKind = LoadReturnKind::Float;
+
+    // --- Inputs of upstream's sample-point generator call (sample_points.h) ---
+    std::vector<double> hashInputs;
+    std::optional<sample_points::RangeDef> mipLevelRange;
+    std::optional<sample_points::RangeDef> arrayIndexRange;
+    std::optional<sample_points::RangeDef> sampleIndexRange;
 };
 
 struct TextureLoadPipelineBundle {
@@ -3775,55 +4041,105 @@ bool textureLoadBitsMatch(
     return ulpDiff <= 3;
 }
 
-uint32_t pseudoRandomU32(uint32_t i, uint32_t salt, uint32_t limit) {
-    if (limit == 0) return 0;
-    return hashU32({i + 1u, salt + 17u, limit + 31u, 0x9e3779b9u}) % limit;
+// Whether the generator sees a view (the storage tests pass a softwareTexture with a single-level
+// view at baseMipLevel / baseArrayLayer; the others pass only the descriptor).
+bool loadCaseHasView(const TextureLoadCase& c) {
+    return c.storageTexture && c.viewMipCount == 1u;
 }
 
-std::vector<LoadCallData> makeLoadCalls(const TextureLoadCase& c) {
-    std::vector<LoadCallData> calls;
-    calls.reserve(kCallCount);
-    for (uint32_t i = 0; i < kCallCount; ++i) {
-        LoadCallData call;
-        // Storage texture views target baseMipLevel, so generate coords in the viewed mip.
-        const uint32_t level = c.useLevel ? (i % c.mipLevelCount)
-                                          : (c.storageTexture ? c.baseMipLevel : 0u);
-        const WGPUExtent3D mipSize = physicalMipSize(c.baseSize, c.textureDimension, level);
-        if (c.samplePoints == "texel-centre") {
-            call.coords[0] = i % mipSize.width;
-            call.coords[1] = (i / std::max(1u, mipSize.width)) % std::max(1u, mipSize.height);
-            call.coords[2] = (i / std::max(1u, mipSize.width * std::max(1u, mipSize.height)))
-                % std::max(1u, mipSize.depthOrArrayLayers);
-        } else {
-            call.coords[0] = pseudoRandomU32(i, 1, mipSize.width);
-            call.coords[1] = pseudoRandomU32(i, 2, std::max(1u, mipSize.height));
-            call.coords[2] = pseudoRandomU32(i, 3, std::max(1u, mipSize.depthOrArrayLayers));
+sample_points::BuiltinInputArgs builtinInputArgsForLoadCase(const TextureLoadCase& c) {
+    sample_points::BuiltinInputArgs args;
+    args.method = c.samplePoints;
+    args.dimension = textureDimensionName(c.textureDimension);
+    args.size = {{static_cast<double>(c.baseSize.width), static_cast<double>(c.baseSize.height),
+                  static_cast<double>(c.baseSize.depthOrArrayLayers)}};
+    args.mipLevelCount = static_cast<double>(c.mipLevelCount);
+    args.depthOrStencilFormat = isDepthOrStencilTextureFormat(c.format);
+    if (loadCaseHasView(c)) {
+        args.viewBaseMipLevel = static_cast<double>(c.baseMipLevel);
+        args.viewMipLevelCount = 1.0;
+        if (c.useArrayIndex) {
+            args.viewBaseArrayLayer = static_cast<double>(c.baseArrayLayer);
         }
-        const uint32_t viewArrayLayers = c.arrayLayerCount == WGPU_ARRAY_LAYER_COUNT_UNDEFINED
-            ? std::max(1u, c.baseSize.depthOrArrayLayers - c.baseArrayLayer)
-            : c.arrayLayerCount;
-        call.scalars[0] = level;
-        call.scalars[1] = c.useArrayIndex ? (i % std::max(1u, viewArrayLayers)) : 0u;
-        call.scalars[2] = c.useSampleIndex ? (i % c.sampleCount) : 0u;
+    }
+    args.mipLevel = c.mipLevelRange;
+    args.arrayIndex = c.arrayIndexRange;
+    args.sampleIndex = c.sampleIndexRange;
+    args.hashInputs = c.hashInputs;
+    return args;
+}
+
+uint32_t i32Bits(double value) {
+    return static_cast<uint32_t>(static_cast<int32_t>(value));
+}
+
+// The calls of a textureLoad case: upstream's generated sample points converted to texel
+// coordinates with normalizedCoordToTexelLoadTestCoord() (textureLoad.spec.ts), which scales by
+// the descriptor's size at the call's level and rounds; u32 coordinates take the absolute value.
+// Coordinates, levels, array and sample indices may be out of bounds. Signed values are stored as
+// their i32 bit patterns.
+std::vector<LoadCallData> makeLoadCalls(const TextureLoadCase& c) {
+    const sample_points::BuiltinInputArgs args = builtinInputArgsForLoadCase(c);
+    const std::vector<sample_points::BuiltinInput> inputs = runGenerator(args, false, c.coordComponents);
+    std::vector<LoadCallData> calls;
+    calls.reserve(inputs.size());
+    for (const sample_points::BuiltinInput& input : inputs) {
+        LoadCallData call;
+        const double level = c.useLevel ? input.mipLevel : 0.0;
+        const std::array<double, 3> size = sample_points::detail::virtualMipSize(args.dimension, args.size, level);
+        for (size_t k = 0; k < input.coords.size() && k < 3; ++k) {
+            const double texel = input.coords[k] * size[k];
+            const double rounded = sample_points::jsRound(texel);
+            call.coords[k] = i32Bits(c.coordType == "u32" ? std::abs(rounded) : rounded);
+        }
+        call.scalars[0] = c.useLevel ? i32Bits(input.mipLevel) : 0u;
+        call.scalars[1] = input.arrayIndex.has_value() ? i32Bits(*input.arrayIndex) : 0u;
+        call.scalars[2] = input.sampleIndex.has_value() ? i32Bits(*input.sampleIndex) : 0u;
         calls.push_back(call);
     }
     return calls;
+}
+
+// upstream isOutOfBoundsCall(): a coordinate, level, array index or sample index outside the view.
+bool loadCallOutOfBounds(const TextureLoadCase& c, const LoadCallData& call) {
+    const sample_points::BuiltinInputArgs args = builtinInputArgsForLoadCase(c);
+    const sample_points::detail::BaseMipLevelInfo info = sample_points::detail::getBaseMipLevelInfo(args);
+    double level = 0.0;
+    if (c.useLevel) {
+        level = static_cast<double>(static_cast<int32_t>(call.scalars[0]));
+        if (level < 0.0 || level >= info.mipLevelCount) {
+            return true;
+        }
+    }
+    const std::array<double, 3> size = sample_points::detail::virtualMipSize(args.dimension, info.baseMipLevelSize, level);
+    for (uint32_t k = 0; k < c.coordComponents && k < 3; ++k) {
+        const double v = static_cast<double>(static_cast<int32_t>(call.coords[k]));
+        if (v < 0.0 || v >= size[k]) {
+            return true;
+        }
+    }
+    if (c.useArrayIndex) {
+        const double arrayIndex = static_cast<double>(static_cast<int32_t>(call.scalars[1]));
+        if (arrayIndex < 0.0 || arrayIndex >= info.baseMipLevelSize[2]) {
+            return true;
+        }
+    }
+    if (c.useSampleIndex) {
+        const double sampleIndex = static_cast<double>(static_cast<int32_t>(call.scalars[2]));
+        if (sampleIndex < 0.0 || sampleIndex >= static_cast<double>(c.sampleCount)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string loadScalarExpr(const std::string& source, const std::string& type) {
     return type == "u32" ? source : "i32(" + source + ")";
 }
 
-std::string loadSignedScalarExpr(const std::string& source) {
-    return "i32(" + source + ")";
-}
-
+// The coordinate, level, array-index and sample-index arguments use the case's C / L / A / S
+// types, like upstream; the params hold i32 values as their bit patterns.
 std::string loadCoordExpr(const TextureLoadCase& c) {
-    if (!c.storageTexture) {
-        if (c.coordComponents == 1) return loadSignedScalarExpr("p.coords.x");
-        if (c.coordComponents == 2) return "vec2i(p.coords.xy)";
-        return "vec3i(p.coords.xyz)";
-    }
     if (c.coordComponents == 1) return loadScalarExpr("p.coords.x", c.coordType);
     if (c.coordComponents == 2) return c.coordType == "u32" ? "p.coords.xy" : "vec2i(p.coords.xy)";
     return c.coordType == "u32" ? "p.coords.xyz" : "vec3i(p.coords.xyz)";
@@ -3832,10 +4148,9 @@ std::string loadCoordExpr(const TextureLoadCase& c) {
 std::string loadCallWGSL(const TextureLoadCase& c) {
     std::ostringstream call;
     call << "textureLoad(tex, " << loadCoordExpr(c);
-    if (c.useArrayIndex) call << ", "
-        << (c.storageTexture ? loadScalarExpr("p.scalars.y", c.arrayIndexType) : loadSignedScalarExpr("p.scalars.y"));
-    if (c.useLevel) call << ", " << (c.storageTexture ? loadScalarExpr("p.scalars.x", c.levelType) : loadSignedScalarExpr("p.scalars.x"));
-    if (c.useSampleIndex) call << ", " << (c.storageTexture ? loadScalarExpr("p.scalars.z", c.sampleIndexType) : loadSignedScalarExpr("p.scalars.z"));
+    if (c.useArrayIndex) call << ", " << loadScalarExpr("p.scalars.y", c.arrayIndexType);
+    if (c.useLevel) call << ", " << loadScalarExpr("p.scalars.x", c.levelType);
+    if (c.useSampleIndex) call << ", " << loadScalarExpr("p.scalars.z", c.sampleIndexType);
     call << ")";
     return call.str();
 }
@@ -4120,6 +4435,11 @@ std::vector<std::array<uint32_t, 4>> expectedTextureLoadBits(const TextureLoadCa
     std::vector<std::array<uint32_t, 4>> expected;
     expected.reserve(calls.size());
     for (const LoadCallData& call : calls) {
+        if (loadCallOutOfBounds(c, call)) {
+            // Checked separately: any texel value or zero is valid.
+            expected.push_back({0u, 0u, 0u, 0u});
+            continue;
+        }
         if (c.multisampled) {
             if (c.isDepth || isDepthTextureFormat(c.format)) {
                 // The multisampled depth texture is filled per sample by
@@ -4159,6 +4479,49 @@ std::vector<std::array<uint32_t, 4>> expectedTextureLoadBits(const TextureLoadCa
         expected.push_back(expectedLoadBits(resultTexel(comps, mip.format), mip.format, c.returnKind));
     }
     return expected;
+}
+
+// Every texel value in the texture (all levels, layers and samples), as the bits a textureLoad of
+// it returns: an out-of-bounds load may return any of them (upstream isValidOutOfBoundsValue()).
+std::vector<std::array<uint32_t, 4>> allTextureLoadTexelBits(const TextureLoadCase& c, const std::vector<MipData>& mips) {
+    std::vector<std::array<uint32_t, 4>> out;
+    const bool depth = c.isDepth || (isDepthTextureFormat(c.format) && !c.storageTexture);
+    for (const MipData& mip : mips) {
+        for (uint32_t z = 0; z < mip.size.depthOrArrayLayers; ++z) {
+            for (uint32_t y = 0; y < mip.size.height; ++y) {
+                for (uint32_t x = 0; x < mip.size.width; ++x) {
+                    if (depth) {
+                        const double value = texelAt(mip, WGPUTextureFormat_R32Float, static_cast<int32_t>(x),
+                            static_cast<int32_t>(y), static_cast<int32_t>(z)).values[0];
+                        out.push_back(expectedLoadBits({value, 0.0, 0.0, 0.0}, c.format, LoadReturnKind::Depth));
+                    } else {
+                        const TexelComponents comps = texelAt(mip, mip.format, static_cast<int32_t>(x),
+                            static_cast<int32_t>(y), static_cast<int32_t>(z));
+                        out.push_back(expectedLoadBits(resultTexel(comps, mip.format), mip.format, c.returnKind));
+                    }
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// The zero values an out-of-bounds load may return: (0, 0, 0, 0 or 1), or R == 0 for a depth texture.
+bool isZeroOutOfBoundsLoad(const TextureLoadCase& c, const std::array<uint32_t, 4>& got) {
+    const auto value = [&c](uint32_t bits) -> double {
+        if (c.returnKind == LoadReturnKind::Uint) {
+            return static_cast<double>(bits);
+        }
+        if (c.returnKind == LoadReturnKind::Sint) {
+            return static_cast<double>(static_cast<int32_t>(bits));
+        }
+        return static_cast<double>(floatFromBits(bits));
+    };
+    if (c.returnKind == LoadReturnKind::Depth) {
+        return value(got[0]) == 0.0;
+    }
+    return value(got[0]) == 0.0 && value(got[1]) == 0.0 && value(got[2]) == 0.0
+        && (value(got[3]) == 0.0 || value(got[3]) == 1.0);
 }
 
 void executeTextureLoadCase(AllFeaturesMaxLimitsGpuTest& t, TextureLoadCase c) {
@@ -4261,6 +4624,15 @@ void executeTextureLoadCase(AllFeaturesMaxLimitsGpuTest& t, TextureLoadCase c) {
 
     const std::vector<LoadCallData> calls = makeLoadCalls(c);
     const std::vector<std::array<uint32_t, 4>> expected = expectedTextureLoadBits(c, calls, mips);
+    std::vector<bool> outOfBounds(calls.size(), false);
+    bool anyOutOfBounds = false;
+    for (size_t i = 0; i < calls.size(); ++i) {
+        outOfBounds[i] = loadCallOutOfBounds(c, calls[i]);
+        anyOutOfBounds = anyOutOfBounds || outOfBounds[i];
+    }
+    const std::vector<std::array<uint32_t, 4>> allTexelBits = anyOutOfBounds
+        ? allTextureLoadTexelBits(c, mips)
+        : std::vector<std::array<uint32_t, 4>>{};
     const uint64_t paramsSize = static_cast<uint64_t>(calls.size()) * sizeof(LoadCallData);
     WGPUBufferDescriptor paramsDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
     paramsDesc.size = paramsSize;
@@ -4343,13 +4715,40 @@ void executeTextureLoadCase(AllFeaturesMaxLimitsGpuTest& t, TextureLoadCase c) {
             if (len < static_cast<size_t>(outputSize)) {
                 return std::string("textureLoad output buffer too small");
             }
+            const auto texelMatches = [&c](const std::array<uint32_t, 4>& want, const std::array<uint32_t, 4>& got) {
+                for (uint32_t component = 0; component < 4; ++component) {
+                    if (!textureLoadBitsMatch(c.format, c.returnKind, component, want[component], got[component])) {
+                        return false;
+                    }
+                }
+                return true;
+            };
             for (size_t i = 0; i < calls.size(); ++i) {
+                std::array<uint32_t, 4> gotTexel = {};
                 for (uint32_t component = 0; component < 4; ++component) {
                     const size_t byteOffset = c.stage == "compute"
                         ? (i * 4u + component) * sizeof(uint32_t)
                         : i * 16u + component * sizeof(uint32_t);
-                    uint32_t got = 0;
-                    std::memcpy(&got, actual + byteOffset, sizeof(uint32_t));
+                    std::memcpy(&gotTexel[component], actual + byteOffset, sizeof(uint32_t));
+                }
+                if (outOfBounds[i]) {
+                    // upstream okBecauseOutOfBounds(): zero, or the value of any texel.
+                    bool ok = isZeroOutOfBoundsLoad(c, gotTexel);
+                    for (size_t k = 0; !ok && k < allTexelBits.size(); ++k) {
+                        ok = texelMatches(allTexelBits[k], gotTexel);
+                    }
+                    if (!ok) {
+                        std::ostringstream msg;
+                        msg << "textureLoad out-of-bounds call " << i << " returned neither zero nor a texel value: bits "
+                            << gotTexel[0] << ", " << gotTexel[1] << ", " << gotTexel[2] << ", " << gotTexel[3]
+                            << ", textureType " << c.textureType << ", stage " << c.stage
+                            << ", format " << textureFormatInfo(c.format).identifier;
+                        return msg.str();
+                    }
+                    continue;
+                }
+                for (uint32_t component = 0; component < 4; ++component) {
+                    const uint32_t got = gotTexel[component];
                     if (!textureLoadBitsMatch(c.format, c.returnKind, component, expected[i][component], got)) {
                         std::ostringstream msg;
                         msg << "textureLoad mismatch call " << i << " component " << component
@@ -4431,11 +4830,11 @@ WGPUSamplerBindingType gatherSamplerBindingType(const TextureCase& c) {
 //   x=(umin,vmax) y=(umax,vmax) z=(umax,vmin) w=(umin,vmin)
 std::array<double, 4> gatherColorTaps(const MipData& mip, const SampleCall& callIn, const TextureCase& c) {
     SampleCall call = callIn;
+    call.arrayIndex = clampedArrayLayer(call, c);
     if (isCubeKind(c.kind)) {
         const Vec3 faceCoord = normalizedCubeToFaceCoord(call.coords);
-        const uint32_t arrayBase = c.useArrayIndex ? (*call.arrayIndex) * 6u : 0u;
         call.coords = Vec3{faceCoord.x, faceCoord.y, 0.0};
-        call.arrayIndex = arrayBase + static_cast<uint32_t>(faceCoord.z);
+        call.arrayIndex = *call.arrayIndex + static_cast<int32_t>(faceCoord.z);
     }
     const int32_t ox = call.offset ? (*call.offset)[0] : 0;
     const int32_t oy = call.offset ? (*call.offset)[1] : 0;
@@ -4446,7 +4845,7 @@ std::array<double, 4> gatherColorTaps(const MipData& mip, const SampleCall& call
     const int32_t x0 = static_cast<int32_t>(std::floor(u));
     const int32_t y0 = static_cast<int32_t>(std::floor(v));
 
-    const uint32_t comp = static_cast<uint32_t>(std::clamp(c.gatherComponent, 0, 3));
+    const uint32_t comp = static_cast<uint32_t>(std::clamp(call.component.value_or(0), 0, 3));
     const std::array<double, 4> c00 = loadAddressed(mip, c.format, x0, y0, layer, c);
     const std::array<double, 4> c10 = loadAddressed(mip, c.format, x0 + 1, y0, layer, c);
     const std::array<double, 4> c01 = loadAddressed(mip, c.format, x0, y0 + 1, layer, c);
@@ -4462,8 +4861,9 @@ std::array<double, 4> gatherColorTaps(const MipData& mip, const SampleCall& call
 std::array<double, 4> gatherDepthTaps(const MipData& depthMip, const SampleCall& call, const TextureCase& c) {
     TextureCase depthCase = c;
     depthCase.format = WGPUTextureFormat_R32Float;
-    depthCase.gatherComponent = 0;
-    const std::array<double, 4> depths = gatherColorTaps(depthMip, call, depthCase);
+    SampleCall depthCall = call;
+    depthCall.component = 0;
+    const std::array<double, 4> depths = gatherColorTaps(depthMip, depthCall, depthCase);
     if (!c.gatherCompare) {
         return depths;
     }
@@ -4476,12 +4876,17 @@ std::array<double, 4> gatherDepthTaps(const MipData& depthMip, const SampleCall&
     };
 }
 
-std::string gatherExprFromParams(std::string_view param, const TextureCase& c, std::string_view offsetExpr) {
+// Whether each call needs its own expression: offsets and gather components are constants.
+bool gatherNeedsPerCallExpr(const TextureCase& c) {
+    return c.useOffset || (!c.gatherCompare && !c.isDepth);
+}
+
+std::string gatherExprFromParams(std::string_view param, const TextureCase& c, const SampleCall& call) {
     std::ostringstream expr;
     const char* builtin = c.gatherCompare ? "textureGatherCompare" : "textureGather";
     expr << builtin << "(";
     if (!c.gatherCompare && !c.isDepth) {
-        expr << c.gatherComponent << ", ";
+        expr << call.component.value_or(0) << c.gatherComponentType << ", ";
     }
     expr << "tex, samp, " << coordParamExpr(param, c);
     if (c.useArrayIndex) {
@@ -4490,19 +4895,20 @@ std::string gatherExprFromParams(std::string_view param, const TextureCase& c, s
     if (c.gatherCompare) {
         expr << ", " << param << ".scalars.z";
     }
-    expr << offsetExpr << ")";
+    expr << offsetExprForCall(call, c) << ")";
     // The output buffer is array<vec4u>; bitcast covers f32/i32/depth, and is an
     // identity for u32 gathers.
     return "bitcast<vec4u>(" + expr.str() + ")";
 }
 
-std::string buildGatherWgsl(uint32_t callCount, const TextureCase& c) {
+std::string buildGatherWgsl(const std::vector<SampleCall>& calls, const TextureCase& c) {
+    const uint32_t callCount = static_cast<uint32_t>(calls.size());
     std::ostringstream wgsl;
     wgsl << "// texture-gather structural shader; stage=" << c.stage << "\n"
          << "@group(0) @binding(0) var tex: " << textureType(c) << ";\n"
          << "@group(0) @binding(1) var samp: " << (c.comparisonSampler ? "sampler_comparison" : "sampler") << ";\n";
     writeSampleParamsHeader(wgsl);
-    const bool perCall = c.useOffset;
+    const bool perCall = gatherNeedsPerCallExpr(c);
     if (c.stage == "compute") {
         wgsl << "@group(0) @binding(2) var<storage, read_write> out: array<vec4u>;\n"
              << "@compute @workgroup_size(1) fn main(@builtin(global_invocation_id) id: vec3u) {\n"
@@ -4511,10 +4917,10 @@ std::string buildGatherWgsl(uint32_t callCount, const TextureCase& c) {
         if (perCall) {
             for (uint32_t i = 0; i < callCount; ++i) {
                 wgsl << "  if (i == " << i << "u) { out[" << i << "] = "
-                     << gatherExprFromParams("p", c, offsetExprForCallIndex(i, c)) << "; }\n";
+                     << gatherExprFromParams("p", c, calls[i]) << "; }\n";
             }
         } else {
-            wgsl << "  out[i] = " << gatherExprFromParams("p", c, {}) << ";\n";
+            wgsl << "  out[i] = " << gatherExprFromParams("p", c, calls.empty() ? SampleCall{} : calls[0]) << ";\n";
         }
         wgsl << "}\n";
         return wgsl.str();
@@ -4531,12 +4937,12 @@ std::string buildGatherWgsl(uint32_t callCount, const TextureCase& c) {
     if (perCall) {
         wgsl << "  var result = vec4u(0u);\n";
         for (uint32_t i = 0; i < callCount; ++i) {
-            wgsl << "  let call" << i << " = " << gatherExprFromParams("p", c, offsetExprForCallIndex(i, c)) << ";\n"
+            wgsl << "  let call" << i << " = " << gatherExprFromParams("p", c, calls[i]) << ";\n"
                  << "  result = select(result, call" << i << ", i == " << i << "u);\n";
         }
         wgsl << "  return result;\n";
     } else {
-        wgsl << "  return " << gatherExprFromParams("p", c, {}) << ";\n";
+        wgsl << "  return " << gatherExprFromParams("p", c, calls.empty() ? SampleCall{} : calls[0]) << ";\n";
     }
     wgsl << "}\n"
          << "fn pixelPos(vertexIndex: u32, instanceIndex: u32) -> vec4f {\n"
@@ -4666,7 +5072,6 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     if (c.viewDimension == WGPUTextureViewDimension_Cube || c.viewDimension == WGPUTextureViewDimension_CubeArray) {
         t.skipIfTextureViewDimensionNotSupported(c.viewDimension);
     }
-    c.baseSize = adjustedBaseSizeForFormat(c);
     if (!c.isDepth) {
         c.gatherResultType = gatherResultTypeForFormat(c.format);
     }
@@ -4762,33 +5167,33 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     // 'texture-component-swizzle' feature is enabled, in which case it reads as
     // (D, 0, 0, 1). textureGather(component, ...) with component > 0 therefore
     // selects an implementation-defined channel and must not be checked when the
-    // feature is absent. (Upstream texture_utils.ts checkResults skips the call
-    // entirely in this case; see getComponentsToCheck / the depth-stencil guard.)
+    // feature is absent. (Upstream's generator only picks component 0 for depth and
+    // stencil formats, so this does not arise with its inputs.)
     const bool hasComponentSwizzle =
         wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureComponentSwizzle);
-    const bool depthGatherUndefinedComponent =
-        colorViewOfDepth && c.gatherComponent > 0 && !hasComponentSwizzle;
 
     const std::vector<SampleCall> calls = generateCalls(c);
     std::vector<std::array<double, 4>> expected;
+    std::vector<bool> uncheckable(calls.size(), false);
     expected.reserve(calls.size());
-    for (const SampleCall& call : calls) {
+    for (size_t callIndex = 0; callIndex < calls.size(); ++callIndex) {
+        const SampleCall& call = calls[callIndex];
+        const int comp = call.component.value_or(0);
         if (stencilViewOfFormat) {
             // Single-channel stencil cleared to 0; component 1/2 -> 0, 3 -> 1.
-            const double v = c.gatherComponent == 3 ? 1.0 : 0.0;
+            const double v = comp == 3 ? 1.0 : 0.0;
             expected.push_back({v, v, v, v});
         } else if (colorViewOfDepth) {
             // texture_2d<f32> over a 1-channel depth texture: component 0 yields
             // the depth corners. With texture-component-swizzle the read is
             // (D, 0, 0, 1) so component 1/2 -> 0, 3 -> 1; without the feature the
-            // component 1/2/3 results are implementation-defined and are skipped
-            // below (depthGatherUndefinedComponent).
-            const int comp = c.gatherComponent;
+            // component 1/2/3 results are implementation-defined and not checked.
             if (comp == 0) {
                 expected.push_back(gatherDepthTaps(mips[0], call, c));
             } else {
                 const double v = comp == 3 ? 1.0 : 0.0;
                 expected.push_back({v, v, v, v});
+                uncheckable[callIndex] = !hasComponentSwizzle;
             }
         } else if (c.isDepth) {
             expected.push_back(gatherDepthTaps(mips[0], call, c));
@@ -4797,7 +5202,7 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         }
     }
 
-    const std::string wgsl = buildGatherWgsl(static_cast<uint32_t>(calls.size()), c);
+    const std::string wgsl = buildGatherWgsl(calls, c);
     const SamplingPipelineBundle& pipelineBundle = gatherPipelineForDevice(t, wgsl, c);
 
     const std::vector<SampleParamsData> sampleParams = makeSampleParamsData(calls);
@@ -4889,14 +5294,10 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
             if (len < static_cast<size_t>(outputSize)) {
                 return std::string("textureGather output buffer too small");
             }
-            if (depthGatherUndefinedComponent) {
-                // Every call selects an implementation-defined depth-texture
-                // component (G/B/A of a depth read without texture-component-
-                // swizzle); nothing is checkable. The pass still exercises that
-                // the shader compiles and runs.
-                return std::nullopt;
-            }
             for (size_t i = 0; i < calls.size(); ++i) {
+                if (uncheckable[i]) {
+                    continue;
+                }
                 for (uint32_t component = 0; component < 4; ++component) {
                     const size_t byteOffset = c.stage == "compute"
                         ? (i * 4u + component) * sizeof(uint32_t)
@@ -4930,22 +5331,32 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         static_cast<size_t>(outputSize));
 }
 
+// The textureGather / textureGatherCompare cases (upstream textureGather.spec.ts,
+// textureGatherCompare.spec.ts).
 TextureCase baseGatherCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind, bool depth) {
-    TextureCase c;
-    c.kind = kind;
-    c.format = parseTextureFormat(t.param<std::string>("format"));
-    c.stage = t.param<std::string>("stage");
-    c.samplePoints = t.param<std::string>("samplePoints");
-    c.mipLevelCount = kMipLevelCount;
+    TextureCase c = samplingCase(t, kind, "textureGather", t.param<std::string>("stage"));
     c.gather = true;
-    c.builtin = "textureGather";
     if (depth) {
+        // The depth tests' sampler sets only address modes.
         c.isDepth = true;
         c.filt = "nearest";
+        c.samplerHasFilter = false;
         c.gatherResultType = "f32";
     } else {
-        c.filt = t.param<std::string>("filt");
+        c.genComponent = true;
+        c.gatherComponentType = t.param<std::string>("C") == "i32" ? "i" : "u";
     }
+    return c;
+}
+
+TextureCase baseGatherCompareCase(AllFeaturesMaxLimitsGpuTest& t, SampleKind kind) {
+    TextureCase c = samplingCase(t, kind, "textureGatherCompare", t.param<std::string>("stage"));
+    c.gather = true;
+    c.gatherCompare = true;
+    c.isDepth = true;
+    c.comparisonSampler = true;
+    c.compare = t.param<std::string>("compare");
+    c.genDepthRef = true;
     return c;
 }
 
@@ -5449,36 +5860,43 @@ std::vector<ParamRecord> depth3DViewDimensionParams() {
     };
 }
 
+// ---------------------------------------------------------------------------
+// textureSampleLevel (upstream textureSampleLevel.spec.ts)
+// ---------------------------------------------------------------------------
+
 void executeTextureSampleLevelStage1(AllFeaturesMaxLimitsGpuTest& t) {
     executeTextureSampleLevelSampled2D(t);
 }
 
 void executeTextureSampleLevelSampled1D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseSampledCase(t, SampleKind::Sampled1D);
+    TextureCase c = samplingCase(t, SampleKind::Sampled1D, "textureSampleLevel", t.param<std::string>("stage"));
     c.textureDimension = WGPUTextureDimension_1D;
     c.viewDimension = WGPUTextureViewDimension_1D;
-    c.baseSize = baseSize(8, 1, 1);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format, "1d"), 1, 1);
+    setAddressModes(c, t, "modeU", "modeV", "");
+    c.mipLevelRange = rangeDef(c.mipLevelCount, "f32");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("modeU").shortStr("modeV").str("filt").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleLevelSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseSampledCase(t, SampleKind::Sampled2D);
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    TextureCase c = samplingCase(t, SampleKind::Sampled2D, "textureSampleLevel", t.param<std::string>("stage"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
+    c.mipLevelRange = rangeDef(c.mipLevelCount, "f32");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleLevelSampled2DLodClamp(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseSampledCase(t, SampleKind::Sampled2DLodClamp);
-    c.baseSize = baseSize(8, 8, 1);
+    TextureCase c = samplingCase(t, SampleKind::Sampled2DLodClamp, "textureSampleLevel", t.param<std::string>("stage"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
     c.baseMipLevel = static_cast<uint32_t>(t.param<int>("baseMipLevel"));
     c.lodMinClamp = t.param<double>("lodMinClamp");
     c.lodMaxClamp = t.param<double>("lodMaxClamp");
+    c.mipLevelRange = rangeDef(c.mipLevelCount, "f32");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").str("filt").num("baseMipLevel").num("lodMinClamp").num("lodMaxClamp").done();
     executeCase(t, c);
 }
 
@@ -5508,26 +5926,15 @@ void executeTextureSampleLevelSampled2DCompressedUnaligned(AllFeaturesMaxLimitsG
     c.mipLevelCount = 1;
     c.modeU = addressModeFromShort(t.param<std::string>("mode"));
     c.modeV = c.modeU;
-    c.unalignedBaseSize = true;
     // checkCallResults: maxFractionalDiff is 0 unless the sampler filters linearly.
     c.maxFractionalDiff = filt == "linear" ? maxFractionalDiffForTextureFormat(format) : 0.0;
 
-    // generateTextureBuiltinInputs2D(50, { method: 'spiral', ... }): coordinates are quantized to
-    // a quarter texel and, with nearest filtering, moved off the edges of texels.
-    constexpr uint32_t kSpiralPoints = 50;
-    const auto quantize = [&filt](double v, uint32_t size) {
-        constexpr double kSubdivisionsPerTexel = 4.0;
-        const double q = static_cast<double>(size) * kSubdivisionsPerTexel;
-        const double v1 = std::floor(v * q);
-        const bool isTexelEdgeCase = std::abs(std::fmod(v1, kSubdivisionsPerTexel)) == 0.0;
-        return (isTexelEdgeCase && filt == "nearest" ? v1 + 1.0 : v1) / q;
-    };
+    // generateTextureBuiltinInputs2D(50, { method: 'spiral', sampler, softwareTexture, hashInputs }).
+    c.samplePoints = "spiral";
+    c.hashInputs = HashInputs(t).str("stage").str("format").shortStr("mode").str("filt").str("partialEdge").done();
     std::vector<Vec3>& coords = c.explicitCoords;
-    for (uint32_t i = 0; i < kSpiralPoints; ++i) {
-        const double f = static_cast<double>(i) / static_cast<double>(kSpiralPoints - 1u);
-        const double r = 1.5 * f;
-        const double a = 2.0 * 2.0 * 3.14159265358979323846 * f;
-        coords.push_back(Vec3{quantize(0.5 + r * std::cos(a), width), quantize(0.5 + r * std::sin(a), height), 0.0});
+    for (const sample_points::BuiltinInput& input : generateBuiltinInputsForCase(c)) {
+        coords.push_back(vec3FromComponents(input.coords, 0.0));
     }
 
     // Coordinates, in one axis, on and a quarter texel to each side of both edges of the texture.
@@ -5584,384 +5991,358 @@ void executeTextureSampleLevelSampled2DCompressedUnaligned(AllFeaturesMaxLimitsG
 }
 
 void executeTextureSampleLevelSampled2DArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseSampledCase(t, SampleKind::Sampled2DArray);
+    TextureCase c = samplingCase(t, SampleKind::Sampled2DArray, "textureSampleLevel", t.param<std::string>("stage"));
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), layers, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    c.mipLevelRange = rangeDef(c.mipLevelCount, "f32");
+    setArrayIndex(c, t, layers);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").str("A").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleLevelSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
     const std::string dim = t.param<std::string>("dim");
-    TextureCase c = baseSampledCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
-    c.textureDimension = dim == "3d" ? WGPUTextureDimension_3D : WGPUTextureDimension_2D;
-    c.viewDimension = dim == "3d" ? WGPUTextureViewDimension_3D : WGPUTextureViewDimension_Cube;
-    c.baseSize = dim == "3d" ? baseSize(8, 8, 8) : baseSize(8, 8, 6);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useOffset = dim == "3d" && t.param<bool>("offset");
+    TextureCase c = samplingCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D, "textureSampleLevel", t.param<std::string>("stage"));
+    const WGPUExtent3D size = chooseTextureSize(32, 2, c.format, dim);
+    if (dim == "3d") {
+        c.textureDimension = WGPUTextureDimension_3D;
+        c.viewDimension = WGPUTextureViewDimension_3D;
+        setTextureSize2D(c, size, depthOrArrayLayersForViewDimension(dim), 3);
+        c.useOffset = t.param<bool>("offset");
+    } else {
+        setCubeTexture(c, baseSize(size.width, size.height, depthOrArrayLayersForViewDimension(dim)), false, 3);
+    }
+    setAddressModes(c, t, "mode", "mode", "mode");
+    c.mipLevelRange = rangeDef(c.mipLevelCount, "f32");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("dim").str("samplePoints").shortStr("mode").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleLevelSampled3DLodClamp(AllFeaturesMaxLimitsGpuTest& t) {
     const std::string dim = t.param<std::string>("dim");
-    TextureCase c = baseSampledCase(t, dim == "cube" ? SampleKind::SampledCubeLodClamp : SampleKind::Sampled3DLodClamp);
-    c.textureDimension = dim == "3d" ? WGPUTextureDimension_3D : WGPUTextureDimension_2D;
-    c.viewDimension = dim == "3d" ? WGPUTextureViewDimension_3D : WGPUTextureViewDimension_Cube;
-    c.baseSize = dim == "3d" ? baseSize(8, 8, 8) : baseSize(8, 8, 6);
+    TextureCase c = samplingCase(t, dim == "cube" ? SampleKind::SampledCubeLodClamp : SampleKind::Sampled3DLodClamp, "textureSampleLevel", t.param<std::string>("stage"));
+    const WGPUExtent3D size = chooseTextureSize(32, 2, c.format, dim);
+    if (dim == "3d") {
+        c.textureDimension = WGPUTextureDimension_3D;
+        c.viewDimension = WGPUTextureViewDimension_3D;
+        setTextureSize2D(c, size, depthOrArrayLayersForViewDimension(dim), 3);
+    } else {
+        setCubeTexture(c, baseSize(size.width, size.height, depthOrArrayLayersForViewDimension(dim)), false, 3);
+    }
     c.baseMipLevel = static_cast<uint32_t>(t.param<int>("baseMipLevel"));
     c.lodMinClamp = t.param<double>("lodMinClamp");
     c.lodMaxClamp = t.param<double>("lodMaxClamp");
+    c.mipLevelRange = rangeDef(c.mipLevelCount, "f32");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("dim").str("samplePoints").str("filt").num("baseMipLevel").num("lodMinClamp").num("lodMaxClamp").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleLevelSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseSampledCase(t, SampleKind::SampledCubeArray);
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(8, 8, 24);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    TextureCase c = samplingCase(t, SampleKind::SampledCubeArray, "textureSampleLevel", t.param<std::string>("stage"));
+    setCubeTexture(c, chooseTextureSize(32, 4, c.format, "cube-array"), true, 3);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    c.mipLevelRange = rangeDef(c.mipLevelCount, "f32");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").lit("cube-array").str("A").str("samplePoints").shortStr("mode").str("filt").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleLevelDepth2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseDepthCase(t, SampleKind::Depth2D);
-    c.baseSize = baseSize(8, 8, 1);
+    TextureCase c = depthSampleLevelCase(t, SampleKind::Depth2D);
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
+    setAddressModes(c, t, "mode", "mode", "");
     c.useOffset = t.param<bool>("offset");
+    c.mipLevelRange = rangeDef(c.mipLevelCount, c.levelType);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("mode").str("L").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleLevelDepth2DArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseDepthCase(t, SampleKind::Depth2DArray);
+    TextureCase c = depthSampleLevelCase(t, SampleKind::Depth2DArray);
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), layers, 3);
+    setAddressModes(c, t, "mode", "mode", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setArrayIndex(c, t, layers);
+    c.mipLevelRange = rangeDef(c.mipLevelCount, c.levelType);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("mode").str("L").str("A").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleLevelDepth3D(AllFeaturesMaxLimitsGpuTest& t) {
     const std::string viewDimension = t.param<std::string>("viewDimension");
-    TextureCase c = baseDepthCase(t, viewDimension == "cube" ? SampleKind::DepthCube : SampleKind::DepthCubeArray);
-    c.viewDimension = viewDimension == "cube" ? WGPUTextureViewDimension_Cube : WGPUTextureViewDimension_CubeArray;
-    c.baseSize = viewDimension == "cube" ? baseSize(8, 8, 6) : baseSize(8, 8, 24);
-    if (viewDimension == "cube-array") {
-        c.useArrayIndex = true;
-        c.arrayIndexType = t.param<std::string>("A");
+    const bool array = viewDimension == "cube-array";
+    TextureCase c = depthSampleLevelCase(t, array ? SampleKind::DepthCubeArray : SampleKind::DepthCube);
+    setCubeTexture(c, chooseTextureSize(32, 4, c.format, viewDimension), array, 3);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    c.mipLevelRange = rangeDef(c.mipLevelCount - 1u, c.levelType);
+    if (array) {
+        setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
     }
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("viewDimension").str("samplePoints").shortStr("mode").done();
     executeCase(t, c);
 }
 
+// ---------------------------------------------------------------------------
+// textureSample (upstream textureSample.spec.ts): fragment stage, implicit derivatives.
+// ---------------------------------------------------------------------------
+
 void executeTextureSampleSampled1D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleSampledCase(t, SampleKind::Sampled1D);
+    TextureCase c = textureSampleCase(t, SampleKind::Sampled1D);
     c.textureDimension = WGPUTextureDimension_1D;
     c.viewDimension = WGPUTextureViewDimension_1D;
-    c.baseSize = baseSize(8, 1, 1);
-    c.mipLevelCount = 1;
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format, "1d"), 1, 1);
     c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
+    // The sampler sets minFilter and magFilter but not mipmapFilter.
+    c.samplerHasMipmapFilter = false;
+    c.hashInputs = HashInputs(t).str("format").str("samplePoints").shortStr("modeU").str("filt").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleSampledCase(t, SampleKind::Sampled2D);
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    TextureCase c = textureSampleCase(t, SampleKind::Sampled2D);
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
+    c.hashInputs = HashInputs(t).str("format").str("samplePoints").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleSampled2DLodClamp(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleSampledCase(t, SampleKind::Sampled2DLodClamp);
-    c.baseSize = baseSize(8, 8, 1);
+    TextureCase c = textureSampleCase(t, SampleKind::Sampled2DLodClamp);
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
     c.baseMipLevel = static_cast<uint32_t>(t.param<int>("baseMipLevel"));
     c.lodMinClamp = t.param<double>("lodMinClamp");
     c.lodMaxClamp = t.param<double>("lodMaxClamp");
+    c.hashInputs = HashInputs(t).str("format").str("samplePoints").str("filt").num("baseMipLevel").num("lodMinClamp").num("lodMaxClamp").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleSampled2DArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleSampledCase(t, SampleKind::Sampled2DArray);
+    TextureCase c = textureSampleCase(t, SampleKind::Sampled2DArray);
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), layers, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setArrayIndex(c, t, layers);
+    c.hashInputs = HashInputs(t).str("format").str("samplePoints").str("A").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
     const std::string dim = t.param<std::string>("dim");
-    TextureCase c = baseTextureSampleSampledCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
-    c.textureDimension = dim == "3d" ? WGPUTextureDimension_3D : WGPUTextureDimension_2D;
-    c.viewDimension = dim == "3d" ? WGPUTextureViewDimension_3D : WGPUTextureViewDimension_Cube;
-    c.baseSize = dim == "3d" ? baseSize(8, 8, 8) : baseSize(32, 32, 6);
-    c.mipLevelCount = dim == "3d" ? kMipLevelCount : 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
-    c.modeW = addressModeFromShort(t.param<std::string>("modeW"));
-    c.useOffset = dim == "3d" && t.param<bool>("offset");
+    TextureCase c = textureSampleCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
+    const WGPUExtent3D size = chooseTextureSize(8, 2, c.format, dim);
+    if (dim == "3d") {
+        c.textureDimension = WGPUTextureDimension_3D;
+        c.viewDimension = WGPUTextureViewDimension_3D;
+        setTextureSize2D(c, size, size.depthOrArrayLayers, 3);
+    } else {
+        setCubeTexture(c, size, false, 1);
+    }
+    setAddressModes(c, t, "modeU", "modeV", "modeW");
+    // Upstream hashes `offset` but does not pass it to the generator: no call has an offset.
+    c.hashInputs = HashInputs(t).str("format").str("dim").str("samplePoints").shortStr("modeU").shortStr("modeV").shortStr("modeW").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleSampledCase(t, SampleKind::SampledCubeArray);
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(32, 32, 24);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    TextureCase c = textureSampleCase(t, SampleKind::SampledCubeArray);
+    setCubeTexture(c, chooseTextureSize(32, 4, c.format, "cube-array"), true, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = HashInputs(t).str("format").lit("cube-array").str("A").str("samplePoints").shortStr("mode").str("filt").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleDepth2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleDepthCase(t, SampleKind::Depth2D);
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    TextureCase c = depthTextureSampleCase(t, SampleKind::Depth2D);
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
+    c.hashInputs = HashInputs(t).str("format").str("samplePoints").shortStr("modeU").shortStr("modeV").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleDepth2DArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleDepthCase(t, SampleKind::Depth2DArray);
+    TextureCase c = depthTextureSampleCase(t, SampleKind::Depth2DArray);
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), layers, 3);
+    setAddressModes(c, t, "mode", "mode", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setArrayIndex(c, t, layers);
+    c.hashInputs = HashInputs(t).str("format").str("samplePoints").shortStr("mode").str("L").str("A").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleDepth3D(AllFeaturesMaxLimitsGpuTest& t) {
     const std::string viewDimension = t.param<std::string>("viewDimension");
-    TextureCase c = baseTextureSampleDepthCase(t, viewDimension == "cube" ? SampleKind::DepthCube : SampleKind::DepthCubeArray);
-    c.viewDimension = viewDimension == "cube" ? WGPUTextureViewDimension_Cube : WGPUTextureViewDimension_CubeArray;
-    c.baseSize = viewDimension == "cube" ? baseSize(32, 32, 6) : baseSize(32, 32, 24);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    if (viewDimension == "cube-array") {
-        c.useArrayIndex = true;
-        c.arrayIndexType = t.param<std::string>("A");
+    const bool array = viewDimension == "cube-array";
+    TextureCase c = depthTextureSampleCase(t, array ? SampleKind::DepthCubeArray : SampleKind::DepthCube);
+    setCubeTexture(c, chooseTextureSize(32, 4, c.format, viewDimension), array, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    if (array) {
+        setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
     }
+    c.hashInputs = HashInputs(t).str("format").str("viewDimension").str("samplePoints").shortStr("mode").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleDepthCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleDepthCase(t, SampleKind::DepthCubeArray);
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(32, 32, 24);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    TextureCase c = depthTextureSampleCase(t, SampleKind::DepthCubeArray);
+    setCubeTexture(c, chooseTextureSize(32, 4, c.format, "cube-array"), true, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = HashInputs(t).str("format").lit("cube-array").str("samplePoints").shortStr("mode").done();
     executeCase(t, c);
 }
 
+// ---------------------------------------------------------------------------
+// textureSampleGrad (upstream textureSampleGrad.spec.ts)
+// ---------------------------------------------------------------------------
+
 void executeTextureSampleGradSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleGradSampledCase(t, SampleKind::Sampled2D);
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    TextureCase c = textureSampleGradCase(t, SampleKind::Sampled2D);
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleGradSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
     const std::string dim = t.param<std::string>("dim");
-    TextureCase c = baseTextureSampleGradSampledCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
-    c.textureDimension = dim == "3d" ? WGPUTextureDimension_3D : WGPUTextureDimension_2D;
-    c.viewDimension = dim == "3d" ? WGPUTextureViewDimension_3D : WGPUTextureViewDimension_Cube;
-    c.baseSize = dim == "3d" ? baseSize(8, 8, 8) : baseSize(32, 32, 6);
-    c.mipLevelCount = dim == "3d" ? kMipLevelCount : 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
-    c.modeW = addressModeFromShort(t.param<std::string>("modeW"));
-    c.useOffset = dim == "3d" && t.param<bool>("offset");
+    TextureCase c = textureSampleGradCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
+    const WGPUExtent3D size = chooseTextureSize(8, 2, c.format, dim);
+    if (dim == "3d") {
+        c.textureDimension = WGPUTextureDimension_3D;
+        c.viewDimension = WGPUTextureViewDimension_3D;
+        setTextureSize2D(c, size, size.depthOrArrayLayers, 3);
+        c.useOffset = t.param<bool>("offset");
+    } else {
+        setCubeTexture(c, size, false, 1);
+    }
+    setAddressModes(c, t, "modeU", "modeV", "modeW");
+    // The sampler sets minFilter and magFilter but not mipmapFilter.
+    c.samplerHasMipmapFilter = false;
+    c.hashInputs = HashInputs(t).str("format").str("dim").str("samplePoints").shortStr("modeU").shortStr("modeV").shortStr("modeW").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleGradSampled2DArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleGradSampledCase(t, SampleKind::Sampled2DArray);
+    TextureCase c = textureSampleGradCase(t, SampleKind::Sampled2DArray);
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), layers, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setArrayIndex(c, t, layers);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").str("A").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleGradSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleGradSampledCase(t, SampleKind::SampledCubeArray);
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(32, 32, 24);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    TextureCase c = textureSampleGradCase(t, SampleKind::SampledCubeArray);
+    setCubeTexture(c, chooseTextureSize(32, 4, c.format, "cube-array"), true, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").lit("cube-array").str("A").str("samplePoints").shortStr("mode").str("filt").done();
     executeCase(t, c);
 }
 
+// ---------------------------------------------------------------------------
+// textureSampleBias (upstream textureSampleBias.spec.ts): fragment stage.
+// ---------------------------------------------------------------------------
+
 void executeTextureSampleBiasSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleBiasSampledCase(t, SampleKind::Sampled2D);
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    TextureCase c = textureSampleBiasCase(t, SampleKind::Sampled2D);
+    setTextureSize2D(c, chooseTextureSize(8, kMinBlocksForTextureSampleBias, c.format), 1, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
+    c.hashInputs = HashInputs(t).str("format").str("samplePoints").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleBiasSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
     const std::string dim = t.param<std::string>("dim");
-    TextureCase c = baseTextureSampleBiasSampledCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
-    c.textureDimension = dim == "3d" ? WGPUTextureDimension_3D : WGPUTextureDimension_2D;
-    c.viewDimension = dim == "3d" ? WGPUTextureViewDimension_3D : WGPUTextureViewDimension_Cube;
-    c.baseSize = dim == "3d" ? baseSize(8, 8, 8) : baseSize(32, 32, 6);
-    c.mipLevelCount = dim == "3d" ? kMipLevelCount : 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
-    c.modeW = addressModeFromShort(t.param<std::string>("modeW"));
-    c.useOffset = dim == "3d" && t.param<bool>("offset");
+    TextureCase c = textureSampleBiasCase(t, dim == "cube" ? SampleKind::SampledCube : SampleKind::Sampled3D);
+    const WGPUExtent3D size = chooseTextureSize(8, 2, c.format, dim);
+    if (dim == "3d") {
+        c.textureDimension = WGPUTextureDimension_3D;
+        c.viewDimension = WGPUTextureViewDimension_3D;
+        setTextureSize2D(c, size, size.depthOrArrayLayers, 3);
+        c.useOffset = t.param<bool>("offset");
+    } else {
+        setCubeTexture(c, size, false, 1);
+    }
+    setAddressModes(c, t, "modeU", "modeV", "modeW");
+    // The sampler sets minFilter and magFilter but not mipmapFilter.
+    c.samplerHasMipmapFilter = false;
+    c.hashInputs = HashInputs(t).str("format").str("dim").str("samplePoints").shortStr("modeU").shortStr("modeV").shortStr("modeW").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleBiasSampled2DArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleBiasSampledCase(t, SampleKind::Sampled2DArray);
+    TextureCase c = textureSampleBiasCase(t, SampleKind::Sampled2DArray);
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, 4);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    setTextureSize2D(c, chooseTextureSize(8, kMinBlocksForTextureSampleBias, c.format), 4, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setArrayIndex(c, t, 4);
+    c.hashInputs = HashInputs(t).str("format").str("samplePoints").str("A").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeCase(t, c);
 }
 
 void executeTextureSampleBiasSampledCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleBiasSampledCase(t, SampleKind::SampledCubeArray);
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(32, 32, 24);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    TextureCase c = textureSampleBiasCase(t, SampleKind::SampledCubeArray);
+    setCubeTexture(c, chooseTextureSize(32, 4, c.format, "cube-array"), true, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = HashInputs(t).str("format").lit("cube-array").str("A").str("samplePoints").shortStr("mode").str("filt").done();
     executeCase(t, c);
 }
 
+// ---------------------------------------------------------------------------
+// textureSampleCompare / textureSampleCompareLevel (upstream textureSampleCompare.spec.ts,
+// textureSampleCompareLevel.spec.ts)
+// ---------------------------------------------------------------------------
+
 void executeTextureSampleCompare2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::Depth2D, "fragment", "textureSampleCompare");
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
-    c.useOffset = t.param<bool>("offset");
-    executeCase(t, c);
+    executeTextureSampleCompare2DCase(t, textureSampleCompareCase(t, SampleKind::Depth2D, "fragment", "textureSampleCompare"));
 }
 
 void executeTextureSampleCompareCube(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::DepthCube, "fragment", "textureSampleCompare");
-    c.viewDimension = WGPUTextureViewDimension_Cube;
-    c.baseSize = baseSize(32, 32, 6);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    executeCase(t, c);
+    executeTextureSampleCompareCubeCase(t, textureSampleCompareCase(t, SampleKind::DepthCube, "fragment", "textureSampleCompare"));
 }
 
 void executeTextureSampleCompare2DArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::Depth2DArray, "fragment", "textureSampleCompare");
-    c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
-    c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
-    executeCase(t, c);
+    executeTextureSampleCompare2DArrayCase(t, textureSampleCompareCase(t, SampleKind::Depth2DArray, "fragment", "textureSampleCompare"));
 }
 
 void executeTextureSampleCompareCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::DepthCubeArray, "fragment", "textureSampleCompare");
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(32, 32, 24);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
-    executeCase(t, c);
+    executeTextureSampleCompareCubeArrayCase(t, textureSampleCompareCase(t, SampleKind::DepthCubeArray, "fragment", "textureSampleCompare"));
 }
 
 void executeTextureSampleCompareLevel2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::Depth2D, t.param<std::string>("stage"), "textureSampleCompareLevel");
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
-    c.useOffset = t.param<bool>("offset");
-    executeCase(t, c);
+    executeTextureSampleCompare2DCase(t, textureSampleCompareCase(t, SampleKind::Depth2D, t.param<std::string>("stage"), "textureSampleCompareLevel"));
 }
 
 void executeTextureSampleCompareLevelCube(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::DepthCube, t.param<std::string>("stage"), "textureSampleCompareLevel");
-    c.viewDimension = WGPUTextureViewDimension_Cube;
-    c.baseSize = baseSize(32, 32, 6);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    executeCase(t, c);
+    executeTextureSampleCompareCubeCase(t, textureSampleCompareCase(t, SampleKind::DepthCube, t.param<std::string>("stage"), "textureSampleCompareLevel"));
 }
 
 void executeTextureSampleCompareLevel2DArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::Depth2DArray, t.param<std::string>("stage"), "textureSampleCompareLevel");
-    c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
-    c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
-    executeCase(t, c);
+    executeTextureSampleCompare2DArrayCase(t, textureSampleCompareCase(t, SampleKind::Depth2DArray, t.param<std::string>("stage"), "textureSampleCompareLevel"));
 }
 
 void executeTextureSampleCompareLevelCubeArray(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseTextureSampleCompareCase(t, SampleKind::DepthCubeArray, t.param<std::string>("stage"), "textureSampleCompareLevel");
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(8, 8, 24);
-    c.mipLevelCount = 1;
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
-    executeCase(t, c);
+    executeTextureSampleCompareCubeArrayCase(t, textureSampleCompareCase(t, SampleKind::DepthCubeArray, t.param<std::string>("stage"), "textureSampleCompareLevel"));
 }
 
 void executeTextureSampleBaseClampToEdge2D(AllFeaturesMaxLimitsGpuTest& t) {
@@ -5983,154 +6364,117 @@ bool isGatherFilterNearestOrPossiblyFilterableParam(const ParamRecord& record) {
 
 void executeTextureGatherSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseGatherCase(t, SampleKind::Sampled2D, false);
-    c.gatherComponent = t.param<std::string>("C") == "i32" ? 1 : 2;
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("C").str("samplePoints").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseGatherCase(t, SampleKind::SampledCube, false);
-    c.gatherComponent = t.param<std::string>("C") == "i32" ? 1 : 2;
-    c.viewDimension = WGPUTextureViewDimension_Cube;
-    c.baseSize = baseSize(8, 8, 6);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
+    const WGPUExtent3D size = chooseTextureSize(8, 2, c.format, "cube");
+    setCubeTexture(c, baseSize(size.width, size.height, 6), false, 3);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("C").str("samplePoints").shortStr("mode").str("filt").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherSampledArray2D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseGatherCase(t, SampleKind::Sampled2DArray, false);
-    c.gatherComponent = t.param<std::string>("C") == "i32" ? 1 : 2;
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), layers, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setArrayIndex(c, t, layers);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").str("C").str("A").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherSampledArray3D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseGatherCase(t, SampleKind::SampledCubeArray, false);
-    c.gatherComponent = t.param<std::string>("C") == "i32" ? 1 : 2;
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(8, 8, 24);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setCubeTexture(c, chooseTextureSize(8, 2, c.format, "cube-array"), true, 3);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("C").str("samplePoints").shortStr("mode").str("filt").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherDepth2D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseGatherCase(t, SampleKind::Depth2D, true);
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("modeU").shortStr("modeV").flag("offset").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherDepth3D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseGatherCase(t, SampleKind::DepthCube, true);
-    c.viewDimension = WGPUTextureViewDimension_Cube;
-    c.baseSize = baseSize(8, 8, 6);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
+    const WGPUExtent3D size = chooseTextureSize(8, 2, c.format, "cube");
+    setCubeTexture(c, baseSize(size.width, size.height, 6), false, 3);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("mode").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherDepthArray2D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseGatherCase(t, SampleKind::Depth2DArray, true);
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), layers, 3);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setArrayIndex(c, t, layers);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").str("A").shortStr("modeU").shortStr("modeV").flag("offset").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherDepthArray3D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureCase c = baseGatherCase(t, SampleKind::DepthCubeArray, true);
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(8, 8, 24);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setCubeTexture(c, chooseTextureSize(8, 2, c.format, "cube-array"), true, 3);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("mode").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherCompareArray2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseGatherCase(t, SampleKind::Depth2DArray, true);
-    c.builtin = "textureGatherCompare";
-    c.gatherCompare = true;
-    c.comparisonSampler = true;
-    c.filt = t.param<std::string>("filt");
-    c.compare = t.param<std::string>("compare");
+    TextureCase c = baseGatherCompareCase(t, SampleKind::Depth2DArray);
     c.viewDimension = WGPUTextureViewDimension_2DArray;
-    c.baseSize = baseSize(8, 8, static_cast<uint32_t>(t.param<int>("depthOrArrayLayers")));
-    c.modeU = addressModeFromShort(t.param<std::string>("modeU"));
-    c.modeV = addressModeFromShort(t.param<std::string>("modeV"));
+    const uint32_t layers = static_cast<uint32_t>(t.param<int>("depthOrArrayLayers"));
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), layers, 1);
+    setAddressModes(c, t, "modeU", "modeV", "");
     c.useOffset = t.param<bool>("offset");
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    setArrayIndex(c, t, layers);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").str("A").shortStr("modeU").shortStr("modeV").str("filt").flag("offset").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherCompareArray3D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseGatherCase(t, SampleKind::DepthCubeArray, true);
-    c.builtin = "textureGatherCompare";
-    c.gatherCompare = true;
-    c.comparisonSampler = true;
-    c.filt = t.param<std::string>("filt");
-    c.compare = t.param<std::string>("compare");
-    c.viewDimension = WGPUTextureViewDimension_CubeArray;
-    c.baseSize = baseSize(8, 8, 24);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
-    c.useArrayIndex = true;
-    c.arrayIndexType = t.param<std::string>("A");
+    TextureCase c = baseGatherCompareCase(t, SampleKind::DepthCubeArray);
+    setCubeTexture(c, chooseTextureSize(8, 2, c.format, "cube-array"), true, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    setArrayIndex(c, t, c.baseSize.depthOrArrayLayers / 6u);
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("mode").str("filt").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherCompareSampled2D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseGatherCase(t, SampleKind::Depth2D, true);
-    c.builtin = "textureGatherCompare";
-    c.gatherCompare = true;
-    c.comparisonSampler = true;
-    c.filt = t.param<std::string>("filt");
-    c.compare = t.param<std::string>("compare");
-    c.baseSize = baseSize(8, 8, 1);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
+    TextureCase c = baseGatherCompareCase(t, SampleKind::Depth2D);
+    setTextureSize2D(c, chooseTextureSize(8, 4, c.format), 1, 1);
+    setAddressModes(c, t, "mode", "mode", "");
     c.useOffset = t.param<bool>("offset");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").optStr("C").str("samplePoints").shortStr("mode").str("filt").str("compare").flag("offset").done();
     executeGatherCase(t, c);
 }
 
 void executeTextureGatherCompareSampled3D(AllFeaturesMaxLimitsGpuTest& t) {
-    TextureCase c = baseGatherCase(t, SampleKind::DepthCube, true);
-    c.builtin = "textureGatherCompare";
-    c.gatherCompare = true;
-    c.comparisonSampler = true;
-    c.filt = t.param<std::string>("filt");
-    c.compare = t.param<std::string>("compare");
-    c.viewDimension = WGPUTextureViewDimension_Cube;
-    c.baseSize = baseSize(8, 8, 6);
-    c.modeU = addressModeFromShort(t.param<std::string>("mode"));
-    c.modeV = c.modeU;
-    c.modeW = c.modeU;
+    TextureCase c = baseGatherCompareCase(t, SampleKind::DepthCube);
+    setCubeTexture(c, chooseTextureSize(8, 2, c.format, "cube"), false, 1);
+    setAddressModes(c, t, "mode", "mode", "mode");
+    c.hashInputs = HashInputs(t).shortStr("stage").str("format").str("samplePoints").shortStr("mode").str("filt").str("compare").done();
     executeGatherCase(t, c);
 }
 
@@ -6436,16 +6780,18 @@ TextureLoadCase baseLoadSampled(AllFeaturesMaxLimitsGpuTest& t, WGPUTextureDimen
         c.textureType = appendLoadComponentType(typeBase, c.format, false);
         c.returnKind = LoadReturnKind::Uint;
     }
-    c.baseSize = dimension == WGPUTextureDimension_1D ? WGPUExtent3D{16, 1, 1}
-        : dimension == WGPUTextureDimension_3D ? WGPUExtent3D{8, 8, 8}
-        : WGPUExtent3D{8, 8, 1};
-    TextureCase tc;
-    tc.format = c.format;
-    tc.textureDimension = c.textureDimension;
-    tc.viewDimension = c.viewDimension;
-    tc.baseSize = c.baseSize;
-    tc.mipLevelCount = c.mipLevelCount;
-    c.baseSize = adjustedBaseSizeForFormat(tc);
+    // chooseTextureSize({ minSize: 8, minBlocks: 4, format }); 1d textures use [width, 1] and one
+    // level, the others maxMipLevelCount({ size }) levels.
+    const WGPUExtent3D size = chooseTextureSize(8, 4, c.format, dimension == WGPUTextureDimension_3D ? "3d" : "2d");
+    if (dimension == WGPUTextureDimension_1D) {
+        c.baseSize = WGPUExtent3D{size.width, 1, 1};
+        c.mipLevelCount = 1;
+    } else {
+        c.baseSize = size;
+        c.mipLevelCount = maxMipLevelCount2D(size);
+    }
+    c.mipLevelRange = rangeDef(c.mipLevelCount, c.levelType);
+    c.hashInputs = HashInputs(t).str("stage").str("format").str("samplePoints").str("C").str("L").done();
     return c;
 }
 
@@ -6487,6 +6833,8 @@ void executeTextureLoadMultisampled(AllFeaturesMaxLimitsGpuTest& t) {
         : isStencilOnlyFormat(c.format) ? WGPUTextureAspect_StencilOnly
                                         : WGPUTextureAspect_All;
     c.baseSize = WGPUExtent3D{8, 8, 1};
+    c.sampleIndexRange = rangeDef(c.sampleCount, c.sampleIndexType);
+    c.hashInputs = HashInputs(t).str("stage").str("format").str("samplePoints").str("C").str("S").done();
     executeTextureLoadCase(t, c);
 }
 
@@ -6513,6 +6861,8 @@ void executeTextureLoadArrayed(AllFeaturesMaxLimitsGpuTest& t) {
     c.useArrayIndex = true;
     c.arrayIndexType = t.param<std::string>("A");
     c.baseSize.depthOrArrayLayers = paramU32(t.params(), "depthOrArrayLayers");
+    c.arrayIndexRange = rangeDef(c.baseSize.depthOrArrayLayers, c.arrayIndexType);
+    c.hashInputs = HashInputs(t).str("stage").str("format").str("samplePoints").str("C").str("L").str("A").done();
     c.textureType = depth ? "texture_depth_2d_array" : appendLoadComponentType("texture_2d_array", c.format, false);
     c.returnKind = loadReturnKindForFormat(c.format, depth);
     c.sampleType = depth ? WGPUTextureSampleType_Depth : metadataSampleType(c.format, c.aspect, false, 1);
@@ -6540,9 +6890,9 @@ TextureLoadCase baseLoadStorage(AllFeaturesMaxLimitsGpuTest& t, WGPUTextureDimen
     c.returnKind = loadReturnKindForFormat(c.format, false);
     c.textureType = typeName + "<" + std::string(textureFormatInfo(c.format).identifier) + ", read>";
     c.sampleType = WGPUTextureSampleType_BindingNotUsed;
-    c.baseSize = dimension == WGPUTextureDimension_1D ? WGPUExtent3D{16, 1, 1}
-        : dimension == WGPUTextureDimension_3D ? WGPUExtent3D{8, 8, 8}
-        : WGPUExtent3D{8, 8, 1};
+    const WGPUExtent3D size = chooseTextureSize(8, 4, c.format, dimension == WGPUTextureDimension_3D ? "3d" : "2d");
+    c.baseSize = dimension == WGPUTextureDimension_1D ? WGPUExtent3D{size.width, 1, 1} : size;
+    c.hashInputs = HashInputs(t).str("stage").str("format").str("samplePoints").str("C").done();
     return c;
 }
 
@@ -6552,6 +6902,8 @@ void executeTextureLoadStorage1D(AllFeaturesMaxLimitsGpuTest& t) {
 
 void executeTextureLoadStorage2D(AllFeaturesMaxLimitsGpuTest& t) {
     TextureLoadCase c = baseLoadStorage(t, WGPUTextureDimension_2D, WGPUTextureViewDimension_2D, 2, "texture_storage_2d");
+    // "We want at least 3 blocks": chooseTextureSize({ minSize: 8, minBlocks: 3, format }).
+    c.baseSize = chooseTextureSize(8, 3, c.format);
     c.mipLevelCount = 3;
     c.baseMipLevel = paramU32(t.params(), "baseMipLevel");
     c.viewMipCount = 1;
@@ -6568,6 +6920,8 @@ void executeTextureLoadStorage2DArray(AllFeaturesMaxLimitsGpuTest& t) {
     c.baseArrayLayer = paramU32(t.params(), "baseArrayLayer");
     c.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
     c.baseSize.depthOrArrayLayers = paramU32(t.params(), "depthOrArrayLayers");
+    c.arrayIndexRange = rangeDef(c.baseSize.depthOrArrayLayers - c.baseArrayLayer, c.arrayIndexType);
+    c.hashInputs = HashInputs(t).str("stage").str("format").str("samplePoints").str("C").str("A").done();
     executeTextureLoadCase(t, c);
 }
 
