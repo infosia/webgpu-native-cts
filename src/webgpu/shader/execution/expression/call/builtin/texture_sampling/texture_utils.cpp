@@ -481,8 +481,7 @@ std::vector<MipData> makeTextureData(
     WGPUTextureFormat format,
     WGPUTextureDimension dimension,
     WGPUExtent3D baseSize,
-    uint32_t mipLevelCount,
-    bool constantPerMip) {
+    uint32_t mipLevelCount) {
     std::vector<MipData> mips;
     mips.reserve(mipLevelCount);
     const TexelRepresentation& repr = texelRepresentation(format);
@@ -498,8 +497,7 @@ std::vector<MipData> makeTextureData(
                 for (uint32_t x = 0; x < mipData.size.width; ++x) {
                     TexelComponents comps;
                     for (uint32_t c = 0; c < 4; ++c) {
-                        comps.values[c] = constantPerMip ? channelValue(format, 0, 0, 0, mip, c)
-                                                         : channelValue(format, x, y, z, mip, c);
+                        comps.values[c] = channelValue(format, x, y, z, mip, c);
                     }
                     if (components < 4) {
                         comps.values[3] = 1.0;
@@ -2558,6 +2556,52 @@ std::vector<MipData> initializeDepthTextureWithRandomTexels(
     return mips;
 }
 
+// Upstream createTextureWithRandomDataAndGetTexelsForEachAspect for a stencil-only format:
+// random stencil8 texels per mip level, written into every mip level and layer of `texture`
+// (which needs COPY_DST and TEXTURE_BINDING usage). Returns the texels as R32Float MipData
+// (S, 0, 0, 1) so the sampling models address them like color texels.
+std::vector<MipData> initializeStencilTextureWithRandomTexels(
+    AllFeaturesMaxLimitsGpuTest& t,
+    WGPUTexture texture,
+    WGPUTextureDimension dimension,
+    WGPUExtent3D baseSize,
+    uint32_t mipLevelCount) {
+    std::vector<MipData> mips;
+    mips.reserve(mipLevelCount);
+    for (uint32_t mip = 0; mip < mipLevelCount; ++mip) {
+        const WGPUExtent3D mipSize = physicalMipSize(baseSize, dimension, mip);
+        MipData mipData = makeDepthMipData(mipSize, 1u);
+        std::vector<uint8_t> bytes(static_cast<size_t>(mipSize.width) * mipSize.height * mipSize.depthOrArrayLayers, 0);
+        bool distinct = false;
+        uint32_t first = 0;
+        for (uint32_t z = 0; z < mipSize.depthOrArrayLayers; ++z) {
+            for (uint32_t y = 0; y < mipSize.height; ++y) {
+                for (uint32_t x = 0; x < mipSize.width; ++x) {
+                    const uint32_t value = randomStencilTexelValue(mipSize, mip, x, y, z, 0u);
+                    if (x == 0 && y == 0 && z == 0) {
+                        first = value;
+                    } else if (value != first) {
+                        distinct = true;
+                    }
+                    bytes[(static_cast<size_t>(z) * mipSize.height + y) * mipSize.width + x] = static_cast<uint8_t>(value);
+                    setDepthMipTexel(mipData, x, y, z, static_cast<float>(value));
+                }
+            }
+        }
+        const uint64_t texelCount = static_cast<uint64_t>(mipSize.width) * mipSize.height * mipSize.depthOrArrayLayers;
+        if (texelCount > 1 && !distinct) {
+            t.fail("random stencil texels: every texel of mip level " + std::to_string(mip) + " holds "
+                   + std::to_string(first));
+        }
+        WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+        layout.bytesPerRow = mipSize.width;
+        layout.rowsPerImage = mipSize.height;
+        t.queueWriteTexture(texture, mipSize, layout, bytes.data(), bytes.size(), mip, WGPUOrigin3D{0, 0, 0});
+        mips.push_back(std::move(mipData));
+    }
+    return mips;
+}
+
 // True for the builtins whose level comes from (implicit or explicit) derivatives.
 bool usesDerivativeLevel(const TextureCase& c) {
     if (c.builtin == "textureSampleGrad") {
@@ -2666,7 +2710,6 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     }
     WGPUTexture texture = t.createTextureTracked(textureDesc);
 
-    const bool constantForCube = isCubeKind(c.kind);
     std::vector<MipData> mips;
     if (useDepthInit) {
         // Per-texel random depth (R32Float texels); texture_depth_* and texture_*<f32> reads of
@@ -2678,7 +2721,7 @@ void executeCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         uploadColorTexture(t, texture, c, compressedMips);
         mips = materializeCompressedTexels(t, texture, c);
     } else {
-        mips = makeTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount, constantForCube);
+        mips = makeTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount);
         uploadColorTexture(t, texture, c, mips);
     }
 
@@ -4359,7 +4402,7 @@ std::vector<MipData> prepareTextureLoadMips(AllFeaturesMaxLimitsGpuTest& t, WGPU
         uploadColorTexture(t, texture, tc, compressedMips);
         return materializeCompressedTexels(t, texture, tc);
     }
-    std::vector<MipData> mips = makeTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount, false);
+    std::vector<MipData> mips = makeTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount);
     uploadColorTexture(t, texture, tc, mips);
     return mips;
 }
@@ -5093,7 +5136,7 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
     textureDesc.sampleCount = 1;
     textureDesc.dimension = c.textureDimension;
     textureDesc.format = c.format;
-    textureDesc.usage = (useDepthInit || stencilViewOfFormat)
+    textureDesc.usage = useDepthInit
         ? (WGPUTextureUsage_TextureBinding | WGPUTextureUsage_RenderAttachment)
         : (WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst);
     WGPUTexture texture = t.createTextureTracked(textureDesc);
@@ -5103,34 +5146,15 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         mips = initializeDepthTextureWithRandomTexels(
             t, texture, c.format, c.textureDimension, c.baseSize, c.mipLevelCount, 1u, randomDepthTexelOptionsForCase(c));
     } else if (stencilViewOfFormat) {
-        // Stencil cleared to 0 across all mips; component 1/2 yields 0 by spec.
-        WGPUCommandEncoder stencilEncoder = t.createCommandEncoderTracked();
-        for (uint32_t mip = 0; mip < c.mipLevelCount; ++mip) {
-            WGPUTextureViewDescriptor sv = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-            sv.dimension = WGPUTextureViewDimension_2D;
-            sv.format = c.format;
-            sv.baseMipLevel = mip;
-            sv.mipLevelCount = 1;
-            sv.aspect = WGPUTextureAspect_All;
-            WGPUTextureView sview = t.createViewTracked(texture, sv);
-            WGPURenderPassDepthStencilAttachment ds = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
-            ds.view = sview;
-            ds.stencilReadOnly = WGPU_FALSE;
-            ds.stencilLoadOp = WGPULoadOp_Clear;
-            ds.stencilStoreOp = WGPUStoreOp_Store;
-            ds.stencilClearValue = 0;
-            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-            passDesc.depthStencilAttachment = &ds;
-            WGPURenderPassEncoder pass = t.beginRenderPassTracked(stencilEncoder, &passDesc);
-            wgpuRenderPassEncoderEnd(pass);
-        }
-        submit(t, stencilEncoder);
+        // Random per-texel stencil8 texels (upstream createRandomTexelViewMipmap for stencil8);
+        // the model reads them as R32Float texels.
+        mips = initializeStencilTextureWithRandomTexels(t, texture, c.textureDimension, c.baseSize, c.mipLevelCount);
     } else if (isCompressedTextureFormat(c.format)) {
         std::vector<MipData> compressedMips = makeCompressedTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount);
         uploadColorTexture(t, texture, c, compressedMips);
         mips = materializeCompressedTexels(t, texture, c);
     } else {
-        mips = makeTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount, isCubeKind(c.kind));
+        mips = makeTextureData(c.format, c.textureDimension, c.baseSize, c.mipLevelCount);
         uploadColorTexture(t, texture, c, mips);
     }
 
@@ -5180,9 +5204,17 @@ void executeGatherCase(AllFeaturesMaxLimitsGpuTest& t, TextureCase c) {
         const SampleCall& call = calls[callIndex];
         const int comp = call.component.value_or(0);
         if (stencilViewOfFormat) {
-            // Single-channel stencil cleared to 0; component 1/2 -> 0, 3 -> 1.
-            const double v = comp == 3 ? 1.0 : 0.0;
-            expected.push_back({v, v, v, v});
+            // Single-channel stencil: component 0 yields the stencil corners; 1/2 -> 0, 3 -> 1.
+            if (comp == 0) {
+                SampleCall stencilCall = call;
+                stencilCall.component = 0;
+                TextureCase stencilCase = c;
+                stencilCase.format = WGPUTextureFormat_R32Float;
+                expected.push_back(gatherColorTaps(mips[0], stencilCall, stencilCase));
+            } else {
+                const double v = comp == 3 ? 1.0 : 0.0;
+                expected.push_back({v, v, v, v});
+            }
         } else if (colorViewOfDepth) {
             // texture_2d<f32> over a 1-channel depth texture: component 0 yields
             // the depth corners. With texture-component-swizzle the read is
@@ -6714,9 +6746,7 @@ bool textureLoadFormatCompatibleWith1D(const ParamRecord& record) {
 
 bool textureLoadFormatCompatibleWith3D(const ParamRecord& record) {
     const WGPUTextureFormat format = paramFormat(record);
-    return textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension_3D, format)
-        && !isBCTextureFormat(format)
-        && !isASTCTextureFormat(format);
+    return textureFormatAndDimensionPossiblyCompatible(WGPUTextureDimension_3D, format);
 }
 
 bool textureLoadFormatNotCompressed(const ParamRecord& record) {
