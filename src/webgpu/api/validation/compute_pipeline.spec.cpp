@@ -98,16 +98,15 @@ WGPUShaderModule getShaderModule(
 
 void doCreateComputePipelineTest(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
     bool success,
-    WGPUComputePipelineDescriptor& desc) {
-    // isAsync=true uses this same synchronous create path; native validation is eager.
-    t.expectValidationError([&] {
-        t.createComputePipelineTracked(desc);
-    }, !success);
+    const WGPUComputePipelineDescriptor& desc) {
+    t.doCreateComputePipelineTest(isAsync, success, desc);
 }
 
 void createPipelineWithCode(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
     bool success,
     std::string_view code,
     std::string_view entryPoint = "main",
@@ -118,7 +117,7 @@ void createPipelineWithCode(
     desc.compute.entryPoint = sv(entryPoint);
     desc.compute.constantCount = constants.size();
     desc.compute.constants = constants.empty() ? nullptr : constants.data();
-    doCreateComputePipelineTest(t, success, desc);
+    doCreateComputePipelineTest(t, isAsync, success, desc);
 }
 
 std::vector<WGPUTextureFormat> possibleStorageTextureFormats() {
@@ -395,23 +394,23 @@ CTS_TEST(g, "basic")
     .desc("Control case for createComputePipeline and createComputePipelineAsync.")
     .params([](ParamsBuilder u) { return u.combine("isAsync", {Value(true), Value(false)}); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         WGPUShaderModule module = getShaderModule(t);
         WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
         desc.compute.module = module;
         desc.compute.entryPoint = sv("main");
-        doCreateComputePipelineTest(t, true, desc);
+        doCreateComputePipelineTest(t, isAsync, true, desc);
     });
 
 CTS_TEST(g, "shader_module,invalid")
     .desc("Tests calling createComputePipeline(Async) with a invalid compute shader.")
     .params([](ParamsBuilder u) { return u.combine("isAsync", {Value(true), Value(false)}); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
         desc.compute.module = createInvalidShaderModule(t);
         desc.compute.entryPoint = sv("main");
-        doCreateComputePipelineTest(t, false, desc);
+        doCreateComputePipelineTest(t, isAsync, false, desc);
     });
 
 CTS_TEST(g, "shader_module,compute")
@@ -421,12 +420,12 @@ CTS_TEST(g, "shader_module,compute")
             .combine("shaderModuleStage", {Value("compute"), Value("vertex"), Value("fragment")});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string stage = t.param<std::string>("shaderModuleStage");
         WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
         desc.compute.module = getShaderModule(t, stage);
         desc.compute.entryPoint = sv("main");
-        doCreateComputePipelineTest(t, stage == "compute", desc);
+        doCreateComputePipelineTest(t, isAsync, stage == "compute", desc);
     });
 
 CTS_TEST(g, "shader_module,device_mismatch")
@@ -437,14 +436,14 @@ CTS_TEST(g, "shader_module,device_mismatch")
             .combine("mismatched", {Value(true), Value(false)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const bool mismatched = t.param<bool>("mismatched");
         WGPUDevice sourceDevice = mismatched ? t.mismatchedDevice() : t.device();
         WGPUShaderModule module = createShaderModuleOnDevice(sourceDevice, "@compute @workgroup_size(1) fn main() {}\n");
         WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
         desc.compute.module = module;
         desc.compute.entryPoint = sv("main");
-        doCreateComputePipelineTest(t, !mismatched, desc);
+        doCreateComputePipelineTest(t, isAsync, !mismatched, desc);
         wgpuShaderModuleRelease(module);
     });
 
@@ -456,7 +455,7 @@ CTS_TEST(g, "pipeline_layout,device_mismatch")
             .combine("mismatched", {Value(true), Value(false)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const bool mismatched = t.param<bool>("mismatched");
         WGPUDevice sourceDevice = mismatched ? t.mismatchedDevice() : t.device();
         WGPUPipelineLayoutDescriptor layoutDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
@@ -465,7 +464,7 @@ CTS_TEST(g, "pipeline_layout,device_mismatch")
         desc.layout = layout;
         desc.compute.module = getShaderModule(t);
         desc.compute.entryPoint = sv("main");
-        doCreateComputePipelineTest(t, !mismatched, desc);
+        doCreateComputePipelineTest(t, isAsync, !mismatched, desc);
         wgpuPipelineLayoutRelease(layout);
     });
 
@@ -481,14 +480,14 @@ CTS_TEST(g, "limits,workgroup_storage_size")
             .combine("countDeltaFromLimit", {Value(0), Value(1)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string type = t.param<std::string>("type");
         const uint32_t typeSize = static_cast<uint32_t>(t.param<int>("_typeSize"));
         const uint32_t countAtLimit = t.getLimits().maxComputeWorkgroupStorageSize / typeSize;
         const uint32_t count = countAtLimit + static_cast<uint32_t>(t.param<int>("countDeltaFromLimit"));
         const std::string code = "var<workgroup> data: array<" + type + ", " + std::to_string(count) + ">;\n"
             "@compute @workgroup_size(64) fn main () {\n  _ = data;\n}\n";
-        createPipelineWithCode(t, count <= countAtLimit, code);
+        createPipelineWithCode(t, isAsync, count <= countAtLimit, code);
     });
 
 CTS_TEST(g, "limits,invocations_per_workgroup")
@@ -505,14 +504,14 @@ CTS_TEST(g, "limits,invocations_per_workgroup")
             });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string size = t.param<std::string>("size");
         uint32_t x = 1;
         uint32_t y = 1;
         uint32_t z = 1;
         parseWorkgroupSize(size, x, y, z);
         const std::string code = "@compute @workgroup_size(" + size + ") fn main () {}\n";
-        createPipelineWithCode(t, x * y * z <= t.getLimits().maxComputeInvocationsPerWorkgroup, code);
+        createPipelineWithCode(t, isAsync, x * y * z <= t.getLimits().maxComputeInvocationsPerWorkgroup, code);
     });
 
 CTS_TEST(g, "limits,invocations_per_workgroup,each_component")
@@ -531,7 +530,7 @@ CTS_TEST(g, "limits,invocations_per_workgroup,each_component")
             });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string size = t.param<std::string>("size");
         uint32_t x = 1;
         uint32_t y = 1;
@@ -539,7 +538,7 @@ CTS_TEST(g, "limits,invocations_per_workgroup,each_component")
         parseWorkgroupSize(size, x, y, z);
         const WGPULimits limits = t.getLimits();
         const std::string code = "@compute @workgroup_size(" + size + ") fn main () {}\n";
-        createPipelineWithCode(t, x <= limits.maxComputeWorkgroupSizeX
+        createPipelineWithCode(t, isAsync, x <= limits.maxComputeWorkgroupSizeX
                 && y <= limits.maxComputeWorkgroupSizeY
                 && z <= limits.maxComputeWorkgroupSizeZ,
             code);
@@ -553,7 +552,7 @@ CTS_TEST(g, "overrides,identifier")
             .combine("subcaseIndex", {Value(0), Value(1), Value(2), Value(3), Value(4), Value(5), Value(6), Value(7), Value(8), Value(9), Value(10), Value(11), Value(12)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const int idx = t.param<int>("subcaseIndex");
         std::vector<WGPUConstantEntry> constants;
         bool success = true;
@@ -582,7 +581,7 @@ CTS_TEST(g, "overrides,identifier")
             "@compute @workgroup_size(1) fn main () {\n"
             "  _ = u32(c0);\n  _ = u32(c1);\n  _ = u32(c2 + s" "\xc3" "\xa9" "quen" "\xc3" "\xa7" "age);\n  _ = u32(c3 + \xe6\x95\xb0);\n"
             "}\n";
-        createPipelineWithCode(t, success, code, "main", constants);
+        createPipelineWithCode(t, isAsync, success, code, "main", constants);
     });
 
 CTS_TEST(g, "overrides,uninitialized")
@@ -593,7 +592,7 @@ CTS_TEST(g, "overrides,uninitialized")
             .combine("subcaseIndex", {Value(0), Value(1), Value(2), Value(3)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const int idx = t.param<int>("subcaseIndex");
         std::vector<WGPUConstantEntry> constants;
         bool success = false;
@@ -615,7 +614,7 @@ CTS_TEST(g, "overrides,uninitialized")
             "@compute @workgroup_size(1) fn main () {\n"
             " _ = u32(c0); _ = u32(c1); _ = u32(c2); _ = u32(c3); _ = u32(c4);\n"
             " _ = u32(c5); _ = u32(c6); _ = u32(c7); _ = u32(c8); _ = u32(c9); _ = u32(c10);\n}\n";
-        createPipelineWithCode(t, success, code, "main", constants);
+        createPipelineWithCode(t, isAsync, success, code, "main", constants);
     });
 
 CTS_TEST(g, "overrides,value,type_error")
@@ -626,11 +625,11 @@ CTS_TEST(g, "overrides,value,type_error")
             .combine("subcaseIndex", {Value(0), Value(1), Value(2), Value(3)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const int idx = t.param<int>("subcaseIndex");
         const double values[] = {1.0, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
         std::vector<WGPUConstantEntry> constants = {makeConstantEntry("cf", values[idx])};
-        createPipelineWithCode(t, idx == 0, "override cf: f32 = 0.0;\n@compute @workgroup_size(1) fn main () { _ = cf; }\n", "main", constants);
+        createPipelineWithCode(t, isAsync, idx == 0, "override cf: f32 = 0.0;\n@compute @workgroup_size(1) fn main () { _ = cf; }\n", "main", constants);
     });
 
 CTS_TEST(g, "overrides,value,validation_error")
@@ -641,7 +640,7 @@ CTS_TEST(g, "overrides,value,validation_error")
             .combine("subcaseIndex", {Value(0), Value(1), Value(2), Value(3), Value(4), Value(5), Value(6), Value(7), Value(8), Value(9), Value(10), Value(11), Value(12), Value(13)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const int idx = t.param<int>("subcaseIndex");
         constexpr double kU32Min = 0.0;
         constexpr double kU32Max = 4294967295.0;
@@ -665,7 +664,7 @@ CTS_TEST(g, "overrides,value,validation_error")
         static const char* code =
             "override cb: bool = false;\n override cu: u32 = 0u;\n override ci: i32 = 0;\n override cf: f32 = 0.0;\n"
             "@compute @workgroup_size(1) fn main () { _ = cb; _ = cu; _ = ci; _ = cf; }\n";
-        createPipelineWithCode(t, testCase.success, code, "main", constants);
+        createPipelineWithCode(t, isAsync, testCase.success, code, "main", constants);
     });
 
 CTS_TEST(g, "overrides,entry_point,validation_error")
@@ -675,14 +674,14 @@ CTS_TEST(g, "overrides,entry_point,validation_error")
             .combine("pipeEntryPoint", {Value("main_success"), Value("main_pipe_error")});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string entryPoint = t.param<std::string>("pipeEntryPoint");
         static const char* code =
             "override cu: u32 = 0u;\n"
             "override cx: u32 = 1u/cu;\n"
             "@compute @workgroup_size(1) fn main_success () { _ = cu; }\n"
             "@compute @workgroup_size(1) fn main_pipe_error () { _ = cx; }\n";
-        createPipelineWithCode(t, entryPoint == "main_success", code, entryPoint);
+        createPipelineWithCode(t, isAsync, entryPoint == "main_success", code, entryPoint);
     });
 
 CTS_TEST(g, "overrides,value,validation_error,f16")
@@ -696,7 +695,7 @@ CTS_TEST(g, "overrides,value,validation_error,f16")
         if (!wgpuDeviceHasFeature(t.device(), WGPUFeatureName_ShaderF16)) {
             t.skip("shader-f16 feature not available");
         }
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const int idx = t.param<int>("subcaseIndex");
         constexpr double kF16Max = 65504.0;
         constexpr double kF16FirstNonCastable = 65520.0;
@@ -711,7 +710,7 @@ CTS_TEST(g, "overrides,value,validation_error,f16")
             {-kF32Max, false}, {kF32Max, false}, {-kF32FirstNonCastable, false}, {kF32FirstNonCastable, false},
         };
         std::vector<WGPUConstantEntry> constants = {makeConstantEntry("cf16", cases[idx].value)};
-        createPipelineWithCode(t, cases[idx].success,
+        createPipelineWithCode(t, isAsync, cases[idx].success,
             "enable f16;\n override cf16: f16 = 0.0h;\n @compute @workgroup_size(1) fn main () { _ = cf16; }\n",
             "main", constants);
     });
@@ -725,7 +724,7 @@ CTS_TEST(g, "overrides,workgroup_size")
             .combine("subcaseIndex", {Value(0), Value(1), Value(2), Value(3), Value(4)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string type = t.param<std::string>("type");
         const int idx = t.param<int>("subcaseIndex");
         std::vector<WGPUConstantEntry> constants;
@@ -742,7 +741,7 @@ CTS_TEST(g, "overrides,workgroup_size")
         } else if (idx == 4) {
             constants = {makeConstantEntry("x", 16.0), makeConstantEntry("y", 1.0), makeConstantEntry("z", 1.0)};
         }
-        createPipelineWithCode(t, success, workgroupSizeShader(type), "main", constants);
+        createPipelineWithCode(t, isAsync, success, workgroupSizeShader(type), "main", constants);
     });
 
 CTS_TEST(g, "overrides,workgroup_size,limits")
@@ -751,7 +750,7 @@ CTS_TEST(g, "overrides,workgroup_size,limits")
         return u.combine("isAsync", {Value(true), Value(false)}).combine("type", {Value("u32"), Value("i32")});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string type = t.param<std::string>("type");
         const WGPULimits limits = t.getLimits();
         auto testFn = [&](uint32_t x, uint32_t y, uint32_t z, bool success) {
@@ -760,7 +759,7 @@ CTS_TEST(g, "overrides,workgroup_size,limits")
                 makeConstantEntry("y", static_cast<double>(y)),
                 makeConstantEntry("z", static_cast<double>(z)),
             };
-            createPipelineWithCode(t, success, workgroupSizeShader(type), "main", constants);
+            createPipelineWithCode(t, isAsync, success, workgroupSizeShader(type), "main", constants);
         };
         testFn(limits.maxComputeWorkgroupSizeX, 1, 1, true);
         testFn(limits.maxComputeWorkgroupSizeX + 1, 1, 1, false);
@@ -778,7 +777,7 @@ CTS_TEST(g, "overrides,workgroup_size,limits,workgroup_storage_size")
     .desc("Tests overridable constants for workgroupStorageSize exceeds device limits.")
     .params([](ParamsBuilder u) { return u.combine("isAsync", {Value(true), Value(false)}); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const WGPULimits limits = t.getLimits();
         const uint32_t maxVec4Count = limits.maxComputeWorkgroupStorageSize / 16;
         const uint32_t maxMat4Count = limits.maxComputeWorkgroupStorageSize / 64;
@@ -794,7 +793,7 @@ CTS_TEST(g, "overrides,workgroup_size,limits,workgroup_storage_size")
                 makeConstantEntry("a", static_cast<double>(vec4Count)),
                 makeConstantEntry("b", static_cast<double>(mat4Count)),
             };
-            createPipelineWithCode(t, success, code, "main", constants);
+            createPipelineWithCode(t, isAsync, success, code, "main", constants);
         };
         testFn(1, 1, true);
         testFn(maxVec4Count + 1, 0, false);
@@ -810,7 +809,7 @@ CTS_TEST(g, "resource_compatibility")
             .combine("wgslResource", resourceKeyValues());
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const Resource& apiResource = findResource(t.param<std::string>("apiResource"));
         const Resource& wgslResource = findResource(t.param<std::string>("wgslResource"));
         if (wgslResource.texture) {
@@ -830,7 +829,7 @@ CTS_TEST(g, "resource_compatibility")
         desc.layout = layout;
         desc.compute.module = module;
         desc.compute.entryPoint = sv("main");
-        doCreateComputePipelineTest(t, doResourcesMatch(apiResource, wgslResource), desc);
+        doCreateComputePipelineTest(t, isAsync, doResourcesMatch(apiResource, wgslResource), desc);
     });
 
 CTS_TEST(g, "storage_texture,format")
@@ -843,7 +842,7 @@ CTS_TEST(g, "storage_texture,format")
             .combine("dimension", {Value("1d"), Value("2d"), Value("3d")});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string formatStr = t.param<std::string>("format");
         const std::string access = t.param<std::string>("access");
         const std::string dimension = t.param<std::string>("dimension");
@@ -858,7 +857,7 @@ CTS_TEST(g, "storage_texture,format")
         } else if (access == "read_write") {
             wgpuAccess = WGPUStorageTextureAccess_ReadWrite;
         }
-        createPipelineWithCode(t, t.isTextureFormatUsableWithStorageAccessMode(format, wgpuAccess), code);
+        createPipelineWithCode(t, isAsync, t.isTextureFormatUsableWithStorageAccessMode(format, wgpuAccess), code);
     });
 
 } // namespace

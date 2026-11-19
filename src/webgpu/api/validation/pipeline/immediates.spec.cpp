@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/pipeline/immediates.spec.ts
-// Note: isAsync=true sub-cases use the same synchronous validation path (harness has no async
-// pipeline-creation wrapper). Validation behaviour is identical for sync/async.
 // Note: supportsImmediateData() — in native we check maxImmediateSize != 0 &&
 //   maxImmediateSize != WGPU_LIMIT_U32_UNDEFINED (same signal: limit is advertised by the device).
 // Note: The expandWithParams generator in upstream conditionally yields render-only sub-cases
@@ -186,8 +184,7 @@ CTS_TEST(g, "pipeline_creation_immediate_size_mismatch")
 
         const std::string pipelineType = t.param<std::string>("pipelineType");
         const int subcaseIdx           = t.param<int>("subcaseIdx");
-        // isAsync: the harness has no async pipeline-creation wrapper; both paths are identical.
-        (void)t.param<bool>("isAsync");
+        const bool isAsync             = t.param<bool>("isAsync");
 
         // Resolve the SubcaseEntry.
         const SubcaseEntry* entry = nullptr;
@@ -255,9 +252,7 @@ CTS_TEST(g, "pipeline_creation_immediate_size_mismatch")
             desc.compute.module                = computeModule;
             desc.compute.entryPoint            = sv("main_compute");
 
-            t.expectValidationError([&] {
-                t.createComputePipelineTracked(desc);
-            }, shouldError);
+            t.doCreateComputePipelineTest(isAsync, !shouldError, desc);
         } else {
             // Build render pipeline descriptor.
             const std::string vertexCode   = makeVertexShaderCode(resolvedStageASize);
@@ -281,9 +276,7 @@ CTS_TEST(g, "pipeline_creation_immediate_size_mismatch")
             desc.vertex.entryPoint            = sv("main_vertex");
             desc.fragment                     = &fragment;
 
-            t.expectValidationError([&] {
-                t.createRenderPipelineTracked(desc);
-            }, shouldError);
+            t.doCreateRenderPipelineTest(isAsync, !shouldError, desc);
         }
     });
 

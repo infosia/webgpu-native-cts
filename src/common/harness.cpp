@@ -136,6 +136,44 @@ void onManyQueueWorkDone(WGPUQueueWorkDoneStatus status, WGPUStringView message,
     ++state->completed;
 }
 
+// Heap-allocated so a callback that fires after a timed-out wait does not write to a dead frame:
+// the waiter frees the state only once the callback has run.
+template <typename Pipeline>
+struct CreatePipelineAsyncState {
+    bool completed = false;
+    WGPUCreatePipelineAsyncStatus status = WGPUCreatePipelineAsyncStatus_InternalError;
+    Pipeline pipeline = nullptr;
+    std::string message;
+};
+
+void onCreateRenderPipelineAsync(WGPUCreatePipelineAsyncStatus status,
+                                 WGPURenderPipeline pipeline,
+                                 WGPUStringView message,
+                                 void* userdata1,
+                                 void*) {
+    auto* state = static_cast<CreatePipelineAsyncState<WGPURenderPipeline>*>(userdata1);
+    state->completed = true;
+    state->status = status;
+    state->pipeline = pipeline;
+    state->message = toString(message);
+}
+
+void onCreateComputePipelineAsync(WGPUCreatePipelineAsyncStatus status,
+                                  WGPUComputePipeline pipeline,
+                                  WGPUStringView message,
+                                  void* userdata1,
+                                  void*) {
+    auto* state = static_cast<CreatePipelineAsyncState<WGPUComputePipeline>*>(userdata1);
+    state->completed = true;
+    state->status = status;
+    state->pipeline = pipeline;
+    state->message = toString(message);
+}
+
+// Pipeline compilation can take far longer than the 5 s used for other device callbacks
+// (large workgroup-storage or many-binding shaders under parallel workers).
+constexpr uint64_t kCreatePipelineAsyncTimeoutNs = 60'000'000'000;
+
 void ensureInstance(DeviceCache& c) {
     if (c.instance != nullptr) {
         return;
@@ -491,6 +529,21 @@ const std::vector<SpecFile>& Registry::files() const {
     return files_;
 }
 
+std::string_view createPipelineAsyncStatusName(WGPUCreatePipelineAsyncStatus status) {
+    switch (status) {
+        case WGPUCreatePipelineAsyncStatus_Success:
+            return "Success";
+        case WGPUCreatePipelineAsyncStatus_CallbackCancelled:
+            return "CallbackCancelled";
+        case WGPUCreatePipelineAsyncStatus_ValidationError:
+            return "ValidationError";
+        case WGPUCreatePipelineAsyncStatus_InternalError:
+            return "InternalError";
+        default:
+            return "unknown";
+    }
+}
+
 void GpuTest::init() {
     (void)device();
 }
@@ -587,6 +640,10 @@ void GpuTest::finalize() {
 
 WGPUDevice GpuTest::device() const {
     return getDevice();
+}
+
+WGPUInstance GpuTest::testInstance() const {
+    return cache().instance;
 }
 
 WGPUDevice GpuTest::mismatchedDevice() {
@@ -1065,6 +1122,147 @@ WGPUComputePipeline GpuTest::createComputePipelineTracked(const WGPUComputePipel
     return pipeline;
 }
 
+RenderPipelineAsyncResult GpuTest::createRenderPipelineAsyncTracked(const WGPURenderPipelineDescriptor& desc) {
+    WGPUDevice dev = device();
+    auto* state = new CreatePipelineAsyncState<WGPURenderPipeline>();
+    WGPUCreateRenderPipelineAsyncCallbackInfo callbackInfo = WGPU_CREATE_RENDER_PIPELINE_ASYNC_CALLBACK_INFO_INIT;
+    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    callbackInfo.callback = onCreateRenderPipelineAsync;
+    callbackInfo.userdata1 = state;
+    (void)wgpuDeviceCreateRenderPipelineAsync(dev, &desc, callbackInfo);
+    if (!processEventsUntil(testInstance(), [&] { return state->completed; }, kCreatePipelineAsyncTimeoutNs)) {
+        // The callback may still fire later; leak the state rather than free it under the callback.
+        fail("createRenderPipelineAsync timed out");
+    }
+    RenderPipelineAsyncResult result{state->status, state->pipeline, std::move(state->message)};
+    delete state;
+    if (result.pipeline != nullptr) {
+        renderPipelines_.push_back(result.pipeline);
+    }
+    return result;
+}
+
+ComputePipelineAsyncResult GpuTest::createComputePipelineAsyncTracked(const WGPUComputePipelineDescriptor& desc) {
+    WGPUDevice dev = device();
+    auto* state = new CreatePipelineAsyncState<WGPUComputePipeline>();
+    WGPUCreateComputePipelineAsyncCallbackInfo callbackInfo = WGPU_CREATE_COMPUTE_PIPELINE_ASYNC_CALLBACK_INFO_INIT;
+    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    callbackInfo.callback = onCreateComputePipelineAsync;
+    callbackInfo.userdata1 = state;
+    (void)wgpuDeviceCreateComputePipelineAsync(dev, &desc, callbackInfo);
+    if (!processEventsUntil(testInstance(), [&] { return state->completed; }, kCreatePipelineAsyncTimeoutNs)) {
+        // The callback may still fire later; leak the state rather than free it under the callback.
+        fail("createComputePipelineAsync timed out");
+    }
+    ComputePipelineAsyncResult result{state->status, state->pipeline, std::move(state->message)};
+    delete state;
+    if (result.pipeline != nullptr) {
+        computePipelines_.push_back(result.pipeline);
+    }
+    return result;
+}
+
+WGPURenderPipeline GpuTest::createRenderPipelineSyncOrAsync(bool isAsync, const WGPURenderPipelineDescriptor& desc) {
+    if (!isAsync) {
+        return createRenderPipelineTracked(desc);
+    }
+    RenderPipelineAsyncResult result = createRenderPipelineAsyncTracked(desc);
+    if (result.status != WGPUCreatePipelineAsyncStatus_Success) {
+        fail("createRenderPipelineAsync failed with status " +
+             std::string(createPipelineAsyncStatusName(result.status)) + ": " + result.message);
+    }
+    return result.pipeline;
+}
+
+WGPUComputePipeline GpuTest::createComputePipelineSyncOrAsync(bool isAsync, const WGPUComputePipelineDescriptor& desc) {
+    if (!isAsync) {
+        return createComputePipelineTracked(desc);
+    }
+    ComputePipelineAsyncResult result = createComputePipelineAsyncTracked(desc);
+    if (result.status != WGPUCreatePipelineAsyncStatus_Success) {
+        fail("createComputePipelineAsync failed with status " +
+             std::string(createPipelineAsyncStatusName(result.status)) + ": " + result.message);
+    }
+    return result.pipeline;
+}
+
+namespace {
+
+// Shared tail of the expectCreate*PipelineAsync helpers. Upstream rejects a failed creation with a
+// GPUPipelineError; a validation failure maps to WGPUCreatePipelineAsyncStatus_ValidationError.
+// The rejection must not also surface as a device error (the scope must stay empty).
+void checkCreatePipelineAsync(Fixture& t,
+                              std::string_view entryPoint,
+                              WGPUCreatePipelineAsyncStatus status,
+                              const std::string& message,
+                              const ScopeResult& scope,
+                              bool shouldError,
+                              std::string_view msg) {
+    std::string suffix;
+    if (!msg.empty()) {
+        suffix = ": ";
+        suffix += std::string(msg);
+    }
+    if (scope.status != WGPUPopErrorScopeStatus_Success) {
+        t.fail("popErrorScope failed: " + scope.message);
+    }
+    if (scope.type != WGPUErrorType_NoError) {
+        t.fail(std::string(entryPoint) + " generated a device error instead of only resolving its callback: " +
+               scope.message + suffix);
+    }
+    if (shouldError) {
+        if (status != WGPUCreatePipelineAsyncStatus_ValidationError) {
+            t.fail(std::string(entryPoint) + ": expected status ValidationError, got " +
+                   std::string(createPipelineAsyncStatusName(status)) + suffix);
+        }
+    } else if (status != WGPUCreatePipelineAsyncStatus_Success) {
+        t.fail(std::string(entryPoint) + ": expected status Success, got " +
+               std::string(createPipelineAsyncStatusName(status)) + " (" + message + ")" + suffix);
+    }
+}
+
+} // namespace
+
+void GpuTest::expectCreateRenderPipelineAsync(const WGPURenderPipelineDescriptor& desc,
+                                              bool shouldError,
+                                              std::string_view msg) {
+    wgpuDevicePushErrorScope(device(), WGPUErrorFilter_Validation);
+    const RenderPipelineAsyncResult result = createRenderPipelineAsyncTracked(desc);
+    const ScopeResult scope = popErrorScopeSync(testInstance(), device());
+    checkCreatePipelineAsync(*this, "createRenderPipelineAsync", result.status, result.message, scope, shouldError, msg);
+}
+
+void GpuTest::expectCreateComputePipelineAsync(const WGPUComputePipelineDescriptor& desc,
+                                               bool shouldError,
+                                               std::string_view msg) {
+    wgpuDevicePushErrorScope(device(), WGPUErrorFilter_Validation);
+    const ComputePipelineAsyncResult result = createComputePipelineAsyncTracked(desc);
+    const ScopeResult scope = popErrorScopeSync(testInstance(), device());
+    checkCreatePipelineAsync(*this, "createComputePipelineAsync", result.status, result.message, scope, shouldError, msg);
+}
+
+void GpuTest::doCreateRenderPipelineTest(bool isAsync,
+                                         bool success,
+                                         const WGPURenderPipelineDescriptor& desc,
+                                         std::string_view msg) {
+    if (isAsync) {
+        expectCreateRenderPipelineAsync(desc, !success, msg);
+        return;
+    }
+    expectValidationError([&] { createRenderPipelineTracked(desc); }, !success, msg);
+}
+
+void GpuTest::doCreateComputePipelineTest(bool isAsync,
+                                          bool success,
+                                          const WGPUComputePipelineDescriptor& desc,
+                                          std::string_view msg) {
+    if (isAsync) {
+        expectCreateComputePipelineAsync(desc, !success, msg);
+        return;
+    }
+    expectValidationError([&] { createComputePipelineTracked(desc); }, !success, msg);
+}
+
 WGPUCommandEncoder GpuTest::createCommandEncoderTracked() {
     WGPUCommandEncoderDescriptor desc = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
     WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device(), &desc);
@@ -1126,19 +1324,24 @@ WGPUQuerySet GpuTest::createQuerySetTracked(const WGPUQuerySetDescriptor& desc) 
     return querySet;
 }
 
-void GpuTest::expectValidationError(const std::function<void()>& body, bool shouldError) {
+void GpuTest::expectValidationError(const std::function<void()>& body, bool shouldError, std::string_view msg) {
     wgpuDevicePushErrorScope(device(), WGPUErrorFilter_Validation);
     body();
-    ScopeResult result = popErrorScopeSync(cache().instance, device());
+    ScopeResult result = popErrorScopeSync(testInstance(), device());
     if (result.status != WGPUPopErrorScopeStatus_Success) {
         fail("popErrorScope failed: " + result.message);
     }
+    std::string suffix;
+    if (!msg.empty()) {
+        suffix = ": ";
+        suffix += std::string(msg);
+    }
     const bool hadError = result.type != WGPUErrorType_NoError;
     if (shouldError && !hadError) {
-        fail("expected validation error, got none");
+        fail("expected validation error, got none" + suffix);
     }
     if (!shouldError && hadError) {
-        fail("unexpected validation error: " + result.message);
+        fail("unexpected validation error: " + result.message + suffix);
     }
 }
 

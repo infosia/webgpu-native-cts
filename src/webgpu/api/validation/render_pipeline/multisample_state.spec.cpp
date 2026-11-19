@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/multisample_state.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
-// Note: the async=true sub-cases are exercised via the same synchronous pipeline-creation path
-// (the harness has no async pipeline-creation wrapper); validation behaviour is identical.
 
 #include <string>
 #include <string_view>
@@ -52,8 +50,10 @@ static const char* kSampleMaskFragmentShaderCode =
 
 // Build a render pipeline descriptor with the given multisample state and optional fragment shader.
 // Mirrors CreateRenderPipelineValidationTest::getDescriptor in the upstream.
-void createRenderPipelineForValidation(
+void doCreateRenderPipelineForValidation(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
+    bool success,
     uint32_t multisampleCount,
     bool alphaToCoverageEnabled,
     const char* fragmentShaderCode) {
@@ -85,7 +85,7 @@ void createRenderPipelineForValidation(
     desc.multisample.alphaToCoverageEnabled = alphaToCoverageEnabled ? WGPU_TRUE : WGPU_FALSE;
     desc.fragment = &fragment;
 
-    t.createRenderPipelineTracked(desc);
+    t.doCreateRenderPipelineTest(isAsync, success, desc);
 }
 
 // getFragmentShaderCodeWithOutput() for a single output at `location`, whose type follows the
@@ -112,6 +112,7 @@ struct AlphaToCoverageDescriptor {
 };
 
 void doAlphaToCoverageRenderPipelineTest(AllFeaturesMaxLimitsGpuTest& t,
+                                         bool isAsync,
                                          const AlphaToCoverageDescriptor& options,
                                          bool success) {
     WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
@@ -154,9 +155,7 @@ void doAlphaToCoverageRenderPipelineTest(AllFeaturesMaxLimitsGpuTest& t,
         desc.fragment = &fragment;
     }
 
-    t.expectValidationError([&] {
-        t.createRenderPipelineTracked(desc);
-    }, !success);
+    t.doCreateRenderPipelineTest(isAsync, success, desc);
 }
 
 // ---------------------------------------------------------------------------
@@ -175,14 +174,9 @@ CTS_TEST(g, "count")
         const bool isAsync = t.param<bool>("isAsync");
         const uint32_t count = static_cast<uint32_t>(t.param<int>("count"));
 
-        // async=true uses same synchronous validation path (harness has no async pipeline wrapper).
-        (void)isAsync;
-
         const bool success = (count == 1 || count == 4);
 
-        t.expectValidationError([&] {
-            createRenderPipelineForValidation(t, count, false, kDefaultFragmentShaderCode);
-        }, !success);
+        doCreateRenderPipelineForValidation(t, isAsync, success, count, false, kDefaultFragmentShaderCode);
     });
 
 // ---------------------------------------------------------------------------
@@ -205,16 +199,11 @@ CTS_TEST(g, "alpha_to_coverage,count")
         const bool alphaToCoverageEnabled = t.param<bool>("alphaToCoverageEnabled");
         const uint32_t count = static_cast<uint32_t>(t.param<int>("count"));
 
-        // async=true uses same synchronous validation path (harness has no async pipeline wrapper).
-        (void)isAsync;
-
         const bool success = alphaToCoverageEnabled
             ? (count == 4)
             : (count == 1 || count == 4);
 
-        t.expectValidationError([&] {
-            createRenderPipelineForValidation(t, count, alphaToCoverageEnabled, kDefaultFragmentShaderCode);
-        }, !success);
+        doCreateRenderPipelineForValidation(t, isAsync, success, count, alphaToCoverageEnabled, kDefaultFragmentShaderCode);
     });
 
 // ---------------------------------------------------------------------------
@@ -230,8 +219,7 @@ CTS_TEST(g, "alpha_to_coverage,fragment_stage_required")
             .combine("noFragment", {Value(false), Value(true)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        // async=true uses same synchronous validation path (harness has no async pipeline wrapper).
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         AlphaToCoverageDescriptor options;
         options.alphaToCoverageEnabled = t.param<bool>("alphaToCoverageEnabled");
@@ -239,7 +227,7 @@ CTS_TEST(g, "alpha_to_coverage,fragment_stage_required")
         options.depthFormat = WGPUTextureFormat_Depth32Float;
 
         const bool success = !(options.alphaToCoverageEnabled && options.noFragment);
-        doAlphaToCoverageRenderPipelineTest(t, options, success);
+        doAlphaToCoverageRenderPipelineTest(t, isAsync, options, success);
     });
 
 // ---------------------------------------------------------------------------
@@ -255,15 +243,14 @@ CTS_TEST(g, "alpha_to_coverage,first_target_required")
             .combine("targetIndex", {Value(0), Value(1)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        // async=true uses same synchronous validation path (harness has no async pipeline wrapper).
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         AlphaToCoverageDescriptor options;
         options.alphaToCoverageEnabled = t.param<bool>("alphaToCoverageEnabled");
         options.targetIndex = static_cast<uint32_t>(t.param<int>("targetIndex"));
 
         const bool success = !(options.alphaToCoverageEnabled && options.targetIndex == 1);
-        doAlphaToCoverageRenderPipelineTest(t, options, success);
+        doAlphaToCoverageRenderPipelineTest(t, isAsync, options, success);
     });
 
 // ---------------------------------------------------------------------------
@@ -279,8 +266,7 @@ CTS_TEST(g, "alpha_to_coverage,first_format_blendable_and_has_alpha")
             .combine("format", formatIdentifierValues(kColorRenderableTextureFormats));
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        // async=true uses same synchronous validation path (harness has no async pipeline wrapper).
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         AlphaToCoverageDescriptor options;
         options.alphaToCoverageEnabled = t.param<bool>("alphaToCoverageEnabled");
@@ -291,7 +277,7 @@ CTS_TEST(g, "alpha_to_coverage,first_format_blendable_and_has_alpha")
         const bool blendableWithAlpha =
             t.isTextureFormatBlendable(options.format) && isColorTextureFormatWithAlpha(options.format);
         const bool success = !options.alphaToCoverageEnabled || blendableWithAlpha;
-        doAlphaToCoverageRenderPipelineTest(t, options, success);
+        doAlphaToCoverageRenderPipelineTest(t, isAsync, options, success);
     });
 
 // ---------------------------------------------------------------------------
@@ -315,9 +301,6 @@ CTS_TEST(g, "alpha_to_coverage,sample_mask")
         const bool alphaToCoverageEnabled = t.param<bool>("alphaToCoverageEnabled");
         const bool hasSampleMaskOutput = t.param<bool>("hasSampleMaskOutput");
 
-        // async=true uses same synchronous validation path (harness has no async pipeline wrapper).
-        (void)isAsync;
-
         // The C++ harness never runs in compatibility mode, so the upstream
         // "t.isCompatibility && hasSampleMaskOutput -> skip" guard is omitted.
 
@@ -329,9 +312,7 @@ CTS_TEST(g, "alpha_to_coverage,sample_mask")
         // alphaToCoverageEnabled=true is invalid.
         const bool success = !hasSampleMaskOutput || !alphaToCoverageEnabled;
 
-        t.expectValidationError([&] {
-            createRenderPipelineForValidation(t, 4u, alphaToCoverageEnabled, fragmentShaderCode);
-        }, !success);
+        doCreateRenderPipelineForValidation(t, isAsync, success, 4u, alphaToCoverageEnabled, fragmentShaderCode);
     });
 
 } // namespace

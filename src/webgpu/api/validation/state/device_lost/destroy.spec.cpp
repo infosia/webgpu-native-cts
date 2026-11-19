@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "cts/gpu.h"
 #include "cts/test.h"
 #include "cts/webgpu.h"
 #include "common/webgpu/backend.h"
@@ -465,6 +466,152 @@ WGPURenderPipeline createRenderPipeline(
     return pipeline;
 }
 
+// One in-flight wgpuDeviceCreate{Compute,Render}PipelineAsync call on an owned device.
+// `lostAtCallback` records whether the device-lost callback had already fired when the
+// creation callback ran (upstream's `isLost` flag observed in the promise handlers).
+// Heap-allocated by the caller and leaked if the wait times out, so a late callback never
+// writes to freed memory.
+template <typename Pipeline>
+struct PendingPipelineAsync {
+    const LostState* lost = nullptr;
+    bool completed = false;
+    bool lostAtCallback = false;
+    WGPUCreatePipelineAsyncStatus status = WGPUCreatePipelineAsyncStatus_InternalError;
+    Pipeline pipeline = nullptr;
+};
+
+template <typename Pipeline>
+void onCreatePipelineAsync(WGPUCreatePipelineAsyncStatus status,
+                           Pipeline pipeline,
+                           WGPUStringView,
+                           void* userdata1,
+                           void*) {
+    auto* pending = static_cast<PendingPipelineAsync<Pipeline>*>(userdata1);
+    pending->completed = true;
+    pending->lostAtCallback = pending->lost->fired;
+    pending->status = status;
+    pending->pipeline = pipeline;
+}
+
+PendingPipelineAsync<WGPUComputePipeline>* createComputePipelineAsync(
+    OwnedDeviceContext& ctx,
+    WGPUShaderModule module,
+    const char* entryPoint) {
+    WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+    desc.layout = nullptr;
+    desc.compute.module = module;
+    desc.compute.entryPoint = sv(entryPoint);
+    auto* pending = new PendingPipelineAsync<WGPUComputePipeline>();
+    pending->lost = &ctx.lost;
+    WGPUCreateComputePipelineAsyncCallbackInfo callbackInfo = WGPU_CREATE_COMPUTE_PIPELINE_ASYNC_CALLBACK_INFO_INIT;
+    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    callbackInfo.callback = onCreatePipelineAsync<WGPUComputePipeline>;
+    callbackInfo.userdata1 = pending;
+    (void)wgpuDeviceCreateComputePipelineAsync(ctx.device, &desc, callbackInfo);
+    return pending;
+}
+
+PendingPipelineAsync<WGPURenderPipeline>* createRenderPipelineAsync(
+    OwnedDeviceContext& ctx,
+    WGPUShaderModule vertexModule,
+    WGPUShaderModule fragmentModule,
+    const char* fragmentEntryPoint) {
+    WGPUColorTargetState target = WGPU_COLOR_TARGET_STATE_INIT;
+    target.format = WGPUTextureFormat_RGBA8Unorm;
+    target.writeMask = WGPUColorWriteMask_None;
+
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    fragment.module = fragmentModule;
+    fragment.entryPoint = sv(fragmentEntryPoint);
+    fragment.targetCount = 1;
+    fragment.targets = &target;
+
+    WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    desc.layout = nullptr;
+    desc.vertex.module = vertexModule;
+    desc.vertex.entryPoint = sv("main");
+    desc.fragment = &fragment;
+    auto* pending = new PendingPipelineAsync<WGPURenderPipeline>();
+    pending->lost = &ctx.lost;
+    WGPUCreateRenderPipelineAsyncCallbackInfo callbackInfo = WGPU_CREATE_RENDER_PIPELINE_ASYNC_CALLBACK_INFO_INIT;
+    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    callbackInfo.callback = onCreatePipelineAsync<WGPURenderPipeline>;
+    callbackInfo.userdata1 = pending;
+    (void)wgpuDeviceCreateRenderPipelineAsync(ctx.device, &desc, callbackInfo);
+    return pending;
+}
+
+void trackPipeline(OwnedDeviceContext& ctx, WGPUComputePipeline pipeline) {
+    ctx.handles.computePipelines.push_back(pipeline);
+}
+
+void trackPipeline(OwnedDeviceContext& ctx, WGPURenderPipeline pipeline) {
+    ctx.handles.renderPipelines.push_back(pipeline);
+}
+
+// Waits for `pending` and takes ownership of its pipeline. Fails the case on timeout (leaking
+// `pending`, whose callback may still fire later).
+template <typename Pipeline>
+PendingPipelineAsync<Pipeline> awaitPipelineAsync(Fixture& t,
+                                                  OwnedDeviceContext& ctx,
+                                                  PendingPipelineAsync<Pipeline>* pending,
+                                                  const char* what) {
+    if (!processEventsUntil(ctx.instance, [pending] { return pending->completed; }, 60'000'000'000)) {
+        t.fail(std::string(what) + " timed out");
+    }
+    PendingPipelineAsync<Pipeline> result = *pending;
+    delete pending;
+    if (result.pipeline != nullptr) {
+        trackPipeline(ctx, result.pipeline);
+    }
+    return result;
+}
+
+// Upstream createComputePipelineAsync / createRenderPipelineAsync body: kick off a creation,
+// destroy the device (optionally awaiting `lost`), then check the in-flight creation and a
+// creation issued on the destroyed device.
+template <typename Pipeline>
+void testCreatePipelineAsyncWhileDestroying(
+    Fixture& t,
+    OwnedDeviceContext& ctx,
+    bool valid,
+    bool awaitLost,
+    const char* what,
+    const std::function<PendingPipelineAsync<Pipeline>*()>& fn) {
+    // Kick off async creation.
+    PendingPipelineAsync<Pipeline>* p = fn();
+
+    // Destroy the device, and expect it to be lost.
+    wgpuDeviceDestroy(ctx.device);
+    awaitLostIfRequested(t, ctx, awaitLost);
+
+    const PendingPipelineAsync<Pipeline> first = awaitPipelineAsync(t, ctx, p, what);
+    if (valid) {
+        // The async creation should resolve successfully.
+        t.expect(first.status == WGPUCreatePipelineAsyncStatus_Success && first.pipeline != nullptr,
+                 std::string(what) + ": valid creation did not resolve with a pipeline (status " +
+                     std::string(createPipelineAsyncStatusName(first.status)) + ")");
+    } else if (first.status == WGPUCreatePipelineAsyncStatus_Success) {
+        // The async creation should resolve successfully if the device is lost.
+        t.expect(first.lostAtCallback,
+                 std::string(what) + ": invalid async creation should \"succeed\" only if the device is already lost");
+        t.expect(first.pipeline != nullptr, std::string(what) + ": resolved without a pipeline");
+    } else {
+        // If the device is not lost, it should see a validation error.
+        t.expect(!first.lostAtCallback,
+                 std::string(what) + ": invalid async creation should only fail if the device is not yet lost");
+        t.expect(first.status == WGPUCreatePipelineAsyncStatus_ValidationError,
+                 std::string(what) + ": expected status ValidationError, got " +
+                     std::string(createPipelineAsyncStatusName(first.status)));
+    }
+
+    // After device destroy, creation should still resolve successfully.
+    const PendingPipelineAsync<Pipeline> second = awaitPipelineAsync(t, ctx, fn(), what);
+    t.expect(second.status == WGPUCreatePipelineAsyncStatus_Success && second.pipeline != nullptr,
+             std::string(what) + " on a destroyed device did not resolve with a pipeline (status " +
+                 std::string(createPipelineAsyncStatusName(second.status)) + ")");
+}
+
 WGPUCommandEncoder createCommandEncoder(OwnedDeviceContext& ctx) {
     WGPUCommandEncoderDescriptor desc = WGPU_COMMAND_ENCODER_DESCRIPTOR_INIT;
     WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(ctx.device, &desc);
@@ -903,15 +1050,10 @@ CTS_TEST(g, "createComputePipelineAsync")
         OwnedDeviceContext ctx;
         createOwnedDevice(t, ctx);
         WGPUShaderModule module = createShaderModule(ctx, noOpShaderCode("COMPUTE"));
-        // Native has no portable async pipeline wrapper here; use the same sync create path.
-        expectValidationErrorOnDevice(t, ctx, [&] {
-            createComputePipeline(ctx, module, valid ? "main" : "does_not_exist");
-        }, !valid);
-        wgpuDeviceDestroy(ctx.device);
-        awaitLostIfRequested(t, ctx, t.param<bool>("awaitLost"));
-        expectValidationErrorOnDevice(t, ctx, [&] {
-            createComputePipeline(ctx, module, valid ? "main" : "does_not_exist");
-        }, false);
+        testCreatePipelineAsyncWhileDestroying<WGPUComputePipeline>(
+            t, ctx, valid, t.param<bool>("awaitLost"), "createComputePipelineAsync", [&] {
+                return createComputePipelineAsync(ctx, module, valid ? "main" : "does_not_exist");
+            });
     });
 
 CTS_TEST(g, "createRenderPipelineAsync")
@@ -923,15 +1065,10 @@ CTS_TEST(g, "createRenderPipelineAsync")
         createOwnedDevice(t, ctx);
         WGPUShaderModule vertex = createShaderModule(ctx, noOpShaderCode("VERTEX"));
         WGPUShaderModule fragment = createShaderModule(ctx, noOpShaderCode("FRAGMENT"));
-        // Native has no portable async pipeline wrapper here; use the same sync create path.
-        expectValidationErrorOnDevice(t, ctx, [&] {
-            createRenderPipeline(ctx, vertex, fragment, valid ? "main" : "does_not_exist");
-        }, !valid);
-        wgpuDeviceDestroy(ctx.device);
-        awaitLostIfRequested(t, ctx, t.param<bool>("awaitLost"));
-        expectValidationErrorOnDevice(t, ctx, [&] {
-            createRenderPipeline(ctx, vertex, fragment, valid ? "main" : "does_not_exist");
-        }, false);
+        testCreatePipelineAsyncWhileDestroying<WGPURenderPipeline>(
+            t, ctx, valid, t.param<bool>("awaitLost"), "createRenderPipelineAsync", [&] {
+                return createRenderPipelineAsync(ctx, vertex, fragment, valid ? "main" : "does_not_exist");
+            });
     });
 
 CTS_TEST(g, "createCommandEncoder")

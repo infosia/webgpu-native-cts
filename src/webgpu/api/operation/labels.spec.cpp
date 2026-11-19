@@ -18,9 +18,10 @@
 //    skipped at runtime (t.skip) rather than marking the whole test
 //    unimplemented, so the other 18 cases still run.
 //
-// 3. createComputePipelineAsync / createRenderPipelineAsync — JS async
-//    pipeline creation.  The C API has synchronous createComputePipeline /
-//    createRenderPipeline which serve the same purpose for a label test.
+// 3. createComputePipelineAsync / createRenderPipelineAsync — created through
+//    wgpuDeviceCreate{Compute,Render}PipelineAsync; the callback must report
+//    Success and return a pipeline, which then gets the same SetLabel check
+//    as the synchronous variants (see note 1).
 //
 // 4. createQuerySet / createView / beginRenderPass / beginComputePass /
 //    finish / createRenderBundleEncoder — not in GpuTest tracked helpers;
@@ -256,11 +257,10 @@ static void testCreateRenderPipeline(AllFeaturesMaxLimitsGpuTest& t, const std::
     setLabelIfSupported(pipeline, sv(label));
 }
 
-// createComputePipelineAsync: JS async — use sync createComputePipeline instead.
+// createComputePipelineAsync: create with label via wgpuDeviceCreateComputePipelineAsync.
 static void testCreateComputePipelineAsync(
     AllFeaturesMaxLimitsGpuTest& t,
     const std::string& label) {
-    // Upstream is async; C port uses synchronous createComputePipeline.
     WGPUShaderModule computeModule = t.createShaderModuleTracked(kComputeWgsl);
 
     WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
@@ -268,16 +268,15 @@ static void testCreateComputePipelineAsync(
     desc.layout = nullptr; // 'auto' layout
     desc.compute.module = computeModule;
     desc.compute.entryPoint = sv("foo");
-    WGPUComputePipeline pipeline = t.createComputePipelineTracked(desc);
-    t.expect(pipeline != nullptr, "createComputePipelineAsync (sync) with label returned null");
+    WGPUComputePipeline pipeline = t.createComputePipelineSyncOrAsync(/*isAsync=*/true, desc);
+    t.expect(pipeline != nullptr, "createComputePipelineAsync with label returned null");
     setLabelIfSupported(pipeline, sv(label));
 }
 
-// createRenderPipelineAsync: JS async — use sync createRenderPipeline instead.
+// createRenderPipelineAsync: create with label via wgpuDeviceCreateRenderPipelineAsync.
 static void testCreateRenderPipelineAsync(
     AllFeaturesMaxLimitsGpuTest& t,
     const std::string& label) {
-    // Upstream is async; C port uses synchronous createRenderPipeline.
     WGPUShaderModule vertModule = t.createShaderModuleTracked(kRenderVertexWgsl);
     WGPUShaderModule fragModule = t.createShaderModuleTracked(kFragmentWgsl);
 
@@ -296,8 +295,8 @@ static void testCreateRenderPipelineAsync(
     desc.vertex.module = vertModule;
     desc.vertex.entryPoint = sv("foo");
     desc.fragment = &fragState;
-    WGPURenderPipeline pipeline = t.createRenderPipelineTracked(desc);
-    t.expect(pipeline != nullptr, "createRenderPipelineAsync (sync) with label returned null");
+    WGPURenderPipeline pipeline = t.createRenderPipelineSyncOrAsync(/*isAsync=*/true, desc);
+    t.expect(pipeline != nullptr, "createRenderPipelineAsync with label returned null");
     setLabelIfSupported(pipeline, sv(label));
 }
 
@@ -486,8 +485,7 @@ CTS_TEST(g, "object_has_descriptor_label")
         "\n"
         "Note (C port): The WebGPU C API has no GetLabel function. This test verifies\n"
         "that objects can be created with labels in descriptors and that SetLabel can be\n"
-        "called without crashing. The requestDevice case is skipped (uses navigator.gpu).\n"
-        "createComputePipelineAsync/createRenderPipelineAsync use the synchronous variants.")
+        "called without crashing. The requestDevice case is skipped (uses navigator.gpu).")
     .params([](ParamsBuilder u) {
         return u.combine("name", kTestFunctionNameValues())
             .beginSubcases()

@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/primitive_state.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Note: the async=true sub-cases are exercised via the same synchronous pipeline-creation path
-// (the harness has no async pipeline-creation wrapper); validation behaviour is identical.
 
 #include <string>
 #include <vector>
@@ -42,7 +40,7 @@ static const char* kDefaultFragmentShaderCode =
 // mirroring CreateRenderPipelineValidationTest::getDescriptor from common.ts.
 //
 // The descriptor holder keeps all sub-objects alive for the call to
-// createRenderPipelineTracked / expectValidationError.
+// doCreateRenderPipelineTest.
 struct RenderPipelineDescriptorHolder {
     WGPUShaderModule vertexModule   = nullptr;
     WGPUShaderModule fragmentModule = nullptr;
@@ -91,16 +89,14 @@ RenderPipelineDescriptorHolder buildDescriptorWithPrimitive(
     return h;
 }
 
-// Mirrors vtu.doCreateRenderPipelineTest for the synchronous path.
-// For isAsync=true the C++ harness has no async wrapper; both paths use expectValidationError.
+// Mirrors vtu.doCreateRenderPipelineTest.
 void doCreateRenderPipelineTest(
     AllFeaturesMaxLimitsGpuTest& t,
-    bool shouldError,
+    bool isAsync,
+    bool success,
     RenderPipelineDescriptorHolder& h)
 {
-    t.expectValidationError([&] {
-        t.createRenderPipelineTracked(h.desc);
-    }, shouldError);
+    t.doCreateRenderPipelineTest(isAsync, success, h.desc);
 }
 
 // ---------------------------------------------------------------------------
@@ -165,9 +161,6 @@ CTS_TEST(g, "strip_index_format")
         const std::string topologyStr         = t.param<std::string>("topology");
         const std::string stripIndexFormatStr = t.param<std::string>("stripIndexFormat");
 
-        // async=true uses same synchronous validation path (harness has no async pipeline wrapper).
-        (void)isAsync;
-
         const WGPUPrimitiveTopology topology         = topologyFromString(topologyStr);
         const WGPUIndexFormat       stripIndexFormat = stripIndexFormatFromString(stripIndexFormatStr);
 
@@ -179,7 +172,7 @@ CTS_TEST(g, "strip_index_format")
             stripIndexFormat == WGPUIndexFormat_Undefined;
 
         auto h = buildDescriptorWithPrimitive(t, topology, stripIndexFormat, false);
-        doCreateRenderPipelineTest(t, !success, h);
+        doCreateRenderPipelineTest(t, isAsync, success, h);
     });
 
 // ---------------------------------------------------------------------------
@@ -198,9 +191,6 @@ CTS_TEST(g, "unclipped_depth")
         const bool isAsync        = t.param<bool>("isAsync");
         const bool unclippedDepth = t.param<bool>("unclippedDepth");
 
-        // async=true uses same synchronous validation path (harness has no async pipeline wrapper).
-        (void)isAsync;
-
         // Upstream: hasFeature(t.device.features, 'depth-clip-control')
         const bool hasDepthClipControl =
             wgpuDeviceHasFeature(t.device(), WGPUFeatureName_DepthClipControl) != 0;
@@ -210,7 +200,7 @@ CTS_TEST(g, "unclipped_depth")
 
         auto h = buildDescriptorWithPrimitive(
             t, WGPUPrimitiveTopology_Undefined, WGPUIndexFormat_Undefined, unclippedDepth);
-        doCreateRenderPipelineTest(t, !success, h);
+        doCreateRenderPipelineTest(t, isAsync, success, h);
     });
 
 } // namespace

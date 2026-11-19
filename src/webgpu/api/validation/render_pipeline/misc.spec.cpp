@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/misc.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Note: the async=true sub-cases are exercised via the same synchronous pipeline-creation path
-// (the harness has no async pipeline-creation wrapper); validation behaviour is identical.
 // Note: pipeline_layout,device_mismatch — mismatchedDevice() is available on GpuTest directly.
 // Note: external_texture — texture_external WGSL type compiled in the shader; no GPUExternalTexture
 //   object needed for pipeline creation itself, so ported faithfully.
@@ -131,16 +129,14 @@ VertexOnlyDescriptorHolder buildVertexOnlyDescriptor(
     return h;
 }
 
-// Mirrors vtu.doCreateRenderPipelineTest for the synchronous path.
-// For isAsync=true the C++ harness has no async wrapper; both paths use expectValidationError.
+// Mirrors vtu.doCreateRenderPipelineTest.
 void doCreateRenderPipelineTest(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
     bool success,
     const WGPURenderPipelineDescriptor& desc)
 {
-    t.expectValidationError([&] {
-        t.createRenderPipelineTracked(desc);
-    }, !success);
+    t.doCreateRenderPipelineTest(isAsync, success, desc);
 }
 
 // Build the list of "possible storage texture formats" matching kPossibleStorageTextureFormats from
@@ -180,9 +176,8 @@ CTS_TEST(g, "basic")
         return u.combine("isAsync", {Value(false), Value(true)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        // isAsync: both paths use the same synchronous expectValidationError
         auto h = buildDefaultDescriptor(t);
-        doCreateRenderPipelineTest(t, /*success=*/true, h.desc);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), /*success=*/true, h.desc);
     });
 
 // ---------------------------------------------------------------------------
@@ -210,7 +205,7 @@ CTS_TEST(g, "no_attachment")
         desc.fragment                = nullptr;
         desc.depthStencil            = nullptr;
 
-        doCreateRenderPipelineTest(t, /*success=*/false, desc);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), /*success=*/false, desc);
     });
 
 // ---------------------------------------------------------------------------
@@ -262,7 +257,7 @@ CTS_TEST(g, "vertex_state_only")
         const bool success = (dsFormat != WGPUTextureFormat_Undefined);
 
         auto h = buildVertexOnlyDescriptor(t, dsFormat, /*hasColor=*/t.param<bool>("hasColor"));
-        doCreateRenderPipelineTest(t, success, h.desc);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), success, h.desc);
     });
 
 // ---------------------------------------------------------------------------
@@ -310,10 +305,7 @@ CTS_TEST(g, "pipeline_layout,device_mismatch")
         desc.vertex.entryPoint       = sv("main");
         desc.fragment                = &fragment;
 
-        // success = !mismatched
-        t.expectValidationError([&] {
-            t.createRenderPipelineTracked(desc);
-        }, mismatched);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), !mismatched, desc);
 
         if (layout != nullptr) {
             wgpuPipelineLayoutRelease(layout);
@@ -363,7 +355,7 @@ CTS_TEST(g, "external_texture")
         desc.vertex.entryPoint       = sv("vertexMain");
         desc.fragment                = &fragment;
 
-        doCreateRenderPipelineTest(t, /*success=*/true, desc);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), /*success=*/true, desc);
     });
 
 // ---------------------------------------------------------------------------
@@ -442,7 +434,7 @@ CTS_TEST(g, "storage_texture,format")
         desc.vertex.entryPoint       = sv("vs");
         desc.fragment                = &fragment;
 
-        doCreateRenderPipelineTest(t, success, desc);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), success, desc);
     });
 
 } // namespace

@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/shader_module/entry_point.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Note: isAsync=true sub-cases are exercised via the same synchronous pipeline-creation path;
-// the harness has no async pipeline-creation wrapper. Validation behaviour is identical.
 
 #include <string>
 #include <vector>
@@ -114,33 +112,26 @@ std::vector<Value> entryPointTestCaseIndexValues() {
 
 // ---------------------------------------------------------------------------
 // Pipeline creation helpers that mirror vtu.doCreateComputePipelineTest /
-// vtu.doCreateRenderPipelineTest (synchronous path only — isAsync is ignored
-// since the C harness has no async pipeline-creation wrapper).
+// vtu.doCreateRenderPipelineTest.
 // ---------------------------------------------------------------------------
 
 void doCreateComputePipelineTest(
     AllFeaturesMaxLimitsGpuTest& t,
-    bool /* isAsync */,
+    bool isAsync,
     bool success,
     WGPUComputePipelineDescriptor& desc)
 {
-    t.expectValidationError([&] {
-        t.createComputePipelineTracked(desc);
-    }, !success);
+    t.doCreateComputePipelineTest(isAsync, success, desc);
 }
 
 void doCreateRenderPipelineTest(
     AllFeaturesMaxLimitsGpuTest& t,
-    bool /* isAsync */,
+    bool isAsync,
     bool success,
-    WGPURenderPipelineDescriptor& desc,
-    WGPUFragmentState* fragment = nullptr)
+    WGPURenderPipelineDescriptor& desc)
 {
     // desc.fragment must already be set by the caller (via pointer to a local FragmentState).
-    (void)fragment; // suppress unused-param warning
-    t.expectValidationError([&] {
-        t.createRenderPipelineTracked(desc);
-    }, !success);
+    t.doCreateRenderPipelineTest(isAsync, success, desc);
 }
 
 // ---------------------------------------------------------------------------

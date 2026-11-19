@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/non_filterable_texture.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Note: the async=true sub-cases are exercised via the same synchronous pipeline-creation path
-// (the harness has no async pipeline-creation wrapper); validation behaviour is identical.
 
 #include <string>
 #include <vector>
@@ -204,42 +202,31 @@ CTS_TEST(g, "non_filterable_texture_with_filtering_sampler")
         const std::string wgsl = buildShader(sampleType, viewDimension, groupNdx);
         WGPUShaderModule shaderModule = t.createShaderModuleTracked(wgsl);
 
-        // doCreateComputePipelineTest / doCreateRenderPipelineTest
-        // For async=true the upstream uses createXxxPipelineAsync (promise rejection).
-        // The C++ harness has no async pipeline-creation wrapper, so both async=true
-        // and async=false use the synchronous expectValidationError path.
-        // The validation outcome is identical; only the API path differs.
-        (void)async;
-
         if (pipelineStr == "compute") {
-            t.expectValidationError([&] {
-                WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
-                desc.layout          = layout;
-                desc.compute.module  = shaderModule;
-                desc.compute.entryPoint = sv("cs");
-                t.createComputePipelineTracked(desc);
-            }, shouldError);
+            WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+            desc.layout          = layout;
+            desc.compute.module  = shaderModule;
+            desc.compute.entryPoint = sv("cs");
+            t.doCreateComputePipelineTest(async, !shouldError, desc);
         } else {
-            t.expectValidationError([&] {
-                WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
-                colorTarget.format    = WGPUTextureFormat_RGBA8Unorm;
-                colorTarget.writeMask = WGPUColorWriteMask_All;
+            WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+            colorTarget.format    = WGPUTextureFormat_RGBA8Unorm;
+            colorTarget.writeMask = WGPUColorWriteMask_All;
 
-                WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-                fragment.module      = shaderModule;
-                fragment.entryPoint  = sv("fs");
-                fragment.targetCount = 1;
-                fragment.targets     = &colorTarget;
+            WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+            fragment.module      = shaderModule;
+            fragment.entryPoint  = sv("fs");
+            fragment.targetCount = 1;
+            fragment.targets     = &colorTarget;
 
-                WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-                desc.layout               = layout;
-                desc.vertex.module        = shaderModule;
-                desc.vertex.entryPoint    = sv("vs");
-                desc.primitive.topology   = WGPUPrimitiveTopology_TriangleList;
-                desc.multisample.count    = 1;
-                desc.fragment             = &fragment;
-                t.createRenderPipelineTracked(desc);
-            }, shouldError);
+            WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+            desc.layout               = layout;
+            desc.vertex.module        = shaderModule;
+            desc.vertex.entryPoint    = sv("vs");
+            desc.primitive.topology   = WGPUPrimitiveTopology_TriangleList;
+            desc.multisample.count    = 1;
+            desc.fragment             = &fragment;
+            t.doCreateRenderPipelineTest(async, !shouldError, desc);
         }
     });
 

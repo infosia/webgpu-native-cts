@@ -1,5 +1,5 @@
 // Ported from gpuweb/cts src/webgpu/api/operation/render_pipeline/overrides.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Ports basic for isAsync=false; async/precision/shared_shader_module/multi_entry_points deferred.
+// Ports basic (isAsync=true/false); precision/shared_shader_module/multi_entry_points are deferred.
 
 #include <array>
 #include <cmath>
@@ -103,6 +103,7 @@ SubcaseData getSubcaseData(int index) {
 }
 
 void runBasicTest(AllFeaturesMaxLimitsGpuTest& t) {
+    const bool isAsync = t.param<bool>("isAsync");
     const int subcaseIndex = t.param<int>("subcaseIndex");
     const SubcaseData sc = getSubcaseData(subcaseIndex);
 
@@ -162,7 +163,7 @@ void runBasicTest(AllFeaturesMaxLimitsGpuTest& t) {
     pipeDesc.primitive.cullMode   = WGPUCullMode_Back;
     pipeDesc.multisample.count    = 1;
     pipeDesc.fragment             = &fragment;
-    WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipeDesc);
+    WGPURenderPipeline pipeline = t.createRenderPipelineSyncOrAsync(isAsync, pipeDesc);
 
     // Render pass: clear {0.2, 0.4, 0.6, 0.8}, store.
     WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
@@ -236,11 +237,11 @@ void runBasicTest(AllFeaturesMaxLimitsGpuTest& t) {
 }
 
 // basic:
-//   1 case (isAsync=false is the case-level param); 6 subcases via combineWithParams.
+//   2 cases (isAsync=true/false is the case-level param); 6 subcases each via combineWithParams.
 //   Each subcase row encodes a distinct combination of vertex/fragment overrides.
 CTS_TEST(g, "basic")
     .params([](ParamsBuilder u) {
-        return u.combine("isAsync", {false})
+        return u.combine("isAsync", {true, false})
             .beginSubcases()
             .combineWithParams({
                 // subcaseIndex 0: no overrides → white output

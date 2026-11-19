@@ -182,6 +182,26 @@ comment, not checked against an upstream checkout.
 
 ---
 
+## F-166 — wgpu-native: `wgpuDevice{Render,Compute}PipelineAsync` are unimplemented — OPEN (expected aborts, not yet run)
+
+**wgpu-native GAP** (found 2026-11-20 from source, wgpu-native `6aed509`). Both entry points are
+`unimplemented!()` in `src/unimplemented.rs`, so calling either panics and aborts the process. Until
+`8b086b8` the suite never called them: every `isAsync=true` case silently used the synchronous API. The
+test-review fixes (spec `specs/test-review-fixes-8b086b8.md`, T3) route those cases through the async
+entry points, as upstream does.
+
+**Expected scope on wgpu-native:** every case with `isAsync=true` or `async=true` (the `capability_checks`
+limit and feature tests, `compute_pipeline`, `render_pipeline/*`, `non_filterable_texture`,
+`pipeline,immediates`, `shader_module,entry_point`, the two `api,operation,*,overrides:basic` cases),
+`limits,maxComputeWorkgroupsPerDimension` with `pipelineType="createComputePipelineAsync"`,
+`state,device_lost,destroy:create{Compute,Render}PipelineAsync`, and the two async cases of
+`api,operation,labels`. Not measured: wgpu-native was not run. The next wgpu-native run needs `--isolate`
+and should add these cases to `expectations/wgpu-native*.txt` / the crash list.
+
+Dawn/Metal passes all of them (93,412 pass, 0 fail). yawgpu implements both entry points.
+
+---
+
 ## F-165 — NVIDIA/Windows: shader compiler crash on `bufferArrayView` workgroup f16 aliasing — driver defect, NOT yawgpu
 
 **DRIVER DEFECT — NOT yawgpu** (Windows 11 / NVIDIA RTX 5060 Ti, driver 617.14, native Vulkan; found and triaged

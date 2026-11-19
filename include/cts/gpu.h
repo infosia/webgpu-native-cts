@@ -95,6 +95,25 @@ inline std::vector<Value> resourceStateValues() {
     return values;
 }
 
+/// Outcome of `wgpuDeviceCreateRenderPipelineAsync`: the callback's status, pipeline (null on
+/// failure), and message.
+struct RenderPipelineAsyncResult {
+    WGPUCreatePipelineAsyncStatus status = WGPUCreatePipelineAsyncStatus_InternalError;
+    WGPURenderPipeline pipeline = nullptr;
+    std::string message;
+};
+
+/// Outcome of `wgpuDeviceCreateComputePipelineAsync`: the callback's status, pipeline (null on
+/// failure), and message.
+struct ComputePipelineAsyncResult {
+    WGPUCreatePipelineAsyncStatus status = WGPUCreatePipelineAsyncStatus_InternalError;
+    WGPUComputePipeline pipeline = nullptr;
+    std::string message;
+};
+
+/// Returns the webgpu.h spelling of a create-pipeline-async status (e.g. `"ValidationError"`).
+std::string_view createPipelineAsyncStatusName(WGPUCreatePipelineAsyncStatus status);
+
 /// Fixture for tests that need a real GPU device. Acquires an adapter/device/queue
 /// in `init`, tracks every resource it creates so they are released in `finalize`,
 /// and provides the WebGPU CTS `GPUTest` helpers (buffer/texture readback,
@@ -110,6 +129,9 @@ class GpuTest : public Fixture {
     WGPUDevice mismatchedDevice();
     /// The primary device's default queue.
     virtual WGPUQueue queue() const;
+    /// The instance that owns `device()`; its events are pumped while waiting on device callbacks.
+    /// Fixtures that create `device()` from their own instance override this.
+    virtual WGPUInstance testInstance() const;
     /// Returns the device's supported limits.
     WGPULimits getLimits() const;
     /// Returns the device's compatibility-mode limits.
@@ -201,6 +223,39 @@ class GpuTest : public Fixture {
     WGPURenderPipeline createRenderPipelineTracked(const WGPURenderPipelineDescriptor& desc);
     /// Creates a compute pipeline and tracks it for release.
     WGPUComputePipeline createComputePipelineTracked(const WGPUComputePipelineDescriptor& desc);
+    /// Creates a render pipeline with `wgpuDeviceCreateRenderPipelineAsync`, waits for the
+    /// callback, and tracks the returned pipeline (if any) for release.
+    RenderPipelineAsyncResult createRenderPipelineAsyncTracked(const WGPURenderPipelineDescriptor& desc);
+    /// Creates a compute pipeline with `wgpuDeviceCreateComputePipelineAsync`, waits for the
+    /// callback, and tracks the returned pipeline (if any) for release.
+    ComputePipelineAsyncResult createComputePipelineAsyncTracked(const WGPUComputePipelineDescriptor& desc);
+    /// Upstream `isAsync ? await createRenderPipelineAsync(desc) : createRenderPipeline(desc)`:
+    /// returns a tracked pipeline; the async path fails the case unless the status is `Success`
+    /// (an awaited rejection throws upstream).
+    WGPURenderPipeline createRenderPipelineSyncOrAsync(bool isAsync, const WGPURenderPipelineDescriptor& desc);
+    /// Compute-pipeline counterpart of `createRenderPipelineSyncOrAsync`.
+    WGPUComputePipeline createComputePipelineSyncOrAsync(bool isAsync, const WGPUComputePipelineDescriptor& desc);
+    /// Upstream `shouldRejectConditionally('GPUPipelineError', createRenderPipelineAsync(desc), shouldError)`:
+    /// creates the pipeline asynchronously and asserts the callback status is `ValidationError`
+    /// when `shouldError`, `Success` otherwise, and that no validation error reaches the device.
+    void expectCreateRenderPipelineAsync(const WGPURenderPipelineDescriptor& desc,
+                                         bool shouldError,
+                                         std::string_view msg = {});
+    /// Compute-pipeline counterpart of `expectCreateRenderPipelineAsync`.
+    void expectCreateComputePipelineAsync(const WGPUComputePipelineDescriptor& desc,
+                                          bool shouldError,
+                                          std::string_view msg = {});
+    /// Upstream `doCreateRenderPipelineTest` (validation_test_utils.ts): with `isAsync`, the async
+    /// expectation above; otherwise `expectValidationError` around `createRenderPipeline`.
+    void doCreateRenderPipelineTest(bool isAsync,
+                                    bool success,
+                                    const WGPURenderPipelineDescriptor& desc,
+                                    std::string_view msg = {});
+    /// Upstream `doCreateComputePipelineTest` (validation_test_utils.ts).
+    void doCreateComputePipelineTest(bool isAsync,
+                                     bool success,
+                                     const WGPUComputePipelineDescriptor& desc,
+                                     std::string_view msg = {});
     /// Creates a command encoder and tracks it for release.
     WGPUCommandEncoder createCommandEncoderTracked();
     /// Begins a compute pass and tracks the encoder for release in `finalize`.
@@ -218,8 +273,9 @@ class GpuTest : public Fixture {
                                                const WGPURenderBundleDescriptor* desc = nullptr);
     /// Creates a query set and tracks it for release.
     WGPUQuerySet createQuerySetTracked(const WGPUQuerySetDescriptor& desc);
-    /// Runs `body` inside an error scope and asserts an error did/didn't occur per `shouldError`.
-    void expectValidationError(const std::function<void()>& body, bool shouldError);
+    /// Runs `body` inside an error scope and asserts an error did/didn't occur per `shouldError`;
+    /// a non-empty `msg` is appended to the failure message.
+    void expectValidationError(const std::function<void()>& body, bool shouldError, std::string_view msg = {});
     /// Maps `buffer` and asserts the map succeeds or fails per `expectSuccess`.
     void expectMapAsync(WGPUBuffer buffer,
                         WGPUMapMode mode,

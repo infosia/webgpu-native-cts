@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/resource_compatibility.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Note: the async=true sub-cases are exercised via the same synchronous pipeline-creation path
-// (the harness has no async pipeline-creation wrapper); validation behaviour is identical.
 // Note: externalTexture resources are omitted (no C WebGPU API equivalent).
 // Note: hasLanguageFeature('readonly_and_readwrite_storage_textures') guard is omitted:
 //   AllFeaturesMaxLimitsGpuTest requests all adapter features; NAGA/tint always support
@@ -433,8 +431,7 @@ CTS_TEST(g, "resource_compatibility")
         const std::string stage       = t.param<std::string>("stage");
         const std::string apiResKey   = t.param<std::string>("apiResource");
         const std::string wgslResKey  = t.param<std::string>("wgslResource");
-        // isAsync: harness has no async pipeline creation wrapper; both paths use synchronous validation
-        (void)t.param<bool>("isAsync");
+        const bool isAsync            = t.param<bool>("isAsync");
 
         const Resource& apiRes  = findResource(apiResKey);
         const Resource& wgslRes = findResource(wgslResKey);
@@ -495,25 +492,22 @@ CTS_TEST(g, "resource_compatibility")
         // Determine expected outcome.
         const bool shouldError = !doResourcesMatch(apiRes, wgslRes);
 
-        // Create render pipeline: error fires at createRenderPipeline (eager model).
-        t.expectValidationError([&] {
-            WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
-            colorTarget.format    = WGPUTextureFormat_RGBA8Unorm;
-            colorTarget.writeMask = WGPUColorWriteMask_All;
+        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        colorTarget.format    = WGPUTextureFormat_RGBA8Unorm;
+        colorTarget.writeMask = WGPUColorWriteMask_All;
 
-            WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-            fragment.module      = fsModule;
-            fragment.entryPoint  = sv("main");
-            fragment.targetCount = 1;
-            fragment.targets     = &colorTarget;
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module      = fsModule;
+        fragment.entryPoint  = sv("main");
+        fragment.targetCount = 1;
+        fragment.targets     = &colorTarget;
 
-            WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-            desc.layout             = layout;
-            desc.vertex.module      = vsModule;
-            desc.vertex.entryPoint  = sv("main");
-            desc.fragment           = &fragment;
-            t.createRenderPipelineTracked(desc);
-        }, shouldError);
+        WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        desc.layout             = layout;
+        desc.vertex.module      = vsModule;
+        desc.vertex.entryPoint  = sv("main");
+        desc.fragment           = &fragment;
+        t.doCreateRenderPipelineTest(isAsync, !shouldError, desc);
     });
 
 } // namespace

@@ -1,5 +1,5 @@
 // Ported from gpuweb/cts src/webgpu/api/operation/compute_pipeline/overrides.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Ports basic for isAsync=false (1 case); async + other 6 tests deferred.
+// Ports basic (isAsync=true/false, 2 cases); the other 6 tests are deferred.
 
 #include <array>
 #include <cstdint>
@@ -47,14 +47,15 @@ WGPUConstantEntry makeConstantEntry(std::string_view key, double value) {
 }
 
 // basic:
-//   1 case (isAsync=false); dispatches 1 workgroup and verifies 11 u32 output values.
+//   2 cases (isAsync=true/false); each dispatches 1 workgroup and verifies 11 u32 output values.
 //   8 constants are pipeline-set; c4, c7, c10 use their WGSL defaults (4, 7, 10).
 //   Expected output: buf.data = {0,1,2,3,4,5,6,7,8,9,10}.
 CTS_TEST(g, "basic")
     .params([](ParamsBuilder u) {
-        return u.combine("isAsync", {false});
+        return u.combine("isAsync", {true, false});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const bool isAsync = t.param<bool>("isAsync");
         // Storage buffer: 11 u32 = 44 bytes, zero-initialized.
         WGPUBufferDescriptor bufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
         bufDesc.size  = 11 * sizeof(uint32_t);
@@ -85,7 +86,7 @@ CTS_TEST(g, "basic")
         pipeDesc.compute.entryPoint    = stringView("main");
         pipeDesc.compute.constantCount = constants.size();
         pipeDesc.compute.constants     = constants.data();
-        WGPUComputePipeline pipeline = t.createComputePipelineTracked(pipeDesc);
+        WGPUComputePipeline pipeline = t.createComputePipelineSyncOrAsync(isAsync, pipeDesc);
 
         // Bind group: auto layout at group 0, binding 0 → dst buffer.
         WGPUBindGroupLayout bindGroupLayout = wgpuComputePipelineGetBindGroupLayout(pipeline, 0);

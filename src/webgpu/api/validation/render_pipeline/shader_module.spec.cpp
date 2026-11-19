@@ -69,16 +69,14 @@ static WGPUShaderModule createInvalidShaderModule(AllFeaturesMaxLimitsGpuTest& t
     return shaderModule;
 }
 
-// Mirror of doCreateRenderPipelineTest (sync path only — harness has no async wrapper).
-// Calls createRenderPipelineTracked inside expectValidationError(!success).
+// Mirror of vtu.doCreateRenderPipelineTest.
 static void doCreateRenderPipelineTest(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
     bool success,
     WGPURenderPipelineDescriptor& desc)
 {
-    t.expectValidationError([&] {
-        t.createRenderPipelineTracked(desc);
-    }, !success);
+    t.doCreateRenderPipelineTest(isAsync, success, desc);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,9 +102,7 @@ CTS_TEST(g, "device_mismatch")
         const bool vertex_mismatched   = t.param<bool>("vertex_mismatched");
         const bool fragment_mismatched = t.param<bool>("fragment_mismatched");
         const bool success             = t.param<bool>("_success");
-
-        // async=true uses the same synchronous validation path (harness has no async pipeline wrapper).
-        // (void)t.param<bool>("isAsync");
+        const bool isAsync             = t.param<bool>("isAsync");
 
         // Vertex shader WGSL (same for both devices).
         constexpr std::string_view kVertWGSL =
@@ -152,7 +148,7 @@ CTS_TEST(g, "device_mismatch")
         desc.vertex.entryPoint  = sv("main");
         desc.fragment           = &fragment;
 
-        doCreateRenderPipelineTest(t, success, desc);
+        doCreateRenderPipelineTest(t, isAsync, success, desc);
 
         // Release any mismatched-device resources (not tracked by harness).
         if (vertex_mismatched && vertModule != nullptr) {
@@ -177,7 +173,7 @@ CTS_TEST(g, "invalid,vertex")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isVertexShaderValid = t.param<bool>("isVertexShaderValid");
-        // async=true uses the same synchronous validation path (harness has no async pipeline wrapper).
+        const bool isAsync = t.param<bool>("isAsync");
 
         WGPUShaderModule vertModule = isVertexShaderValid
             ? t.createShaderModuleTracked(kDefaultVertexShaderCode)
@@ -203,10 +199,7 @@ CTS_TEST(g, "invalid,vertex")
         desc.vertex.entryPoint = sv("main");
         desc.fragment          = &fragment;
 
-        // success = isVertexShaderValid
-        t.expectValidationError([&] {
-            t.createRenderPipelineTracked(desc);
-        }, !isVertexShaderValid);
+        doCreateRenderPipelineTest(t, isAsync, isVertexShaderValid, desc);
     });
 
 // ---------------------------------------------------------------------------
@@ -223,7 +216,7 @@ CTS_TEST(g, "invalid,fragment")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isFragmentShaderValid = t.param<bool>("isFragmentShaderValid");
-        // async=true uses the same synchronous validation path (harness has no async pipeline wrapper).
+        const bool isAsync = t.param<bool>("isAsync");
 
         WGPUShaderModule vertModule = t.createShaderModuleTracked(kDefaultVertexShaderCode);
 
@@ -247,10 +240,7 @@ CTS_TEST(g, "invalid,fragment")
         desc.vertex.entryPoint = sv("main");
         desc.fragment          = &fragment;
 
-        // success = isFragmentShaderValid
-        t.expectValidationError([&] {
-            t.createRenderPipelineTracked(desc);
-        }, !isFragmentShaderValid);
+        doCreateRenderPipelineTest(t, isAsync, isFragmentShaderValid, desc);
     });
 
 } // namespace

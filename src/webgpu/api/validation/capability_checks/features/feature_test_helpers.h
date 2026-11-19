@@ -62,6 +62,11 @@ class FeatureGpuTest : public GpuTest {
         return self->device_;
     }
 
+    WGPUInstance testInstance() const override {
+        const_cast<FeatureGpuTest*>(this)->ensureInstanceAndAdapter();
+        return instance_;
+    }
+
     WGPUQueue queue() const override {
         FeatureGpuTest* self = const_cast<FeatureGpuTest*>(this);
         if (self->queue_ == nullptr) {
@@ -212,20 +217,18 @@ inline void expectValidationError(FeatureGpuTest& t, const std::function<void()>
 
 inline void doCreateRenderPipelineTest(
     FeatureGpuTest& t,
-    bool,
+    bool isAsync,
     bool success,
     const WGPURenderPipelineDescriptor& desc) {
-    // isAsync=true maps to the same synchronous native create path.
-    expectValidationError(t, [&] { t.createRenderPipelineTracked(desc); }, !success);
+    t.doCreateRenderPipelineTest(isAsync, success, desc);
 }
 
 inline void doCreateComputePipelineTest(
     FeatureGpuTest& t,
-    bool,
+    bool isAsync,
     bool success,
     const WGPUComputePipelineDescriptor& desc) {
-    // isAsync=true maps to the same synchronous native create path.
-    expectValidationError(t, [&] { t.createComputePipelineTracked(desc); }, !success);
+    t.doCreateComputePipelineTest(isAsync, success, desc);
 }
 
 } // namespace cts::capability_features

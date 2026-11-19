@@ -3,9 +3,8 @@
 // Note: t.isCompatibility guards (maxStorageBuffersInVertexStage,
 // maxStorageTexturesInVertexStage, etc.) are omitted — AllFeaturesMaxLimitsGpuTest
 // always runs with max limits so those limits are never 0 in this harness.
-// Note: isAsync=true sub-cases are not parameterized separately because the C
-// harness has no async pipeline-creation wrapper; both paths use the same
-// synchronous validation path.
+// Note: upstream fixes isAsync = false in this file, so pipelines are created
+// synchronously here too.
 
 #include <string>
 

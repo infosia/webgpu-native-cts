@@ -51,7 +51,8 @@ CTS_TEST(testGroup, "dispatchWorkgroups,at_over")
                 pipelineDesc.layout = nullptr;
                 pipelineDesc.compute.module = module;
                 pipelineDesc.compute.entryPoint = sv("main");
-                WGPUComputePipeline pipeline = t.createComputePipelineTracked(pipelineDesc);
+                WGPUComputePipeline pipeline = t.createComputePipelineSyncOrAsync(
+                    t.param<std::string>("pipelineType") == "createComputePipelineAsync", pipelineDesc);
 
                 WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
                 WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;

@@ -375,6 +375,10 @@ class LimitTest : public GpuTest {
         return self->currentDevice_;
     }
 
+    WGPUInstance testInstance() const override {
+        return instance_;
+    }
+
     WGPUQueue queue() const override {
         LimitTest* self = const_cast<LimitTest*>(this);
         if (self->currentQueue_ == nullptr) {
@@ -660,16 +664,19 @@ class LimitTest : public GpuTest {
 
     void testCreatePipeline(
         std::string_view pipelineType,
-        bool,
+        bool async,
         WGPUShaderModule module,
         bool shouldError,
         std::string_view msg = {}) {
-        // Native has no async pipeline promise path; async=true uses the same synchronous create.
         if (pipelineType == "createComputePipeline") {
             WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
             desc.layout = nullptr;
             desc.compute.module = module;
             desc.compute.entryPoint = sv("main");
+            if (async) {
+                expectCreateComputePipelineAsync(desc, shouldError, msg);
+                return;
+            }
             expectValidationErrorOnLimitDevice([&] {
                 createComputePipelineTracked(desc);
             }, shouldError, msg);
@@ -704,13 +711,14 @@ class LimitTest : public GpuTest {
             fragment.targets = &target;
             desc.fragment = &fragment;
         }
-        expectValidationErrorOnLimitDevice([&] {
-            createRenderPipelineTracked(desc);
-        }, shouldError, msg);
+        testCreateRenderPipeline(desc, async, shouldError, msg);
     }
 
-    void testCreateRenderPipeline(const WGPURenderPipelineDescriptor& desc, bool, bool shouldError, std::string_view msg = {}) {
-        // Native has no async pipeline promise path; async=true uses the same synchronous create.
+    void testCreateRenderPipeline(const WGPURenderPipelineDescriptor& desc, bool async, bool shouldError, std::string_view msg = {}) {
+        if (async) {
+            expectCreateRenderPipelineAsync(desc, shouldError, msg);
+            return;
+        }
         expectValidationErrorOnLimitDevice([&] {
             createRenderPipelineTracked(desc);
         }, shouldError, msg);

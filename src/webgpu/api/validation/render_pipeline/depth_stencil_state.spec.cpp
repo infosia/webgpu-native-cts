@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/depth_stencil_state.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Note: the async=true sub-cases are exercised via the same synchronous pipeline-creation path
-// (the harness has no async pipeline-creation wrapper); validation behaviour is identical.
 
 #include <string>
 #include <vector>
@@ -249,10 +247,8 @@ DescHolder buildBaseDescriptor(
     return h;
 }
 
-void doCreateRenderPipelineTest(AllFeaturesMaxLimitsGpuTest& t, bool shouldError, DescHolder& h) {
-    t.expectValidationError([&] {
-        t.createRenderPipelineTracked(h.desc);
-    }, shouldError);
+void doCreateRenderPipelineTest(AllFeaturesMaxLimitsGpuTest& t, bool isAsync, bool shouldError, DescHolder& h) {
+    t.doCreateRenderPipelineTest(isAsync, !shouldError, h.desc);
 }
 
 // -----------------------------------------------------------------------
@@ -290,7 +286,6 @@ CTS_TEST(g, "format")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         t.skipIfTextureFormatNotSupported(format);
@@ -306,7 +301,7 @@ CTS_TEST(g, "format")
         h.hasDepthStencil = true;
 
         const bool shouldError = !isDepthOrStencilTextureFormat(format);
-        doCreateRenderPipelineTest(t, shouldError, h);
+        doCreateRenderPipelineTest(t, isAsync, shouldError, h);
     });
 
 // -----------------------------------------------------------------------
@@ -336,7 +331,6 @@ CTS_TEST(g, "depthCompare_optional")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         t.skipIfTextureFormatNotSupported(format);
@@ -410,7 +404,7 @@ CTS_TEST(g, "depthCompare_optional")
             }
         }
 
-        doCreateRenderPipelineTest(t, !success, h);
+        doCreateRenderPipelineTest(t, isAsync, !success, h);
     });
 
 // -----------------------------------------------------------------------
@@ -429,7 +423,6 @@ CTS_TEST(g, "depthWriteEnabled_optional")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         t.skipIfTextureFormatNotSupported(format);
@@ -445,7 +438,7 @@ CTS_TEST(g, "depthWriteEnabled_optional")
 
         // success = !isDepthTextureFormat(format)
         const bool shouldError = isDepthTextureFormat(format);
-        doCreateRenderPipelineTest(t, shouldError, h);
+        doCreateRenderPipelineTest(t, isAsync, shouldError, h);
     });
 
 // -----------------------------------------------------------------------
@@ -464,7 +457,6 @@ CTS_TEST(g, "depth_test")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         t.skipIfTextureFormatNotSupported(format);
@@ -483,7 +475,7 @@ CTS_TEST(g, "depth_test")
         // (depthCompare is always defined here; check against 'always')
         const bool depthTestEnabled = (depthCompare != WGPUCompareFunction_Always);
         const bool success = !depthTestEnabled || isDepthTextureFormat(format);
-        doCreateRenderPipelineTest(t, !success, h);
+        doCreateRenderPipelineTest(t, isAsync, !success, h);
     });
 
 // -----------------------------------------------------------------------
@@ -502,7 +494,6 @@ CTS_TEST(g, "depth_write")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         t.skipIfTextureFormatNotSupported(format);
@@ -519,7 +510,7 @@ CTS_TEST(g, "depth_write")
         h.hasDepthStencil = true;
 
         const bool success = !depthWriteEnabled || isDepthTextureFormat(format);
-        doCreateRenderPipelineTest(t, !success, h);
+        doCreateRenderPipelineTest(t, isAsync, !success, h);
     });
 
 // -----------------------------------------------------------------------
@@ -538,7 +529,6 @@ CTS_TEST(g, "depth_write,frag_depth")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const bool formatIsUndefined = t.paramIsUndefined("format");
         WGPUTextureFormat format = WGPUTextureFormat_Undefined;
@@ -563,7 +553,7 @@ CTS_TEST(g, "depth_write,frag_depth")
         // hasDepth = format ? isDepthTextureFormat(format) : false
         const bool hasDepth = !formatIsUndefined && isDepthTextureFormat(format);
         // success = hasDepth
-        doCreateRenderPipelineTest(t, !hasDepth, h);
+        doCreateRenderPipelineTest(t, isAsync, !hasDepth, h);
     });
 
 // -----------------------------------------------------------------------
@@ -592,7 +582,6 @@ CTS_TEST(g, "depth_bias")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const WGPUPrimitiveTopology topology = parsePT(t.param<std::string>("topology"));
 
@@ -634,7 +623,7 @@ CTS_TEST(g, "depth_bias")
 
         h.desc.primitive.topology = topology;
 
-        doCreateRenderPipelineTest(t, !shouldSucceed, h);
+        doCreateRenderPipelineTest(t, isAsync, !shouldSucceed, h);
     });
 
 // -----------------------------------------------------------------------
@@ -654,7 +643,6 @@ CTS_TEST(g, "stencil_test")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         t.skipIfTextureFormatNotSupported(format);
@@ -684,7 +672,7 @@ CTS_TEST(g, "stencil_test")
         const bool stencilTestEnabled =
             !compareIsUndefined && (compare != WGPUCompareFunction_Always);
         const bool success = !stencilTestEnabled || isStencilTextureFormat(format);
-        doCreateRenderPipelineTest(t, !success, h);
+        doCreateRenderPipelineTest(t, isAsync, !success, h);
     });
 
 // -----------------------------------------------------------------------
@@ -711,7 +699,6 @@ CTS_TEST(g, "stencil_write")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const bool isAsync = t.param<bool>("isAsync");
-        (void)isAsync;
 
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         t.skipIfTextureFormatNotSupported(format);
@@ -749,7 +736,7 @@ CTS_TEST(g, "stencil_write")
         const bool stencilWriteEnabled =
             !opIsUndefined && (op != WGPUStencilOperation_Keep);
         const bool success = !stencilWriteEnabled || isStencilTextureFormat(format);
-        doCreateRenderPipelineTest(t, !success, h);
+        doCreateRenderPipelineTest(t, isAsync, !success, h);
     });
 
 } // namespace

@@ -83,6 +83,7 @@ static std::string buildFragmentShaderCode(
 // Helper: create a render pipeline using vertex and fragment WGSL, with optional topology.
 static void doCreateRenderPipelineTest(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
     bool success,
     const std::string& vertWGSL,
     const std::string& fragWGSL,
@@ -115,9 +116,7 @@ static void doCreateRenderPipelineTest(
         desc.primitive.topology = topology;
     }
 
-    t.expectValidationError([&] {
-        t.createRenderPipelineTracked(desc);
-    }, !success);
+    t.doCreateRenderPipelineTest(isAsync, success, desc);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,12 +150,12 @@ CTS_TEST(g, "location,mismatch")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int caseIndex = t.param<int>("caseIndex");
-        // isAsync is ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
 
         const LocationMismatchCase& tc = kLocationMismatchCases[caseIndex];
         const std::string vertWGSL = buildVertexShaderCode(tc.outputs);
         const std::string fragWGSL = buildFragmentShaderCode(tc.inputs);
-        doCreateRenderPipelineTest(t, tc.success, vertWGSL, fragWGSL);
+        doCreateRenderPipelineTest(t, isAsync, tc.success, vertWGSL, fragWGSL);
     });
 
 // ---------------------------------------------------------------------------
@@ -169,12 +168,12 @@ CTS_TEST(g, "location,superset")
         return u.combine("isAsync", {Value(false), Value(true)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        // isAsync ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string vertWGSL = buildVertexShaderCode(
             {"@location(0) __: f32", "@location(1) __: f32"});
         const std::string fragWGSL = buildFragmentShaderCode(
             {"@location(1) __: f32"});
-        doCreateRenderPipelineTest(t, true, vertWGSL, fragWGSL);
+        doCreateRenderPipelineTest(t, isAsync, true, vertWGSL, fragWGSL);
     });
 
 // ---------------------------------------------------------------------------
@@ -187,12 +186,12 @@ CTS_TEST(g, "location,subset")
         return u.combine("isAsync", {Value(false), Value(true)});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        // isAsync ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
         const std::string vertWGSL = buildVertexShaderCode(
             {"@location(0) __: f32"});
         const std::string fragWGSL = buildFragmentShaderCode(
             {"@location(0) __: f32", "@location(1) __: f32"});
-        doCreateRenderPipelineTest(t, false, vertWGSL, fragWGSL);
+        doCreateRenderPipelineTest(t, isAsync, false, vertWGSL, fragWGSL);
     });
 
 // ---------------------------------------------------------------------------
@@ -234,7 +233,7 @@ CTS_TEST(g, "type")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int caseIndex = t.param<int>("caseIndex");
-        // isAsync ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
 
         const TypeCase& tc = kTypeCases[caseIndex];
         const bool success = (std::string(tc.output) == std::string(tc.input));
@@ -247,7 +246,7 @@ CTS_TEST(g, "type")
 
         const std::string vertWGSL = buildVertexShaderCode({outputDecl});
         const std::string fragWGSL = buildFragmentShaderCode({inputDecl});
-        doCreateRenderPipelineTest(t, success, vertWGSL, fragWGSL);
+        doCreateRenderPipelineTest(t, isAsync, success, vertWGSL, fragWGSL);
     });
 
 // ---------------------------------------------------------------------------
@@ -297,7 +296,7 @@ CTS_TEST(g, "interpolation_type")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int caseIndex = t.param<int>("caseIndex");
-        // isAsync ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
 
         const InterpolationTypeCase& tc = kInterpolationTypeCases[caseIndex];
         const std::string outputStr(tc.output);
@@ -326,7 +325,7 @@ CTS_TEST(g, "interpolation_type")
 
         const std::string vertWGSL = buildVertexShaderCode({outputDecl});
         const std::string fragWGSL = buildFragmentShaderCode({inputDecl});
-        doCreateRenderPipelineTest(t, success, vertWGSL, fragWGSL);
+        doCreateRenderPipelineTest(t, isAsync, success, vertWGSL, fragWGSL);
     });
 
 // ---------------------------------------------------------------------------
@@ -368,7 +367,7 @@ CTS_TEST(g, "interpolation_sampling")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int caseIndex = t.param<int>("caseIndex");
-        // isAsync ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
 
         const InterpolationSamplingCase& tc = kInterpolationSamplingCases[caseIndex];
         const std::string outputStr(tc.output);
@@ -391,7 +390,7 @@ CTS_TEST(g, "interpolation_sampling")
 
         const std::string vertWGSL = buildVertexShaderCode({outputDecl});
         const std::string fragWGSL = buildFragmentShaderCode({inputDecl});
-        doCreateRenderPipelineTest(t, success, vertWGSL, fragWGSL);
+        doCreateRenderPipelineTest(t, isAsync, success, vertWGSL, fragWGSL);
     });
 
 // ---------------------------------------------------------------------------
@@ -411,7 +410,7 @@ CTS_TEST(g, "max_shader_variable_location")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int locationDelta = t.param<int>("locationDelta");
-        // isAsync ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
 
         const WGPULimits limits = t.getLimits();
         const uint32_t maxInterStageShaderVariables = limits.maxInterStageShaderVariables;
@@ -427,7 +426,7 @@ CTS_TEST(g, "max_shader_variable_location")
 
         // success = location < maxInterStageShaderVariables (i.e. locationDelta < 0)
         const bool success = (location < static_cast<int>(maxInterStageShaderVariables));
-        doCreateRenderPipelineTest(t, success, vertWGSL, fragWGSL);
+        doCreateRenderPipelineTest(t, isAsync, success, vertWGSL, fragWGSL);
     });
 
 // ---------------------------------------------------------------------------
@@ -463,7 +462,7 @@ CTS_TEST(g, "max_variables_count,output")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int caseIndex = t.param<int>("caseIndex");
-        // isAsync ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
 
         const MaxOutputCase& tc = kMaxOutputCases[caseIndex];
 
@@ -492,7 +491,7 @@ CTS_TEST(g, "max_variables_count,output")
             topology = WGPUPrimitiveTopology_PointList;
         }
 
-        doCreateRenderPipelineTest(t, tc.success, vertWGSL, fragWGSL, topology);
+        doCreateRenderPipelineTest(t, isAsync, tc.success, vertWGSL, fragWGSL, topology);
     });
 
 // ---------------------------------------------------------------------------
@@ -515,7 +514,7 @@ CTS_TEST(g, "max_variables_count,input")
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const std::string builtins = t.param<std::string>("builtins");
         const bool overLimit = t.param<bool>("overLimit");
-        // isAsync ignored — harness has no async pipeline-creation wrapper.
+        const bool isAsync = t.param<bool>("isAsync");
 
         // C++ harness is never in compatibility mode:
         // upstream: if (builtins === 'all') t.skipIf(t.isCompatibility) — omitted.
@@ -583,7 +582,7 @@ CTS_TEST(g, "max_variables_count,input")
         const std::string fragWGSL = buildFragmentShaderCode(inputs, hasBuiltinPosition, fragPreamble);
 
         const bool success = !overLimit;
-        doCreateRenderPipelineTest(t, success, vertWGSL, fragWGSL);
+        doCreateRenderPipelineTest(t, isAsync, success, vertWGSL, fragWGSL);
     });
 
 } // namespace

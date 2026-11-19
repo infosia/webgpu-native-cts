@@ -1,6 +1,4 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/float32_blendable.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Note: the async=true sub-cases are exercised via the same synchronous pipeline-creation path
-// (the harness has no async pipeline-creation wrapper); validation behaviour is identical.
 // Note: UniqueFeaturesOrLimitsGPUTest is replaced by GpuTest; feature gate is checked at runtime
 // via wgpuDeviceHasFeature, mirroring the float32_filterable.spec.cpp pattern.
 
@@ -114,14 +112,6 @@ RenderPipelineDescriptorHolder buildRenderPipelineDescriptor(
     return h;
 }
 
-// Mirrors vtu.doCreateRenderPipelineTest for the non-async (synchronous) path.
-// For async=true the C++ harness has no async wrapper, so both paths use expectValidationError.
-void doCreateRenderPipelineTest(GpuTest& t, bool shouldError, RenderPipelineDescriptorHolder& h) {
-    t.expectValidationError([&] {
-        t.createRenderPipelineTracked(h.desc);
-    }, shouldError);
-}
-
 CTS_TEST(g, "create_render_pipeline")
     .desc(R"(
 Tests that the float32-blendable feature is required to create a render
@@ -154,16 +144,8 @@ pipeline that uses blending with any float32-format attachment.
             t.skip("float32-blendable is always enabled on this device; cannot test without-feature path");
         }
 
-        // The async path and the sync path produce the same validation outcome;
-        // both are exercised via expectValidationError.
-        (void)isAsync;
-
-        // Upstream: vtu.doCreateRenderPipelineTest(t, isAsync, enabled || !hasBlend, descriptor)
-        // shouldError = !(enabled || !hasBlend)
-        const bool shouldError = !(enabled || !hasBlend);
-
         auto h = buildRenderPipelineDescriptor(t, format, hasBlend);
-        doCreateRenderPipelineTest(t, shouldError, h);
+        t.doCreateRenderPipelineTest(isAsync, enabled || !hasBlend, h.desc);
     });
 
 } // namespace

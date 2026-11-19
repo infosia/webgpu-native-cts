@@ -364,9 +364,8 @@ PipelineHolder makePipeline(
     return h;
 }
 
-void doCreateRenderPipelineTest(AllFeaturesMaxLimitsGpuTest& t, bool success, PipelineHolder& h) {
-    // isAsync=true uses this same synchronous create path; native validation is eager.
-    t.expectValidationError([&] { t.createRenderPipelineTracked(h.desc); }, !success);
+void doCreateRenderPipelineTest(AllFeaturesMaxLimitsGpuTest& t, bool isAsync, bool success, PipelineHolder& h) {
+    t.doCreateRenderPipelineTest(isAsync, success, h.desc);
 }
 
 WGPUColorTargetState colorTarget(
@@ -393,9 +392,9 @@ CTS_TEST(g, "color_target_exists")
     .params([](ParamsBuilder u) { return u.combine("isAsync", {false, true}); })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         auto good = makePipeline(t, {colorTarget(WGPUTextureFormat_RGBA8Unorm)});
-        doCreateRenderPipelineTest(t, true, good);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), true, good);
         auto bad = makePipeline(t, {});
-        doCreateRenderPipelineTest(t, false, bad);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), false, bad);
     });
 
 CTS_TEST(g, "targets_format_is_color_format")
@@ -415,7 +414,7 @@ CTS_TEST(g, "targets_format_is_color_format")
         const std::string fragOutType = t.param<std::string>("fragOutType");
         skipIfFormatUnsupported(t, format);
         auto h = makePipeline(t, {colorTarget(format)}, fragmentShaderWithOutput(fragOutType.c_str(), 4));
-        doCreateRenderPipelineTest(t, format == WGPUTextureFormat_RGBA8Unorm && fragOutType == "f32", h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), format == WGPUTextureFormat_RGBA8Unorm && fragOutType == "f32", h);
     });
 
 CTS_TEST(g, "targets_format_renderable")
@@ -427,7 +426,7 @@ CTS_TEST(g, "targets_format_renderable")
         const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
         skipIfFormatUnsupported(t, format);
         auto h = makePipeline(t, {colorTarget(format)});
-        doCreateRenderPipelineTest(t, t.isTextureFormatColorRenderable(format), h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), t.isTextureFormatColorRenderable(format), h);
     });
 
 CTS_TEST(g, "limits,maxColorAttachments")
@@ -447,7 +446,7 @@ CTS_TEST(g, "limits,maxColorAttachments")
             target = colorTarget(WGPUTextureFormat_RG8Unorm, WGPUColorWriteMask_None);
         }
         auto h = makePipeline(t, std::move(targets), kDefaultFragmentShaderCode, true);
-        doCreateRenderPipelineTest(t, count <= limits.maxColorAttachments, h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), count <= limits.maxColorAttachments, h);
     });
 
 CTS_TEST(g, "limits,maxColorAttachmentBytesPerSample,aligned")
@@ -473,7 +472,7 @@ CTS_TEST(g, "limits,maxColorAttachmentBytesPerSample,aligned")
         auto h = makePipeline(t, std::move(targets));
         const bool shouldError = !t.isTextureFormatColorRenderable(format) ||
             getColorRenderByteCost(format) * attachmentCount > limits.maxColorAttachmentBytesPerSample;
-        doCreateRenderPipelineTest(t, !shouldError, h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), !shouldError, h);
     });
 
 CTS_TEST(g, "limits,maxColorAttachmentBytesPerSample,unaligned")
@@ -500,7 +499,7 @@ CTS_TEST(g, "limits,maxColorAttachmentBytesPerSample,unaligned")
         targets.reserve(formats.size());
         for (WGPUTextureFormat format : formats) targets.push_back(colorTarget(format, WGPUColorWriteMask_None));
         auto h = makePipeline(t, std::move(targets));
-        doCreateRenderPipelineTest(t, computeBytesPerSampleFromFormats(formats) <= limits.maxColorAttachmentBytesPerSample, h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), computeBytesPerSampleFromFormats(formats) <= limits.maxColorAttachmentBytesPerSample, h);
     });
 
 CTS_TEST(g, "targets_format_filterable")
@@ -518,7 +517,7 @@ CTS_TEST(g, "targets_format_filterable")
         if (!t.isTextureFormatColorRenderable(format)) t.skip("texture format is not renderable");
         WGPUBlendState blend = WGPU_BLEND_STATE_INIT;
         auto h = makePipeline(t, {colorTarget(format, WGPUColorWriteMask_All, hasBlend ? &blend : nullptr)});
-        doCreateRenderPipelineTest(t, !hasBlend || t.isTextureFormatBlendable(format), h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), !hasBlend || t.isTextureFormatBlendable(format), h);
     });
 
 CTS_TEST(g, "targets_blend")
@@ -556,7 +555,7 @@ CTS_TEST(g, "targets_blend")
                               fragmentShaderWithOutput("f32", 4, dual));
         const bool success = (opName != "min" && opName != "max") ||
             (src == WGPUBlendFactor_One && dst == WGPUBlendFactor_One);
-        doCreateRenderPipelineTest(t, success, h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), success, h);
     });
 
 CTS_TEST(g, "targets_write_mask")
@@ -569,7 +568,7 @@ CTS_TEST(g, "targets_write_mask")
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const uint64_t writeMask = t.param<uint64_t>("writeMask");
         auto h = makePipeline(t, {colorTarget(WGPUTextureFormat_RGBA8Unorm, static_cast<WGPUColorWriteMask>(writeMask))});
-        doCreateRenderPipelineTest(t, writeMask < 16, h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), writeMask < 16, h);
     });
 
 CTS_TEST(g, "pipeline_output_targets")
@@ -614,7 +613,7 @@ CTS_TEST(g, "pipeline_output_targets")
                 success = t.param<uint64_t>("writeMask") == 0;
             }
         }
-        doCreateRenderPipelineTest(t, success, h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), success, h);
     });
 
 std::vector<ParamRecord> blendSingleFactorParams() {
@@ -670,7 +669,7 @@ CTS_TEST(g, "pipeline_output_targets,blend")
         const bool readsSrcAlpha = blendFactorNameReadsSrcAlpha(csrc) || blendFactorNameReadsSrcAlpha(cdst);
         const bool success = info != nullptr && std::string_view(info->sampleType) == "float" &&
             componentCount >= info->componentCount && (!readsSrcAlpha || componentCount == 4);
-        doCreateRenderPipelineTest(t, success, h);
+        doCreateRenderPipelineTest(t, t.param<bool>("isAsync"), success, h);
     });
 
 std::vector<Value> dualSourceFactorValues() {
@@ -713,7 +712,7 @@ CTS_TEST(g, "dual_source_blending,color_target_count")
                                           &blends[i]));
         }
         auto h = makePipeline(t, std::move(targets), fragmentShaderWithOutput("f32", 4, true));
-        doCreateRenderPipelineTest(t, count == 1, h);
+        doCreateRenderPipelineTest(t, /*isAsync=*/false, count == 1, h);
     });
 
 CTS_TEST(g, "dual_source_blending,use_blend_src")
@@ -743,7 +742,7 @@ CTS_TEST(g, "dual_source_blending,use_blend_src")
         auto h = makePipeline(t, {colorTarget(WGPUTextureFormat_RGBA8Unorm,
                                               static_cast<WGPUColorWriteMask>(t.param<uint64_t>("writeMask")), &blend)},
                               fragmentShaderWithOutput("f32", 4, useBlendSrc1));
-        doCreateRenderPipelineTest(t, !isDualSourceBlendFactor(factor) || useBlendSrc1, h);
+        doCreateRenderPipelineTest(t, /*isAsync=*/false, !isDualSourceBlendFactor(factor) || useBlendSrc1, h);
     });
 
 } // namespace

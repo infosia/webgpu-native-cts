@@ -1,7 +1,6 @@
 // Ported from gpuweb/cts src/webgpu/api/validation/render_pipeline/overrides.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Note: isAsync=true sub-cases use the same synchronous validation path (harness has no async
-// pipeline-creation wrapper). value,type_error tests treat NaN/Infinity as a validation error
-// (no JS TypeError concept in the native C API).
+// Note: value,type_error tests treat NaN/Infinity as a validation error (no JS TypeError concept
+// in the native C API); with isAsync the creation callback reports ValidationError.
 
 #include <cstdint>
 #include <limits>
@@ -52,52 +51,51 @@ static const char* kDefaultFragmentShaderCode =
 //   - a fragment shader (custom code + constants)
 //   - layout: auto (null layout → automatic)
 //   - render target: rgba8unorm
-// and call expectValidationError around createRenderPipeline.
+// and run vtu.doCreateRenderPipelineTest on it.
 void doCreateRenderPipelineTest(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
     bool shouldError,
     std::string_view vertShaderCode,
     const std::vector<WGPUConstantEntry>& vertConstants,
     std::string_view fragShaderCode,
     const std::vector<WGPUConstantEntry>& fragConstants) {
+    WGPUShaderModule vertModule = t.createShaderModuleTracked(vertShaderCode);
+    WGPUShaderModule fragModule = t.createShaderModuleTracked(fragShaderCode);
 
-    t.expectValidationError([&] {
-        WGPUShaderModule vertModule = t.createShaderModuleTracked(vertShaderCode);
-        WGPUShaderModule fragModule = t.createShaderModuleTracked(fragShaderCode);
+    WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
+    colorTarget.format    = WGPUTextureFormat_RGBA8Unorm;
+    colorTarget.writeMask = WGPUColorWriteMask_All;
 
-        WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
-        colorTarget.format    = WGPUTextureFormat_RGBA8Unorm;
-        colorTarget.writeMask = WGPUColorWriteMask_All;
+    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+    fragment.module        = fragModule;
+    fragment.entryPoint    = sv("main");
+    fragment.targetCount   = 1;
+    fragment.targets       = &colorTarget;
+    fragment.constantCount = fragConstants.size();
+    fragment.constants     = fragConstants.empty() ? nullptr : fragConstants.data();
 
-        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-        fragment.module        = fragModule;
-        fragment.entryPoint    = sv("main");
-        fragment.targetCount   = 1;
-        fragment.targets       = &colorTarget;
-        fragment.constantCount = fragConstants.size();
-        fragment.constants     = fragConstants.empty() ? nullptr : fragConstants.data();
+    WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    // layout:auto — null after INIT selects automatic layout
+    desc.vertex.module        = vertModule;
+    desc.vertex.entryPoint    = sv("main");
+    desc.vertex.constantCount = vertConstants.size();
+    desc.vertex.constants     = vertConstants.empty() ? nullptr : vertConstants.data();
+    desc.multisample.count    = 1;
+    desc.fragment             = &fragment;
 
-        WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-        // layout:auto — null after INIT selects automatic layout
-        desc.vertex.module        = vertModule;
-        desc.vertex.entryPoint    = sv("main");
-        desc.vertex.constantCount = vertConstants.size();
-        desc.vertex.constants     = vertConstants.empty() ? nullptr : vertConstants.data();
-        desc.multisample.count    = 1;
-        desc.fragment             = &fragment;
-
-        t.createRenderPipelineTracked(desc);
-    }, shouldError);
+    t.doCreateRenderPipelineTest(isAsync, !shouldError, desc);
 }
 
 // Convenience overload: vertex with no overrides, custom fragment code and constants.
 void doCreateRenderPipelineTestFragOnly(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
     bool shouldError,
     std::string_view fragShaderCode,
     const std::vector<WGPUConstantEntry>& fragConstants) {
     doCreateRenderPipelineTest(
-        t, shouldError,
+        t, isAsync, shouldError,
         kDefaultVertexShaderCode, {},
         fragShaderCode, fragConstants);
 }
@@ -105,11 +103,12 @@ void doCreateRenderPipelineTestFragOnly(
 // Convenience overload: custom vertex code + constants, default fragment.
 void doCreateRenderPipelineTestVertOnly(
     AllFeaturesMaxLimitsGpuTest& t,
+    bool isAsync,
     bool shouldError,
     std::string_view vertShaderCode,
     const std::vector<WGPUConstantEntry>& vertConstants) {
     doCreateRenderPipelineTest(
-        t, shouldError,
+        t, isAsync, shouldError,
         vertShaderCode, vertConstants,
         kDefaultFragmentShaderCode, {});
 }
@@ -248,8 +247,7 @@ CTS_TEST(g, "identifier,vertex")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int idx = t.param<int>("subcaseIndex");
-        // (void) isAsync: no async pipeline path in harness
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         // UTF-8 encoded strings for non-ASCII identifiers.
         // 数 = U+6570 = UTF-8 (NFC): \xe6\x95\xb0
@@ -302,7 +300,7 @@ CTS_TEST(g, "identifier,vertex")
             entries.push_back(makeConstantEntry(key, val));
         }
 
-        doCreateRenderPipelineTestVertOnly(t, !sc.success, kIdentifierVertexShader, entries);
+        doCreateRenderPipelineTestVertOnly(t, isAsync, !sc.success, kIdentifierVertexShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -343,7 +341,7 @@ CTS_TEST(g, "identifier,fragment")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         static const std::string kNullR = std::string("r\0", 2); // NOLINT
         static const std::string kKanji = "\xe6\x95\xb0"; // 数
@@ -390,7 +388,7 @@ CTS_TEST(g, "identifier,fragment")
             entries.push_back(makeConstantEntry(key, val));
         }
 
-        doCreateRenderPipelineTestFragOnly(t, !sc.success, kIdentifierFragmentShader, entries);
+        doCreateRenderPipelineTestFragOnly(t, isAsync, !sc.success, kIdentifierFragmentShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -415,7 +413,7 @@ CTS_TEST(g, "uninitialized,vertex")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         struct UninitSubcaseData {
             std::vector<std::pair<std::string, double>> entries;
@@ -440,7 +438,7 @@ CTS_TEST(g, "uninitialized,vertex")
             entries.push_back(makeConstantEntry(key, val));
         }
 
-        doCreateRenderPipelineTestVertOnly(t, !sc.success, kUninitializedVertexShader, entries);
+        doCreateRenderPipelineTestVertOnly(t, isAsync, !sc.success, kUninitializedVertexShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -465,7 +463,7 @@ CTS_TEST(g, "uninitialized,fragment")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         struct UninitFragSubcaseData {
             std::vector<std::pair<std::string, double>> entries;
@@ -490,7 +488,7 @@ CTS_TEST(g, "uninitialized,fragment")
             entries.push_back(makeConstantEntry(key, val));
         }
 
-        doCreateRenderPipelineTestFragOnly(t, !sc.success, kUninitializedFragmentShader, entries);
+        doCreateRenderPipelineTestFragOnly(t, isAsync, !sc.success, kUninitializedFragmentShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -520,7 +518,7 @@ CTS_TEST(g, "value,type_error,vertex")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         // Double values for the 4 subcases; avoid static local init ordering issues.
         double value = 0.0;
@@ -534,7 +532,7 @@ CTS_TEST(g, "value,type_error,vertex")
         }
 
         std::vector<WGPUConstantEntry> entries = {makeConstantEntry("cf", value)};
-        doCreateRenderPipelineTestVertOnly(t, !success, kValueVertexShader, entries);
+        doCreateRenderPipelineTestVertOnly(t, isAsync, !success, kValueVertexShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -557,7 +555,7 @@ CTS_TEST(g, "value,type_error,fragment")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         double value = 0.0;
         bool success = false;
@@ -570,7 +568,7 @@ CTS_TEST(g, "value,type_error,fragment")
         }
 
         std::vector<WGPUConstantEntry> entries = {makeConstantEntry("cf", value)};
-        doCreateRenderPipelineTestFragOnly(t, !success, kValueFragmentShader, entries);
+        doCreateRenderPipelineTestFragOnly(t, isAsync, !success, kValueFragmentShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -608,7 +606,7 @@ CTS_TEST(g, "value,validation_error,vertex")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         // Boundary values (from kValue in upstream CTS)
         // u32: [0, 4294967295]
@@ -669,7 +667,7 @@ CTS_TEST(g, "value,validation_error,vertex")
 
         const auto& sc = kSubcases[idx];
         std::vector<WGPUConstantEntry> entries = {makeConstantEntry(sc.key, sc.value)};
-        doCreateRenderPipelineTestVertOnly(t, !sc.success, kValidationVertexShader, entries);
+        doCreateRenderPipelineTestVertOnly(t, isAsync, !sc.success, kValidationVertexShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -701,7 +699,7 @@ CTS_TEST(g, "value,validation_error,fragment")
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         static const double kU32Min     = 0.0;
         static const double kU32MinM1   = -1.0;
@@ -742,7 +740,7 @@ CTS_TEST(g, "value,validation_error,fragment")
 
         const auto& sc = kSubcases[idx];
         std::vector<WGPUConstantEntry> entries = {makeConstantEntry(sc.key, sc.value)};
-        doCreateRenderPipelineTestFragOnly(t, !sc.success, kValidationFragmentShader, entries);
+        doCreateRenderPipelineTestFragOnly(t, isAsync, !sc.success, kValidationFragmentShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -777,7 +775,7 @@ CTS_TEST(g, "value,validation_error,f16,vertex")
         }
 
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         // f16 boundaries
         static const double kF16PMax   = 65504.0;
@@ -817,7 +815,7 @@ CTS_TEST(g, "value,validation_error,f16,vertex")
 
         const auto& sc = kSubcases[idx];
         std::vector<WGPUConstantEntry> entries = {makeConstantEntry("cf16", sc.value)};
-        doCreateRenderPipelineTestVertOnly(t, !sc.success, kF16VertexShader, entries);
+        doCreateRenderPipelineTestVertOnly(t, isAsync, !sc.success, kF16VertexShader, entries);
     });
 
 // ---------------------------------------------------------------------------
@@ -848,7 +846,7 @@ CTS_TEST(g, "value,validation_error,f16,fragment")
         }
 
         const int idx = t.param<int>("subcaseIndex");
-        (void)t.param<bool>("isAsync");
+        const bool isAsync = t.param<bool>("isAsync");
 
         static const double kF16PMax   = 65504.0;
         static const double kF16NMin   = -65504.0;
@@ -886,7 +884,7 @@ CTS_TEST(g, "value,validation_error,f16,fragment")
 
         const auto& sc = kSubcases[idx];
         std::vector<WGPUConstantEntry> entries = {makeConstantEntry("cf16", sc.value)};
-        doCreateRenderPipelineTestFragOnly(t, !sc.success, kF16FragmentShader, entries);
+        doCreateRenderPipelineTestFragOnly(t, isAsync, !sc.success, kF16FragmentShader, entries);
     });
 
 } // namespace
