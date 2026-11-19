@@ -138,9 +138,35 @@ Found while implementing T4.
    not depend on the filter, but upstream binds a sampler with the case's `filt`, which also checks
    that a filtering sampler binds with `*32float` under `float32-filterable`. Bind the requested filter.
 
+### T9 — Per-texel depth data in the texture-sampling helpers (batch D)
+
+Found while reviewing T8. `texture_sampling/texture_utils.cpp` fills every depth texture by clearing
+each mip level and layer to one value (`depthValue(mip, layer)` through `initializeDepthTexture()`),
+and the software model reads that same constant. Every texel of a subresource is therefore equal, so
+no depth sampling path tests texel addressing, wrapping, filtering footprint or gather texel order:
+`textureSampleCompare*`, `textureGatherCompare`, `textureGather` and `textureSample*` on depth
+formats, and any other user of `initializeDepthTexture()`.
+
+Upstream fills depth textures with random per-texel data
+(`createTextureWithRandomDataAndGetTexelsForEachAspect()` in
+`<cts>/src/webgpu/shader/execution/expression/call/builtin/texture_utils.ts`, around line 3363):
+
+- the data is random depth32float texels per mip level (`createRandomTexelViewMipmap`, which takes the
+  same random-texel options as the color path);
+- the texture is filled by rendering those values (`frag_depth`), because depth formats cannot be
+  written by copies;
+- for formats whose stored depth differs from the generated value (unencodable formats, and
+  `depth16unorm` quantization) the expected texels are read back from the GPU after filling, so the
+  software model uses the stored values;
+- a combined depth-stencil format also gets random stencil texels.
+
+Port this so the software model samples per-texel depth values through the same addressing, wrapping
+and filtering code the color path uses. Remove `depthValue()` and the per-subresource clear once
+nothing uses them. Parameters and case lists stay unchanged.
+
 ## Scope
 
-**In:** T1-T8 above, with unit tests for T1.
+**In:** T1-T9 above, with unit tests for T1.
 
 **Out:**
 - Removing upstream cases or renaming tests. Query names and parameters stay identical to upstream,
@@ -172,6 +198,9 @@ Found while implementing T4.
       declaration; `requestDevice:stale` issues overlapping requests when an await flag is false.
 - [ ] T8: the 20 `textureSample*` tests enumerate exactly upstream's case and subcase counts, and
       `textureGather` binds a sampler with the case's filter.
+- [ ] T9: `depthValue(` no longer appears in `src/webgpu`; within one mip level of a depth texture
+      used by these tests at least two texels hold different values (shown by a unit test or an
+      assertion in the fill helper); `--list-cases 'webgpu:*'` is unchanged.
 - [ ] Apart from T2, T4, T6, T7.1 and T8, `cts --list-cases 'webgpu:*'` is unchanged; REPORT.md lists
       every test whose case list changed.
 
