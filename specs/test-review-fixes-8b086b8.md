@@ -122,9 +122,25 @@ must match.
    descriptor. Keep the cases for query parity with upstream; Claude records the divergence in
    `docs/UPSTREAM.md`.
 
+### T8 — Texture-sampling parity left open by T4 (batch C)
+
+Found while implementing T4.
+
+1. **Depth formats in the `textureSample*` color tests.** Native drops the five depth formats from 15
+   tests (`textureSample`, `textureSampleBias`, `textureSampleGrad`, `textureSampleLevel`:
+   `sampled_*` / `arrayed_*` / `lodClamp` variants) with its own `isSampledColorTextureFormatParam`
+   filter. Upstream enumerates them with `filt="nearest"` and samples them as `texture_*<f32>` over
+   the depth aspect. Remove the native filter so the parameters match upstream, and give
+   `executeCase()` the depth initialisation and expected-value path the gather path already has
+   (`executeGatherCase()`). Upstream counts per test are in the batch A report (for example
+   `textureSample:sampled_2d_coords` 2646 cases / 5292 subcases).
+2. **Gather sampler filter.** `executeGatherCase()` always binds a nearest sampler. Gather results do
+   not depend on the filter, but upstream binds a sampler with the case's `filt`, which also checks
+   that a filtering sampler binds with `*32float` under `float32-filterable`. Bind the requested filter.
+
 ## Scope
 
-**In:** T1-T7 above, with unit tests for T1.
+**In:** T1-T8 above, with unit tests for T1.
 
 **Out:**
 - Removing upstream cases or renaming tests. Query names and parameters stay identical to upstream,
@@ -154,7 +170,9 @@ must match.
 - [ ] T6: `bgl_visibility_mismatch` enumerates 832 subcases.
 - [ ] T7: `atan2:values` subcase count drops by 940; `bitcast` alias cases produce WGSL with an alias
       declaration; `requestDevice:stale` issues overlapping requests when an await flag is false.
-- [ ] Apart from T2, T4, T6 and T7.1, `cts --list-cases 'webgpu:*'` is unchanged; REPORT.md lists
+- [ ] T8: the 15 `textureSample*` tests enumerate exactly upstream's case and subcase counts, and
+      `textureGather` binds a sampler with the case's filter.
+- [ ] Apart from T2, T4, T6, T7.1 and T8, `cts --list-cases 'webgpu:*'` is unchanged; REPORT.md lists
       every test whose case list changed.
 
 ## Verification
