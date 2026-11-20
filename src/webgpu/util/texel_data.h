@@ -64,4 +64,10 @@ struct TexelRepresentation {
 const TexelRepresentation& texelRepresentation(WGPUTextureFormat format);
 bool texelComponentEqual(double actual, double expected, double maxDiff);
 
+/// Port of a `Float16Array` element store: rounds `value` to the nearest binary16 value (ties to
+/// even, overflow to infinity) and returns its bit pattern.
+uint16_t float16BitsFromNumber(double value);
+/// Port of a `Float16Array` element load: decodes a binary16 bit pattern.
+double float16BitsToNumber(uint16_t bits);
+
 } // namespace cts

@@ -526,4 +526,52 @@ bool texelComponentEqual(double actual, double expected, double maxDiff) {
         || std::fabs(actual - expected) <= maxDiff;
 }
 
+uint16_t float16BitsFromNumber(double value) {
+    const uint16_t sign = static_cast<uint16_t>(std::signbit(value) ? 0x8000u : 0u);
+    if (std::isnan(value)) {
+        return 0x7e00u;
+    }
+    const double magnitude = std::fabs(value);
+    if (std::isinf(magnitude)) {
+        return static_cast<uint16_t>(sign | 0x7c00u);
+    }
+    if (magnitude == 0.0) {
+        return sign;
+    }
+    int exponent = 0;
+    std::frexp(magnitude, &exponent); // magnitude in [2^(exponent-1), 2^exponent)
+    // Quantum of the binade (subnormals share the smallest normal binade's quantum, 2^-24).
+    const int binade = std::max(exponent - 1, -14);
+    const double quantum = std::ldexp(1.0, binade - 10);
+    // nearbyint rounds ties to even under the default rounding mode.
+    const double rounded = std::nearbyint(magnitude / quantum) * quantum;
+    if (rounded > 65504.0) {
+        return static_cast<uint16_t>(sign | 0x7c00u);
+    }
+    if (rounded < std::ldexp(1.0, -14)) {
+        return static_cast<uint16_t>(sign | static_cast<uint16_t>(rounded / std::ldexp(1.0, -24)));
+    }
+    int roundedExponent = 0;
+    std::frexp(rounded, &roundedExponent);
+    const int unbiased = roundedExponent - 1;
+    const uint32_t mantissa =
+        static_cast<uint32_t>((rounded / std::ldexp(1.0, unbiased) - 1.0) * 1024.0) & 0x3ffu;
+    const uint32_t biased = static_cast<uint32_t>(unbiased + 15);
+    return static_cast<uint16_t>(sign | (biased << 10u) | mantissa);
+}
+
+double float16BitsToNumber(uint16_t bits) {
+    const double sign = (bits & 0x8000u) != 0 ? -1.0 : 1.0;
+    const uint32_t exponent = (bits >> 10u) & 0x1fu;
+    const uint32_t mantissa = bits & 0x3ffu;
+    if (exponent == 0) {
+        return sign * std::ldexp(static_cast<double>(mantissa), -24);
+    }
+    if (exponent == 0x1fu) {
+        return mantissa == 0 ? sign * std::numeric_limits<double>::infinity()
+                             : std::numeric_limits<double>::quiet_NaN();
+    }
+    return sign * std::ldexp(1.0 + static_cast<double>(mantissa) / 1024.0, static_cast<int>(exponent) - 15);
+}
+
 } // namespace cts
