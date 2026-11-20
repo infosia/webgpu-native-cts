@@ -129,7 +129,8 @@ Dawn and are not listed.
 expectations, only the 2 F-159 cases fail; Windows also had 1 intermittent driver crash (F-165). Carried in
 `expectations/yawgpu-vulkan.txt`: `index_buffer_format_dirtying`, F-085, F-129 (denormal `fwidth`), F-141 and F-152.
 F-111 and F-139 were resolved after that sweep; F-111 was confirmed on Windows native Vulkan, F-139 only through
-MoltenVK.
+MoltenVK. `occlusionQuery:*` and `timestampQuery:*` pass on Windows native Vulkan at yawgpu `e4a55b1`
+(2026-11-20; F-170, F-171).
 
 **Open — yawgpu:** none. F-170 and F-171 were resolved on 2026-11-20.
 
@@ -208,8 +209,13 @@ passes (`occlusionQuery:*` is 227/244 on both commits). Still failing there and 
 `occlusion_query,reuse:*;noop="after"` (16 cases, failing on `01324f0` too) and `occlusion_query,empty:*` (passed
 on `01324f0`); each reads a non-zero result for a query with no draws. yawgpu's Metal HAL needed an explicit
 zero-fill for draw-free queries (Block 159 S2, `f7bad8d`), so these are likely the same Apple visibility-buffer
-behaviour surfacing through MoltenVK. Native Vulkan has not run these tests yet (they were ported in O2); until it
-does, they are not tracked as a finding. The report below is the state on `01324f0`.
+behaviour surfacing through MoltenVK. Native Vulkan passes them (below), so they are a MoltenVK artifact and not
+tracked as a finding. The report below is the state on `01324f0`.
+
+**Native Vulkan (2026-11-20).** yawgpu `e4a55b1` (Vulkan DLL rebuilt at that commit), CTS `388644e`, Windows /
+NVIDIA RTX 5060 Ti, `--workers 8`, no expectations: `occlusionQuery:*` passes 244/244 (fail 0, crash 0), including
+`multi_resolve`, every `reuse:*;noop="after"` case and `empty:*`. The core fix (`72f07ce`) therefore holds on the
+Vulkan HAL, and the MoltenVK-only failures above do not occur on a native Vulkan driver.
 
 **yawgpu DEFECT, cross-HAL** (found 2026-11-20, yawgpu `01324f0`, CTS batch O2 of
 `specs/apiop-parity.md`). `webgpu:api,operation,command_buffer,queries,occlusionQuery:occlusion_query,multi_resolve:*`
@@ -230,7 +236,12 @@ different reason: each timestamped pass cost three encoders (one mock blit per s
 device (compute) or the Metal driver aborted with `Failed to allocate IOGPUDeviceShmem` (render). Pass
 `timestampWrites` are now sampled through the pass descriptor, one encoder per pass, as in Dawn. On Metal (2026-11-20)
 `many_query_sets` passes for every `numQuerySets` in both stages except `65536` render, which loses the device exactly
-as Dawn does (F-169) and is carried as `xfail`. The exit-time Rust panic did not reproduce after the fix. The report
+as Dawn does (F-169) and is carried as `xfail`. The exit-time Rust panic did not reproduce after the fix.
+
+**Native Vulkan (2026-11-20).** The defect and its fixes are Metal-HAL-only. yawgpu `e4a55b1`, CTS `388644e`,
+Windows / NVIDIA RTX 5060 Ti, `--workers 8`, no expectations: `timestampQuery:*` passes 20/20 (fail 0, crash 0),
+including `many_query_sets` for every `numQuerySets` up to `65536` in both stages, with empty stderr. The `65536`
+render loss is therefore Metal-specific; nothing is carried in `expectations/yawgpu-vulkan.txt`. The report
 below is the state on `01324f0`.
 
 **yawgpu DEFECT, Metal HAL** (found 2026-11-20, yawgpu `01324f0`). Metal allows 32
