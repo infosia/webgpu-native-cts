@@ -19,11 +19,11 @@
 //    wgpuDeviceGetAdapterInfo, which is not implemented in wgpu-native
 //    (src/unimplemented.rs) and not exported by yawgpu.
 //
-// 3. device_matches_adapter (.unimplemented): requires wgpuDeviceGetAdapterInfo
-//    to read device.adapterInfo, which is not implemented in wgpu-native and
-//    not exported by yawgpu.  The testDeviceFirst / testMembersFirst subcases
-//    govern JS access order (a [SameObject] caching concern) that has no
-//    meaningful C analog.
+// 3. device_matches_adapter: compares wgpuDeviceGetAdapterInfo on a fresh device
+//    with wgpuAdapterGetInfo on its adapter.  The testDeviceFirst /
+//    testMembersFirst subcases map to the order of the two calls and of the
+//    member reads.  wgpu-native implements wgpuDeviceGetAdapterInfo as a panic
+//    (src/unimplemented.rs), so the test skips there.
 //
 // 4. Normalized-identifier check: the upstream test checks vendor/architecture/device
 //    against the normalizedIdentifierRegex /^$|^[a-z0-9]+(-[a-z0-9]+)*$/.  This is a
@@ -36,6 +36,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "cts/gpu.h"
 #include "cts/test.h"
@@ -166,16 +167,111 @@ CTS_TEST(grp, "same_object")
 // ---------------------------------------------------------------------------
 
 CTS_TEST(grp, "device_matches_adapter")
-    .desc(
-        "Test that GPUDevice.adapterInfo matches GPUAdapter.info. Cases access the members in "
-        "different orders to make sure that they are consistent regardless of the access order.")
-    // Requires wgpuDeviceGetAdapterInfo which is unimplemented in wgpu-native
-    // (src/unimplemented.rs) and not exported by yawgpu.  The testDeviceFirst /
-    // testMembersFirst subcases control JS access order for [SameObject]
-    // caching, a concern with no meaningful C analog.
-    .unimplemented(
-        "Requires wgpuDeviceGetAdapterInfo which is unimplemented in wgpu-native and not "
-        "exported by yawgpu.");
+    .desc(R"(
+Test that GPUDevice.adapterInfo matches GPUAdapter.info. Cases access the members in
+different orders to make sure that they are consistent regardless of the access order.)")
+    .params([](ParamsBuilder u) {
+        return u.beginSubcases()
+            .combine("testDeviceFirst", {true, false})
+            .combine("testMembersFirst", {true, false});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+#if defined(CTS_BACKEND_WGPU)
+        t.skip("wgpuDeviceGetAdapterInfo is unimplemented in wgpu-native (panics)");
+#else
+        const bool testDeviceFirst = t.param<bool>("testDeviceFirst");
+        const bool testMembersFirst = t.param<bool>("testMembersFirst");
+
+        // Upstream: adapter = await gpu.requestAdapter(); device = await requestDeviceTracked(adapter).
+        ProbeContext ctx;
+        createProbeContext(t, ctx);
+        WGPUDeviceDescriptor deviceDesc = WGPU_DEVICE_DESCRIPTOR_INIT;
+        DeviceResult dr = requestDeviceSync(ctx.instance, ctx.adapter, &deviceDesc);
+        if (dr.status != WGPURequestDeviceStatus_Success || dr.device == nullptr) {
+            t.fail("adapter/info: failed to request device: " + dr.message);
+        }
+        struct DeviceGuard {
+            WGPUDevice device;
+            ~DeviceGuard() {
+                wgpuDeviceDestroy(device);
+                wgpuDeviceRelease(device);
+            }
+        } deviceGuard{dr.device};
+
+        // The C analog of reading `device.adapterInfo` / `adapter.info` is one Get*Info call each;
+        // the member-wise access order is mirrored by the order of the calls and of the reads.
+        WGPUAdapterInfo deviceAdapterInfo = WGPU_ADAPTER_INFO_INIT;
+        WGPUAdapterInfo adapterInfo = WGPU_ADAPTER_INFO_INIT;
+        auto getDeviceInfo = [&] {
+            t.expect(wgpuDeviceGetAdapterInfo(dr.device, &deviceAdapterInfo) == WGPUStatus_Success,
+                     "wgpuDeviceGetAdapterInfo failed");
+        };
+        auto getAdapterInfo = [&] {
+            t.expect(wgpuAdapterGetInfo(ctx.adapter, &adapterInfo) == WGPUStatus_Success,
+                     "wgpuAdapterGetInfo failed");
+        };
+        auto toString = [](WGPUStringView view) {
+            if (view.data == nullptr) {
+                return std::string();
+            }
+            return view.length == WGPU_STRLEN ? std::string(view.data) : std::string(view.data, view.length);
+        };
+        // keysOf(GPUAdapterInfo.prototype), with the native members that exist in the C struct.
+        auto members = [&](const WGPUAdapterInfo& info) {
+            return std::vector<std::string>{
+                toString(info.vendor),
+                toString(info.architecture),
+                toString(info.device),
+                toString(info.description),
+                std::to_string(static_cast<uint32_t>(info.backendType)),
+                std::to_string(static_cast<uint32_t>(info.adapterType)),
+                std::to_string(info.vendorID),
+                std::to_string(info.deviceID),
+                std::to_string(info.subgroupMinSize),
+                std::to_string(info.subgroupMaxSize),
+            };
+        };
+
+        std::vector<std::string> deviceInfo;
+        std::vector<std::string> adapterInfoValues;
+        if (testMembersFirst) {
+            if (testDeviceFirst) {
+                getDeviceInfo();
+                deviceInfo = members(deviceAdapterInfo);
+                getAdapterInfo();
+                adapterInfoValues = members(adapterInfo);
+            } else {
+                getAdapterInfo();
+                adapterInfoValues = members(adapterInfo);
+                getDeviceInfo();
+                deviceInfo = members(deviceAdapterInfo);
+            }
+        } else {
+            if (testDeviceFirst) {
+                getDeviceInfo();
+                getAdapterInfo();
+            } else {
+                getAdapterInfo();
+                getDeviceInfo();
+            }
+            const std::vector<std::string> d = members(deviceAdapterInfo);
+            const std::vector<std::string> a = members(adapterInfo);
+            for (size_t i = 0; i < d.size(); ++i) {
+                if (testDeviceFirst) {
+                    deviceInfo.push_back(d[i]);
+                    adapterInfoValues.push_back(a[i]);
+                } else {
+                    adapterInfoValues.push_back(a[i]);
+                    deviceInfo.push_back(d[i]);
+                }
+            }
+            // Upstream only compares in this branch.
+            t.expect(deviceInfo == adapterInfoValues, "GPUDevice.adapterInfo does not match GPUAdapter.info");
+        }
+        wgpuAdapterInfoFreeMembers(deviceAdapterInfo);
+        wgpuAdapterInfoFreeMembers(adapterInfo);
+#endif
+    });
 
 // ---------------------------------------------------------------------------
 // subgroup_sizes
