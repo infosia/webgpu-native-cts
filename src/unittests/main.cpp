@@ -702,6 +702,73 @@ struct SecondOrderedDeviceScopedObject : cts::DeviceScopedObject {
     }
 };
 
+void testUncapturedErrorKeepsFirst() {
+    cts::Fixture fixture;
+    require(!fixture.hasUncapturedError(), "no uncaptured error initially");
+    fixture.recordUncapturedError("uncaptured error: first");
+    require(fixture.hasUncapturedError(), "one uncaptured error recorded");
+    require(fixture.uncapturedError() == "uncaptured error: first", "single error is reported verbatim");
+    fixture.recordUncapturedError("uncaptured error: second\n - details");
+    require(fixture.uncapturedError() ==
+                "uncaptured error: first (+1 more uncaptured error; last: uncaptured error: second)",
+            "first error kept, one later error summarized");
+    fixture.recordUncapturedError("uncaptured error: third");
+    require(fixture.uncapturedError() ==
+                "uncaptured error: first (+2 more uncaptured errors; last: uncaptured error: third)",
+            "count and last error updated");
+}
+
+void testDeviceLossTracking() {
+    cts::teardownCachedDevicesForTest();
+    require(!cts::checkDeviceLossAfterCase().has_value(), "no loss without a recorded loss");
+
+    require(cts::isDeviceLostErrorMessage("[Device] is lost."), "Dawn device-lost error is recognized");
+    require(!cts::isDeviceLostErrorMessage("[Buffer] is destroyed."), "other errors are not loss signals");
+
+    // Our own teardown reasons never count as a loss.
+    cts::noteDeviceLost(WGPUDeviceLostReason_Destroyed, "destroyed");
+    cts::noteDeviceLost(WGPUDeviceLostReason_CallbackCancelled, "cancelled");
+    require(!cts::checkDeviceLossAfterCase().has_value(), "Destroyed/CallbackCancelled are ignored");
+
+    // A genuine loss is reported once, with the first message, then cleared.
+    cts::noteDeviceLost(WGPUDeviceLostReason_Unknown, "first");
+    cts::noteDeviceLost(WGPUDeviceLostReason_FailedCreation, "second");
+    const std::optional<std::string> loss = cts::checkDeviceLossAfterCase();
+    require(loss.has_value() && *loss == "device was unexpectedly lost: first", "loss message");
+    require(!cts::checkDeviceLossAfterCase().has_value(), "loss is consumed by the check");
+
+    // Runner: the losing case fails with the loss; the following case passes.
+    const std::vector<cts::SubcaseResult> results = cts::runSyntheticDeviceLossForSelfTest();
+    require(results.size() == 2, "synthetic device-loss result count");
+    require(results[0].status == cts::TestStatus::Fail, "losing case fails");
+    require(results[0].message == "device was unexpectedly lost: synthetic loss", "losing case message");
+    require(results[1].status == cts::TestStatus::Pass, "next case starts with a clean device");
+
+    // Worker side: only a device-loss failure stops the shard worker.
+    require(cts::isDeviceLossResult(results[0]), "loss result is recognized");
+    require(!cts::isDeviceLossResult(cts::SubcaseResult{"q", cts::TestStatus::Fail, "other failure"}),
+            "ordinary failure is not a loss");
+    require(!cts::isDeviceLossResult(
+                cts::SubcaseResult{"q", cts::TestStatus::Pass, "device was unexpectedly lost: x"}),
+            "only failures count as losses");
+    require(cts::shouldRestartWorkerAfterCase(results), "worker restarts after a case with a loss");
+    require(!cts::shouldRestartWorkerAfterCase({results[1]}), "worker continues after a clean case");
+
+    // Parent side: a planned exit after progress resumes without a crash; otherwise crash path.
+    using cts::WorkerFinishAction;
+    require(cts::classifyWorkerFinish(true, false, true, true) == WorkerFinishAction::Done, "clean finish");
+    require(cts::classifyWorkerFinish(false, true, true, true) == WorkerFinishAction::Done,
+            "planned exit on the shard's last case is done");
+    require(cts::classifyWorkerFinish(false, true, true, false) == WorkerFinishAction::Resume,
+            "planned exit resumes from the next case");
+    require(cts::classifyWorkerFinish(false, true, false, false) == WorkerFinishAction::CrashCurrent,
+            "planned exit without progress is charged as a crash (no infinite respawn)");
+    require(cts::classifyWorkerFinish(false, false, true, false) == WorkerFinishAction::CrashCurrent,
+            "abnormal exit is a crash");
+    require(cts::classifyWorkerFinish(true, false, false, false) == WorkerFinishAction::CrashCurrent,
+            "clean exit before reporting is a crash");
+}
+
 void testDeviceScopedObjects() {
     cts::teardownCachedDevicesForTest();
     deviceScopedConstructed = 0;
@@ -1961,6 +2028,9 @@ int main() {
         auto failures = cts::runSyntheticFailureForSelfTest();
         require(failures.size() == 1, "synthetic failure result count");
         require(failures[0].status == cts::TestStatus::Fail, "synthetic failure status");
+
+        testDeviceLossTracking();
+        testUncapturedErrorKeepsFirst();
     } catch (const std::exception& e) {
         std::cerr << e.what() << "\n";
         return 1;

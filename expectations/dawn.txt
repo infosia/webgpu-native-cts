@@ -934,3 +934,7 @@ webgpu:shader,execution,expression,call,builtin,textureSampleBias:sampled_2d_coo
 webgpu:shader,execution,expression,call,builtin,textureSampleBias:sampled_2d_coords:format="etc2-rgba8unorm";filt="nearest";modeU="repeat";modeV="clamp";offset=true
 webgpu:shader,execution,expression,call,builtin,textureSampleBias:sampled_2d_coords:format="etc2-rgba8unorm";filt="nearest";modeU="repeat";modeV="mirror";offset=true
 webgpu:shader,execution,expression,call,builtin,textureSampleBias:sampled_2d_coords:format="etc2-rgba8unorm";filt="nearest";modeU="repeat";modeV="repeat";offset=true
+
+# F-169: Metal counter-sample-buffer budget. 65,536 query sets in one render encoder exhaust GPU memory and
+# lose the device (Dawn's own expectations: crbug.com/558180182 [ mac ]).
+webgpu:api,operation,command_buffer,queries,timestampQuery:many_query_sets:numQuerySets=65536;stage="render"

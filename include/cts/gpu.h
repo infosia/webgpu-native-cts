@@ -43,6 +43,19 @@ T& deviceScoped() {
 /// Test-only: runs the device teardown path (GPU-free when no device was created).
 void teardownCachedDevicesForTest();
 
+/// True if an uncaptured-error message reports that the device is already lost.
+bool isDeviceLostErrorMessage(std::string_view message);
+
+/// Records a loss of a cached device. Destroyed / CallbackCancelled (our own teardown) are
+/// ignored; the first message is kept until the loss is consumed.
+void noteDeviceLost(WGPUDeviceLostReason reason, std::string_view message);
+
+/// End-of-case device check (upstream DevicePool.release): drains the cached queues and pumps
+/// instance events so a pending loss is delivered, then, if a cached device was lost during the
+/// case, tears the devices down (the next case gets fresh ones) and returns
+/// "device was unexpectedly lost: <message>". Returns nullopt otherwise. Never throws.
+std::optional<std::string> checkDeviceLossAfterCase();
+
 /// Lifecycle state a resource can be put in for validation tests: a valid
 /// resource, one created invalid (via an error scope), or one explicitly destroyed.
 enum class ResourceState {

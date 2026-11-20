@@ -175,7 +175,8 @@ class Fixture {
     void warn(const std::string& message);
     /// Returns the warnings accumulated during the case.
     const std::vector<std::string>& warnings() const;
-    /// Records a WebGPU uncaptured-error message observed during the case.
+    /// Records a WebGPU uncaptured-error message observed during the case. The first message is
+    /// kept; later ones add a "(+N more uncaptured errors; last: <first line>)" suffix.
     void recordUncapturedError(std::string message);
     /// True if an uncaptured error was recorded.
     bool hasUncapturedError() const;
@@ -185,7 +186,9 @@ class Fixture {
   private:
     ParamRecord params_;
     std::vector<std::string> warnings_;
-    std::string uncapturedError_;
+    std::string uncapturedError_;          // composed message reported for the case
+    std::string firstUncapturedError_;
+    size_t uncapturedErrorCount_ = 0;
 };
 
 /// Outcome of a (sub)case run, in increasing severity.
@@ -408,6 +411,27 @@ std::vector<SubcaseResult> drainWorkerResultLinesForTest(
 std::optional<SubcaseResult> parseIsolatedResultLine(const std::string& query, const std::string& output);
 /// Produces a deliberate failing result, used by the harness self-test.
 std::vector<SubcaseResult> runSyntheticFailureForSelfTest();
+/// Self-test: a passing case during which a device loss is noted, then a clean case.
+std::vector<SubcaseResult> runSyntheticDeviceLossForSelfTest();
+/// Prefix of the failure message of a case whose cached device was lost (see
+/// checkDeviceLossAfterCase in cts/gpu.h).
+inline constexpr std::string_view kDeviceLostResultPrefix = "device was unexpectedly lost: ";
+/// Exit code of a `--shard-results` worker that stopped after a device-loss case. The parent treats
+/// it as a planned (non-crash) exit and resumes the shard from the next case in a new process,
+/// because a loss can poison the whole process. Sequential runs (no `--workers`) only tear the
+/// device down and continue, so process-level poisoning is contained only with `--workers`.
+inline constexpr int kDeviceLostWorkerExitCode = 75;
+/// True if `result` is a failure caused by an unexpected device loss.
+bool isDeviceLossResult(const SubcaseResult& result);
+/// Worker-side decision: stop the worker process after a case with a device-loss result.
+bool shouldRestartWorkerAfterCase(const std::vector<SubcaseResult>& caseResults);
+/// Parent-side decision when a shard worker exits.
+enum class WorkerFinishAction {
+    Done,          // every case of the shard has its results
+    Resume,        // planned device-loss exit after progress: respawn from the next case, no crash
+    CrashCurrent,  // charge the next unreported case as a crash, then respawn if cases remain
+};
+WorkerFinishAction classifyWorkerFinish(bool exitClean, bool deviceLostRestart, bool madeProgress, bool allReported);
 /// Sets the fixture that thread-local error callbacks attribute uncaptured errors to.
 void setCurrentTest(Fixture* fixture);
 

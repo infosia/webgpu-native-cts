@@ -4,7 +4,10 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -46,6 +49,7 @@ struct DeviceCache {
     WGPUQueue queueAllFeatures = nullptr;
     bool allFeaturesDeviceUsedFallback = false;
     bool deviceLost = false;
+    std::string deviceLostMessage;
 
     ~DeviceCache() {
         clearDeviceScopedObjects();
@@ -86,19 +90,22 @@ DeviceCache& cache() {
 }
 
 void onUncapturedError(WGPUDevice const*, WGPUErrorType, WGPUStringView message, void*, void*) {
+    const std::string text = toString(message);
+    // A "[Device] is lost" error means the loss already happened even if the lost callback has
+    // not been delivered yet; treat it as a loss signal so the case is charged and the device
+    // is replaced.
+    if (isDeviceLostErrorMessage(text)) {
+        noteDeviceLost(WGPUDeviceLostReason_Unknown, text);
+    }
     if (g_currentTest != nullptr) {
-        g_currentTest->recordUncapturedError("uncaptured error: " + toString(message));
+        g_currentTest->recordUncapturedError("uncaptured error: " + text);
     }
 }
 
 // phaseH3-A: detect genuine device loss so the cache can self-heal. Destroyed /
 // CallbackCancelled fire during our own teardown and must NOT trigger a recycle.
-void onDeviceLost(WGPUDevice const*, WGPUDeviceLostReason reason, WGPUStringView, void*, void*) {
-    if (reason == WGPUDeviceLostReason_Destroyed
-        || reason == WGPUDeviceLostReason_CallbackCancelled) {
-        return;
-    }
-    cache().deviceLost = true;
+void onDeviceLost(WGPUDevice const*, WGPUDeviceLostReason reason, WGPUStringView message, void*, void*) {
+    noteDeviceLost(reason, toString(message));
 }
 
 struct QueueWorkDoneState {
@@ -399,7 +406,31 @@ void teardownDevices(DeviceCache& c) {
         c.instance = nullptr;
     }
     c.deviceLost = false;
+    c.deviceLostMessage.clear();
     c.allFeaturesDeviceUsedFallback = false;
+}
+
+// Upstream DevicePool.release(): wait for the queue so a loss caused by this case's GPU work is
+// delivered before the next case starts. Returns false if the drain did not complete cleanly
+// (timeout or a non-success status), which is itself treated as a loss.
+bool drainQueueAfterCase(DeviceCache& c, WGPUQueue queue) {
+    QueueWorkDoneState state;
+    WGPUQueueWorkDoneCallbackInfo callbackInfo = WGPU_QUEUE_WORK_DONE_CALLBACK_INFO_INIT;
+    callbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    callbackInfo.callback = onQueueWorkDone;
+    callbackInfo.userdata1 = &state;
+    (void)wgpuQueueOnSubmittedWorkDone(queue, callbackInfo);
+    constexpr uint64_t kDrainTimeoutNs = 60'000'000'000;
+    if (!processEventsUntil(c.instance, [&] { return state.completed; }, kDrainTimeoutNs)) {
+        noteDeviceLost(WGPUDeviceLostReason_Unknown, "queue drain after the case timed out");
+        return false;
+    }
+    if (state.status != WGPUQueueWorkDoneStatus_Success) {
+        noteDeviceLost(WGPUDeviceLostReason_Unknown,
+                       "queue drain after the case failed: " + state.message);
+        return false;
+    }
+    return true;
 }
 
 // On-loss self-heal: if the cached device was genuinely lost (onDeviceLost set
@@ -450,6 +481,46 @@ void teardownCachedDevicesForTest() {
     teardownDevices(cache());
 }
 
+bool isDeviceLostErrorMessage(std::string_view message) {
+    return message.find("[Device] is lost") != std::string_view::npos;
+}
+
+void noteDeviceLost(WGPUDeviceLostReason reason, std::string_view message) {
+    if (reason == WGPUDeviceLostReason_Destroyed
+        || reason == WGPUDeviceLostReason_CallbackCancelled) {
+        return;
+    }
+    DeviceCache& c = cache();
+    if (!c.deviceLost) {
+        c.deviceLostMessage = std::string(message);
+    }
+    c.deviceLost = true;
+}
+
+std::optional<std::string> checkDeviceLossAfterCase() {
+    DeviceCache& c = cache();
+    try {
+        if (!c.deviceLost && c.instance != nullptr) {
+            if (c.queue != nullptr) {
+                (void)drainQueueAfterCase(c, c.queue);
+            }
+            if (!c.deviceLost && c.queueAllFeatures != nullptr) {
+                (void)drainQueueAfterCase(c, c.queueAllFeatures);
+            }
+            // Deliver a lost callback that became ready during the drain.
+            wgpuInstanceProcessEvents(c.instance);
+        }
+    } catch (...) {
+        noteDeviceLost(WGPUDeviceLostReason_Unknown, "queue drain after the case threw");
+    }
+    if (!c.deviceLost) {
+        return std::nullopt;
+    }
+    std::string message = std::string(kDeviceLostResultPrefix) + c.deviceLostMessage;
+    teardownDevices(c);
+    return message;
+}
+
 void Fixture::setParams(ParamRecord params) {
     params_ = std::move(params);
 }
@@ -495,11 +566,20 @@ const std::vector<std::string>& Fixture::warnings() const {
 }
 
 void Fixture::recordUncapturedError(std::string message) {
-    uncapturedError_ = std::move(message);
+    ++uncapturedErrorCount_;
+    if (uncapturedErrorCount_ == 1) {
+        firstUncapturedError_ = std::move(message);
+        uncapturedError_ = firstUncapturedError_;
+        return;
+    }
+    const std::string lastFirstLine = message.substr(0, message.find('\n'));
+    uncapturedError_ = firstUncapturedError_ + " (+" + std::to_string(uncapturedErrorCount_ - 1) +
+                       " more uncaptured error" + (uncapturedErrorCount_ == 2 ? "" : "s") +
+                       "; last: " + lastFirstLine + ")";
 }
 
 bool Fixture::hasUncapturedError() const {
-    return !uncapturedError_.empty();
+    return uncapturedErrorCount_ > 0;
 }
 
 const std::string& Fixture::uncapturedError() const {
@@ -549,6 +629,30 @@ void GpuTest::init() {
 }
 
 void GpuTest::finalize() {
+    // Upstream trackForCleanup: destroy every tracked destroyable object at the end of the case,
+    // then release. Releasing alone frees GPU memory (and Metal counter sample buffers behind
+    // query sets) only when the implementation drops its last internal reference, which can be
+    // after the next case has started. Objects cached across cases (deviceScoped) are never
+    // created through the *Tracked helpers, so destroying here cannot affect them.
+    // wgpu-native implements wgpuQuerySetDestroy as the registry drop that wgpuQuerySetRelease
+    // also performs (lib.rs "FIXME: we shouldn't be using drop"), so destroy + release removes the
+    // id twice and aborts. There the query sets are only released, as before.
+    const bool destroyQuerySets = std::strcmp(cts::backendName(), "wgpu-native") != 0;
+    if (destroyQuerySets) {
+        for (WGPUQuerySet querySet : querySets_) {
+            wgpuQuerySetDestroy(querySet);
+        }
+    }
+    for (WGPUBuffer buffer : buffers_) {
+        wgpuBufferDestroy(buffer);
+    }
+    for (WGPUBuffer buffer : mismatchedDeviceBuffers_) {
+        wgpuBufferDestroy(buffer);
+    }
+    for (WGPUTexture texture : textures_) {
+        wgpuTextureDestroy(texture);
+    }
+
     // Pass encoders first: they are children of the command encoders released
     // below, and on some backends a live pass encoder pins its bound pipeline
     // (and through it a compiled shader) for as long as it is alive.

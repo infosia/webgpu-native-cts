@@ -382,42 +382,45 @@ SubcaseResult runOne(const std::string& query, const TestSpec& test, const Param
     std::unique_ptr<Fixture> fixture = test.fixtureFactory();
     fixture->setParams(params);
     setCurrentTest(fixture.get());
+
+    // Upstream DevicePool.release: after the case, drain the queue so a device loss caused by
+    // this case is delivered now, and charge it to this case (the device is then replaced).
+    const auto finish = [&](SubcaseResult result, bool uncapturedOverrides) {
+        std::optional<std::string> loss = checkDeviceLossAfterCase();
+        setCurrentTest(nullptr);
+        if (loss) {
+            return SubcaseResult{query, TestStatus::Fail, *loss};
+        }
+        if (uncapturedOverrides && fixture->hasUncapturedError()) {
+            return SubcaseResult{query, TestStatus::Fail, fixture->uncapturedError()};
+        }
+        return result;
+    };
+
     try {
         fixture->init();
         test.fn(*fixture);
         fixture->finalize();
-        setCurrentTest(nullptr);
-        if (fixture->hasUncapturedError()) {
-            return SubcaseResult{query, TestStatus::Fail, fixture->uncapturedError()};
-        }
-        return SubcaseResult{query, fixture->warnings().empty() ? TestStatus::Pass : TestStatus::Warn, ""};
+        return finish(
+            SubcaseResult{query, fixture->warnings().empty() ? TestStatus::Pass : TestStatus::Warn, ""}, true);
     } catch (const SkipTestCase& e) {
         try {
             fixture->finalize();
         } catch (...) {
         }
-        setCurrentTest(nullptr);
-        return SubcaseResult{query, TestStatus::Skip, e.what()};
+        return finish(SubcaseResult{query, TestStatus::Skip, e.what()}, false);
     } catch (const TestFailed& e) {
         try {
             fixture->finalize();
         } catch (...) {
         }
-        setCurrentTest(nullptr);
-        if (fixture->hasUncapturedError()) {
-            return SubcaseResult{query, TestStatus::Fail, fixture->uncapturedError()};
-        }
-        return SubcaseResult{query, TestStatus::Fail, e.what()};
+        return finish(SubcaseResult{query, TestStatus::Fail, e.what()}, true);
     } catch (const std::exception& e) {
         try {
             fixture->finalize();
         } catch (...) {
         }
-        setCurrentTest(nullptr);
-        if (fixture->hasUncapturedError()) {
-            return SubcaseResult{query, TestStatus::Fail, fixture->uncapturedError()};
-        }
-        return SubcaseResult{query, TestStatus::Fail, e.what()};
+        return finish(SubcaseResult{query, TestStatus::Fail, e.what()}, true);
     }
 }
 
@@ -1491,7 +1494,10 @@ void emitShardResults(const std::vector<SubcaseResult>& results) {
     std::cout.flush();
 }
 
-void collectShardResultRuns(
+// Both return true when the worker stopped early after a case that lost its device: the loss
+// can poison the whole process (e.g. Metal OOM persists across devices), so the worker exits with
+// kDeviceLostWorkerExitCode and the parent resumes the shard from the next case in a new process.
+bool collectShardResultRuns(
     const RunOptions& options,
     const std::vector<Query>& queries,
     FormatSampleStats* stats) {
@@ -1502,10 +1508,14 @@ void collectShardResultRuns(
         }
         std::vector<SubcaseResult> caseResults = runCase(cases[i]);
         emitShardResults(caseResults);
+        if (shouldRestartWorkerAfterCase(caseResults)) {
+            return true;
+        }
     }
+    return false;
 }
 
-void collectShardResultRunsFromPlan(const RunOptions& options) {
+bool collectShardResultRunsFromPlan(const RunOptions& options) {
     const std::vector<PlannedCase> cases = loadCasePlan(options.casePlanPath);
     for (const PlannedCase& planned : cases) {
         if (!caseSelectedByShard(planned.position, options)) {
@@ -1513,7 +1523,11 @@ void collectShardResultRunsFromPlan(const RunOptions& options) {
         }
         std::vector<SubcaseResult> caseResults = runCase(planned.run);
         emitShardResults(caseResults);
+        if (shouldRestartWorkerAfterCase(caseResults)) {
+            return true;
+        }
     }
+    return false;
 }
 
 struct WorkerState {
@@ -1530,6 +1544,8 @@ struct WorkerState {
     std::string casePlanPath;
     std::vector<size_t> positions;
     size_t next = 0;
+    // `next` when this process was spawned; a planned device-loss exit must have advanced past it.
+    size_t spawnedAt = 0;
 };
 
 std::string shardArg(int shard, int workers) {
@@ -1709,6 +1725,8 @@ WorkerState spawnWorker(
 struct WorkerExit {
     bool clean = false;
     std::string message;
+    // The worker exited with kDeviceLostWorkerExitCode after reporting a device-loss case.
+    bool deviceLostRestart = false;
 };
 
 WorkerExit waitWorkerExit(WorkerState& worker) {
@@ -1723,6 +1741,9 @@ WorkerExit waitWorkerExit(WorkerState& worker) {
     }
     CloseHandle(worker.proc.hThread);
     CloseHandle(worker.proc.hProcess);
+    if (exitCode == static_cast<DWORD>(kDeviceLostWorkerExitCode)) {
+        return WorkerExit{false, "worker restarted after device loss", true};
+    }
     return WorkerExit{exitCode == 0, exitCode == 0 ? "" : windowsExitMessage(exitCode)};
 #else
     int status = 0;
@@ -1737,6 +1758,9 @@ WorkerExit waitWorkerExit(WorkerState& worker) {
     }
     if (WIFEXITED(status)) {
         const int exitCode = WEXITSTATUS(status);
+        if (exitCode == kDeviceLostWorkerExitCode) {
+            return WorkerExit{false, "worker restarted after device loss", true};
+        }
         return WorkerExit{exitCode == 0, exitCode == 0 ? "" : "child exited " + std::to_string(exitCode)};
     }
     return WorkerExit{false, "child did not exit normally"};
@@ -1820,8 +1844,23 @@ std::optional<WorkerState> finishWorker(
     const WorkerExit exit = waitWorkerExit(worker);
 
     advanceCompletedWorkerCases(worker, cases, resultsByCase);
-    if (exit.clean && worker.next >= worker.positions.size()) {
+    const WorkerFinishAction action = classifyWorkerFinish(
+        exit.clean, exit.deviceLostRestart, worker.next > worker.spawnedAt,
+        worker.next >= worker.positions.size());
+    if (action == WorkerFinishAction::Done && (exit.clean || exit.deviceLostRestart)) {
         return std::nullopt;
+    }
+
+    if (action == WorkerFinishAction::Resume) {
+        // Planned exit: the lost case already has its (fail) result; resume after it.
+        std::cerr << "shard " << worker.shard << ": device lost in "
+                  << cases[worker.positions[worker.next - 1]].query
+                  << "; restarting the worker from the next case\n";
+        WorkerState replacement = spawnWorker(
+            options, queryTexts, cases, worker.shard, options.workers, worker.casePlanPath, worker.positions,
+            worker.next);
+        replacement.spawnedAt = worker.next;
+        return replacement;
     }
 
     if (worker.next < worker.positions.size()) {
@@ -1838,7 +1877,7 @@ std::optional<WorkerState> finishWorker(
     if (worker.next >= worker.positions.size()) {
         return std::nullopt;
     }
-    return spawnWorker(
+    WorkerState replacement = spawnWorker(
         options,
         queryTexts,
         cases,
@@ -1847,6 +1886,8 @@ std::optional<WorkerState> finishWorker(
         worker.casePlanPath,
         worker.positions,
         worker.next);
+    replacement.spawnedAt = worker.next;
+    return replacement;
 }
 
 struct ShardCasePlan {
@@ -2411,12 +2452,10 @@ int runQueries(const RunOptions& options) {
     try {
         if (options.shardResults) {
             setStdoutBinaryForResultProtocol();
-            if (!runOptions.casePlanPath.empty()) {
-                (void)collectShardResultRunsFromPlan(runOptions);
-            } else {
-                (void)collectShardResultRuns(runOptions, queries, &sampleStats);
-            }
-            return 0;
+            const bool stoppedForDeviceLoss = !runOptions.casePlanPath.empty()
+                ? collectShardResultRunsFromPlan(runOptions)
+                : collectShardResultRuns(runOptions, queries, &sampleStats);
+            return stoppedForDeviceLoss ? kDeviceLostWorkerExitCode : 0;
         } else if (!options.crashListPath.empty()) {
             ExpectationSet crashList = loadExpectations(options.crashListPath);
             results = collectSelectiveRuns(runOptions, queries, crashList, &sampleStats);
@@ -2487,6 +2526,30 @@ int writeListingJson(const std::string& path) {
     return 0;
 }
 
+bool isDeviceLossResult(const SubcaseResult& result) {
+    return result.status == TestStatus::Fail && result.message.starts_with(kDeviceLostResultPrefix);
+}
+
+bool shouldRestartWorkerAfterCase(const std::vector<SubcaseResult>& caseResults) {
+    for (const SubcaseResult& result : caseResults) {
+        if (isDeviceLossResult(result)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+WorkerFinishAction classifyWorkerFinish(bool exitClean, bool deviceLostRestart, bool madeProgress, bool allReported) {
+    if (allReported) {
+        return WorkerFinishAction::Done;
+    }
+    if (deviceLostRestart && madeProgress) {
+        return WorkerFinishAction::Resume;
+    }
+    (void)exitClean;
+    return WorkerFinishAction::CrashCurrent;
+}
+
 std::vector<SubcaseResult> runSyntheticFailureForSelfTest() {
     struct FailingFixture : Fixture {};
     TestSpec test;
@@ -2494,6 +2557,23 @@ std::vector<SubcaseResult> runSyntheticFailureForSelfTest() {
     test.fixtureFactory = [] { return std::make_unique<FailingFixture>(); };
     test.fn = [](Fixture& fixture) { fixture.fail("synthetic failure"); };
     return {runOne("webgpu:synthetic:file:test:*", test, {})};
+}
+
+std::vector<SubcaseResult> runSyntheticDeviceLossForSelfTest() {
+    struct PassingFixture : Fixture {};
+    TestSpec test;
+    test.name = "synthetic-device-loss";
+    test.fixtureFactory = [] { return std::make_unique<PassingFixture>(); };
+    // The body passes, but a (GPU-free) loss is recorded while the case runs.
+    test.fn = [](Fixture&) { noteDeviceLost(WGPUDeviceLostReason_Unknown, "synthetic loss"); };
+    std::vector<SubcaseResult> results{runOne("webgpu:synthetic:file:loss:*", test, {})};
+    // The next case must start clean.
+    TestSpec clean;
+    clean.name = "synthetic-after-loss";
+    clean.fixtureFactory = [] { return std::make_unique<PassingFixture>(); };
+    clean.fn = [](Fixture&) {};
+    results.push_back(runOne("webgpu:synthetic:file:after:*", clean, {}));
+    return results;
 }
 
 } // namespace cts

@@ -127,11 +127,13 @@ expectations, only the 2 F-159 cases fail; Windows also had 1 intermittent drive
 F-111 and F-139 were resolved after that sweep; F-111 was confirmed on Windows native Vulkan, F-139 only through
 MoltenVK.
 
-**Open — yawgpu:** none.
+**Open — yawgpu:** F-170 (no workaround for Metal's 32 counter-sample-buffer limit; abort at exit after
+65,536 query sets), F-171 (occlusion query result lost when a set is re-resolved in a later submit).
 
 **Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a
 compile-time zero value on Metal; yawgpu fails the same cases), F-167 (Metal `textureSampleBias` with offset +
-repeat/mirror on non-block-aligned compressed mips).
+repeat/mirror on non-block-aligned compressed mips), F-169 (`many_query_sets` with 65,536 query sets:
+device lost on render; counter-sample-buffer budget not returned on compute).
 
 **Open — wgpu-native:** F-166 (async pipeline creation unimplemented) in addition to the list below.
 
@@ -185,6 +187,55 @@ specs against `c77b620`. Per-subcase results from the older sweep were not kept,
 was not compared test by test. The 19,494 skips in `texture_component_swizzle:read_swizzle`, a test unchanged in the
 catalog, are inferred to make up most of the old 20,233. The compatibility-mode skips were read from the port's
 comment, not checked against an upstream checkout.
+
+---
+
+## F-171 — yawgpu: re-resolving an occlusion query set in a later submit loses a result — OPEN (Metal and MoltenVK)
+
+**yawgpu DEFECT, cross-HAL** (found 2026-11-20, yawgpu `01324f0`, CTS batch O2 of
+`specs/apiop-parity.md`). `webgpu:api,operation,command_buffer,queries,occlusionQuery:occlusion_query,multi_resolve:*`
+fails on Metal and through MoltenVK with `result(2): queryIndex: 1, passed: false, expected: true`;
+Dawn passes. The test runs 30 occlusion queries in one pass (odd indices draw, even ones are scissored
+to zero), resolves the set twice and copies it out, draws again and resolves a third time in the same
+command buffer, then in a second submit draws once more and resolves again. Only that last resolve
+(`readBuffer3`, second submit) is wrong, and only for query 1, so yawgpu loses an already-resolved
+occlusion result across submits.
+
+---
+
+## F-170 — yawgpu/Metal: no workaround for Metal's 32 counter-sample-buffer limit; abort at exit after 65,536 query sets — OPEN
+
+**yawgpu DEFECT, Metal HAL** (found 2026-11-20, yawgpu `01324f0`). Metal allows 32
+`MTLCounterSampleBuffer`s per process; upstream's `timestampQuery:many_query_sets` exists to make
+implementations suballocate query sets from larger buffers. yawgpu creates one per query set:
+`numQuerySets=32` passes, `64`, `256` and `65536` fail in both stages with
+`HAL out of memory: metal: timestamp counter sample buffer` for every set past the 32nd (6 cases).
+Through MoltenVK 11 of 12 cases pass.
+
+After the `65536` compute case the process also aborts at exit (exit 134): a Rust panic
+`use of std::thread::current() is not possible after the thread's local data has been destroyed`,
+then `panic in a destructor during cleanup`, from a yawgpu thread during teardown. In a `--workers` run
+that surfaces as a crash of the worker.
+
+---
+
+## F-169 — Dawn/Metal: `many_query_sets` with 65,536 query sets — OPEN (Dawn; render case in Dawn's own expectations)
+
+**METAL / DAWN** (found 2026-11-20, Dawn `v20261030.184100`, Apple M2, CTS batch O2).
+`timestampQuery:many_query_sets:numQuerySets=65536`:
+
+- `stage="render"`: the command buffer fails with `Insufficient Memory
+  (kIOGPUCommandBufferCallbackErrorOutOfMemory)` and the device is lost. Dawn lists this case as
+  failing on mac (`crbug.com/558180182`). Carried as `xfail` in `expectations/dawn.txt`.
+- `stage="compute"`: passes, but the process cannot create query sets afterwards: a later
+  `timestampQuery:multi_resolve:stage="compute"` in the same process fails with `Error creating query
+  set: Cannot allocate sample buffer` (QuerySetMTL.mm:71), although the test destroys all 65,536 sets.
+  This is order-dependent, so it is not in the expectations; it shows only when a worker runs
+  `multi_resolve` after that case.
+
+The render case used to poison every later case in its worker. The harness now checks for device loss
+at the end of each case (as upstream's DevicePool does), charges the loss to the case that caused it,
+and restarts a `--workers` shard process after it, so later cases start clean.
 
 ---
 
