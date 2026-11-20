@@ -164,33 +164,37 @@ re-baseline (642 files), so their counts are not comparable with the current one
 
 #### yawgpu — native Metal (Tint frontend), per-subcase
 
-Sweep 2026-11-20, upstream `d116bcc` (657 files, 280,146 cases), yawgpu `01324f0`, Apple M2,
-`--workers 6`.
+Sweep 2026-11-20 after the `api/operation` parity campaign, upstream `d116bcc` (657 files, 283,799
+cases), yawgpu `01324f0`, Apple M2, `--workers 6`.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
 | `api/validation` (128) | 342,191 | 55,814 | 2† | 0 |
-| `api/operation` (70) | 287,938 | 45,667 | 0 | 0 |
-| `shader/execution` (246) | 847,618 | 29,196 | 2,859‡ | 0 |
+| `api/operation` (70) | 307,526 | 45,912 | 7§ | 0 |
+| `shader/execution` (246) | 847,622 | 29,196 | 2,855‡ | 0 |
 | `shader/validation` (213) | 661,419 | 20,235 | 2‡ | 0 |
-| **total** | **2,139,166** | **150,912** | **2,863** | **0** |
+| **total** | **2,158,758** | **151,157** | **2,866** | **0** |
+
+§ yawgpu findings, not in its expectations: F-170 (6, no workaround for Metal's 32 counter-sample-buffer
+limit) and F-171 (1, occlusion result lost when a query set is re-resolved in a later submit).
 
 #### Dawn — native Metal (conformance oracle, Tint frontend), per-subcase
 
-Sweep 2026-11-20, upstream `d116bcc` (657 files, 280,146 cases), Dawn `v20261030.184100`, Apple M2,
-`--workers 6`, 45 minutes.
+Sweep 2026-11-20 after the `api/operation` parity campaign, upstream `d116bcc` (657 files, 283,799
+cases), Dawn `v20261030.184100`, Apple M2, `--workers 6`.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
 | `api/validation` (128) | 342,203 | 55,802 | 2† | 0 |
-| `api/operation` (70) | 287,938 | 45,667 | 0 | 0 |
+| `api/operation` (70) | 307,531 | 45,912 | 2‡ | 0 |
 | `shader/execution` (246) | 847,619 | 29,196 | 2,858‡ | 0 |
 | `shader/validation` (213) | 661,419 | 20,235 | 2‡ | 0 |
-| **total** | **2,139,179** | **150,900** | **2,862** | **0** |
+| **total** | **2,158,772** | **151,145** | **2,864** | **0** |
 
 ‡ Metal findings shared by Dawn and yawgpu, carried as `xfail` in `expectations/dawn.txt` and
 `expectations/yawgpu.txt` (F-159 is listed for Dawn only): F-159 (2), F-160 (70; random, so the count
-varies by one or two between runs), and
+varies by one or two between runs), F-169 (2 on Dawn: the 65,536-query-set render case, and an
+order-dependent `timestampQuery:multi_resolve` failure after the compute case), and
 F-167 (2,788, Metal `textureSampleBias` on non-block-aligned compressed mips; 256 of them are in
 partially failing cases and are not masked).
 

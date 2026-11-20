@@ -111,13 +111,14 @@ that are green on both native Metal and native Vulkan — see those findings.
 Suite at upstream CTS `d116bcc` (657 files); Dawn oracle `v20261030.184100`. Per-area counts are in the
 [README](../README.md#test-results).
 
-**Dawn (oracle), Metal:** last full sweep 2026-11-20 (after the `8b086b8` test-review fixes, 280,146 cases):
-pass 2,139,179 / skip 150,900 / fail 258 / crash 0, plus 2,604 `xfail` (F-159, F-160, F-167) and 2 F-160
-`xpass`. The fails are the 2 `index_buffer_format_dirtying` subcases (¹ above) and 256 F-167 subcases in
-partially failing cases.
+**Dawn (oracle), Metal:** last full sweep 2026-11-20 (after the `api/operation` parity campaign, 283,799
+cases): pass 2,158,772 / skip 151,145 / fail 259 / crash 0, plus 2,605 `xfail` (F-159, F-160, F-167,
+F-169) and 2 F-160 `xpass`. The fails are the 2 `index_buffer_format_dirtying` subcases (¹ above), 256
+F-167 subcases in partially failing cases, and the order-dependent F-169 `multi_resolve` case.
 
-**yawgpu, Metal:** no open defects. Full sweep 2026-11-20 (`01324f0`): pass 2,139,166 / skip 150,912 /
-fail 2,863 raw, the same fail profile as Dawn (F-159, F-160, F-167, `index_buffer_format_dirtying`). F-161 to F-164 from the 2026-11-01 sweep are resolved. Carried in
+**yawgpu, Metal:** full sweep 2026-11-20 after the `api/operation` parity campaign (`01324f0`, 283,799
+cases): pass 2,158,758 / skip 151,157 / fail 265 / crash 0 with expectations. Fails: F-167 (256, shared
+with Dawn), F-159 (2, shared), F-170 (6) and F-171 (1). F-161 to F-164 from the 2026-11-01 sweep are resolved. Carried in
 `expectations/yawgpu.txt`: `index_buffer_format_dirtying` and F-160 (shared with Dawn). The 2 F-159 cases fail as on
 Dawn and are not listed.
 
