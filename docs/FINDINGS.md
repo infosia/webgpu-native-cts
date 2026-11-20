@@ -129,9 +129,6 @@ MoltenVK.
 
 **Open — yawgpu:** none.
 
-**Open — MoltenVK, native Vulkan confirmation pending:** F-168 (negative array index in sampled array
-textures; yawgpu Vulkan HAL through MoltenVK only).
-
 **Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a
 compile-time zero value on Metal; yawgpu fails the same cases), F-167 (Metal `textureSampleBias` with offset +
 repeat/mirror on non-block-aligned compressed mips).
@@ -145,7 +142,7 @@ F-084, F-088), and the naga-lineage shader findings that yawgpu resolved by movi
 F-133, F-134, F-136), the immediates / unrequestable-feature divergences (F-154), and the `v29.0.1.1` `mapAsync` `WGPU_WHOLE_MAP_SIZE` regression (F-155, fixed upstream but unreleased).
 
 **MoltenVK** (non-authoritative — development / reference / Tier-2 Vulkan coverage on macOS only): a few
-Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-158), all green on both
+Vulkan→Metal translation artifacts (F-033, F-045, F-053, F-083, F-086, F-104, F-158, F-168), all green on both
 native Metal and native Vulkan. Not yawgpu defects; not tracked as open.
 
 **Open — NVIDIA driver:** F-165 (shader compiler crash on `bufferArrayView` workgroup f16 aliasing, intermittent).
@@ -191,9 +188,9 @@ comment, not checked against an upstream checkout.
 
 ---
 
-## F-168 — MoltenVK: negative array index in sampled array textures reads the wrong layer — MoltenVK only (native Vulkan confirmation pending)
+## F-168 — MoltenVK: negative array index in sampled array textures reads the wrong layer — MoltenVK only
 
-**MOLTENVK, NOT yet confirmed on native Vulkan** (found 2026-11-20, yawgpu `01324f0` Vulkan HAL through
+**MOLTENVK ARTIFACT; native Vulkan passes** (found 2026-11-20, yawgpu `01324f0` Vulkan HAL through
 MoltenVK, `$VULKAN_SDK` 1.3.296.0, Apple M2). Exposed once T10 of
 `specs/test-review-fixes-8b086b8.md` ported upstream's sample-point generators, which pass an array
 index of -1 (and the layer count) to check WGSL's clamp to `[0, layers - 1]`.
@@ -208,9 +205,22 @@ all of them, so yawgpu's core and Tint's WGSL handling are correct.
 Vulkan defines the layer as `clamp(RNE(a), 0, d - 1)` of the floating-point coordinate, so a correct
 driver clamps -1 to 0. MoltenVK translates the SPIR-V to MSL, where the array index is an unsigned
 integer; a -1 that reaches it unclamped selects the wrong layer. This matches the MoltenVK artifact
-pattern of F-033, F-104 and F-158 but is unconfirmed: run the arrayed texture builtin tests on native
-Vulkan (Windows or Linux) to settle it. Dawn on this Mac has no Vulkan backend, so it cannot cross-check.
-Not added to `expectations/yawgpu-vulkan.txt`, which carries native-Vulkan results.
+pattern of F-033, F-104 and F-158. The MoltenVK root cause itself is inferred, not traced.
+
+**Native Vulkan check (2026-11-20).** yawgpu `01324f0` (Vulkan DLL rebuilt at that commit), CTS
+`5568d55`, Windows / NVIDIA RTX 5060 Ti, `--sample-formats --workers 8`, the same fast mode as the
+MoltenVK runs. All five tests pass:
+
+| query | result |
+|---|---|
+| `textureSampleLevel:sampled_array_2d_coords` | pass 7,776 / skip 864 / fail 0 |
+| `textureSampleBias:arrayed_{2d,3d}_coords`, `textureSample:sampled_array_2d_coords`, `textureGather:sampled_array_2d_coords` | pass 20,628 / skip 2,196 / fail 0 / crash 0 |
+
+The skips are ASTC formats, which this device does not support. The ported generators draw float and
+signed array indices from `[-1, num]` (`sample_points.h`), so the native run does exercise index -1.
+Since native Metal and native Vulkan both pass, this is not a yawgpu or Tint defect, and it is not
+tracked as open. The cases are not in `expectations/yawgpu-vulkan.txt`, since listing them would
+`xpass` on native Vulkan. They still fail in a MoltenVK sweep.
 
 ---
 
