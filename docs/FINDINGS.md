@@ -106,13 +106,15 @@ that are green on both native Metal and native Vulkan — see those findings.
 
 ---
 
-## Status — current state & open findings (2026-11-05)
+## Status — current state & open findings (2026-11-20)
 
 Suite at upstream CTS `d116bcc` (657 files); Dawn oracle `v20261030.184100`. Per-area counts are in the
 [README](../README.md#test-results).
 
-**Dawn (oracle), Metal:** last full sweep 2026-11-01: pass 2,109,506 / skip 147,876 / fail 2 / crash 0, plus
-74 `xfail` (F-159, F-160). The 2 fails are the `index_buffer_format_dirtying` port-oracle quirk (¹ above).
+**Dawn (oracle), Metal:** last full sweep 2026-11-20 (after the `8b086b8` test-review fixes, 280,146 cases):
+pass 2,139,179 / skip 150,900 / fail 258 / crash 0, plus 2,604 `xfail` (F-159, F-160, F-167) and 2 F-160
+`xpass`. The fails are the 2 `index_buffer_format_dirtying` subcases (¹ above) and 256 F-167 subcases in
+partially failing cases.
 
 **yawgpu, Metal:** no open defects. F-161 to F-164 from the 2026-11-01 sweep are resolved. Carried in
 `expectations/yawgpu.txt`: `index_buffer_format_dirtying` and F-160 (shared with Dawn). The 2 F-159 cases fail as on
@@ -127,7 +129,10 @@ MoltenVK.
 **Open — yawgpu:** none.
 
 **Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a
-compile-time zero value on Metal; yawgpu fails the same cases).
+compile-time zero value on Metal; yawgpu fails the same cases), F-167 (Metal `textureSampleBias` with offset +
+repeat/mirror on non-block-aligned compressed mips).
+
+**Open — wgpu-native:** F-166 (async pipeline creation unimplemented) in addition to the list below.
 
 **Open — wgpu-native (naga-based bring-up reference, not triaged to `fail=0`; not swept at `d116bcc`):** the panic-heavy validation
 surface (F-001–F-004, F-007, F-012, F-013, F-015, F-017, F-019, F-021, F-027, F-028, F-036, F-052, F-056,

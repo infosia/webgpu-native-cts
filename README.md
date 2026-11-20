@@ -158,8 +158,8 @@ runs whole-suite **per-subcase** (`--workers`, no `--isolate`). All tables are *
 carries its own sweep date, run mode and backend revision. Per-finding detail is in
 [FINDINGS](docs/FINDINGS.md).
 
-The yawgpu native Vulkan tables and the yawgpu GLES / NVIDIA table are at the current pin (upstream
-`d116bcc`, 657 files). The Metal tables, the wgpu-native tables and the Haswell table predate that
+The Dawn Metal table, the yawgpu native Vulkan tables and the yawgpu GLES / NVIDIA table are at the
+current pin (upstream `d116bcc`, 657 files). The yawgpu Metal table, the wgpu-native tables and the Haswell table predate that
 re-baseline (642 files), so their counts are not comparable with the current ones.
 
 #### yawgpu — native Metal (Tint frontend), per-subcase
@@ -174,17 +174,24 @@ re-baseline (642 files), so their counts are not comparable with the current one
 
 #### Dawn — native Metal (conformance oracle, Tint frontend), per-subcase
 
+Sweep 2026-11-20, upstream `d116bcc` (657 files, 280,146 cases), Dawn `v20261030.184100`, Apple M2,
+`--workers 6`, 45 minutes.
+
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 293,547 | 61,443 | 2† | 0 |
-| `api/operation` (70) | 228,849 | 744 | 0 | 0 |
-| `shader/execution` (239) | 822,636 | 21,950 | 0 | 0 |
-| `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
-| **total** | **1,991,805** | **104,506** | **2** | **0** |
+| `api/validation` (128) | 342,203 | 55,802 | 2† | 0 |
+| `api/operation` (70) | 287,938 | 45,667 | 0 | 0 |
+| `shader/execution` (246) | 847,619 | 29,196 | 2,858‡ | 0 |
+| `shader/validation` (213) | 661,419 | 20,235 | 2‡ | 0 |
+| **total** | **2,139,179** | **150,900** | **2,862** | **0** |
+
+‡ Dawn/Metal findings carried as `xfail` in `expectations/dawn.txt`: F-159 (2), F-160 (70), and
+F-167 (2,788, Metal `textureSampleBias` on non-block-aligned compressed mips; 256 of them are in
+partially failing cases and are not masked).
 
 † Documented non-defects, carried as `xfail`.
 
-**yawgpu matches Dawn on Metal.** Same fail profile (only those 2 cases), both shader areas
+**yawgpu matched Dawn on Metal** in the pre-re-baseline sweeps above: same fail profile (only those 2 cases), both shader areas
 subcase-identical, and the skip counts within 13 subcases of each other — a capability-exposure
 difference, not conformance divergence.
 
