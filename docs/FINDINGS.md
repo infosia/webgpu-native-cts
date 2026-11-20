@@ -201,7 +201,15 @@ query set and is committed when the submit succeeds, as in Dawn. `occlusionQuery
 2026-11-20). While verifying, yawgpu also found that on Apple GPUs a render pass writes every visibility slot below
 its highest used query index, so a later pass could zero an earlier result of the same set; yawgpu Block 162
 (`c9f33a5`) now writes through a per-pass scratch buffer. Dawn attaches the set's visibility buffer directly and is
-expected to share that defect; no CTS case covers it. The report below is the state on `01324f0`.
+expected to share that defect; no CTS case covers it.
+
+Through MoltenVK (yawgpu `e4a55b1` Vulkan HAL, `$VULKAN_SDK` 1.3.296.0, Apple M2, 2026-11-20) `multi_resolve` also
+passes (`occlusionQuery:*` is 227/244 on both commits). Still failing there and passing on Metal:
+`occlusion_query,reuse:*;noop="after"` (16 cases, failing on `01324f0` too) and `occlusion_query,empty:*` (passed
+on `01324f0`); each reads a non-zero result for a query with no draws. yawgpu's Metal HAL needed an explicit
+zero-fill for draw-free queries (Block 159 S2, `f7bad8d`), so these are likely the same Apple visibility-buffer
+behaviour surfacing through MoltenVK. Native Vulkan has not run these tests yet (they were ported in O2); until it
+does, they are not tracked as a finding. The report below is the state on `01324f0`.
 
 **yawgpu DEFECT, cross-HAL** (found 2026-11-20, yawgpu `01324f0`, CTS batch O2 of
 `specs/apiop-parity.md`). `webgpu:api,operation,command_buffer,queries,occlusionQuery:occlusion_query,multi_resolve:*`
