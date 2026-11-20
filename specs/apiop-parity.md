@@ -66,6 +66,13 @@ Sizes are portable cases / subcases to add.
 - [ ] Dawn/Metal: the batch's files `fail=0 crash=0`, or each failure triaged as a Dawn/Metal finding.
 - [ ] `docs/COVERAGE.md` rows and `listing.json` updated (Claude).
 
+## Status (2026-11-20)
+
+All seven batches are committed (O1 `9184216`, O2 `2cdcf5f`, O3 `0044c6a`, O4 `921f632`, O5 `b599c76`,
+O6 `c86abff`, O7 `b1e750c`). The rerun inventory (`data/apiop-parity-d116bcc.tsv`, now the post-campaign
+state) has 240 MATCH, 16 UPSTREAM-UNIMPLEMENTED, and only the 8 non-portable tests listed above as
+MISSING or REGISTERED-UNIMPLEMENTED. Each batch passed on Dawn/Metal and yawgpu/Metal.
+
 ## Done when
 
 All seven batches are committed, the inventory rerun shows only MATCH, UPSTREAM-UNIMPLEMENTED and the
