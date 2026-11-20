@@ -1,7 +1,18 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/memory_sync/texture/readonly_depth_stencil.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Parameterized: sampling_while_testing over (depthReadOnly, stencilReadOnly) x {true,false} = 4 cases.
-// Fixed format: depth24plus-stencil8.
-// Deferred: kDepthStencilFormats matrix (depth-only / stencil-only formats) (V32a-rest2).
+// SPDX-License-Identifier: BSD-3-Clause
+// Ported from gpuweb/cts src/webgpu/api/operation/memory_sync/texture/readonly_depth_stencil.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
+// Upstream CTS: Copyright (c) 2023 The WebGPU CTS Contributors, BSD-3-Clause.
+// Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
+//
+// Porting notes:
+//   - The beforeAllSubcases skip (depth+stencil formats in compatibility mode) is a no-op on the
+//     core devices this harness runs.
+//   - The WGSL template interpolations (${!!stencilReadOnly}, ${hasDepth}, ...) are substituted
+//     with the same boolean / number literals JS produces; `undefined` read-only values behave as
+//     JS falsy (!!undefined === false, !undefined === true).
+//   - Upstream omits the vertex entryPoint (each module has a single vertex entry point); the port
+//     names it explicitly.
+//   - expectSingleColor(r32uint, {R: 1}) is a copy into a fresh (zero-initialized) buffer whose
+//     texels are compared to 1.
 
 #include <cstdint>
 #include <cstring>
@@ -9,9 +20,12 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <variant>
+#include <vector>
 
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/texture_format.h"
 
 using namespace cts;
 
@@ -19,478 +33,424 @@ namespace {
 
 TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpuTest>(
     "api,operation,memory_sync,texture,readonly_depth_stencil",
-    "Memory synchronization tests for depth-stencil attachments in a single pass, with checks "
-    "for readonlyness.");
+    R"(
+Memory synchronization tests for depth-stencil attachments in a single pass, with checks for readonlyness.
+)");
 
-// ---------------------------------------------------------------------------
-// Helper: WGPUStringView from std::string_view
-// ---------------------------------------------------------------------------
-static WGPUStringView sv(std::string_view s) {
+WGPUStringView sv(std::string_view s) {
     return WGPUStringView{s.data(), s.size()};
 }
 
-// ---------------------------------------------------------------------------
-// Init module WGSL (verbatim from upstream sampling_while_testing).
-// Encodes a 3x3 depth24plus-stencil8 texture:
-//   stencil(x,y) = x+1 (via instance_index + stencil reference)
-//   depth(x,y)   = (y+1)/10  (via frag_depth)
-// ---------------------------------------------------------------------------
+// Row pitch of the r32uint result readback (3 texels padded to the 256-byte copy alignment).
+constexpr uint32_t kResultBytesPerRow = 256;
+
+const char* boolLiteral(bool value) {
+    return value ? "true" : "false";
+}
+
 constexpr std::string_view kInitShader = R"(
-@vertex fn vs(
-    @builtin(instance_index) x : u32, @builtin(vertex_index) y : u32
-) -> @builtin(position) vec4f {
-    let texcoord = (vec2f(f32(x), f32(y)) + vec2f(0.5)) / 3;
-    return vec4f((texcoord * 2) - vec2f(1.0), 0, 1);
-}
-@fragment fn fs_with_depth(@builtin(position) pos : vec4f) -> @builtin(frag_depth) f32 {
-    return (pos.y + 0.5) / 10;
-}
+            @vertex fn vs(
+                @builtin(instance_index) x : u32, @builtin(vertex_index) y : u32
+            ) -> @builtin(position) vec4f {
+                let texcoord = (vec2f(f32(x), f32(y)) + vec2f(0.5)) / 3;
+                return vec4f((texcoord * 2) - vec2f(1.0), 0, 1);
+            }
+            @fragment fn fs_with_depth(@builtin(position) pos : vec4f) -> @builtin(frag_depth) f32 {
+                return (pos.y + 0.5) / 10;
+            }
+            @fragment fn fs_no_depth() {
+            }
 )";
 
-// ---------------------------------------------------------------------------
-// Per-combo test/check WGSL builder.
-// Substitutes depthReadOnly and stencilReadOnly literals into the upstream
-// template (which originally uses JS template literals ${...}).
-//
-// kFragDepth = 0.15, kStencilRef = 2 are fixed constants.
-// ---------------------------------------------------------------------------
-static std::string buildTestCheckShader(bool depthReadOnly, bool stencilReadOnly) {
-    const char* dr = depthReadOnly   ? "true" : "false";
-    const char* sr = stencilReadOnly ? "true" : "false";
-    const char* not_dr = depthReadOnly   ? "false" : "true";
-    const char* not_sr = stencilReadOnly ? "false" : "true";
+// The test/check module. `depthReadOnly` / `stencilReadOnly` are std::nullopt for `undefined`.
+// kFragDepth = 0.15, kStencilRef = 2.
+std::string buildTestCheckShader(bool hasDepth,
+                                 bool hasStencil,
+                                 std::optional<bool> depthReadOnly,
+                                 std::optional<bool> stencilReadOnly) {
+    const bool depthRO = depthReadOnly.value_or(false);     // !!depthReadOnly
+    const bool stencilRO = stencilReadOnly.value_or(false); // !!stencilReadOnly
+    std::ostringstream s;
+    s << R"(
+          @group(0) @binding(0) var depthTex : texture_2d<f32>;
+          @group(0) @binding(1) var stencilTex : texture_2d<u32>;
 
-    std::string s;
-    s.reserve(1200);
-    s += "@group(0) @binding(0) var depthTex : texture_2d<f32>;\n";
-    s += "@group(0) @binding(1) var stencilTex : texture_2d<u32>;\n";
-    s += "@vertex fn full_quad_vs(@builtin(vertex_index) id : u32) -> @builtin(position) vec4f {\n";
-    s += "  let pos = array(vec2f(-3, -1), vec2(3, -1), vec2(0, 2));\n";
-    s += "  return vec4f(pos[id], 0.15, 1.0);\n";
-    s += "}\n";
-    s += "@fragment fn test_texture(@builtin(position) pos : vec4f) {\n";
-    s += "  let texel = vec2u(floor(pos.xy));\n";
-    s += "  if "; s += sr; s += " && textureLoad(stencilTex, texel, 0).r > 2 { discard; }\n";
-    s += "  if "; s += dr; s += " && textureLoad(depthTex, texel, 0).r > 0.21 { discard; }\n";
-    s += "}\n";
-    s += "@fragment fn check_texture(@builtin(position) pos : vec4f) -> @location(0) u32 {\n";
-    s += "  let texel = vec2u(floor(pos.xy));\n";
-    s += "  let initStencil = texel.x + 1;\n";
-    s += "  let initDepth = f32(texel.y + 1) / 10.0;\n";
-    s += "  let stencilTestPasses = !true || 2 <= initStencil;\n";
-    s += "  let depthTestPasses = !true || 0.15 <= initDepth;\n";
-    s += "  let fsDiscards = ("; s += sr; s += " && initStencil > 2) || ("; s += dr; s += " && initDepth > 0.21);\n";
-    s += "  var stencil = initStencil;\n";
-    s += "  var depth = initDepth;\n";
-    s += "  if depthTestPasses && stencilTestPasses && !fsDiscards {\n";
-    s += "    if "; s += not_sr; s += " { stencil += 1; }\n";
-    s += "    if "; s += not_dr; s += " { depth = 0.15; }\n";
-    s += "  }\n";
-    s += "  if true && textureLoad(stencilTex, texel, 0).r != stencil { return 0; }\n";
-    s += "  if true && abs(textureLoad(depthTex, texel, 0).r - depth) > 0.01 { return 0; }\n";
-    s += "  return 1;\n";
-    s += "}\n";
-    return s;
+          @vertex fn full_quad_vs(@builtin(vertex_index) id : u32) -> @builtin(position) vec4f {
+            let pos = array(vec2f(-3, -1), vec2(3, -1), vec2(0, 2));
+            return vec4f(pos[id], 0.15, 1.0);
+          }
+
+          @fragment fn test_texture(@builtin(position) pos : vec4f) {
+            let texel = vec2u(floor(pos.xy));
+            if )" << boolLiteral(stencilRO) << R"( && textureLoad(stencilTex, texel, 0).r > 2 {
+                discard;
+            }
+            if )" << boolLiteral(depthRO) << R"( && textureLoad(depthTex, texel, 0).r > 0.21 {
+                discard;
+            }
+          }
+
+          @fragment fn check_texture(@builtin(position) pos : vec4f) -> @location(0) u32 {
+            let texel = vec2u(floor(pos.xy));
+
+            // The current values in the framebuffer.
+            let initStencil = texel.x + 1;
+            let initDepth = f32(texel.y + 1) / 10.0;
+
+            // Expected results of the test_texture step.
+            let stencilTestPasses = !)" << boolLiteral(hasStencil) << R"( || 2 <= initStencil;
+            let depthTestPasses = !)" << boolLiteral(hasDepth) << R"( || 0.15 <= initDepth;
+            let fsDiscards = ()" << boolLiteral(stencilRO) << R"( && initStencil > 2) ||
+                             ()" << boolLiteral(depthRO) << R"( && initDepth > 0.21);
+
+            // Compute the values that should be in the framebuffer.
+            var stencil = initStencil;
+            var depth = initDepth;
+
+            // When the fragments aren't discarded, fragment output operations happen.
+            if depthTestPasses && stencilTestPasses && !fsDiscards {
+                if )" << boolLiteral(!stencilRO) << R"( {
+                    stencil += 1;
+                }
+                if )" << boolLiteral(!depthRO) << R"( {
+                    depth = 0.15;
+                }
+            }
+
+            if )" << boolLiteral(hasStencil) << R"( && textureLoad(stencilTex, texel, 0).r != stencil {
+                return 0;
+            }
+            if )" << boolLiteral(hasDepth) << R"( && abs(textureLoad(depthTex, texel, 0).r - depth) > 0.01 {
+                return 0;
+            }
+            return 1;
+          }
+    )";
+    return s.str();
 }
 
-// ---------------------------------------------------------------------------
-// Core test logic, called for each (depthReadOnly, stencilReadOnly) combo.
-// ---------------------------------------------------------------------------
-static void runSamplingWhileTesting(AllFeaturesMaxLimitsGpuTest& t,
-                                    bool depthReadOnly,
-                                    bool stencilReadOnly) {
-    // ----- Textures -----
-    // ds: 3x3 depth24plus-stencil8, RENDER_ATTACHMENT | TEXTURE_BINDING
-    WGPUTextureDescriptor dsDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    dsDesc.size          = WGPUExtent3D{3, 3, 1};
-    dsDesc.mipLevelCount = 1;
-    dsDesc.sampleCount   = 1;
-    dsDesc.dimension     = WGPUTextureDimension_2D;
-    dsDesc.format        = WGPUTextureFormat_Depth24PlusStencil8;
-    dsDesc.usage         = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
-    WGPUTexture ds = t.createTextureTracked(dsDesc);
+std::optional<bool> optionalBoolParam(const AllFeaturesMaxLimitsGpuTest& t, std::string_view key) {
+    if (t.paramIsUndefined(key)) {
+        return std::nullopt;
+    }
+    return t.param<bool>(key);
+}
 
-    // resultTexture: 3x3 r32uint, RENDER_ATTACHMENT | COPY_SRC
-    WGPUTextureDescriptor resultDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    resultDesc.size          = WGPUExtent3D{3, 3, 1};
-    resultDesc.mipLevelCount = 1;
-    resultDesc.sampleCount   = 1;
-    resultDesc.dimension     = WGPUTextureDimension_2D;
-    resultDesc.format        = WGPUTextureFormat_R32Uint;
-    resultDesc.usage         = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
-    WGPUTexture resultTexture = t.createTextureTracked(resultDesc);
+WGPUTexture createTexture2D(AllFeaturesMaxLimitsGpuTest& t,
+                            WGPUTextureFormat format,
+                            uint32_t width,
+                            uint32_t height,
+                            WGPUTextureUsage usage) {
+    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    desc.size = WGPUExtent3D{width, height, 1};
+    desc.mipLevelCount = 1;
+    desc.sampleCount = 1;
+    desc.dimension = WGPUTextureDimension_2D;
+    desc.format = format;
+    desc.usage = usage;
+    return t.createTextureTracked(desc);
+}
 
-    // fakeStencil: r32uint 1x1 TEXTURE_BINDING (used when stencilReadOnly=false)
-    WGPUTextureDescriptor fakeStencilDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    fakeStencilDesc.size          = WGPUExtent3D{1, 1, 1};
-    fakeStencilDesc.mipLevelCount = 1;
-    fakeStencilDesc.sampleCount   = 1;
-    fakeStencilDesc.dimension     = WGPUTextureDimension_2D;
-    fakeStencilDesc.format        = WGPUTextureFormat_R32Uint;
-    fakeStencilDesc.usage         = WGPUTextureUsage_TextureBinding;
-    WGPUTexture fakeStencil = t.createTextureTracked(fakeStencilDesc);
+WGPUTextureView createView(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture, WGPUTextureAspect aspect) {
+    WGPUTextureViewDescriptor desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    desc.aspect = aspect;
+    return t.createViewTracked(texture, desc);
+}
 
-    // fakeDepth: r32float 1x1 TEXTURE_BINDING (used when depthReadOnly=false)
-    WGPUTextureDescriptor fakeDepthDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    fakeDepthDesc.size          = WGPUExtent3D{1, 1, 1};
-    fakeDepthDesc.mipLevelCount = 1;
-    fakeDepthDesc.sampleCount   = 1;
-    fakeDepthDesc.dimension     = WGPUTextureDimension_2D;
-    fakeDepthDesc.format        = WGPUTextureFormat_R32Float;
-    fakeDepthDesc.usage         = WGPUTextureUsage_TextureBinding;
-    WGPUTexture fakeDepth = t.createTextureTracked(fakeDepthDesc);
+WGPUBindGroup createDepthStencilBindGroup(AllFeaturesMaxLimitsGpuTest& t,
+                                          WGPURenderPipeline pipeline,
+                                          WGPUTextureView depthView,
+                                          WGPUTextureView stencilView) {
+    WGPUBindGroupLayout layout = wgpuRenderPipelineGetBindGroupLayout(pipeline, 0);
+    WGPUBindGroupEntry entries[2] = {
+        WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT,
+    };
+    entries[0].binding = 0;
+    entries[0].textureView = depthView;
+    entries[1].binding = 1;
+    entries[1].textureView = stencilView;
+    WGPUBindGroupDescriptor desc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    desc.layout = layout;
+    desc.entryCount = 2;
+    desc.entries = entries;
+    WGPUBindGroup bindGroup = t.createBindGroupTracked(desc);
+    wgpuBindGroupLayoutRelease(layout);
+    return bindGroup;
+}
 
-    // Full-texture view (used for init pass and test pass DS attachment)
-    WGPUTextureViewDescriptor fullViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    WGPUTextureView dsFullView = t.createViewTracked(ds, fullViewDesc);
+std::vector<Value> depthStencilFormatValues() {
+    std::vector<Value> values;
+    for (WGPUTextureFormat format : kDepthStencilFormats) {
+        values.emplace_back(std::string(textureFormatIdentifier(format)));
+    }
+    return values;
+}
 
-    // Depth-only aspect view (bound as texture_2d<f32>)
-    WGPUTextureViewDescriptor depthViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    depthViewDesc.aspect = WGPUTextureAspect_DepthOnly;
-    WGPUTextureView dsDepthView = t.createViewTracked(ds, depthViewDesc);
+CTS_TEST(g, "sampling_while_testing")
+    .desc(R"(Tests concurrent sampling and testing of readonly depth-stencil attachments in a render pass.
+      - Test for all depth-stencil formats.
+      - Test for all valid combinations of depth/stencilReadOnly.
 
-    // Stencil-only aspect view (bound as texture_2d<u32>)
-    WGPUTextureViewDescriptor stencilViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    stencilViewDesc.aspect = WGPUTextureAspect_StencilOnly;
-    WGPUTextureView dsStencilView = t.createViewTracked(ds, stencilViewDesc);
+In particular this test checks that a non-readonly aspect can be rendered to, and used for depth/stencil
+testing while the other one is used for sampling.
+  )")
+    .params([](ParamsBuilder u) {
+        return u.combine("format", depthStencilFormatValues())
+            .combine("depthReadOnly", {Value(true), Value(false), Value::undef()})
+            .combine("stencilReadOnly", {Value(true), Value(false), Value::undef()})
+            .filter([](const ParamRecord& p) {
+                const WGPUTextureFormat format = parseTextureFormat(valueAs<std::string>(*findParam(p, "format")));
+                const bool depthUndefined =
+                    std::holds_alternative<Value::Undefined>(findParam(p, "depthReadOnly")->data());
+                const bool stencilUndefined =
+                    std::holds_alternative<Value::Undefined>(findParam(p, "stencilReadOnly")->data());
+                const bool depthMatch = !isDepthTextureFormat(format) == depthUndefined;
+                const bool stencilMatch = !isStencilTextureFormat(format) == stencilUndefined;
+                return depthMatch && stencilMatch;
+            });
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+        const std::optional<bool> depthReadOnly = optionalBoolParam(t, "depthReadOnly");
+        const std::optional<bool> stencilReadOnly = optionalBoolParam(t, "stencilReadOnly");
+        const bool depthRO = depthReadOnly.value_or(false);
+        const bool stencilRO = stencilReadOnly.value_or(false);
+        const bool hasDepth = isDepthTextureFormat(format);
+        const bool hasStencil = isStencilTextureFormat(format);
 
-    // fakeDepth and fakeStencil views (default view for 1x1 textures)
-    WGPUTextureViewDescriptor fakeViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    WGPUTextureView fakeDepthView   = t.createViewTracked(fakeDepth,   fakeViewDesc);
-    WGPUTextureView fakeStencilView = t.createViewTracked(fakeStencil, fakeViewDesc);
+        t.skipIfTextureFormatNotSupported(format);
 
-    // Result texture view
-    WGPUTextureViewDescriptor resultViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    WGPUTextureView resultView = t.createViewTracked(resultTexture, resultViewDesc);
+        // The 3x3 depth stencil texture used for the tests.
+        WGPUTexture ds = createTexture2D(t, format, 3, 3,
+                                         WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding);
 
-    // ----- Shader modules -----
-    WGPUShaderModule initModule = t.createShaderModuleTracked(kInitShader);
+        // Fill the texture along the X axis with stencil values 1, 2, 3 and along the Y axis depth
+        // values 0.1, 0.2, 0.3. The depth value is written using @builtin(frag_depth) while the
+        // stencil is written using stencil operation and modifying the stencilReference.
+        WGPUShaderModule initModule = t.createShaderModuleTracked(kInitShader);
 
-    // Build test/check WGSL per combo
-    std::string testCheckWgsl = buildTestCheckShader(depthReadOnly, stencilReadOnly);
-    WGPUShaderModule testCheckModule = t.createShaderModuleTracked(testCheckWgsl);
+        WGPUDepthStencilState initDepthStencil = WGPU_DEPTH_STENCIL_STATE_INIT;
+        initDepthStencil.format = format;
+        if (hasDepth) {
+            initDepthStencil.depthWriteEnabled = WGPUOptionalBool_True;
+            initDepthStencil.depthCompare = WGPUCompareFunction_Always;
+        }
+        if (hasStencil) {
+            initDepthStencil.stencilBack.compare = WGPUCompareFunction_Always;
+            initDepthStencil.stencilBack.passOp = WGPUStencilOperation_Replace;
+            initDepthStencil.stencilFront.compare = WGPUCompareFunction_Always;
+            initDepthStencil.stencilFront.passOp = WGPUStencilOperation_Replace;
+        }
 
-    // ----- initPipeline -----
-    // layout auto, vertex=vs, fragment=fs_with_depth (targets []),
-    // depthStencil {format, depthWriteEnabled true, depthCompare always,
-    //               stencilFront/Back {compare always, passOp replace}},
-    // primitive point-list.
-    WGPUDepthStencilState initDS = WGPU_DEPTH_STENCIL_STATE_INIT;
-    initDS.format                   = WGPUTextureFormat_Depth24PlusStencil8;
-    initDS.depthWriteEnabled        = WGPUOptionalBool_True;
-    initDS.depthCompare             = WGPUCompareFunction_Always;
-    initDS.stencilFront.compare     = WGPUCompareFunction_Always;
-    initDS.stencilFront.passOp      = WGPUStencilOperation_Replace;
-    initDS.stencilBack.compare      = WGPUCompareFunction_Always;
-    initDS.stencilBack.passOp       = WGPUStencilOperation_Replace;
+        WGPUFragmentState initFragment = WGPU_FRAGMENT_STATE_INIT;
+        initFragment.module = initModule;
+        initFragment.entryPoint = sv(hasDepth ? "fs_with_depth" : "fs_no_depth");
+        initFragment.targetCount = 0;
 
-    WGPUFragmentState initFrag = WGPU_FRAGMENT_STATE_INIT;
-    initFrag.module      = initModule;
-    initFrag.entryPoint  = sv("fs_with_depth");
-    initFrag.targetCount = 0;
-    initFrag.targets     = nullptr;
+        WGPURenderPipelineDescriptor initPipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        initPipelineDesc.label = sv("initPipeline");
+        initPipelineDesc.layout = nullptr; // auto
+        initPipelineDesc.vertex.module = initModule;
+        initPipelineDesc.vertex.entryPoint = sv("vs");
+        initPipelineDesc.fragment = &initFragment;
+        initPipelineDesc.depthStencil = &initDepthStencil;
+        initPipelineDesc.primitive.topology = WGPUPrimitiveTopology_PointList;
+        WGPURenderPipeline initPipeline = t.createRenderPipelineTracked(initPipelineDesc);
 
-    WGPURenderPipelineDescriptor initPipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-    initPipeDesc.layout                = nullptr; // auto
-    initPipeDesc.vertex.module         = initModule;
-    initPipeDesc.vertex.entryPoint     = sv("vs");
-    initPipeDesc.fragment              = &initFrag;
-    initPipeDesc.depthStencil          = &initDS;
-    initPipeDesc.primitive.topology    = WGPUPrimitiveTopology_PointList;
-    initPipeDesc.multisample.count     = 1;
-    WGPURenderPipeline initPipeline = t.createRenderPipelineTracked(initPipeDesc);
-
-    // ----- testPipeline -----
-    // layout auto, vertex=full_quad_vs, fragment=test_texture (targets []),
-    // depthStencil {format, depthCompare less-equal,
-    //               depthWriteEnabled = !depthReadOnly,
-    //               stencilFront/Back {compare less-equal, passOp = stencilReadOnly ? keep : increment-clamp}},
-    // primitive triangle-list.
-    WGPUDepthStencilState testDS = WGPU_DEPTH_STENCIL_STATE_INIT;
-    testDS.format               = WGPUTextureFormat_Depth24PlusStencil8;
-    testDS.depthWriteEnabled    = depthReadOnly ? WGPUOptionalBool_False : WGPUOptionalBool_True;
-    testDS.depthCompare         = WGPUCompareFunction_LessEqual;
-    testDS.stencilFront.compare = WGPUCompareFunction_LessEqual;
-    testDS.stencilFront.passOp  = stencilReadOnly
-                                      ? WGPUStencilOperation_Keep
-                                      : WGPUStencilOperation_IncrementClamp;
-    testDS.stencilBack.compare  = WGPUCompareFunction_LessEqual;
-    testDS.stencilBack.passOp   = stencilReadOnly
-                                      ? WGPUStencilOperation_Keep
-                                      : WGPUStencilOperation_IncrementClamp;
-
-    WGPUFragmentState testFrag = WGPU_FRAGMENT_STATE_INIT;
-    testFrag.module      = testCheckModule;
-    testFrag.entryPoint  = sv("test_texture");
-    testFrag.targetCount = 0;
-    testFrag.targets     = nullptr;
-
-    WGPURenderPipelineDescriptor testPipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-    testPipeDesc.layout                = nullptr; // auto
-    testPipeDesc.vertex.module         = testCheckModule;
-    testPipeDesc.vertex.entryPoint     = sv("full_quad_vs");
-    testPipeDesc.fragment              = &testFrag;
-    testPipeDesc.depthStencil          = &testDS;
-    testPipeDesc.primitive.topology    = WGPUPrimitiveTopology_TriangleList;
-    testPipeDesc.multisample.count     = 1;
-    WGPURenderPipeline testPipeline = t.createRenderPipelineTracked(testPipeDesc);
-
-    // ----- checkPipeline -----
-    // layout auto, vertex=full_quad_vs, fragment=check_texture (targets [{r32uint}]),
-    // primitive triangle-list.  No depthStencil.
-    WGPUColorTargetState checkColorTarget = WGPU_COLOR_TARGET_STATE_INIT;
-    checkColorTarget.format    = WGPUTextureFormat_R32Uint;
-    // writeMask default All via WGPU_COLOR_TARGET_STATE_INIT
-
-    WGPUFragmentState checkFrag = WGPU_FRAGMENT_STATE_INIT;
-    checkFrag.module      = testCheckModule;
-    checkFrag.entryPoint  = sv("check_texture");
-    checkFrag.targetCount = 1;
-    checkFrag.targets     = &checkColorTarget;
-
-    WGPURenderPipelineDescriptor checkPipeDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-    checkPipeDesc.layout                = nullptr; // auto
-    checkPipeDesc.vertex.module         = testCheckModule;
-    checkPipeDesc.vertex.entryPoint     = sv("full_quad_vs");
-    checkPipeDesc.fragment              = &checkFrag;
-    checkPipeDesc.depthStencil          = nullptr;
-    checkPipeDesc.primitive.topology    = WGPUPrimitiveTopology_TriangleList;
-    checkPipeDesc.multisample.count     = 1;
-    WGPURenderPipeline checkPipeline = t.createRenderPipelineTracked(checkPipeDesc);
-
-    // ----- Bind groups -----
-    // testBindGroup:
-    //   binding 0 = depthReadOnly  ? ds depth-only view : fakeDepth view
-    //   binding 1 = stencilReadOnly ? ds stencil-only view : fakeStencil view
-    WGPUTextureView testDepthView   = depthReadOnly   ? dsDepthView   : fakeDepthView;
-    WGPUTextureView testStencilView = stencilReadOnly ? dsStencilView : fakeStencilView;
-
-    {
-        WGPUBindGroupLayout testBgl = wgpuRenderPipelineGetBindGroupLayout(testPipeline, 0);
-
-        WGPUBindGroupEntry testEntries[2] = {
-            WGPU_BIND_GROUP_ENTRY_INIT,
-            WGPU_BIND_GROUP_ENTRY_INIT,
-        };
-        testEntries[0].binding     = 0;
-        testEntries[0].textureView = testDepthView;
-        testEntries[1].binding     = 1;
-        testEntries[1].textureView = testStencilView;
-
-        WGPUBindGroupDescriptor testBgDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-        testBgDesc.layout     = testBgl;
-        testBgDesc.entryCount = 2;
-        testBgDesc.entries    = testEntries;
-        WGPUBindGroup testBindGroup = t.createBindGroupTracked(testBgDesc);
-        wgpuBindGroupLayoutRelease(testBgl);
-
-        // checkBindGroup: always uses real ds aspect views (hasDepth=hasStencil=true)
-        WGPUBindGroupLayout checkBgl = wgpuRenderPipelineGetBindGroupLayout(checkPipeline, 0);
-
-        WGPUBindGroupEntry checkEntries[2] = {
-            WGPU_BIND_GROUP_ENTRY_INIT,
-            WGPU_BIND_GROUP_ENTRY_INIT,
-        };
-        checkEntries[0].binding     = 0;
-        checkEntries[0].textureView = dsDepthView;
-        checkEntries[1].binding     = 1;
-        checkEntries[1].textureView = dsStencilView;
-
-        WGPUBindGroupDescriptor checkBgDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-        checkBgDesc.layout     = checkBgl;
-        checkBgDesc.entryCount = 2;
-        checkBgDesc.entries    = checkEntries;
-        WGPUBindGroup checkBindGroup = t.createBindGroupTracked(checkBgDesc);
-        wgpuBindGroupLayoutRelease(checkBgl);
-
-        // ----- One command encoder, three passes -----
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
 
-        // === Pass 1: init ===
-        // depthStencilAttachment: depthLoadOp clear, depthStoreOp store, depthClearValue 0,
-        //                        stencilLoadOp clear, stencilStoreOp store, stencilClearValue 0.
         {
-            WGPURenderPassDepthStencilAttachment initDsAtt =
-                WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
-            initDsAtt.view             = dsFullView;
-            initDsAtt.depthLoadOp      = WGPULoadOp_Clear;
-            initDsAtt.depthStoreOp     = WGPUStoreOp_Store;
-            initDsAtt.depthClearValue  = 0.0f;
-            initDsAtt.stencilLoadOp    = WGPULoadOp_Clear;
-            initDsAtt.stencilStoreOp   = WGPUStoreOp_Store;
-            initDsAtt.stencilClearValue = 0;
-
-            WGPURenderPassDescriptor initPassDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-            initPassDesc.colorAttachmentCount   = 0;
-            initPassDesc.colorAttachments       = nullptr;
-            initPassDesc.depthStencilAttachment = &initDsAtt;
-
-            WGPURenderPassEncoder initPass =
-                t.beginRenderPassTracked(encoder, &initPassDesc);
+            WGPURenderPassDepthStencilAttachment attachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+            attachment.view = createView(t, ds, WGPUTextureAspect_All);
+            if (hasDepth) {
+                attachment.depthLoadOp = WGPULoadOp_Clear;
+                attachment.depthStoreOp = WGPUStoreOp_Store;
+                attachment.depthClearValue = 0.0f;
+            }
+            if (hasStencil) {
+                attachment.stencilLoadOp = WGPULoadOp_Clear;
+                attachment.stencilStoreOp = WGPUStoreOp_Store;
+                attachment.stencilClearValue = 0;
+            }
+            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            passDesc.colorAttachmentCount = 0;
+            passDesc.depthStencilAttachment = &attachment;
+            WGPURenderPassEncoder initPass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderSetPipeline(initPass, initPipeline);
-            // Draw 3 columns (X = 0,1,2), each as instance i; 3 points (Y=0,1,2).
             for (uint32_t i = 0; i < 3; ++i) {
                 wgpuRenderPassEncoderSetStencilReference(initPass, i + 1);
+                // Draw 3 points (Y = 0, 1, 2) at X = instance_index = i.
                 wgpuRenderPassEncoderDraw(initPass, 3, 1, 0, i);
             }
             wgpuRenderPassEncoderEnd(initPass);
         }
 
-        // === Pass 2: test ===
-        // DS attachment per combo:
-        //   depthReadOnly  → depthReadOnly=WGPU_TRUE (load/store ops left Undefined)
-        //                    else depthLoadOp Load + depthStoreOp Store
-        //   stencilReadOnly → stencilReadOnly=WGPU_TRUE (load/store ops left Undefined)
-        //                    else stencilLoadOp Load + stencilStoreOp Store
-        // setStencilReference(2).
+        // Perform the actual test:
+        //   - The shader outputs depth 0.15 and stencil 2 (via stencilReference).
+        //   - Test that the fragdepth / stencilref must be <= to what's in the depth-stencil
+        //     attachment. -> Fragments that have depth 0.1 or stencil 1 are tested out.
+        //   - Test that sampling the depth / stencil (when possible) is <= 0.2 for depth, <= 2 for
+        //     stencil. -> Fragments that have depth 0.3 or stencil 3 are discarded if that aspect
+        //     is readonly.
+        //   - Write the depth / increment the stencil if the aspect is not readonly.
+        //     -> After the test, fragments that passed will have non-readonly aspects updated.
+        constexpr uint32_t kStencilRef = 2;
+        WGPUShaderModule testAndCheckModule =
+            t.createShaderModuleTracked(buildTestCheckShader(hasDepth, hasStencil, depthReadOnly, stencilReadOnly));
+
+        WGPUDepthStencilState testDepthStencil = WGPU_DEPTH_STENCIL_STATE_INIT;
+        testDepthStencil.format = format;
+        if (hasDepth) {
+            testDepthStencil.depthCompare = WGPUCompareFunction_LessEqual;
+            testDepthStencil.depthWriteEnabled = depthRO ? WGPUOptionalBool_False : WGPUOptionalBool_True;
+        }
+        if (hasStencil) {
+            const WGPUStencilOperation passOp =
+                stencilRO ? WGPUStencilOperation_Keep : WGPUStencilOperation_IncrementClamp;
+            testDepthStencil.stencilBack.compare = WGPUCompareFunction_LessEqual;
+            testDepthStencil.stencilBack.passOp = passOp;
+            testDepthStencil.stencilFront.compare = WGPUCompareFunction_LessEqual;
+            testDepthStencil.stencilFront.passOp = passOp;
+        }
+
+        WGPUFragmentState testFragment = WGPU_FRAGMENT_STATE_INIT;
+        testFragment.module = testAndCheckModule;
+        testFragment.entryPoint = sv("test_texture");
+        testFragment.targetCount = 0;
+
+        WGPURenderPipelineDescriptor testPipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        testPipelineDesc.label = sv("testPipeline");
+        testPipelineDesc.layout = nullptr; // auto
+        testPipelineDesc.vertex.module = testAndCheckModule;
+        testPipelineDesc.vertex.entryPoint = sv("full_quad_vs");
+        testPipelineDesc.fragment = &testFragment;
+        testPipelineDesc.depthStencil = &testDepthStencil;
+        testPipelineDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        WGPURenderPipeline testPipeline = t.createRenderPipelineTracked(testPipelineDesc);
+
+        // Make fake stencil or depth textures to put in the bindgroup if the aspect is not readonly.
+        WGPUTexture fakeStencil = createTexture2D(t, WGPUTextureFormat_R32Uint, 1, 1, WGPUTextureUsage_TextureBinding);
+        WGPUTexture fakeDepth = createTexture2D(t, WGPUTextureFormat_R32Float, 1, 1, WGPUTextureUsage_TextureBinding);
+        WGPUTextureView stencilView = stencilRO ? createView(t, ds, WGPUTextureAspect_StencilOnly)
+                                                : createView(t, fakeStencil, WGPUTextureAspect_All);
+        WGPUTextureView depthView = depthRO ? createView(t, ds, WGPUTextureAspect_DepthOnly)
+                                            : createView(t, fakeDepth, WGPUTextureAspect_All);
+        WGPUBindGroup testBindGroup = createDepthStencilBindGroup(t, testPipeline, depthView, stencilView);
+
+        // Run the test.
         {
-            WGPURenderPassDepthStencilAttachment testDsAtt =
-                WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
-            testDsAtt.view = dsFullView;
-
-            if (depthReadOnly) {
-                testDsAtt.depthReadOnly = WGPU_TRUE;
-                // depthLoadOp/depthStoreOp remain Undefined (required for read-only aspect)
-            } else {
-                testDsAtt.depthLoadOp  = WGPULoadOp_Load;
-                testDsAtt.depthStoreOp = WGPUStoreOp_Store;
+            WGPURenderPassDepthStencilAttachment attachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+            attachment.view = createView(t, ds, WGPUTextureAspect_All);
+            if (hasDepth) {
+                if (depthRO) {
+                    attachment.depthReadOnly = WGPU_TRUE;
+                } else {
+                    attachment.depthLoadOp = WGPULoadOp_Load;
+                    attachment.depthStoreOp = WGPUStoreOp_Store;
+                }
             }
-
-            if (stencilReadOnly) {
-                testDsAtt.stencilReadOnly = WGPU_TRUE;
-                // stencilLoadOp/stencilStoreOp remain Undefined
-            } else {
-                testDsAtt.stencilLoadOp  = WGPULoadOp_Load;
-                testDsAtt.stencilStoreOp = WGPUStoreOp_Store;
+            if (hasStencil) {
+                if (stencilRO) {
+                    attachment.stencilReadOnly = WGPU_TRUE;
+                } else {
+                    attachment.stencilLoadOp = WGPULoadOp_Load;
+                    attachment.stencilStoreOp = WGPUStoreOp_Store;
+                }
             }
-
-            WGPURenderPassDescriptor testPassDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-            testPassDesc.colorAttachmentCount   = 0;
-            testPassDesc.colorAttachments       = nullptr;
-            testPassDesc.depthStencilAttachment = &testDsAtt;
-
-            WGPURenderPassEncoder testPass =
-                t.beginRenderPassTracked(encoder, &testPassDesc);
+            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            passDesc.colorAttachmentCount = 0;
+            passDesc.depthStencilAttachment = &attachment;
+            WGPURenderPassEncoder testPass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderSetPipeline(testPass, testPipeline);
-            wgpuRenderPassEncoderSetStencilReference(testPass, 2);
+            wgpuRenderPassEncoderSetStencilReference(testPass, kStencilRef);
             wgpuRenderPassEncoderSetBindGroup(testPass, 0, testBindGroup, 0, nullptr);
             wgpuRenderPassEncoderDraw(testPass, 3, 1, 0, 0);
             wgpuRenderPassEncoderEnd(testPass);
         }
 
-        // === Pass 3: check ===
-        // Color attachment: resultTexture, loadOp clear, clearValue [0,0,0,0], storeOp store.
+        // Check that the contents of the textures are what we expect. See the shader module for
+        // the computation of what's expected, it writes a 1 on success, 0 otherwise.
+        WGPUColorTargetState checkTarget = WGPU_COLOR_TARGET_STATE_INIT;
+        checkTarget.format = WGPUTextureFormat_R32Uint;
+
+        WGPUFragmentState checkFragment = WGPU_FRAGMENT_STATE_INIT;
+        checkFragment.module = testAndCheckModule;
+        checkFragment.entryPoint = sv("check_texture");
+        checkFragment.targetCount = 1;
+        checkFragment.targets = &checkTarget;
+
+        WGPURenderPipelineDescriptor checkPipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        checkPipelineDesc.label = sv("checkPipeline");
+        checkPipelineDesc.layout = nullptr; // auto
+        checkPipelineDesc.vertex.module = testAndCheckModule;
+        checkPipelineDesc.vertex.entryPoint = sv("full_quad_vs");
+        checkPipelineDesc.fragment = &checkFragment;
+        checkPipelineDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        WGPURenderPipeline checkPipeline = t.createRenderPipelineTracked(checkPipelineDesc);
+
+        WGPUBindGroup checkBindGroup = createDepthStencilBindGroup(
+            t, checkPipeline,
+            hasDepth ? createView(t, ds, WGPUTextureAspect_DepthOnly) : createView(t, fakeDepth, WGPUTextureAspect_All),
+            hasStencil ? createView(t, ds, WGPUTextureAspect_StencilOnly)
+                       : createView(t, fakeStencil, WGPUTextureAspect_All));
+
+        WGPUTexture resultTexture = createTexture2D(t, WGPUTextureFormat_R32Uint, 3, 3,
+                                                    WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc);
         {
-            WGPURenderPassColorAttachment checkColorAtt =
-                WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-            checkColorAtt.view       = resultView;
-            checkColorAtt.loadOp     = WGPULoadOp_Clear;
-            checkColorAtt.storeOp    = WGPUStoreOp_Store;
-            checkColorAtt.clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
-
-            WGPURenderPassDescriptor checkPassDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-            checkPassDesc.colorAttachmentCount   = 1;
-            checkPassDesc.colorAttachments       = &checkColorAtt;
-            checkPassDesc.depthStencilAttachment = nullptr;
-
-            WGPURenderPassEncoder checkPass =
-                t.beginRenderPassTracked(encoder, &checkPassDesc);
+            WGPURenderPassColorAttachment attachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+            attachment.view = createView(t, resultTexture, WGPUTextureAspect_All);
+            attachment.loadOp = WGPULoadOp_Clear;
+            attachment.clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
+            attachment.storeOp = WGPUStoreOp_Store;
+            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            passDesc.colorAttachmentCount = 1;
+            passDesc.colorAttachments = &attachment;
+            WGPURenderPassEncoder checkPass = t.beginRenderPassTracked(encoder, &passDesc);
             wgpuRenderPassEncoderSetPipeline(checkPass, checkPipeline);
             wgpuRenderPassEncoderSetBindGroup(checkPass, 0, checkBindGroup, 0, nullptr);
             wgpuRenderPassEncoderDraw(checkPass, 3, 1, 0, 0);
             wgpuRenderPassEncoderEnd(checkPass);
         }
 
-        // Submit all three passes.
-        WGPUCommandBuffer cmdBuf = t.finishTracked(encoder);
-        wgpuQueueSubmit(t.queue(), 1, &cmdBuf);
-    }
+        WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
+        wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
 
-    // ----- Verify -----
-    // Copy resultTexture (3x3 r32uint) to a readback buffer.
-    // bytesPerRow 256, rowsPerImage 3, size {3,3,1}.
-    // Texel (x,y) lives at byte y*256 + x*4; must be u32 == 1.
-    constexpr uint64_t kBytesPerRow  = 256;
-    constexpr uint64_t kRowsPerImage = 3;
-    constexpr uint64_t kReadbackSize = kBytesPerRow * kRowsPerImage; // 768 bytes
-
-    WGPUBufferDescriptor rbDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    rbDesc.size  = kReadbackSize;
-    rbDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
-    // Zero-init: do not pre-fill with expected value (would mask no-write bugs).
-    WGPUBuffer readback = t.createBufferTracked(rbDesc);
-
-    {
-        WGPUTexelCopyTextureInfo src = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
-        src.texture  = resultTexture;
-        src.mipLevel = 0;
-        src.origin   = WGPUOrigin3D{0, 0, 0};
-        src.aspect   = WGPUTextureAspect_All;
-
-        WGPUTexelCopyBufferInfo dst = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
-        dst.buffer              = readback;
-        dst.layout.offset       = 0;
-        dst.layout.bytesPerRow  = static_cast<uint32_t>(kBytesPerRow);
-        dst.layout.rowsPerImage = static_cast<uint32_t>(kRowsPerImage);
-
-        WGPUExtent3D copySize = WGPUExtent3D{3, 3, 1};
+        // The check texture should be full of success (a.k.a. 1)!
+        // expectSingleColor(resultTexture, 'r32uint', {size: [3, 3, 1], exp: {R: 1}}).
+        constexpr uint64_t kReadbackSize = uint64_t{kResultBytesPerRow} * 2 + 3 * 4;
+        WGPUBufferDescriptor readbackDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
+        readbackDesc.size = kReadbackSize;
+        readbackDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
+        WGPUBuffer readback = t.createBufferTracked(readbackDesc);
 
         WGPUCommandEncoder copyEncoder = t.createCommandEncoderTracked();
-        wgpuCommandEncoderCopyTextureToBuffer(copyEncoder, &src, &dst, &copySize);
-        WGPUCommandBuffer copyCmdBuf = t.finishTracked(copyEncoder);
-        wgpuQueueSubmit(t.queue(), 1, &copyCmdBuf);
-    }
+        t.copyTextureToBuffer(copyEncoder, resultTexture, readback, kResultBytesPerRow, WGPUExtent3D{3, 3, 1});
+        WGPUCommandBuffer copyCommandBuffer = t.finishTracked(copyEncoder);
+        wgpuQueueSubmit(t.queue(), 1, &copyCommandBuffer);
 
-    t.expectGPUBufferValuesPassCheck(
-        readback,
-        [](const uint8_t* actual, size_t len) -> std::optional<std::string> {
-            // Each of the 9 texels must read back as u32 == 1.
-            for (uint32_t y = 0; y < 3; ++y) {
-                for (uint32_t x = 0; x < 3; ++x) {
-                    const size_t byteOffset = y * 256u + x * 4u;
-                    if (byteOffset + 4 > len) {
-                        std::ostringstream msg;
-                        msg << "readback buffer too small at texel (" << x << "," << y
-                            << "): need " << (byteOffset + 4) << " bytes, got " << len;
-                        return msg.str();
-                    }
-                    uint32_t value = 0;
-                    std::memcpy(&value, actual + byteOffset, 4);
-                    if (value != 1u) {
-                        std::ostringstream msg;
-                        msg << "resultTexture texel (" << x << "," << y
-                            << ") expected 1, got " << value;
-                        return msg.str();
+        t.expectGPUBufferValuesPassCheck(
+            readback,
+            [](const uint8_t* actual, size_t len) -> std::optional<std::string> {
+                for (uint32_t y = 0; y < 3; ++y) {
+                    for (uint32_t x = 0; x < 3; ++x) {
+                        const size_t offset = static_cast<size_t>(y) * kResultBytesPerRow + static_cast<size_t>(x) * 4;
+                        if (offset + 4 > len) {
+                            return std::string("readback buffer too small");
+                        }
+                        uint32_t value = 0;
+                        std::memcpy(&value, actual + offset, sizeof(value));
+                        if (value != 1u) {
+                            std::ostringstream message;
+                            message << "resultTexture texel (" << x << "," << y << ") expected 1, got " << value;
+                            return message.str();
+                        }
                     }
                 }
-            }
-            return std::nullopt;
-        },
-        0,
-        static_cast<size_t>(kReadbackSize));
-}
-
-// ---------------------------------------------------------------------------
-// Test case: sampling_while_testing
-//
-// Parameterized over depthReadOnly x stencilReadOnly = 4 cases.
-// Fixed format: depth24plus-stencil8.
-// ---------------------------------------------------------------------------
-CTS_TEST(g, "sampling_while_testing")
-    .desc(
-        "Tests concurrent sampling and testing of depth-stencil attachments in a render pass. "
-        "Fixed format=depth24plus-stencil8, parameterized over depthReadOnly x stencilReadOnly "
-        "(4 cases). For a read-only aspect the real ds view is sampled; for a written aspect a "
-        "fake 1x1 texture fills the bind slot and the aspect is written (depth write / stencil "
-        "increment-clamp).")
-    .params([](ParamsBuilder u) {
-        return u.combine("depthReadOnly",   {true, false})
-                .combine("stencilReadOnly", {true, false});
-    })
-    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        const bool depthReadOnly   = t.param<bool>("depthReadOnly");
-        const bool stencilReadOnly = t.param<bool>("stencilReadOnly");
-        runSamplingWhileTesting(t, depthReadOnly, stencilReadOnly);
+                return std::nullopt;
+            },
+            0,
+            static_cast<size_t>(kReadbackSize));
     });
 
 } // namespace

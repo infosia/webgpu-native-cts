@@ -1,576 +1,254 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/memory_sync/buffer/single_buffer.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// SPDX-License-Identifier: BSD-3-Clause
+// Ported from gpuweb/cts src/webgpu/api/operation/memory_sync/buffer/single_buffer.spec.ts @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa
+// Upstream CTS: Copyright (c) 2019 The WebGPU CTS Contributors, BSD-3-Clause.
+// Port:         Copyright (c) 2026 Kota Iguchi, BSD-3-Clause.
+//
+// Porting notes:
+//   - The upstream helper modules ../operation_context_helper.ts and ./buffer_sync_test.ts are
+//     ported in ../operation_context_helper.h and ./buffer_sync_test.h (shared with
+//     multiple_buffers.spec.cpp).
+//   - 'rw'/'wr' public params: boundary;readOp;readContext;writeOp;writeContext, as upstream (the
+//     private `_context` is not in the query).
+//   - 'ww' deviation: upstream's array params writeOps=[a,b] / contexts=[a,b] are comma-joined
+//     strings (writeOps="storage,b2b-copy"), the spelling multiple_buffers already uses.
+//   - The compatibility-mode-only storage-buffers-in-fragment-stage skips are no-ops on the core
+//     devices this harness runs.
 
 #include <array>
 #include <cstdint>
-#include <cstring>
-#include <optional>
-#include <sstream>
 #include <string>
-#include <string_view>
-#include <vector>
 
 #include "cts/gpu.h"
 #include "cts/test.h"
+#include "webgpu/api/operation/memory_sync/buffer/buffer_sync_test.h"
 
 using namespace cts;
+using namespace cts::memory_sync;
 
 namespace {
 
-TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpuTest>(
+TestGroup<BufferSyncTest> g = MakeTestGroup<BufferSyncTest>(
     "api,operation,memory_sync,buffer,single_buffer",
-    "Single-buffer memory synchronization operation tests.");
+    R"(
+Memory Synchronization Tests for Buffer: read before write, read after write, and write after write.
 
-constexpr uint32_t kBufferSize = 4;
+- Create a src buffer and initialize it to 0, wait on the fence to ensure the data is initialized.
+Write Op: write a value (say 1) into the src buffer via render pass, compute pass, copy, write buffer, etc.
+Read Op: read the value from the src buffer and write it to dst buffer via render pass (vertex, index, indirect input, uniform, storage), compute pass, copy etc.
+Wait on another fence, then call expectContents to verify the dst buffer value.
+  - x= write op: {storage buffer in {compute, render, render-via-bundle}, t2b copy dst, b2b copy dst, writeBuffer}
+  - x= read op: {index buffer, vertex buffer, indirect buffer (draw, draw indexed, dispatch), uniform buffer, {readonly, readwrite} storage buffer in {compute, render, render-via-bundle}, b2b copy src, b2t copy src}
+  - x= read-write sequence: {read then write, write then read, write then write}
+  - x= op context: {queue, command-encoder, compute-pass-encoder, render-pass-encoder, render-bundle-encoder}, x= op boundary: {queue-op, command-buffer, pass, execute-bundles, render-bundle}
+    - Not every context/boundary combinations are valid. We have the checkOpsValidForContext func to do the filtering.
+  - If two writes are in the same passes, render result has loose guarantees.
+)");
+
+// The src value is what stores in the src buffer before any operation.
 constexpr uint32_t kSrcValue = 0;
+// The op value is what the read/write operation write into the target buffer.
 constexpr uint32_t kOpValue = 1;
 
-struct RenderPipelineForTest {
-    WGPUBindGroupLayout bindGroupLayout = nullptr;
-    WGPURenderPipeline pipeline = nullptr;
-};
-
-constexpr std::string_view kStorageReadShader = R"(
-struct Data {
-  a : u32,
-};
-
-@group(0) @binding(0) var<storage, read> src : Data;
-@group(0) @binding(1) var<storage, read_write> dst : Data;
-
-@compute @workgroup_size(1)
-fn main() {
-  dst.a = src.a;
-}
-)";
-
-constexpr std::string_view kDummyVertexShader = R"(
-@vertex fn vert_main() -> @builtin(position) vec4<f32> {
-  return vec4<f32>(0.5, 0.5, 0.0, 1.0);
-}
-)";
-
-WGPUStringView stringView(std::string_view value) {
-    return WGPUStringView{value.data(), value.size()};
-}
-
-std::vector<Value> boundaryValues() {
-    return {Value("command-buffer"), Value("queue-op")};
-}
-
-std::vector<Value> writeOpValues() {
-    return {Value("storage"), Value("b2b-copy")};
-}
-
-std::vector<Value> readOpValues() {
-    return {Value("storage-read"), Value("b2b-copy")};
-}
-
-std::string storageWriteShader(uint32_t value) {
-    std::ostringstream shader;
-    shader << R"(
-struct Data {
-  a : u32,
-};
-
-@group(0) @binding(0) var<storage, read_write> data : Data;
-
-@compute @workgroup_size(1)
-fn main() {
-  data.a = )" << value << R"(u;
-}
-)";
-    return shader.str();
-}
-
-std::string storageWriteFragmentShader(uint32_t value) {
-    std::ostringstream shader;
-    shader << R"(
-struct Data {
-  a : u32,
-};
-
-@group(0) @binding(0) var<storage, read_write> data : Data;
-
-@fragment fn frag_main() -> @location(0) vec4<f32> {
-  data.a = )" << value << R"(u;
-  return vec4<f32>();
-}
-)";
-    return shader.str();
-}
-
-WGPUBuffer createBufferWithValue(AllFeaturesMaxLimitsGpuTest& t, uint32_t value) {
-    return t.makeBufferWithContents(
-        &value,
-        sizeof(value),
-        WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst | WGPUBufferUsage_Storage);
-}
-
-WGPUBuffer createDstBuffer(AllFeaturesMaxLimitsGpuTest& t) {
-    WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    desc.size = kBufferSize;
-    desc.usage = WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst | WGPUBufferUsage_Storage;
-    return t.createBufferTracked(desc);
-}
-
-WGPUBindGroupLayout createStorageWriteBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t) {
-    WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
-    entry.binding = 0;
-    entry.visibility = WGPUShaderStage_Compute;
-    entry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
-    entry.buffer.type = WGPUBufferBindingType_Storage;
-
-    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
-    desc.entryCount = 1;
-    desc.entries = &entry;
-    return t.createBindGroupLayoutTracked(desc);
-}
-
-WGPUBindGroupLayout createRenderStorageWriteBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t) {
-    WGPUBindGroupLayoutEntry entry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
-    entry.binding = 0;
-    entry.visibility = WGPUShaderStage_Fragment;
-    entry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
-    entry.buffer.type = WGPUBufferBindingType_Storage;
-
-    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
-    desc.entryCount = 1;
-    desc.entries = &entry;
-    return t.createBindGroupLayoutTracked(desc);
-}
-
-WGPUBindGroupLayout createStorageReadBindGroupLayout(AllFeaturesMaxLimitsGpuTest& t) {
-    std::array<WGPUBindGroupLayoutEntry, 2> entries = {{
-        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-    }};
-
-    entries[0].binding = 0;
-    entries[0].visibility = WGPUShaderStage_Compute;
-    entries[0].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
-    entries[0].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
-
-    entries[1].binding = 1;
-    entries[1].visibility = WGPUShaderStage_Compute;
-    entries[1].buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
-    entries[1].buffer.type = WGPUBufferBindingType_Storage;
-
-    WGPUBindGroupLayoutDescriptor desc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
-    desc.entryCount = entries.size();
-    desc.entries = entries.data();
-    return t.createBindGroupLayoutTracked(desc);
-}
-
-WGPUPipelineLayout createPipelineLayout(AllFeaturesMaxLimitsGpuTest& t, WGPUBindGroupLayout bindGroupLayout) {
-    WGPUPipelineLayoutDescriptor desc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
-    desc.bindGroupLayoutCount = 1;
-    desc.bindGroupLayouts = &bindGroupLayout;
-    return t.createPipelineLayoutTracked(desc);
-}
-
-WGPUComputePipeline createStorageWriteComputePipeline(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPUPipelineLayout layout,
-    uint32_t value) {
-    WGPUShaderModule shaderModule = t.createShaderModuleTracked(storageWriteShader(value));
-
-    WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
-    desc.layout = layout;
-    desc.compute.module = shaderModule;
-    desc.compute.entryPoint = stringView("main");
-    return t.createComputePipelineTracked(desc);
-}
-
-WGPUComputePipeline createStorageReadComputePipeline(AllFeaturesMaxLimitsGpuTest& t, WGPUPipelineLayout layout) {
-    WGPUShaderModule shaderModule = t.createShaderModuleTracked(kStorageReadShader);
-
-    WGPUComputePipelineDescriptor desc = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
-    desc.layout = layout;
-    desc.compute.module = shaderModule;
-    desc.compute.entryPoint = stringView("main");
-    return t.createComputePipelineTracked(desc);
-}
-
-RenderPipelineForTest createStorageWriteRenderPipeline(AllFeaturesMaxLimitsGpuTest& t, uint32_t value) {
-    WGPUBindGroupLayout bindGroupLayout = createRenderStorageWriteBindGroupLayout(t);
-    WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, bindGroupLayout);
-    WGPUShaderModule vertexModule = t.createShaderModuleTracked(kDummyVertexShader);
-    WGPUShaderModule fragmentModule = t.createShaderModuleTracked(storageWriteFragmentShader(value));
-
-    WGPUColorTargetState colorTarget = WGPU_COLOR_TARGET_STATE_INIT;
-    colorTarget.format = WGPUTextureFormat_RGBA8Unorm;
-
-    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-    fragment.module = fragmentModule;
-    fragment.entryPoint = stringView("frag_main");
-    fragment.targetCount = 1;
-    fragment.targets = &colorTarget;
-
-    WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-    desc.layout = pipelineLayout;
-    desc.vertex.module = vertexModule;
-    desc.vertex.entryPoint = stringView("vert_main");
-    desc.primitive.topology = WGPUPrimitiveTopology_PointList;
-    desc.multisample.count = 1;
-    desc.fragment = &fragment;
-    return RenderPipelineForTest{bindGroupLayout, t.createRenderPipelineTracked(desc)};
-}
-
-WGPUBindGroup createStorageWriteBindGroup(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPUBindGroupLayout layout,
-    WGPUBuffer buffer) {
-    WGPUBindGroupEntry entry = WGPU_BIND_GROUP_ENTRY_INIT;
-    entry.binding = 0;
-    entry.buffer = buffer;
-    entry.offset = 0;
-    entry.size = kBufferSize;
-
-    WGPUBindGroupDescriptor desc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-    desc.layout = layout;
-    desc.entryCount = 1;
-    desc.entries = &entry;
-    return t.createBindGroupTracked(desc);
-}
-
-WGPUBindGroup createStorageReadBindGroup(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPUBindGroupLayout layout,
-    WGPUBuffer src,
-    WGPUBuffer dst) {
-    std::array<WGPUBindGroupEntry, 2> entries = {{
-        WGPU_BIND_GROUP_ENTRY_INIT,
-        WGPU_BIND_GROUP_ENTRY_INIT,
-    }};
-    entries[0].binding = 0;
-    entries[0].buffer = src;
-    entries[0].offset = 0;
-    entries[0].size = kBufferSize;
-    entries[1].binding = 1;
-    entries[1].buffer = dst;
-    entries[1].offset = 0;
-    entries[1].size = kBufferSize;
-
-    WGPUBindGroupDescriptor desc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-    desc.layout = layout;
-    desc.entryCount = entries.size();
-    desc.entries = entries.data();
-    return t.createBindGroupTracked(desc);
-}
-
-void encodeWriteOp(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder, std::string_view op, WGPUBuffer buffer, uint32_t value) {
-    if (op == "storage") {
-        WGPUBindGroupLayout bindGroupLayout = createStorageWriteBindGroupLayout(t);
-        WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, bindGroupLayout);
-        WGPUComputePipeline pipeline = createStorageWriteComputePipeline(t, pipelineLayout, value);
-        WGPUBindGroup bindGroup = createStorageWriteBindGroup(t, bindGroupLayout, buffer);
-
-        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
-        wgpuComputePassEncoderSetPipeline(pass, pipeline);
-        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
-        wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
-        wgpuComputePassEncoderEnd(pass);
-        return;
-    }
-
-    if (op == "b2b-copy") {
-        WGPUBuffer tmp = createBufferWithValue(t, value);
-        wgpuCommandEncoderCopyBufferToBuffer(encoder, tmp, 0, buffer, 0, kBufferSize);
-        return;
-    }
-
-    std::abort();
-}
-
-void encodeReadOp(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder, std::string_view op, WGPUBuffer src, WGPUBuffer dst) {
-    if (op == "storage-read") {
-        WGPUBindGroupLayout bindGroupLayout = createStorageReadBindGroupLayout(t);
-        WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, bindGroupLayout);
-        WGPUComputePipeline pipeline = createStorageReadComputePipeline(t, pipelineLayout);
-        WGPUBindGroup bindGroup = createStorageReadBindGroup(t, bindGroupLayout, src, dst);
-
-        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
-        wgpuComputePassEncoderSetPipeline(pass, pipeline);
-        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
-        wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
-        wgpuComputePassEncoderEnd(pass);
-        return;
-    }
-
-    if (op == "b2b-copy") {
-        wgpuCommandEncoderCopyBufferToBuffer(encoder, src, 0, dst, 0, kBufferSize);
-        return;
-    }
-
-    std::abort();
-}
-
-void submitWithBoundary(
-    AllFeaturesMaxLimitsGpuTest& t,
-    std::string_view boundary,
-    WGPUCommandBuffer firstCommandBuffer,
-    WGPUCommandBuffer secondCommandBuffer) {
-    if (boundary == "command-buffer") {
-        std::array<WGPUCommandBuffer, 2> commandBuffers = {{firstCommandBuffer, secondCommandBuffer}};
-        wgpuQueueSubmit(t.queue(), commandBuffers.size(), commandBuffers.data());
-        return;
-    }
-
-    if (boundary == "queue-op") {
-        wgpuQueueSubmit(t.queue(), 1, &firstCommandBuffer);
-        wgpuQueueSubmit(t.queue(), 1, &secondCommandBuffer);
-        return;
-    }
-
-    std::abort();
-}
-
-void verifyData(AllFeaturesMaxLimitsGpuTest& t, WGPUBuffer buffer, uint32_t expected) {
-    t.expectGPUBufferValuesEqual(buffer, &expected, sizeof(expected));
-}
-
-void verifyDataTwoValidValues(AllFeaturesMaxLimitsGpuTest& t, WGPUBuffer buffer, uint32_t first, uint32_t second) {
-    t.expectGPUBufferValuesPassCheck(
-        buffer,
-        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
-            if (len < sizeof(uint32_t)) {
-                return std::string("buffer readback is too small");
-            }
-            uint32_t value = 0;
-            std::memcpy(&value, actual, sizeof(value));
-            if (value == first || value == second) {
-                return std::nullopt;
-            }
-            std::ostringstream message;
-            message << "expected " << first << " or " << second << ", got " << value;
-            return message.str();
-        },
-        0,
-        sizeof(uint32_t));
-}
-
-WGPUTexture createRenderTarget(AllFeaturesMaxLimitsGpuTest& t) {
-    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    desc.size = WGPUExtent3D{1, 1, 1};
-    desc.mipLevelCount = 1;
-    desc.sampleCount = 1;
-    desc.dimension = WGPUTextureDimension_2D;
-    desc.format = WGPUTextureFormat_RGBA8Unorm;
-    desc.usage = WGPUTextureUsage_RenderAttachment;
-    return t.createTextureTracked(desc);
-}
-
-WGPURenderPassEncoder beginSimpleRenderPass(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder) {
-    WGPUTexture target = createRenderTarget(t);
-    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    WGPUTextureView targetView = t.createViewTracked(target, viewDesc);
-
-    WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-    colorAttachment.view = targetView;
-    colorAttachment.loadOp = WGPULoadOp_Clear;
-    colorAttachment.storeOp = WGPUStoreOp_Store;
-    colorAttachment.clearValue = WGPUColor{0.0, 1.0, 0.0, 1.0};
-
-    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-    passDesc.colorAttachmentCount = 1;
-    passDesc.colorAttachments = &colorAttachment;
-    return t.beginRenderPassTracked(encoder, &passDesc);
-}
-
-WGPURenderBundleEncoder createRenderBundleEncoder(AllFeaturesMaxLimitsGpuTest& t) {
-    WGPUTextureFormat colorFormat = WGPUTextureFormat_RGBA8Unorm;
-    WGPURenderBundleEncoderDescriptor desc = WGPU_RENDER_BUNDLE_ENCODER_DESCRIPTOR_INIT;
-    desc.colorFormatCount = 1;
-    desc.colorFormats = &colorFormat;
-    desc.sampleCount = 1;
-    return t.createRenderBundleEncoderTracked(desc);
-}
-
-void recordRenderBundleDraw(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPURenderBundleEncoder renderer,
-    WGPUBuffer buffer,
-    uint32_t value) {
-    RenderPipelineForTest pipeline = createStorageWriteRenderPipeline(t, value);
-    WGPUBindGroup bindGroup = createStorageWriteBindGroup(t, pipeline.bindGroupLayout, buffer);
-    wgpuRenderBundleEncoderSetPipeline(renderer, pipeline.pipeline);
-    wgpuRenderBundleEncoderSetBindGroup(renderer, 0, bindGroup, 0, nullptr);
-    wgpuRenderBundleEncoderDraw(renderer, 1, 1, 0, 0);
-}
-
-void recordRenderPassDraw(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPURenderPassEncoder renderer,
-    WGPUBuffer buffer,
-    uint32_t value) {
-    RenderPipelineForTest pipeline = createStorageWriteRenderPipeline(t, value);
-    WGPUBindGroup bindGroup = createStorageWriteBindGroup(t, pipeline.bindGroupLayout, buffer);
-    wgpuRenderPassEncoderSetPipeline(renderer, pipeline.pipeline);
-    wgpuRenderPassEncoderSetBindGroup(renderer, 0, bindGroup, 0, nullptr);
-    wgpuRenderPassEncoderDraw(renderer, 1, 1, 0, 0);
-}
-
-void runReadWriteTest(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string boundary = t.param<std::string>("boundary");
-    const std::string readOp = t.param<std::string>("readOp");
-    const std::string writeOp = t.param<std::string>("writeOp");
-    WGPUBuffer src = createBufferWithValue(t, kSrcValue);
-    WGPUBuffer dst = createDstBuffer(t);
-
-    WGPUCommandEncoder firstEncoder = t.createCommandEncoderTracked();
-    encodeReadOp(t, firstEncoder, readOp, src, dst);
-    WGPUCommandBuffer firstCommandBuffer = t.finishTracked(firstEncoder);
-
-    WGPUCommandEncoder secondEncoder = t.createCommandEncoderTracked();
-    encodeWriteOp(t, secondEncoder, writeOp, src, kOpValue);
-    WGPUCommandBuffer secondCommandBuffer = t.finishTracked(secondEncoder);
-
-    submitWithBoundary(t, boundary, firstCommandBuffer, secondCommandBuffer);
-    verifyData(t, dst, kSrcValue);
-}
-
-void runWriteReadTest(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string boundary = t.param<std::string>("boundary");
-    const std::string writeOp = t.param<std::string>("writeOp");
-    const std::string readOp = t.param<std::string>("readOp");
-    WGPUBuffer src = createBufferWithValue(t, kSrcValue);
-    WGPUBuffer dst = createDstBuffer(t);
-
-    WGPUCommandEncoder firstEncoder = t.createCommandEncoderTracked();
-    encodeWriteOp(t, firstEncoder, writeOp, src, kOpValue);
-    WGPUCommandBuffer firstCommandBuffer = t.finishTracked(firstEncoder);
-
-    WGPUCommandEncoder secondEncoder = t.createCommandEncoderTracked();
-    encodeReadOp(t, secondEncoder, readOp, src, dst);
-    WGPUCommandBuffer secondCommandBuffer = t.finishTracked(secondEncoder);
-
-    submitWithBoundary(t, boundary, firstCommandBuffer, secondCommandBuffer);
-    verifyData(t, dst, kOpValue);
-}
-
-void runWriteWriteTest(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string boundary = t.param<std::string>("boundary");
-    const std::string firstWriteOp = t.param<std::string>("firstWriteOp");
-    const std::string secondWriteOp = t.param<std::string>("secondWriteOp");
-    WGPUBuffer src = createBufferWithValue(t, kSrcValue);
-
-    WGPUCommandEncoder firstEncoder = t.createCommandEncoderTracked();
-    encodeWriteOp(t, firstEncoder, firstWriteOp, src, kOpValue);
-    WGPUCommandBuffer firstCommandBuffer = t.finishTracked(firstEncoder);
-
-    WGPUCommandEncoder secondEncoder = t.createCommandEncoderTracked();
-    encodeWriteOp(t, secondEncoder, secondWriteOp, src, kOpValue + 1);
-    WGPUCommandBuffer secondCommandBuffer = t.finishTracked(secondEncoder);
-
-    submitWithBoundary(t, boundary, firstCommandBuffer, secondCommandBuffer);
-    verifyData(t, src, kOpValue + 1);
-}
-
 CTS_TEST(g, "rw")
-    .params([](ParamsBuilder u) {
-        return u.combine("boundary", boundaryValues())
-            .combine("readOp", readOpValues())
-            .combine("writeOp", writeOpValues());
-    })
-    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        runReadWriteTest(t);
+    .desc(R"(
+    Perform a 'read' operations on a buffer, followed by a 'write' operation.
+    Operations are separated by a 'boundary' (pass, encoder, queue-op, etc.).
+    Test that the results are synchronized.
+    The read should not see the contents written by the subsequent write.)")
+    .params([](ParamsBuilder u) { return u.combineWithParams(readWriteCaseRecords()); })
+    .fn([](BufferSyncTest& t) {
+        const std::string boundary = t.param<std::string>("boundary");
+        const std::string readOp = t.param<std::string>("readOp");
+        const OpContext readContext = parseContext(t.param<std::string>("readContext"));
+        const std::string writeOp = t.param<std::string>("writeOp");
+        const OpContext writeContext = parseContext(t.param<std::string>("writeContext"));
+        OperationContextHelper helper(t);
+
+        t.skipIfReadOpsOrWriteOpsUsesStorageBufferInFragmentStageAndNoSupportStorageBuffersInFragmentShaders();
+
+        const ReadOpBuffers buffers = createBuffersForReadOp(t, readOp, kSrcValue, kOpValue);
+        createIntermediateBuffersAndTexturesForWriteOp(t, writeOp, 0, kOpValue);
+
+        // The read op will read from src buffer and write to dst buffer based on what it reads.
+        // The write op will write the given op value into src buffer as well.
+        // The write op happens after read op. So we are expecting the src value to be in the dst
+        // buffer.
+        encodeReadOp(t, helper, readOp, readContext, buffers.srcBuffer, buffers.dstBuffer);
+        helper.ensureBoundary(boundary);
+        encodeWriteOp(t, helper, writeOp, writeContext, buffers.srcBuffer, 0, kOpValue);
+        helper.ensureSubmit();
+        // Only verify the value of the first element of the dstBuffer.
+        verifyData(t, buffers.dstBuffer, kSrcValue);
     });
 
 CTS_TEST(g, "wr")
-    .params([](ParamsBuilder u) {
-        return u.combine("boundary", boundaryValues())
-            .combine("writeOp", writeOpValues())
-            .combine("readOp", readOpValues());
-    })
-    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        runWriteReadTest(t);
+    .desc(R"(
+    Perform a 'write' operation on a buffer, followed by a 'read' operation.
+    Operations are separated by a 'boundary' (pass, encoder, queue-op, etc.).
+    Test that the results are synchronized.
+    The read should see exactly the contents written by the previous write.)")
+    .params([](ParamsBuilder u) { return u.combineWithParams(readWriteCaseRecords()); })
+    .fn([](BufferSyncTest& t) {
+        const std::string boundary = t.param<std::string>("boundary");
+        const std::string readOp = t.param<std::string>("readOp");
+        const OpContext readContext = parseContext(t.param<std::string>("readContext"));
+        const std::string writeOp = t.param<std::string>("writeOp");
+        const OpContext writeContext = parseContext(t.param<std::string>("writeContext"));
+
+        t.skipIfReadOpsOrWriteOpsUsesStorageBufferInFragmentStageAndNoSupportStorageBuffersInFragmentShaders();
+
+        OperationContextHelper helper(t);
+
+        const ReadOpBuffers buffers = createBuffersForReadOp(t, readOp, kSrcValue, kOpValue);
+        createIntermediateBuffersAndTexturesForWriteOp(t, writeOp, 0, kOpValue);
+
+        // The write op will write the given op value into src buffer.
+        // The read op will read from src buffer and write to dst buffer based on what it reads.
+        // The write op happens before read op. So we are expecting the op value to be in the dst
+        // buffer.
+        encodeWriteOp(t, helper, writeOp, writeContext, buffers.srcBuffer, 0, kOpValue);
+        helper.ensureBoundary(boundary);
+        encodeReadOp(t, helper, readOp, readContext, buffers.srcBuffer, buffers.dstBuffer);
+        helper.ensureSubmit();
+        // Only verify the value of the first element of the dstBuffer.
+        verifyData(t, buffers.dstBuffer, kOpValue);
     });
 
 CTS_TEST(g, "ww")
-    .params([](ParamsBuilder u) {
-        return u.combine("boundary", boundaryValues())
-            .combine("firstWriteOp", writeOpValues())
-            .combine("secondWriteOp", writeOpValues());
-    })
-    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        runWriteWriteTest(t);
+    .desc(R"(
+    Perform a 'first' write operation on a buffer, followed by a 'second' write operation.
+    Operations are separated by a 'boundary' (pass, encoder, queue-op, etc.).
+    Test that the results are synchronized.
+    The second write should overwrite the contents of the first.)")
+    .params([](ParamsBuilder u) { return u.combineWithParams(writeWriteCaseRecords()); })
+    .fn([](BufferSyncTest& t) {
+        const std::string boundary = t.param<std::string>("boundary");
+        // Deviation: upstream params are arrays writeOps=[a,b] / contexts=[a,b]; here each is a
+        // comma-joined string (see the file header).
+        const std::array<std::string, 2> writeOps = splitPair(t.param<std::string>("writeOps"));
+        const std::array<std::string, 2> contextNames = splitPair(t.param<std::string>("contexts"));
+        const std::array<OpContext, 2> contexts = {{
+            parseContext(contextNames[0]),
+            parseContext(contextNames[1]),
+        }};
+
+        t.skipIfReadOpsOrWriteOpsUsesStorageBufferInFragmentStageAndNoSupportStorageBuffersInFragmentShaders();
+
+        OperationContextHelper helper(t);
+
+        WGPUBuffer buffer = createBufferWithValue(t, 0);
+        createIntermediateBuffersAndTexturesForWriteOp(t, writeOps[0], 0, 1);
+        createIntermediateBuffersAndTexturesForWriteOp(t, writeOps[1], 1, 2);
+
+        encodeWriteOp(t, helper, writeOps[0], contexts[0], buffer, 0, 1);
+        helper.ensureBoundary(boundary);
+        encodeWriteOp(t, helper, writeOps[1], contexts[1], buffer, 1, 2);
+        helper.ensureSubmit();
+        verifyData(t, buffer, 2);
     });
 
-CTS_TEST(g, "two_dispatches_in_the_same_compute_pass")
-    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        WGPUBuffer buffer = createBufferWithValue(t, kSrcValue);
-        WGPUBindGroupLayout bindGroupLayout = createStorageWriteBindGroupLayout(t);
-        WGPUPipelineLayout pipelineLayout = createPipelineLayout(t, bindGroupLayout);
-        WGPUComputePipeline firstPipeline = createStorageWriteComputePipeline(t, pipelineLayout, kOpValue);
-        WGPUComputePipeline secondPipeline = createStorageWriteComputePipeline(t, pipelineLayout, kOpValue + 1);
-        WGPUBindGroup bindGroup = createStorageWriteBindGroup(t, bindGroupLayout, buffer);
-
-        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
-        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
-        wgpuComputePassEncoderSetPipeline(pass, firstPipeline);
-        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
-        wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
-        wgpuComputePassEncoderSetPipeline(pass, secondPipeline);
-        wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
-        wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
-        wgpuComputePassEncoderEnd(pass);
-        WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
-        wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
-
-        verifyData(t, buffer, kOpValue + 1);
-    });
+// Cases with loose render result guarantees.
 
 CTS_TEST(g, "two_draws_in_the_same_render_pass")
+    .desc(R"(Test write-after-write operations in the same render pass. The first write will write 1 into
+    a storage buffer. The second write will write 2 into the same buffer in the same pass. Expected
+    data in buffer is either 1 or 2. It may use bundle in each draw.)")
     .params([](ParamsBuilder u) {
+        // Upstream .paramsSubcasesOnly(...): all params are subcases.
         return u.beginSubcases()
             .combine("firstDrawUseBundle", {false, true})
             .combine("secondDrawUseBundle", {false, true});
     })
-    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        WGPUBuffer buffer = createBufferWithValue(t, kSrcValue);
-        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginSimpleRenderPass(t, encoder);
+    .fn([](BufferSyncTest& t) {
+        t.skipIfNoSupportForStorageBuffersInFragmentStage();
+
         const std::array<bool, 2> useBundle = {{
             t.param<bool>("firstDrawUseBundle"),
             t.param<bool>("secondDrawUseBundle"),
         }};
 
-        for (uint32_t i = 0; i < useBundle.size(); ++i) {
+        WGPUBuffer buffer = createBufferWithValue(t, 0);
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPURenderPassEncoder passEncoder = beginSimpleRenderPass(t, encoder);
+
+        for (uint32_t i = 0; i < 2; ++i) {
+            RenderEncoder renderer;
+            WGPURenderBundleEncoder bundleEncoder = nullptr;
             if (useBundle[i]) {
-                WGPURenderBundleEncoder bundleEncoder = createRenderBundleEncoder(t);
-                recordRenderBundleDraw(t, bundleEncoder, buffer, i + 1);
-                WGPURenderBundle bundle = t.finishRenderBundleTracked(bundleEncoder);
-                wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
+                bundleEncoder = createRenderBundleEncoder(t);
+                renderer.bundle = bundleEncoder;
             } else {
-                recordRenderPassDraw(t, pass, buffer, i + 1);
+                renderer.pass = passEncoder;
+            }
+            WGPURenderPipeline pipeline = createStorageWriteRenderPipeline(t, i + 1);
+            WGPUBindGroup bindGroup = createBindGroup(t, pipeline, buffer);
+            renderer.setPipeline(pipeline);
+            renderer.setBindGroup(0, bindGroup);
+            renderer.draw(1);
+            if (useBundle[i]) {
+                WGPURenderBundle bundle = t.finishRenderBundleTracked(bundleEncoder);
+                wgpuRenderPassEncoderExecuteBundles(passEncoder, 1, &bundle);
             }
         }
 
-        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderEnd(passEncoder);
         WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
         wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
-
         verifyDataTwoValidValues(t, buffer, 1, 2);
     });
 
 CTS_TEST(g, "two_draws_in_the_same_render_bundle")
-    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        WGPUBuffer buffer = createBufferWithValue(t, kSrcValue);
+    .desc(R"(Test write-after-write operations in the same render bundle. The first write will write 1 into
+    a storage buffer. The second write will write 2 into the same buffer in the same pass. Expected
+    data in buffer is either 1 or 2.)")
+    .fn([](BufferSyncTest& t) {
+        t.skipIfNoSupportForStorageBuffersInFragmentStage();
+
+        WGPUBuffer buffer = createBufferWithValue(t, 0);
         WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        WGPURenderPassEncoder pass = beginSimpleRenderPass(t, encoder);
-        WGPURenderBundleEncoder bundleEncoder = createRenderBundleEncoder(t);
-        recordRenderBundleDraw(t, bundleEncoder, buffer, 1);
-        recordRenderBundleDraw(t, bundleEncoder, buffer, 2);
-        WGPURenderBundle bundle = t.finishRenderBundleTracked(bundleEncoder);
-        wgpuRenderPassEncoderExecuteBundles(pass, 1, &bundle);
-        wgpuRenderPassEncoderEnd(pass);
+        WGPURenderPassEncoder passEncoder = beginSimpleRenderPass(t, encoder);
+        WGPURenderBundleEncoder renderEncoder = createRenderBundleEncoder(t);
+
+        for (uint32_t i = 0; i < 2; ++i) {
+            WGPURenderPipeline pipeline = createStorageWriteRenderPipeline(t, i + 1);
+            WGPUBindGroup bindGroup = createBindGroup(t, pipeline, buffer);
+            wgpuRenderBundleEncoderSetPipeline(renderEncoder, pipeline);
+            wgpuRenderBundleEncoderSetBindGroup(renderEncoder, 0, bindGroup, 0, nullptr);
+            wgpuRenderBundleEncoderDraw(renderEncoder, 1, 1, 0, 0);
+        }
+
+        WGPURenderBundle bundle = t.finishRenderBundleTracked(renderEncoder);
+        wgpuRenderPassEncoderExecuteBundles(passEncoder, 1, &bundle);
+        wgpuRenderPassEncoderEnd(passEncoder);
         WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
         wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
-
         verifyDataTwoValidValues(t, buffer, 1, 2);
+    });
+
+CTS_TEST(g, "two_dispatches_in_the_same_compute_pass")
+    .desc(R"(Test write-after-write operations in the same compute pass. The first write will write 1 into
+    a storage buffer. The second write will write 2 into the same buffer in the same pass. Expected
+    data in buffer is 2.)")
+    .fn([](BufferSyncTest& t) {
+        t.skipIfNoSupportForStorageBuffersInFragmentStage();
+
+        WGPUBuffer buffer = createBufferWithValue(t, 0);
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        WGPUComputePassDescriptor passDesc = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        WGPUComputePassEncoder pass = t.beginComputePassTracked(encoder, &passDesc);
+
+        for (uint32_t i = 0; i < 2; ++i) {
+            WGPUComputePipeline pipeline = createStorageWriteComputePipeline(t, i + 1);
+            WGPUBindGroup bindGroup = createBindGroup(t, pipeline, buffer);
+            wgpuComputePassEncoderSetPipeline(pass, pipeline);
+            wgpuComputePassEncoderSetBindGroup(pass, 0, bindGroup, 0, nullptr);
+            wgpuComputePassEncoderDispatchWorkgroups(pass, 1, 1, 1);
+        }
+
+        wgpuComputePassEncoderEnd(pass);
+        WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
+        wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
+        verifyData(t, buffer, 2);
     });
 
 } // namespace
