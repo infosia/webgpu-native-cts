@@ -1,5 +1,6 @@
 // Ported from gpuweb/cts src/webgpu/api/operation/rendering/stencil.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -688,7 +689,301 @@ CTS_TEST(g, "stencil_reference_initialized")
         }, kGreenStencilColor, true);
     });
 
+constexpr uint32_t kMinDynamicBufferOffsetAlignment = 256;
+constexpr uint64_t kBufferSizeAlignment = 4;
+
+// data_generation.ts DataArrayGenerator.generateView(byteSize, start, offset) on a fresh generator:
+// `offset` leading zero bytes, then ((i ** 3 + i + start) % 251) + 1. Upstream shares one generator
+// across cases, whose cached buffer may carry bytes from earlier calls; the test compares the
+// rendered output against the very bytes it uploaded, so only the regeneration (not its history)
+// matters.
+std::vector<uint8_t> generateDataView(uint64_t byteSize, uint64_t start, uint64_t offset) {
+    std::vector<uint8_t> data(static_cast<size_t>(byteSize), 0);
+    for (uint64_t i = 0; i + offset < byteSize; ++i) {
+        data[static_cast<size_t>(i + offset)] = static_cast<uint8_t>(((i * i * i + i + start) % 251) + 1);
+    }
+    return data;
+}
+
+constexpr std::string_view kStencilAccumulationVertexShader = R"(
+            @vertex
+            fn main(@builtin(vertex_index) VertexIndex : u32)-> @builtin(position) vec4<f32> {
+              var pos : array<vec2<f32>, 6> = array<vec2<f32>, 6>(
+                  vec2<f32>(-1.0,  1.0),
+                  vec2<f32>(-1.0, -1.0),
+                  vec2<f32>( 1.0,  1.0),
+                  vec2<f32>(-1.0, -1.0),
+                  vec2<f32>( 1.0,  1.0),
+                  vec2<f32>( 1.0, -1.0));
+              return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+            })";
+
+constexpr std::string_view kStencilAccumulationFragmentShader = R"(
+            struct Params {
+              stencilBitIndex: u32
+            };
+            @group(0) @binding(0) var<uniform> param: Params;
+            @fragment
+            fn main() -> @location(0) vec4<f32> {
+              return vec4<f32>(f32(1u << param.stencilBitIndex) / 255.0, 0.0, 0.0, 0.0);
+            })";
+
 CTS_TEST(g, "stencil_accumulation")
-    .unimplemented("stencil bit-accumulation + stencil-aspect copy readback deferred");
+    .desc(R"(A variation of a technique previously used to verify stencil texture copy that was observed to
+    fail on some Qualcomm chipsets. Attempts to read back from a stencil texture by doing multiple
+    fullscreen renders, one per stencil bit. Each pass sets the stencil mask and stencil reference
+    to 1 << passIndex, and renders 1 << passIndex into the red channel with additive blending. This
+    should duplicate the stencil values into the red channel of the texture, and on most GPUs it
+    works. Technique is replicated here to catch driver bugs, while the original stencil copy test
+    has been updated to verify the stencil values using copyTextureToBuffer, which is more
+    straightforward and allows those tests to focus on the behavior of the APIs in question.
+)")
+    .params([](ParamsBuilder u) {
+        return u.combine("format", stencilFormatValues())
+            .beginSubcases()
+            .combineWithParams({
+                ParamRecord{{"offsetInBlocks", 0}, {"dataPaddingInBytes", 0}},
+                ParamRecord{{"offsetInBlocks", 16}, {"dataPaddingInBytes", 0}},
+                ParamRecord{{"offsetInBlocks", 768}, {"dataPaddingInBytes", 0}},
+                ParamRecord{{"offsetInBlocks", 0}, {"dataPaddingInBytes", 1}},
+            })
+            .combine("copyDepth", {1, 2})
+            .combine("mipLevel", {0, 2});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("format"));
+        const uint64_t offsetInBlocks = t.param<uint64_t>("offsetInBlocks");
+        const uint64_t dataPaddingInBytes = t.param<uint64_t>("dataPaddingInBytes");
+        const uint32_t copyDepth = static_cast<uint32_t>(t.param<uint64_t>("copyDepth"));
+        const uint32_t mipLevel = static_cast<uint32_t>(t.param<uint64_t>("mipLevel"));
+        t.skipIfTextureFormatNotSupported(format);
+        // depthStencilFormatAspectSize(format, 'stencil-only') is 1 for every stencil format; the
+        // stencil aspect copies/writes as 'stencil8'.
+        constexpr WGPUTextureFormat kStencilAspectFormat = WGPUTextureFormat_Stencil8;
+        const uint64_t bytesPerBlock = getBlockInfoForTextureFormat(kStencilAspectFormat).bytesPerBlock;
+        const uint64_t initialDataOffset = offsetInBlocks * bytesPerBlock;
+        const WGPUExtent3D copySize{3, 3, copyDepth};
+        constexpr uint32_t rowsPerImage = 3;
+        constexpr uint32_t bytesPerRow = 256;
+
+        const WGPUExtent3D textureSize{copySize.width << mipLevel, copySize.height << mipLevel, copyDepth};
+
+        TexelCopyBufferLayout dataLayout;
+        dataLayout.offset = initialDataOffset;
+        dataLayout.bytesPerRow = bytesPerRow;
+        dataLayout.rowsPerImage = rowsPerImage;
+        const uint64_t minDataSize = dataBytesForCopyOrFail(
+            dataLayout, kStencilAspectFormat, copySize, /*requireStrictAlignment=*/false);
+        const uint64_t initialDataSize = minDataSize + dataPaddingInBytes;
+
+        WGPUTextureDescriptor srcDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        srcDesc.size = textureSize;
+        srcDesc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment;
+        srcDesc.format = format;
+        srcDesc.mipLevelCount = mipLevel + 1;
+        srcDesc.dimension = WGPUTextureDimension_2D;
+        srcDesc.sampleCount = 1;
+        WGPUTexture srcTexture = t.createTextureTracked(srcDesc);
+
+        const WGPUExtent3D writeSize{textureSize.width >> mipLevel, textureSize.height >> mipLevel, textureSize.depthOrArrayLayers};
+        const std::vector<uint8_t> initialData =
+            generateDataView(alignTo(initialDataSize, kBufferSizeAlignment), 0, initialDataOffset);
+
+        {
+            WGPUTexelCopyTextureInfo destination = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+            destination.texture = srcTexture;
+            destination.aspect = WGPUTextureAspect_StencilOnly;
+            destination.mipLevel = mipLevel;
+            WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+            layout.offset = initialDataOffset;
+            layout.bytesPerRow = bytesPerRow;
+            layout.rowsPerImage = rowsPerImage;
+            wgpuQueueWriteTexture(t.queue(), &destination, initialData.data(), initialData.size(), &layout, &writeSize);
+        }
+
+        // Everything below here was previously checkStencilTextureContent in image_copy.spec.ts
+        constexpr uint32_t stencilBitCount = 8;
+
+        // Prepare the uniform buffer that stores the bit indices (from 0 to 7) at stride 256
+        // (required by Dynamic Buffer Offset).
+        constexpr uint32_t uniformBufferSize = kMinDynamicBufferOffsetAlignment * (stencilBitCount - 1) + 4;
+        std::vector<uint32_t> uniformBufferData(uniformBufferSize / 4, 0);
+        for (uint32_t i = 1; i < stencilBitCount; ++i) {
+            uniformBufferData[(kMinDynamicBufferOffsetAlignment / 4) * i] = i;
+        }
+        WGPUBuffer uniformBuffer = t.makeBufferWithContents(
+            uniformBufferData.data(),
+            uniformBufferData.size() * sizeof(uint32_t),
+            WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform);
+
+        // Prepare the base render pipeline descriptor (all the settings expect stencilReadMask).
+        WGPUBindGroupLayoutEntry layoutEntry = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        layoutEntry.binding = 0;
+        layoutEntry.visibility = WGPUShaderStage_Fragment;
+        layoutEntry.buffer = WGPU_BUFFER_BINDING_LAYOUT_INIT;
+        layoutEntry.buffer.type = WGPUBufferBindingType_Uniform;
+        layoutEntry.buffer.minBindingSize = 4;
+        layoutEntry.buffer.hasDynamicOffset = WGPU_TRUE;
+        WGPUBindGroupLayoutDescriptor bglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        bglDesc.entryCount = 1;
+        bglDesc.entries = &layoutEntry;
+        WGPUBindGroupLayout bindGroupLayout = t.createBindGroupLayoutTracked(bglDesc);
+
+        WGPUShaderModule vertexModule = t.createShaderModuleTracked(kStencilAccumulationVertexShader);
+        WGPUShaderModule fragmentModule = t.createShaderModuleTracked(kStencilAccumulationFragmentShader);
+
+        // As we implement "rendering one bit in each draw() call" with blending operation 'add',
+        // the format of outputTexture must support blending.
+        WGPUBlendState blend = WGPU_BLEND_STATE_INIT;
+        blend.color.srcFactor = WGPUBlendFactor_One;
+        blend.color.dstFactor = WGPUBlendFactor_One;
+        blend.color.operation = WGPUBlendOperation_Add;
+        // alpha: {} (the GPUBlendComponent defaults).
+        blend.alpha.srcFactor = WGPUBlendFactor_One;
+        blend.alpha.dstFactor = WGPUBlendFactor_Zero;
+        blend.alpha.operation = WGPUBlendOperation_Add;
+        WGPUColorTargetState target = WGPU_COLOR_TARGET_STATE_INIT;
+        target.format = WGPUTextureFormat_R8Unorm;
+        target.blend = &blend;
+
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = fragmentModule;
+        fragment.entryPoint = stringView("main");
+        fragment.targetCount = 1;
+        fragment.targets = &target;
+
+        WGPUDepthStencilState depthStencil = WGPU_DEPTH_STENCIL_STATE_INIT;
+        depthStencil.depthWriteEnabled = WGPUOptionalBool_False;
+        depthStencil.depthCompare = WGPUCompareFunction_Always;
+        depthStencil.format = format;
+        depthStencil.stencilFront = stencilFace(WGPUCompareFunction_Equal);
+        depthStencil.stencilBack = stencilFace(WGPUCompareFunction_Equal);
+
+        WGPURenderPipelineDescriptor renderPipelineDescriptorBase = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        renderPipelineDescriptorBase.layout = createPipelineLayout(t, bindGroupLayout);
+        renderPipelineDescriptorBase.vertex.module = vertexModule;
+        renderPipelineDescriptorBase.vertex.entryPoint = stringView("main");
+        renderPipelineDescriptorBase.fragment = &fragment;
+        renderPipelineDescriptorBase.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        renderPipelineDescriptorBase.multisample.count = 1;
+        renderPipelineDescriptorBase.depthStencil = &depthStencil;
+
+        // Prepare the bindGroup that contains uniformBuffer and referenceTexture.
+        WGPUBindGroupEntry bindGroupEntry = WGPU_BIND_GROUP_ENTRY_INIT;
+        bindGroupEntry.binding = 0;
+        bindGroupEntry.buffer = uniformBuffer;
+        bindGroupEntry.offset = 0;
+        bindGroupEntry.size = 4;
+        WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+        bindGroupDesc.layout = bindGroupLayout;
+        bindGroupDesc.entryCount = 1;
+        bindGroupDesc.entries = &bindGroupEntry;
+        WGPUBindGroup bindGroup = t.createBindGroupTracked(bindGroupDesc);
+
+        // "Copy" the stencil value into the color attachment with 8 draws in one render pass. Each
+        // draw will "Copy" one bit of the stencil value into the color attachment. The bit of the
+        // stencil value is specified by setStencilReference().
+        // getTextureCopyLayout(format, '2d', [w, h, 1], { mipLevel, aspect: 'stencil-only' }):
+        // the stencil aspect resolves to 'stencil8'.
+        const TextureCopyLayout copyFromOutputTextureLayout = getTextureCopyLayout(
+            kStencilAspectFormat,
+            WGPUTextureDimension_2D,
+            WGPUExtent3D{textureSize.width, textureSize.height, 1},
+            mipLevel);
+        const WGPUExtent3D outputTextureSize{
+            copyFromOutputTextureLayout.mipSize.width,
+            copyFromOutputTextureLayout.mipSize.height,
+            1,
+        };
+        WGPUTextureDescriptor outputDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+        outputDesc.format = WGPUTextureFormat_R8Unorm;
+        outputDesc.size = outputTextureSize;
+        outputDesc.usage = WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment;
+        outputDesc.mipLevelCount = 1;
+        outputDesc.sampleCount = 1;
+        outputDesc.dimension = WGPUTextureDimension_2D;
+        WGPUTexture outputTexture = t.createTextureTracked(outputDesc);
+
+        for (uint32_t stencilTextureLayer = 0; stencilTextureLayer < textureSize.depthOrArrayLayers; ++stencilTextureLayer) {
+            WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+
+            WGPUTextureViewDescriptor srcViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+            srcViewDesc.dimension = WGPUTextureViewDimension_2D;
+            srcViewDesc.baseMipLevel = mipLevel;
+            srcViewDesc.mipLevelCount = 1;
+            srcViewDesc.baseArrayLayer = stencilTextureLayer;
+            srcViewDesc.arrayLayerCount = 1;
+            WGPURenderPassDepthStencilAttachment depthStencilAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+            depthStencilAttachment.view = t.createViewTracked(srcTexture, srcViewDesc);
+            if (isDepthTextureFormat(format)) {
+                depthStencilAttachment.depthClearValue = 0.0f;
+                depthStencilAttachment.depthLoadOp = WGPULoadOp_Clear;
+                depthStencilAttachment.depthStoreOp = WGPUStoreOp_Store;
+            }
+            if (isStencilTextureFormat(format)) {
+                depthStencilAttachment.stencilLoadOp = WGPULoadOp_Load;
+                depthStencilAttachment.stencilStoreOp = WGPUStoreOp_Store;
+            }
+
+            WGPUTextureViewDescriptor outputViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+            WGPURenderPassColorAttachment colorAttach = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+            colorAttach.view = t.createViewTracked(outputTexture, outputViewDesc);
+            colorAttach.clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
+            colorAttach.loadOp = WGPULoadOp_Clear;
+            colorAttach.storeOp = WGPUStoreOp_Store;
+
+            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            passDesc.colorAttachmentCount = 1;
+            passDesc.colorAttachments = &colorAttach;
+            passDesc.depthStencilAttachment = &depthStencilAttachment;
+            WGPURenderPassEncoder renderPass = t.beginRenderPassTracked(encoder, &passDesc);
+
+            for (uint32_t stencilBitIndex = 0; stencilBitIndex < stencilBitCount; ++stencilBitIndex) {
+                depthStencil.stencilReadMask = 1u << stencilBitIndex;
+                WGPURenderPipeline renderPipeline = t.createRenderPipelineTracked(renderPipelineDescriptorBase);
+
+                wgpuRenderPassEncoderSetPipeline(renderPass, renderPipeline);
+                wgpuRenderPassEncoderSetStencilReference(renderPass, 1u << stencilBitIndex);
+                const uint32_t dynamicOffset = stencilBitIndex * kMinDynamicBufferOffsetAlignment;
+                wgpuRenderPassEncoderSetBindGroup(renderPass, 0, bindGroup, 1, &dynamicOffset);
+                wgpuRenderPassEncoderDraw(renderPass, 6, 1, 0, 0);
+            }
+            wgpuRenderPassEncoderEnd(renderPass);
+
+            // Check outputTexture by copying the content of outputTexture into outputStagingBuffer
+            // and checking all the data in outputStagingBuffer.
+            WGPUBuffer outputStagingBuffer = createBuffer(
+                t,
+                copyFromOutputTextureLayout.byteLength,
+                WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+            {
+                WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+                source.texture = outputTexture;
+                WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+                destination.buffer = outputStagingBuffer;
+                destination.layout.bytesPerRow = copyFromOutputTextureLayout.bytesPerRow;
+                destination.layout.rowsPerImage = copyFromOutputTextureLayout.rowsPerImage;
+                wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &outputTextureSize);
+            }
+
+            submit(t, encoder);
+
+            // Check the valid data in outputStagingBuffer once per row.
+            for (uint32_t y = 0; y < copyFromOutputTextureLayout.mipSize.height; ++y) {
+                const uint64_t dataStart = initialDataOffset
+                    + static_cast<uint64_t>(bytesPerRow) * rowsPerImage * stencilTextureLayer
+                    + static_cast<uint64_t>(bytesPerRow) * y;
+                // initialData.slice(dataStart, dataStart + width) (slice clamps to the array end).
+                const size_t begin = static_cast<size_t>(std::min<uint64_t>(dataStart, initialData.size()));
+                const size_t end = static_cast<size_t>(
+                    std::min<uint64_t>(dataStart + copyFromOutputTextureLayout.mipSize.width, initialData.size()));
+                t.expectGPUBufferValuesEqual(
+                    outputStagingBuffer,
+                    initialData.data() + begin,
+                    end - begin,
+                    static_cast<uint64_t>(copyFromOutputTextureLayout.bytesPerRow) * y);
+            }
+        }
+    });
 
 } // namespace
