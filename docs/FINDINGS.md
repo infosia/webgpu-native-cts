@@ -116,7 +116,8 @@ pass 2,139,179 / skip 150,900 / fail 258 / crash 0, plus 2,604 `xfail` (F-159, F
 `xpass`. The fails are the 2 `index_buffer_format_dirtying` subcases (¹ above) and 256 F-167 subcases in
 partially failing cases.
 
-**yawgpu, Metal:** no open defects. F-161 to F-164 from the 2026-11-01 sweep are resolved. Carried in
+**yawgpu, Metal:** no open defects. Full sweep 2026-11-20 (`01324f0`): pass 2,139,166 / skip 150,912 /
+fail 2,863 raw, the same fail profile as Dawn (F-159, F-160, F-167, `index_buffer_format_dirtying`). F-161 to F-164 from the 2026-11-01 sweep are resolved. Carried in
 `expectations/yawgpu.txt`: `index_buffer_format_dirtying` and F-160 (shared with Dawn). The 2 F-159 cases fail as on
 Dawn and are not listed.
 
@@ -127,6 +128,9 @@ F-111 and F-139 were resolved after that sweep; F-111 was confirmed on Windows n
 MoltenVK.
 
 **Open — yawgpu:** none.
+
+**Open — MoltenVK, native Vulkan confirmation pending:** F-168 (negative array index in sampled array
+textures; yawgpu Vulkan HAL through MoltenVK only).
 
 **Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a
 compile-time zero value on Metal; yawgpu fails the same cases), F-167 (Metal `textureSampleBias` with offset +
@@ -187,6 +191,29 @@ comment, not checked against an upstream checkout.
 
 ---
 
+## F-168 — MoltenVK: negative array index in sampled array textures reads the wrong layer — MoltenVK only (native Vulkan confirmation pending)
+
+**MOLTENVK, NOT yet confirmed on native Vulkan** (found 2026-11-20, yawgpu `01324f0` Vulkan HAL through
+MoltenVK, `$VULKAN_SDK` 1.3.296.0, Apple M2). Exposed once T10 of
+`specs/test-review-fixes-8b086b8.md` ported upstream's sample-point generators, which pass an array
+index of -1 (and the layer count) to check WGSL's clamp to `[0, layers - 1]`.
+
+Every failing call has `arrayIndex -1`; the layer-count index passes. Seen in
+`textureSampleBias:arrayed_{2d,3d}_coords` (2,575 cases beyond the F-167 set),
+`textureSampleLevel:sampled_array_2d_coords`, `textureSample:sampled_array_2d_coords` and
+`textureGather:sampled_array_2d_coords` (fast-mode runs: 2,159 / 720 / 4,536 failing subcases), across
+uncompressed and compressed formats and both `offset` values. yawgpu on Metal and Dawn on Metal pass
+all of them, so yawgpu's core and Tint's WGSL handling are correct.
+
+Vulkan defines the layer as `clamp(RNE(a), 0, d - 1)` of the floating-point coordinate, so a correct
+driver clamps -1 to 0. MoltenVK translates the SPIR-V to MSL, where the array index is an unsigned
+integer; a -1 that reaches it unclamped selects the wrong layer. This matches the MoltenVK artifact
+pattern of F-033, F-104 and F-158 but is unconfirmed: run the arrayed texture builtin tests on native
+Vulkan (Windows or Linux) to settle it. Dawn on this Mac has no Vulkan backend, so it cannot cross-check.
+Not added to `expectations/yawgpu-vulkan.txt`, which carries native-Vulkan results.
+
+---
+
 ## F-167 — Metal (Apple M2): `textureSampleBias` with offset + repeat/mirror on non-block-aligned compressed mips — OPEN (Dawn; matches Dawn's own expectations)
 
 **METAL / APPLE GPU ACCURACY** (found 2026-11-20, Dawn `v20261030.184100`, CTS `d116bcc`, Apple M2).
@@ -207,10 +234,14 @@ fails in 1,004 cases (2,788 subcases), deterministically across runs. Every fail
 The port's software model applies the offset and then the address mode over the virtual mip size, as
 upstream's does. Dawn's own `webgpu-cts/expectations.txt` marks every `textureSampleBias` test as
 failing on Mac M2 (`crbug.com/407076135`) and lists the same `offset=true; modeU="c"; modeV="r"`
-pattern as failing on Mac AMD (`crbug.com/407109059`). The defect is attributed to Metal sampling,
-not to Dawn's translation; it was not cross-checked on yawgpu or MoltenVK.
+pattern as failing on Mac AMD (`crbug.com/407109059`).
 
-`expectations/dawn.txt` lists the 849 cases in which every subcase fails. The other 155 cases also
+**Cross-check (2026-11-20).** yawgpu `01324f0` on Metal fails the same 1,004 cases, and its failure
+lines, messages and values included, are byte-identical to Dawn's. yawgpu through MoltenVK (which also
+ends in Metal) fails all 1,004 as well. Two independent WebGPU implementations producing the same wrong
+texels puts the defect in Metal sampling. Native Vulkan has not been run for this test.
+
+`expectations/dawn.txt` and `expectations/yawgpu.txt` list the 849 cases in which every subcase fails. The other 155 cases also
 have passing subcases and are left visible as failures, per the case-level expectation rule.
 
 ---

@@ -158,19 +158,22 @@ runs whole-suite **per-subcase** (`--workers`, no `--isolate`). All tables are *
 carries its own sweep date, run mode and backend revision. Per-finding detail is in
 [FINDINGS](docs/FINDINGS.md).
 
-The Dawn Metal table, the yawgpu native Vulkan tables and the yawgpu GLES / NVIDIA table are at the
-current pin (upstream `d116bcc`, 657 files). The yawgpu Metal table, the wgpu-native tables and the Haswell table predate that
+The Metal tables (yawgpu and Dawn), the yawgpu native Vulkan tables and the yawgpu GLES / NVIDIA table are at the
+current pin (upstream `d116bcc`, 657 files). The wgpu-native tables and the Haswell table predate that
 re-baseline (642 files), so their counts are not comparable with the current ones.
 
 #### yawgpu — native Metal (Tint frontend), per-subcase
 
+Sweep 2026-11-20, upstream `d116bcc` (657 files, 280,146 cases), yawgpu `01324f0`, Apple M2,
+`--workers 6`.
+
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
-| `api/validation` (126) | 293,557 | 61,433 | 2† | 0 |
-| `api/operation` (70) | 228,852 | 741 | 0 | 0 |
-| `shader/execution` (239) | 822,636 | 21,950 | 0 | 0 |
-| `shader/validation` (207) | 646,773 | 20,369 | 0 | 0 |
-| **total** | **1,991,818** | **104,493** | **2†** | **0** |
+| `api/validation` (128) | 342,191 | 55,814 | 2† | 0 |
+| `api/operation` (70) | 287,938 | 45,667 | 0 | 0 |
+| `shader/execution` (246) | 847,618 | 29,196 | 2,859‡ | 0 |
+| `shader/validation` (213) | 661,419 | 20,235 | 2‡ | 0 |
+| **total** | **2,139,166** | **150,912** | **2,863** | **0** |
 
 #### Dawn — native Metal (conformance oracle, Tint frontend), per-subcase
 
@@ -185,13 +188,17 @@ Sweep 2026-11-20, upstream `d116bcc` (657 files, 280,146 cases), Dawn `v20261030
 | `shader/validation` (213) | 661,419 | 20,235 | 2‡ | 0 |
 | **total** | **2,139,179** | **150,900** | **2,862** | **0** |
 
-‡ Dawn/Metal findings carried as `xfail` in `expectations/dawn.txt`: F-159 (2), F-160 (70), and
+‡ Metal findings shared by Dawn and yawgpu, carried as `xfail` in `expectations/dawn.txt` and
+`expectations/yawgpu.txt` (F-159 is listed for Dawn only): F-159 (2), F-160 (70; random, so the count
+varies by one or two between runs), and
 F-167 (2,788, Metal `textureSampleBias` on non-block-aligned compressed mips; 256 of them are in
 partially failing cases and are not masked).
 
 † Documented non-defects, carried as `xfail`.
 
-**yawgpu matched Dawn on Metal** in the pre-re-baseline sweeps above: same fail profile (only those 2 cases), both shader areas
+**yawgpu matches Dawn on Metal.** The F-167 failures are byte-identical on both, including the
+messages, and the rest of the fail profile is the same; the 12-subcase skip difference is capability
+exposure. In the earlier pre-re-baseline sweeps it was likewise the same fail profile (only those 2 cases), both shader areas
 subcase-identical, and the skip counts within 13 subcases of each other — a capability-exposure
 difference, not conformance divergence.
 
