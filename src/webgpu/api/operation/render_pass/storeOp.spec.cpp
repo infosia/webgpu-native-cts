@@ -1,18 +1,21 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/render_pass/storeOp.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
-// Ports color_attachment_only (rgba8unorm) + color_attachment_with_depth_stencil_attachment; format/mip/layer/multiple/depth-only deferred.
+// SPDX-License-Identifier: BSD-3-Clause
+// Ported from gpuweb/cts src/webgpu/api/operation/render_pass/storeOp.spec.ts
+// @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
+// Upstream CTS: Copyright (c) 2020 The WebGPU CTS Contributors, BSD-3-Clause.
+// Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
 
 #include <array>
-#include <cmath>
 #include <cstdint>
-#include <cstring>
-#include <optional>
-#include <sstream>
+#include <cstdlib>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "cts/gpu.h"
 #include "cts/test.h"
-#include "webgpu/util/texture_layout.h"
+#include "webgpu/texture_format.h"
+#include "webgpu/util/texel_data.h"
+#include "webgpu/util/texture_test_utils.h"
 
 using namespace cts;
 
@@ -20,33 +23,44 @@ namespace {
 
 TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpuTest>(
     "api,operation,render_pass,storeOp",
-    "Render pass storeOp operation tests.");
+    R"(API Operation Tests for RenderPass StoreOp.
 
-constexpr uint32_t kWidth = 2;
+  Test Coverage:
+
+  - Tests that color and depth-stencil store operations {'discard', 'store'} work correctly for a
+    render pass with both a color attachment and depth-stencil attachment.
+      TODO: use depth24plus-stencil8
+
+  - Tests that store operations {'discard', 'store'} work correctly for a render pass with multiple
+    color attachments.
+      TODO: test with more interesting loadOp values
+
+  - Tests that store operations {'discard', 'store'} work correctly for a render pass with a color
+    attachment for:
+      - All renderable color formats
+      - mip level set to {'0', mip > '0'}
+      - array layer set to {'0', layer > '1'} for 2D textures
+      TODO: depth slice set to {'0', slice > '0'} for 3D textures
+
+  - Tests that store operations {'discard', 'store'} work correctly for a render pass with a
+    depth-stencil attachment for:
+      - All renderable depth-stencil formats
+      - mip level set to {'0', mip > '0'}
+      - array layer set to {'0', layer > '1'} for 2D textures
+      TODO: test depth24plus and depth24plus-stencil8 formats
+      TODO: test that depth and stencil aspects are set separately
+      TODO: depth slice set to {'0', slice > '0'} for 3D textures
+      TODO: test with more interesting loadOp values)");
+
+// Test with a zero and non-zero mip.
+constexpr uint32_t kMipLevelCount = 2;
+
 constexpr uint32_t kHeight = 2;
-constexpr uint32_t kBytesPerPixel = 4;  // rgba8unorm: 4 bytes/texel
-constexpr uint32_t kDepthBytesPerPixel = 4;  // depth32float: 4 bytes/texel (f32)
+constexpr uint32_t kWidth = 2;
 
-// bytesPerRow = align(kWidth * kBytesPerPixel, 256) = align(8, 256) = 256
-constexpr uint32_t kColorBytesPerRow = kBytesPerRowAlignment;
-// depth bytesPerRow = align(kWidth * kDepthBytesPerPixel, 256) = align(8, 256) = 256
-constexpr uint32_t kDepthBytesPerRow = kBytesPerRowAlignment;
-
-// color_attachment_only clear values: {R:0.8, G:0.75, B:0.5, A:1.0}
-// Rounded to unorm8: {204, 191, 128, 255}  (tol 2/255)
-constexpr WGPUColor kColorOnlyClearValue = {0.8, 0.75, 0.5, 1.0};
-constexpr std::array<uint8_t, 4> kColorOnlyStoredBytes = {204, 191, 128, 255};
-constexpr std::array<uint8_t, 4> kColorOnlyDiscardedBytes = {0, 0, 0, 0};
-constexpr uint32_t kColorOnlyTolerance = 2;
-
-// color_attachment_with_depth_stencil_attachment clear values
-constexpr WGPUColor kColorDepthClearColor = {1.0, 1.0, 1.0, 1.0};
-constexpr float kDepthClearValue = 1.0f;
-constexpr std::array<uint8_t, 4> kColorDepthStoredColorBytes = {255, 255, 255, 255};
-constexpr std::array<uint8_t, 4> kColorDepthDiscardedColorBytes = {0, 0, 0, 0};
-constexpr float kDepthStoredValue = 1.0f;
-constexpr float kDepthDiscardedValue = 0.0f;
-constexpr double kDepthTolerance = 1.0 / 256.0;
+std::vector<Value> storeOpValues() {
+    return {Value("discard"), Value("store")};
+}
 
 WGPUStoreOp parseStoreOp(std::string_view value) {
     if (value == "store") {
@@ -58,479 +72,276 @@ WGPUStoreOp parseStoreOp(std::string_view value) {
     std::abort();
 }
 
+bool isSintOrUintFormat(WGPUTextureFormat format) {
+    const std::string_view id = textureFormatIdentifier(format);
+    return id.find("sint") != std::string_view::npos || id.find("uint") != std::string_view::npos;
+}
+
 void submit(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder) {
     WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
     wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
 }
 
-// Verify all 4 texels of the 2x2 rgba8unorm color texture.
-// expected: the 4-byte RGBA value each texel should have.
-// tolerance: per-channel absolute tolerance (for unorm rounding).
-void expectColorTexture2x2(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPUTexture colorTexture,
-    const std::array<uint8_t, 4>& expected,
-    uint32_t tolerance) {
-    // Total buffer size = bytesPerRow * kHeight = 256 * 2 = 512, already >= kBufferCopyAlignment.
-    const uint64_t byteLength = static_cast<uint64_t>(kColorBytesPerRow) * kHeight;
-
-    WGPUBufferDescriptor bufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    bufDesc.size = byteLength;
-    bufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
-    WGPUBuffer buffer = t.createBufferTracked(bufDesc);
-
-    WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
-    source.texture = colorTexture;
-    source.mipLevel = 0;
-    source.origin = WGPUOrigin3D{0, 0, 0};
-    source.aspect = WGPUTextureAspect_All;
-
-    WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
-    destination.buffer = buffer;
-    destination.layout.offset = 0;
-    destination.layout.bytesPerRow = kColorBytesPerRow;
-    destination.layout.rowsPerImage = kHeight;
-
-    WGPUExtent3D copyExtent = WGPUExtent3D{kWidth, kHeight, 1};
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &copyExtent);
-    submit(t, encoder);
-
-    t.expectGPUBufferValuesPassCheck(
-        buffer,
-        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
-            for (uint32_t row = 0; row < kHeight; ++row) {
-                for (uint32_t col = 0; col < kWidth; ++col) {
-                    const uint64_t offset =
-                        static_cast<uint64_t>(row) * kColorBytesPerRow
-                        + static_cast<uint64_t>(col) * kBytesPerPixel;
-                    if (offset + kBytesPerPixel > len) {
-                        std::ostringstream msg;
-                        msg << "color texel offset out of range at (" << col << "," << row << ")";
-                        return msg.str();
-                    }
-                    for (uint32_t ch = 0; ch < kBytesPerPixel; ++ch) {
-                        const int diff = static_cast<int>(actual[offset + ch])
-                                       - static_cast<int>(expected[ch]);
-                        if (std::abs(diff) > static_cast<int>(tolerance)) {
-                            std::ostringstream msg;
-                            msg << "rgba8unorm mismatch at (" << col << "," << row
-                                << ") channel " << ch
-                                << ": expected " << static_cast<int>(expected[ch])
-                                << " got " << static_cast<int>(actual[offset + ch])
-                                << " (tol " << tolerance << ")";
-                            return msg.str();
-                        }
-                    }
-                }
-            }
-            return std::nullopt;
-        },
-        0,
-        static_cast<size_t>(byteLength));
+WGPUTexture createAttachmentTexture(AllFeaturesMaxLimitsGpuTest& t,
+                                    WGPUTextureFormat format,
+                                    uint32_t depthOrArrayLayers = 1,
+                                    uint32_t mipLevelCount = 1) {
+    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    desc.format = format;
+    desc.size = WGPUExtent3D{kWidth, kHeight, depthOrArrayLayers};
+    desc.mipLevelCount = mipLevelCount;
+    desc.usage = WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment;
+    return t.createTextureTracked(desc);
 }
 
-// Verify all 4 texels of the 2x2 depth32float depth texture.
-// expected: the f32 depth value each texel should have.
-void expectDepthTexture2x2(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPUTexture depthTexture,
-    float expectedDepth) {
-    // Total buffer size = bytesPerRow * kHeight = 256 * 2 = 512.
-    const uint64_t byteLength = static_cast<uint64_t>(kDepthBytesPerRow) * kHeight;
-
-    WGPUBufferDescriptor bufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    bufDesc.size = byteLength;
-    bufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
-    WGPUBuffer buffer = t.createBufferTracked(bufDesc);
-
-    WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
-    source.texture = depthTexture;
-    source.mipLevel = 0;
-    source.origin = WGPUOrigin3D{0, 0, 0};
-    source.aspect = WGPUTextureAspect_DepthOnly;
-
-    WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
-    destination.buffer = buffer;
-    destination.layout.offset = 0;
-    destination.layout.bytesPerRow = kDepthBytesPerRow;
-    destination.layout.rowsPerImage = kHeight;
-
-    WGPUExtent3D copyExtent = WGPUExtent3D{kWidth, kHeight, 1};
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &copyExtent);
-    submit(t, encoder);
-
-    t.expectGPUBufferValuesPassCheck(
-        buffer,
-        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
-            for (uint32_t row = 0; row < kHeight; ++row) {
-                for (uint32_t col = 0; col < kWidth; ++col) {
-                    const uint64_t offset =
-                        static_cast<uint64_t>(row) * kDepthBytesPerRow
-                        + static_cast<uint64_t>(col) * kDepthBytesPerPixel;
-                    if (offset + kDepthBytesPerPixel > len) {
-                        std::ostringstream msg;
-                        msg << "depth texel offset out of range at (" << col << "," << row << ")";
-                        return msg.str();
-                    }
-                    float actualDepth = 0.0f;
-                    std::memcpy(&actualDepth, actual + offset, sizeof(actualDepth));
-                    if (std::abs(static_cast<double>(actualDepth)
-                                 - static_cast<double>(expectedDepth)) > kDepthTolerance) {
-                        std::ostringstream msg;
-                        msg << "depth32float mismatch at (" << col << "," << row
-                            << "): expected " << expectedDepth
-                            << " got " << actualDepth;
-                        return msg.str();
-                    }
-                }
-            }
-            return std::nullopt;
-        },
-        0,
-        static_cast<size_t>(byteLength));
+WGPUTextureView createDefaultView(AllFeaturesMaxLimitsGpuTest& t, WGPUTexture texture) {
+    WGPUTextureViewDescriptor desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    return t.createViewTracked(texture, desc);
 }
 
-// color_attachment_only: empty render pass on a 2x2 rgba8unorm target.
-// Verify that 'store' keeps the clear value and 'discard' produces zeros.
-void runColorAttachmentOnly(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string storeOpStr = t.param<std::string>("storeOperation");
-    const WGPUStoreOp storeOp = parseStoreOp(storeOpStr);
+WGPUTextureView createSingleSubresourceView(AllFeaturesMaxLimitsGpuTest& t,
+                                            WGPUTexture texture,
+                                            uint32_t mipLevel,
+                                            uint32_t arrayLayer) {
+    WGPUTextureViewDescriptor desc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    desc.baseArrayLayer = arrayLayer;
+    desc.baseMipLevel = mipLevel;
+    desc.mipLevelCount = 1;
+    desc.arrayLayerCount = 1;
+    return t.createViewTracked(texture, desc);
+}
 
-    // Create 2x2 rgba8unorm render target.
-    WGPUTextureDescriptor colorTexDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    colorTexDesc.size = WGPUExtent3D{kWidth, kHeight, 1};
-    colorTexDesc.mipLevelCount = 1;
-    colorTexDesc.sampleCount = 1;
-    colorTexDesc.dimension = WGPUTextureDimension_2D;
-    colorTexDesc.format = WGPUTextureFormat_RGBA8Unorm;
-    colorTexDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
-    WGPUTexture colorTexture = t.createTextureTracked(colorTexDesc);
-
-    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    WGPUTextureView colorView = t.createViewTracked(colorTexture, viewDesc);
-
-    // Color attachment: clear to {0.8,0.75,0.5,1.0}, storeOp from param.
-    WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-    colorAttachment.view = colorView;
-    colorAttachment.loadOp = WGPULoadOp_Clear;
-    colorAttachment.storeOp = storeOp;
-    colorAttachment.clearValue = kColorOnlyClearValue;
-
+void encodeEmptyPass(AllFeaturesMaxLimitsGpuTest& t,
+                     const std::vector<WGPURenderPassColorAttachment>& colorAttachments,
+                     const WGPURenderPassDepthStencilAttachment* depthStencilAttachment) {
+    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
     WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-    passDesc.colorAttachmentCount = 1;
-    passDesc.colorAttachments = &colorAttachment;
-
-    // Empty render pass: no pipeline, no draw.
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+    passDesc.colorAttachmentCount = colorAttachments.size();
+    passDesc.colorAttachments = colorAttachments.empty() ? nullptr : colorAttachments.data();
+    passDesc.depthStencilAttachment = depthStencilAttachment;
     WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
     wgpuRenderPassEncoderEnd(pass);
     submit(t, encoder);
-
-    // Verify all 4 texels.
-    const std::array<uint8_t, 4>& expected =
-        (storeOpStr == "store") ? kColorOnlyStoredBytes : kColorOnlyDiscardedBytes;
-    expectColorTexture2x2(t, colorTexture, expected, kColorOnlyTolerance);
 }
 
-// Verify all 4 texels of the 2x2 stencil8 texture (stencil aspect, 1 byte/texel).
-// expectedStencil: the uint8 stencil value each texel should have.
-void expectStencilTexture2x2(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPUTexture stencilTexture,
-    uint8_t expectedStencil) {
-    // stencil8: 1 byte/texel, bytesPerRow = align(kWidth * 1, 256) = 256, total = 256 * 2 = 512.
-    constexpr uint32_t kStencilBytesPerPixel = 1;
-    constexpr uint32_t kStencilBytesPerRow = kBytesPerRowAlignment;  // align(2*1, 256) = 256
-    const uint64_t byteLength = static_cast<uint64_t>(kStencilBytesPerRow) * kHeight;
-
-    WGPUBufferDescriptor bufDesc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    bufDesc.size = byteLength;
-    bufDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc;
-    WGPUBuffer buffer = t.createBufferTracked(bufDesc);
-
-    WGPUTexelCopyTextureInfo source = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
-    source.texture = stencilTexture;
-    source.mipLevel = 0;
-    source.origin = WGPUOrigin3D{0, 0, 0};
-    source.aspect = WGPUTextureAspect_StencilOnly;
-
-    WGPUTexelCopyBufferInfo destination = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
-    destination.buffer = buffer;
-    destination.layout.offset = 0;
-    destination.layout.bytesPerRow = kStencilBytesPerRow;
-    destination.layout.rowsPerImage = kHeight;
-
-    WGPUExtent3D copyExtent = WGPUExtent3D{kWidth, kHeight, 1};
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    wgpuCommandEncoderCopyTextureToBuffer(encoder, &source, &destination, &copyExtent);
-    submit(t, encoder);
-
-    t.expectGPUBufferValuesPassCheck(
-        buffer,
-        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
-            for (uint32_t row = 0; row < kHeight; ++row) {
-                for (uint32_t col = 0; col < kWidth; ++col) {
-                    const uint64_t offset =
-                        static_cast<uint64_t>(row) * kStencilBytesPerRow
-                        + static_cast<uint64_t>(col) * kStencilBytesPerPixel;
-                    if (offset + kStencilBytesPerPixel > len) {
-                        std::ostringstream msg;
-                        msg << "stencil texel offset out of range at (" << col << "," << row << ")";
-                        return msg.str();
-                    }
-                    if (actual[offset] != expectedStencil) {
-                        std::ostringstream msg;
-                        msg << "stencil8 mismatch at (" << col << "," << row
-                            << "): expected " << static_cast<int>(expectedStencil)
-                            << " got " << static_cast<int>(actual[offset]);
-                        return msg.str();
-                    }
-                }
-            }
-            return std::nullopt;
-        },
-        0,
-        static_cast<size_t>(byteLength));
+TexelValue depthValue(double depth) {
+    TexelValue value;
+    value.Depth = depth;
+    return value;
 }
 
-// color_attachment_with_depth_stencil_attachment: empty render pass on a 2x2 rgba8unorm color
-// target and a 2x2 depth32float depth target. Verify color and depth independently.
-void runColorWithDepthStencil(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string colorStoreOpStr = t.param<std::string>("colorStoreOperation");
-    const std::string depthStoreOpStr = t.param<std::string>("depthStencilStoreOperation");
-    const WGPUStoreOp colorStoreOp = parseStoreOp(colorStoreOpStr);
-    const WGPUStoreOp depthStoreOp = parseStoreOp(depthStoreOpStr);
-
-    // Create 2x2 rgba8unorm color target.
-    WGPUTextureDescriptor colorTexDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    colorTexDesc.size = WGPUExtent3D{kWidth, kHeight, 1};
-    colorTexDesc.mipLevelCount = 1;
-    colorTexDesc.sampleCount = 1;
-    colorTexDesc.dimension = WGPUTextureDimension_2D;
-    colorTexDesc.format = WGPUTextureFormat_RGBA8Unorm;
-    colorTexDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
-    WGPUTexture colorTexture = t.createTextureTracked(colorTexDesc);
-
-    // Create 2x2 depth32float depth target.
-    WGPUTextureDescriptor depthTexDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    depthTexDesc.size = WGPUExtent3D{kWidth, kHeight, 1};
-    depthTexDesc.mipLevelCount = 1;
-    depthTexDesc.sampleCount = 1;
-    depthTexDesc.dimension = WGPUTextureDimension_2D;
-    depthTexDesc.format = WGPUTextureFormat_Depth32Float;
-    depthTexDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
-    WGPUTexture depthTexture = t.createTextureTracked(depthTexDesc);
-
-    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    WGPUTextureView colorView = t.createViewTracked(colorTexture, viewDesc);
-    WGPUTextureView depthView = t.createViewTracked(depthTexture, viewDesc);
-
-    // Color attachment: clear to white {1,1,1,1}, colorStoreOp from param.
-    WGPURenderPassColorAttachment colorAttachment = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-    colorAttachment.view = colorView;
-    colorAttachment.loadOp = WGPULoadOp_Clear;
-    colorAttachment.storeOp = colorStoreOp;
-    colorAttachment.clearValue = kColorDepthClearColor;
-
-    // Depth-stencil attachment: depthClearValue 1.0, depthStoreOp from param.
-    WGPURenderPassDepthStencilAttachment dsAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
-    dsAttachment.view = depthView;
-    dsAttachment.depthLoadOp = WGPULoadOp_Clear;
-    dsAttachment.depthStoreOp = depthStoreOp;
-    dsAttachment.depthClearValue = kDepthClearValue;
-
-    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-    passDesc.colorAttachmentCount = 1;
-    passDesc.colorAttachments = &colorAttachment;
-    passDesc.depthStencilAttachment = &dsAttachment;
-
-    // Empty render pass: no pipeline, no draw.
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
-    wgpuRenderPassEncoderEnd(pass);
-    submit(t, encoder);
-
-    // Verify color: all 4 texels.
-    const std::array<uint8_t, 4>& expectedColor =
-        (colorStoreOpStr == "store") ? kColorDepthStoredColorBytes : kColorDepthDiscardedColorBytes;
-    expectColorTexture2x2(t, colorTexture, expectedColor, 0);
-
-    // Verify depth: all 4 texels.
-    const float expectedDepth =
-        (depthStoreOpStr == "store") ? kDepthStoredValue : kDepthDiscardedValue;
-    expectDepthTexture2x2(t, depthTexture, expectedDepth);
+TexelValue stencilValue(double stencil) {
+    TexelValue value;
+    value.Stencil = stencil;
+    return value;
 }
 
-// multiple_color_attachments: colorAttachments x storeOperation1 x storeOperation2 matrix.
-// Each attachment cleared to {1,1,1,1}; even index uses storeOp1, odd index uses storeOp2.
-// Empty render pass. Verify per-attachment: store→{255,255,255,255}, discard→{0,0,0,0}.
-void runMultipleColorAttachments(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string storeOpStr1 = t.param<std::string>("storeOperation1");
-    const std::string storeOpStr2 = t.param<std::string>("storeOperation2");
-    const WGPUStoreOp storeOp1 = parseStoreOp(storeOpStr1);
-    const WGPUStoreOp storeOp2 = parseStoreOp(storeOpStr2);
-
-    const uint32_t colorAttachmentCount = static_cast<uint32_t>(t.param<uint64_t>("colorAttachments"));
-
-    // Create 2 rgba8unorm render targets.
-    std::array<WGPUTexture, 4> colorTextures{};
-    std::array<WGPUTextureView, 4> colorViews{};
-    for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
-        WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-        texDesc.size = WGPUExtent3D{kWidth, kHeight, 1};
-        texDesc.mipLevelCount = 1;
-        texDesc.sampleCount = 1;
-        texDesc.dimension = WGPUTextureDimension_2D;
-        texDesc.format = WGPUTextureFormat_RGBA8Unorm;
-        texDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
-        colorTextures[i] = t.createTextureTracked(texDesc);
-
-        WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-        colorViews[i] = t.createViewTracked(colorTextures[i], viewDesc);
-    }
-
-    // Set up color attachments: even index uses storeOp1, odd index uses storeOp2.
-    std::array<WGPURenderPassColorAttachment, 4> colorAttachments{};
-    for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
-        colorAttachments[i] = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
-        colorAttachments[i].view = colorViews[i];
-        colorAttachments[i].loadOp = WGPULoadOp_Clear;
-        colorAttachments[i].storeOp = (i % 2 == 0) ? storeOp1 : storeOp2;
-        colorAttachments[i].clearValue = WGPUColor{1.0, 1.0, 1.0, 1.0};
-    }
-
-    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-    passDesc.colorAttachmentCount = colorAttachmentCount;
-    passDesc.colorAttachments = colorAttachments.data();
-
-    // Empty render pass: no pipeline, no draw.
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
-    wgpuRenderPassEncoderEnd(pass);
-    submit(t, encoder);
-
-    // Verify each attachment independently.
-    constexpr std::array<uint8_t, 4> kStored = {255, 255, 255, 255};
-    constexpr std::array<uint8_t, 4> kDiscarded = {0, 0, 0, 0};
-
-    for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
-        const std::string& opStr = (i % 2 == 0) ? storeOpStr1 : storeOpStr2;
-        const std::array<uint8_t, 4>& expected = (opStr == "store") ? kStored : kDiscarded;
-        expectColorTexture2x2(t, colorTextures[i], expected, 0);
-    }
-}
-
-// depth_stencil_attachment_only: colorAttachmentCount=0, depth32float or stencil8 attachment.
-// depth32float: depthClearValue 1.0, depthLoadOp clear, depthStoreOp=param (stencil Undefined).
-// stencil8: stencilClearValue 1, stencilLoadOp clear, stencilStoreOp=param (depth Undefined).
-// Empty render pass. Verify: store keeps clear value, discard produces 0.
-void runDepthStencilAttachmentOnly(AllFeaturesMaxLimitsGpuTest& t) {
-    const std::string formatStr = t.param<std::string>("depthStencilFormat");
-    const std::string storeOpStr = t.param<std::string>("storeOperation");
-    const WGPUStoreOp storeOp = parseStoreOp(storeOpStr);
-
-    const bool isDepth32float = (formatStr == "depth32float");
-    const WGPUTextureFormat texFormat = isDepth32float
-        ? WGPUTextureFormat_Depth32Float
-        : WGPUTextureFormat_Stencil8;
-
-    // Create 2x2 depth-or-stencil render target.
-    WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    texDesc.size = WGPUExtent3D{kWidth, kHeight, 1};
-    texDesc.mipLevelCount = 1;
-    texDesc.sampleCount = 1;
-    texDesc.dimension = WGPUTextureDimension_2D;
-    texDesc.format = texFormat;
-    texDesc.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
-    WGPUTexture dsTexture = t.createTextureTracked(texDesc);
-
-    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    WGPUTextureView dsView = t.createViewTracked(dsTexture, viewDesc);
-
-    // Build depth-stencil attachment, setting only the relevant aspect fields.
-    WGPURenderPassDepthStencilAttachment dsAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
-    dsAttachment.view = dsView;
-    if (isDepth32float) {
-        // depth32float: only depth aspect; stencil fields remain Undefined.
-        dsAttachment.depthClearValue = 1.0f;
-        dsAttachment.depthLoadOp = WGPULoadOp_Clear;
-        dsAttachment.depthStoreOp = storeOp;
-    } else {
-        // stencil8: only stencil aspect; depth fields remain Undefined.
-        dsAttachment.stencilClearValue = 1;
-        dsAttachment.stencilLoadOp = WGPULoadOp_Clear;
-        dsAttachment.stencilStoreOp = storeOp;
-    }
-
-    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-    passDesc.colorAttachmentCount = 0;
-    passDesc.colorAttachments = nullptr;
-    passDesc.depthStencilAttachment = &dsAttachment;
-
-    // Empty render pass: no pipeline, no draw.
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
-    wgpuRenderPassEncoderEnd(pass);
-    submit(t, encoder);
-
-    // Verify the stored/discarded value.
-    if (isDepth32float) {
-        const float expectedDepth = (storeOpStr == "store") ? 1.0f : 0.0f;
-        expectDepthTexture2x2(t, dsTexture, expectedDepth);
-    } else {
-        const uint8_t expectedStencil = (storeOpStr == "store") ? 1 : 0;
-        expectStencilTexture2x2(t, dsTexture, expectedStencil);
-    }
-}
-
-CTS_TEST(g, "render_pass_store_op,color_attachment_only")
-    .params([](ParamsBuilder u) {
-        return u
-            .combine("colorFormat", {Value("rgba8unorm")})
-            .combine("storeOperation", {Value("store"), Value("discard")})
-            .beginSubcases()
-            .combine("mipLevel", {uint64_t(0)})
-            .combine("arrayLayer", {uint64_t(0)});
-    })
-    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        runColorAttachmentOnly(t);
-    });
-
+// Tests a render pass with both a color and depth stencil attachment to ensure store operations are
+// set independently.
 CTS_TEST(g, "render_pass_store_op,color_attachment_with_depth_stencil_attachment")
     .params([](ParamsBuilder u) {
-        return u
-            .combine("colorStoreOperation", {Value("store"), Value("discard")})
-            .combine("depthStencilStoreOperation", {Value("store"), Value("discard")});
+        return u.combine("colorStoreOperation", storeOpValues())
+            .combine("depthStencilStoreOperation", storeOpValues());
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        runColorWithDepthStencil(t);
+        const std::string colorStoreOperation = t.param<std::string>("colorStoreOperation");
+        const std::string depthStencilStoreOperation = t.param<std::string>("depthStencilStoreOperation");
+
+        // Create a basic color attachment.
+        constexpr WGPUTextureFormat kColorFormat = WGPUTextureFormat_RGBA8Unorm;
+        WGPUTexture colorAttachment = createAttachmentTexture(t, kColorFormat);
+
+        // Create a basic depth/stencil attachment.
+        constexpr WGPUTextureFormat kDepthStencilFormat = WGPUTextureFormat_Depth32Float;
+        WGPUTexture depthStencilAttachment = createAttachmentTexture(t, kDepthStencilFormat);
+
+        // Color load operation will clear to {1.0, 1.0, 1.0, 1.0}.
+        // Depth operation will clear to 1.0.
+        // Store operations are determined by test the params.
+        WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        color.view = createDefaultView(t, colorAttachment);
+        color.clearValue = WGPUColor{1.0, 1.0, 1.0, 1.0};
+        color.loadOp = WGPULoadOp_Clear;
+        color.storeOp = parseStoreOp(colorStoreOperation);
+
+        WGPURenderPassDepthStencilAttachment depthStencil = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+        depthStencil.view = createDefaultView(t, depthStencilAttachment);
+        depthStencil.depthClearValue = 1.0f;
+        depthStencil.depthLoadOp = WGPULoadOp_Clear;
+        depthStencil.depthStoreOp = parseStoreOp(depthStencilStoreOperation);
+
+        encodeEmptyPass(t, {color}, &depthStencil);
+
+        // Check that the correct store operation occurred.
+        const double expectedColor = colorStoreOperation == "discard" ? 0.0 : 1.0;
+        expectSingleColor(t, colorAttachment, kColorFormat, {kHeight, kWidth, 1},
+                          colorTexelValue({expectedColor, expectedColor, expectedColor, expectedColor}));
+
+        // Check that the correct store operation occurred.
+        const double expectedDepth = depthStencilStoreOperation == "discard" ? 0.0 : 1.0;
+        expectSingleColor(t, depthStencilAttachment, kDepthStencilFormat, {kHeight, kWidth, 1},
+                          depthValue(expectedDepth), WGPUTextureDimension_2D, 0, 0, WGPUTextureAspect_DepthOnly);
     });
 
-CTS_TEST(g, "render_pass_store_op,multiple_color_attachments")
+std::vector<Value> colorRenderableFormatValues() {
+    std::vector<Value> values;
+    for (WGPUTextureFormat format : kColorRenderableTextureFormats) {
+        values.emplace_back(std::string(textureFormatIdentifier(format)));
+    }
+    return values;
+}
+
+// Tests that render pass color attachment store operations work correctly for all renderable color
+// formats, mip levels and array layers.
+CTS_TEST(g, "render_pass_store_op,color_attachment_only")
     .params([](ParamsBuilder u) {
-        return u
-            .combine("storeOperation1", {Value("store"), Value("discard")})
-            .combine("storeOperation2", {Value("store"), Value("discard")})
+        return u.combine("colorFormat", colorRenderableFormatValues())
+            .combine("storeOperation", storeOpValues())
             .beginSubcases()
-            .combine("colorAttachments", {uint64_t(1), uint64_t(2), uint64_t(3), uint64_t(4)});
+            .combine("mipLevel", {0, 1})
+            .combine("arrayLayer", {0, 1});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        runMultipleColorAttachments(t);
+        const WGPUTextureFormat colorFormat = parseTextureFormat(t.param<std::string>("colorFormat"));
+        const std::string storeOperation = t.param<std::string>("storeOperation");
+        const uint32_t mipLevel = static_cast<uint32_t>(t.param<int64_t>("mipLevel"));
+        const uint32_t arrayLayer = static_cast<uint32_t>(t.param<int64_t>("arrayLayer"));
+        t.skipIfTextureFormatNotSupported(colorFormat);
+        t.skipIfTextureFormatNotUsableAsRenderAttachment(colorFormat);
+
+        WGPUTexture colorAttachment = createAttachmentTexture(t, colorFormat, arrayLayer + 1, kMipLevelCount);
+        WGPUTextureView colorAttachmentView = createSingleSubresourceView(t, colorAttachment, mipLevel, arrayLayer);
+
+        const TexelRepresentation& repr = texelRepresentation(colorFormat);
+        std::array<bool, 4> hasComponent = {false, false, false, false};
+        for (TexelComponent component : repr.componentOrder) {
+            hasComponent[static_cast<size_t>(component)] = true;
+        }
+
+        // Note: for unorm/float values we specifically want values that will generate failure if
+        // srgb remapping is applied so we can't choose 0 or 1 for R, G, or B.
+        constexpr std::array<double, 4> kMissingValue = {0, 0, 0, 1};
+        const bool isInt = isSintOrUintFormat(colorFormat);
+        const std::array<double, 4> baseValue =
+            isInt ? std::array<double, 4>{12, 34, 56, 3} : std::array<double, 4>{0.8, 0.75, 0.5, 1.0};
+        const double maxDiff = isInt ? 0.0 : 2.0 / 255.0;
+
+        std::array<double, 4> clearValueAsComponents{};
+        for (size_t c = 0; c < 4; ++c) {
+            clearValueAsComponents[c] = hasComponent[c] ? baseValue[c] : kMissingValue[c];
+        }
+
+        // Color store operation is determined by the test params.
+        WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        color.view = colorAttachmentView;
+        color.clearValue = WGPUColor{clearValueAsComponents[0], clearValueAsComponents[1], clearValueAsComponents[2],
+                                     clearValueAsComponents[3]};
+        color.loadOp = WGPULoadOp_Clear;
+        color.storeOp = parseStoreOp(storeOperation);
+        encodeEmptyPass(t, {color}, nullptr);
+
+        // Check that the correct store operation occurred.
+        const std::array<double, 4> expectedValue =
+            storeOperation == "discard" ? std::array<double, 4>{0.0, 0.0, 0.0, 0.0} : clearValueAsComponents;
+        expectSingleColorWithTolerance(t, colorAttachment, colorFormat, {kHeight, kWidth, 1}, expectedValue, arrayLayer,
+                                       mipLevel, maxDiff);
+    });
+
+// Test with multiple color attachments to ensure each attachment's storeOp is set independently.
+CTS_TEST(g, "render_pass_store_op,multiple_color_attachments")
+    .params([](ParamsBuilder u) {
+        return u.combine("storeOperation1", storeOpValues())
+            .combine("storeOperation2", storeOpValues())
+            .beginSubcases()
+            .combine("colorAttachments", {1, 2, 3, 4});
+    })
+    .fn([](AllFeaturesMaxLimitsGpuTest& t) {
+        const std::string storeOperation1 = t.param<std::string>("storeOperation1");
+        const std::string storeOperation2 = t.param<std::string>("storeOperation2");
+        const uint32_t colorAttachmentCount = static_cast<uint32_t>(t.param<int64_t>("colorAttachments"));
+        constexpr WGPUTextureFormat kColorFormat = WGPUTextureFormat_RGBA8Unorm;
+
+        std::vector<WGPUTexture> colorAttachments;
+        for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
+            colorAttachments.push_back(createAttachmentTexture(t, kColorFormat));
+        }
+
+        // Color load operation will clear to {1.0, 1.0, 1.0, 1.0}. Color store operation is
+        // determined by test params: storeOperation1 for even numbered attachments and
+        // storeOperation2 for odd numbered attachments.
+        std::vector<WGPURenderPassColorAttachment> renderPassColorAttachments;
+        std::vector<std::string> storeOps;
+        for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
+            const std::string& op = i % 2 == 0 ? storeOperation1 : storeOperation2;
+            WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+            color.view = createDefaultView(t, colorAttachments[i]);
+            color.clearValue = WGPUColor{1.0, 1.0, 1.0, 1.0};
+            color.loadOp = WGPULoadOp_Clear;
+            color.storeOp = parseStoreOp(op);
+            renderPassColorAttachments.push_back(color);
+            storeOps.push_back(op);
+        }
+        encodeEmptyPass(t, renderPassColorAttachments, nullptr);
+
+        // Check that the correct store operation occurred.
+        for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
+            const double expected = storeOps[i] == "discard" ? 0.0 : 1.0;
+            expectSingleColor(t, colorAttachments[i], kColorFormat, {kHeight, kWidth, 1},
+                              colorTexelValue({expected, expected, expected, expected}));
+        }
     });
 
 CTS_TEST(g, "render_pass_store_op,depth_stencil_attachment_only")
+    .desc(R"(
+Tests that render pass depth stencil store operations work correctly for all renderable color
+formats, mip levels and array layers.
+
+- x= all (sized) depth stencil formats, all store ops, multiple mip levels, multiple array layers
+
+TODO: Also test unsized depth/stencil formats [1]
+  )")
     .params([](ParamsBuilder u) {
-        return u
-            .combine("depthStencilFormat", {Value("depth32float"), Value("stencil8")})
-            .combine("storeOperation", {Value("store"), Value("discard")})
+        return u.combine("depthStencilFormat", {"stencil8", "depth16unorm", "depth32float"}) // [1]
+            .combine("storeOperation", storeOpValues())
             .beginSubcases()
-            .combine("mipLevel", {uint64_t(0)})
-            .combine("arrayLayer", {uint64_t(0)});
+            .combine("mipLevel", {0, 1})
+            .combine("arrayLayer", {0, 1});
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        runDepthStencilAttachmentOnly(t);
+        const WGPUTextureFormat format = parseTextureFormat(t.param<std::string>("depthStencilFormat"));
+        const std::string storeOperation = t.param<std::string>("storeOperation");
+        const uint32_t mipLevel = static_cast<uint32_t>(t.param<int64_t>("mipLevel"));
+        const uint32_t arrayLayer = static_cast<uint32_t>(t.param<int64_t>("arrayLayer"));
+
+        WGPUTexture depthStencilTexture = createAttachmentTexture(t, format, arrayLayer + 1, kMipLevelCount);
+        WGPUTextureView view = createSingleSubresourceView(t, depthStencilTexture, mipLevel, arrayLayer);
+
+        // Depth-stencil load operation will clear to depth = 1.0, stencil = 1.0.
+        // Depth-stencil store operate is determined by test params.
+        WGPURenderPassDepthStencilAttachment depthStencilAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+        depthStencilAttachment.view = view;
+        if (isDepthTextureFormat(format)) {
+            depthStencilAttachment.depthClearValue = 1.0f;
+            depthStencilAttachment.depthLoadOp = WGPULoadOp_Clear;
+            depthStencilAttachment.depthStoreOp = parseStoreOp(storeOperation);
+        }
+        if (isStencilTextureFormat(format)) {
+            depthStencilAttachment.stencilClearValue = 1;
+            depthStencilAttachment.stencilLoadOp = WGPULoadOp_Clear;
+            depthStencilAttachment.stencilStoreOp = parseStoreOp(storeOperation);
+        }
+        encodeEmptyPass(t, {}, &depthStencilAttachment);
+
+        // discard: the depth/stencil components should be 0; store: they should be 1.
+        const double expected = storeOperation == "discard" ? 0.0 : 1.0;
+        if (isDepthTextureFormat(format)) {
+            expectSingleColor(t, depthStencilTexture, format, {kHeight, kWidth, 1}, depthValue(expected),
+                              WGPUTextureDimension_2D, arrayLayer, mipLevel, WGPUTextureAspect_DepthOnly);
+        }
+        if (isStencilTextureFormat(format)) {
+            expectSingleColor(t, depthStencilTexture, format, {kHeight, kWidth, 1}, stencilValue(expected),
+                              WGPUTextureDimension_2D, arrayLayer, mipLevel, WGPUTextureAspect_StencilOnly);
+        }
     });
 
 } // namespace

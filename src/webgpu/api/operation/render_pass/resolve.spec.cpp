@@ -1,17 +1,25 @@
-// Ported from gpuweb/cts src/webgpu/api/operation/render_pass/resolve.spec.ts @ b507bd117e53db86f2fb52d0d858d3ae7d684a85
+// SPDX-License-Identifier: BSD-3-Clause
+// Ported from gpuweb/cts src/webgpu/api/operation/render_pass/resolve.spec.ts
+// @ d116bcccd1833369fa3715a6df503c0dd9b0d7fa (see docs/UPSTREAM.md).
+// Upstream CTS: Copyright (c) 2021 The WebGPU CTS Contributors, BSD-3-Clause.
+// Port:         Copyright (c) the webgpu-native-cts contributors, BSD-3-Clause.
+//
+// Native spelling: the array-valued subcase param `slotsToResolve` is a comma-separated string
+// ("0,2"), as before.
 
+#include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "cts/gpu.h"
 #include "cts/test.h"
-#include "webgpu/util/texture_layout.h"
+#include "webgpu/texture_format.h"
+#include "webgpu/util/texture_test_utils.h"
 
 using namespace cts;
 
@@ -19,77 +27,77 @@ namespace {
 
 TestGroup<AllFeaturesMaxLimitsGpuTest> g = MakeTestGroup<AllFeaturesMaxLimitsGpuTest>(
     "api,operation,render_pass,resolve",
-    "Render pass resolve operation tests.");
+    "API Operation Tests for multisample resolve in render passes.");
 
 constexpr uint32_t kSize = 4;
-constexpr uint32_t kBytesPerPixel = 4;
-constexpr uint32_t kSampleCount = 4;
-constexpr uint32_t kNumColorAttachments = 2;
+constexpr WGPUTextureFormat kDepthStencilFormat = WGPUTextureFormat_Depth24PlusStencil8;
 
-struct ResolveResources {
-    std::array<WGPUTexture, kNumColorAttachments> colorTextures = {};
-    std::array<WGPUTextureView, kNumColorAttachments> colorViews = {};
-    std::array<WGPUTexture, kNumColorAttachments> resolveTextures = {};
-    std::array<WGPUTextureView, kNumColorAttachments> resolveViews = {};
-    std::array<bool, kNumColorAttachments> hasResolveTarget = {};
-};
-
-struct PixelExpectation {
-    uint32_t x = 0;
-    uint32_t y = 0;
-    std::array<double, 4> expected = {};
-    double maxDiff = 0.0;
+// kColorTextureFormats filtered by isTextureFormatPossiblyResolvable, in upstream order.
+constexpr std::array<WGPUTextureFormat, 14> kPossiblyResolvableColorFormats = {
+    WGPUTextureFormat_R8Unorm,
+    WGPUTextureFormat_R8Snorm,
+    WGPUTextureFormat_RG8Unorm,
+    WGPUTextureFormat_RG8Snorm,
+    WGPUTextureFormat_RGBA8Unorm,
+    WGPUTextureFormat_RGBA8UnormSrgb,
+    WGPUTextureFormat_RGBA8Snorm,
+    WGPUTextureFormat_BGRA8Unorm,
+    WGPUTextureFormat_BGRA8UnormSrgb,
+    WGPUTextureFormat_R16Float,
+    WGPUTextureFormat_RG16Float,
+    WGPUTextureFormat_RGBA16Float,
+    WGPUTextureFormat_RGB10A2Unorm,
+    WGPUTextureFormat_RG11B10Ufloat,
 };
 
 constexpr std::string_view kVertexShader = R"(
-@vertex fn main(@builtin(vertex_index) vertexIndex : u32) -> @builtin(position) vec4f {
-  let pos = array(
-    vec2f(-1, -1),
-    vec2f(-1, 1),
-    vec2f(1, 1)
-  );
-  return vec4f(pos[vertexIndex], 0, 1);
-}
-)";
+            @vertex fn main(
+              @builtin(vertex_index) VertexIndex : u32
+              ) -> @builtin(position) vec4<f32> {
+              var pos : array<vec2<f32>, 3> = array<vec2<f32>, 3>(
+                  vec2<f32>(-1.0, -1.0),
+                  vec2<f32>(-1.0,  1.0),
+                  vec2<f32>( 1.0,  1.0));
+              return vec4<f32>(pos[VertexIndex], 0.0, 1.0);
+            })";
 
 constexpr std::string_view kFragmentShader = R"(
-struct FragmentOut {
-  @location(0) color0 : vec4f,
-  @location(1) color1 : vec4f,
-};
+            struct Output {
+              @location(0) fragColor0 : vec4<f32>,
+              @location(1) fragColor1 : vec4<f32>,
+              @location(2) fragColor2 : vec4<f32>,
+              @location(3) fragColor3 : vec4<f32>,
+            };
 
-@fragment fn main() -> FragmentOut {
-  return FragmentOut(vec4f(1, 1, 1, 1), vec4f(1, 1, 1, 1));
-}
-)";
-
-uint64_t alignTo(uint64_t value, uint64_t alignment) {
-    return (value + alignment - 1) / alignment * alignment;
-}
+            @fragment fn main() -> Output {
+              return Output(
+                vec4<f32>(1.0, 1.0, 1.0, 1.0),
+                vec4<f32>(1.0, 1.0, 1.0, 1.0),
+                vec4<f32>(1.0, 1.0, 1.0, 1.0),
+                vec4<f32>(1.0, 1.0, 1.0, 1.0)
+              );
+            })";
 
 WGPUStringView stringView(std::string_view value) {
     return WGPUStringView{value.data(), value.size()};
 }
 
-std::vector<Value> slotsToResolveValues() {
-    return {
-        Value("0,2"),
-        Value("1,3"),
-        Value("0,1,2,3"),
-    };
+std::vector<Value> colorFormatValues() {
+    std::vector<Value> values;
+    for (WGPUTextureFormat format : kPossiblyResolvableColorFormats) {
+        values.emplace_back(std::string(textureFormatIdentifier(format)));
+    }
+    return values;
 }
 
-bool slotShouldResolve(std::string_view slotsToResolve, uint32_t slot) {
-    if (slotsToResolve == "0,2") {
-        return slot == 0;
+std::vector<uint32_t> parseSlots(std::string_view text) {
+    std::vector<uint32_t> slots;
+    for (char c : text) {
+        if (c >= '0' && c <= '9') {
+            slots.push_back(static_cast<uint32_t>(c - '0'));
+        }
     }
-    if (slotsToResolve == "1,3") {
-        return slot == 1;
-    }
-    if (slotsToResolve == "0,1,2,3") {
-        return true;
-    }
-    std::abort();
+    return slots;
 }
 
 WGPUStoreOp parseStoreOp(std::string_view value) {
@@ -102,197 +110,235 @@ WGPUStoreOp parseStoreOp(std::string_view value) {
     std::abort();
 }
 
-WGPUBuffer createBuffer(AllFeaturesMaxLimitsGpuTest& t, uint64_t size, WGPUBufferUsage usage) {
-    WGPUBufferDescriptor desc = WGPU_BUFFER_DESCRIPTOR_INIT;
-    desc.size = size;
-    desc.usage = usage;
-    return t.createBufferTracked(desc);
+bool paramBool(const ParamRecord& p, std::string_view key) {
+    return valueAs<bool>(*findParam(p, key));
 }
 
-WGPUTexture createColorTexture(AllFeaturesMaxLimitsGpuTest& t, uint32_t sampleCount, WGPUTextureUsage usage) {
-    WGPUTextureDescriptor desc = WGPU_TEXTURE_DESCRIPTOR_INIT;
-    desc.size = WGPUExtent3D{kSize, kSize, 1};
-    desc.mipLevelCount = 1;
-    desc.sampleCount = sampleCount;
-    desc.dimension = WGPUTextureDimension_2D;
-    desc.format = WGPUTextureFormat_RGBA8Unorm;
-    desc.usage = usage;
-    return t.createTextureTracked(desc);
-}
-
-ResolveResources createResolveResources(AllFeaturesMaxLimitsGpuTest& t, std::string_view slotsToResolve) {
-    ResolveResources resources;
-    WGPUTextureViewDescriptor viewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
-    for (uint32_t i = 0; i < kNumColorAttachments; ++i) {
-        resources.colorTextures[i] = createColorTexture(t, kSampleCount, WGPUTextureUsage_RenderAttachment);
-        resources.colorViews[i] = t.createViewTracked(resources.colorTextures[i], viewDesc);
-        resources.hasResolveTarget[i] = slotShouldResolve(slotsToResolve, i);
-        if (resources.hasResolveTarget[i]) {
-            resources.resolveTextures[i] = createColorTexture(
-                t,
-                1,
-                WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment);
-            resources.resolveViews[i] = t.createViewTracked(resources.resolveTextures[i], viewDesc);
-        }
+// format_info.ts isTextureFormatResolvable.
+bool isTextureFormatResolvable(AllFeaturesMaxLimitsGpuTest& t, WGPUTextureFormat format) {
+    if (format == WGPUTextureFormat_RG11B10Ufloat) {
+        return wgpuDeviceHasFeature(t.device(), WGPUFeatureName_RG11B10UfloatRenderable);
     }
-    return resources;
-}
-
-WGPURenderPipeline createResolvePipeline(AllFeaturesMaxLimitsGpuTest& t) {
-    WGPUShaderModule vertexModule = t.createShaderModuleTracked(kVertexShader);
-    WGPUShaderModule fragmentModule = t.createShaderModuleTracked(kFragmentShader);
-
-    std::array<WGPUColorTargetState, kNumColorAttachments> targets = {{
-        WGPU_COLOR_TARGET_STATE_INIT,
-        WGPU_COLOR_TARGET_STATE_INIT,
-    }};
-    for (WGPUColorTargetState& target : targets) {
-        target.format = WGPUTextureFormat_RGBA8Unorm;
+    if (textureFormatInList(format, kTextureFormatTier1AllowsResolve)) {
+        return wgpuDeviceHasFeature(t.device(), WGPUFeatureName_TextureFormatsTier1);
     }
-
-    WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
-    fragment.module = fragmentModule;
-    fragment.entryPoint = stringView("main");
-    fragment.targetCount = targets.size();
-    fragment.targets = targets.data();
-
-    WGPURenderPipelineDescriptor desc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-    desc.vertex.module = vertexModule;
-    desc.vertex.entryPoint = stringView("main");
-    desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    desc.multisample.count = kSampleCount;
-    desc.fragment = &fragment;
-    return t.createRenderPipelineTracked(desc);
-}
-
-void submit(AllFeaturesMaxLimitsGpuTest& t, WGPUCommandEncoder encoder) {
-    WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
-    wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
-}
-
-std::array<WGPURenderPassColorAttachment, kNumColorAttachments> colorAttachments(
-    const ResolveResources& resources,
-    WGPULoadOp loadOp,
-    WGPUStoreOp storeOp,
-    bool includeResolveTargets) {
-    std::array<WGPURenderPassColorAttachment, kNumColorAttachments> attachments = {{
-        WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT,
-        WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT,
-    }};
-    for (uint32_t i = 0; i < kNumColorAttachments; ++i) {
-        attachments[i].view = resources.colorViews[i];
-        attachments[i].loadOp = loadOp;
-        attachments[i].storeOp = storeOp;
-        attachments[i].clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
-        if (includeResolveTargets && resources.hasResolveTarget[i]) {
-            attachments[i].resolveTarget = resources.resolveViews[i];
-        }
-    }
-    return attachments;
-}
-
-void encodePass(GpuTest& t, 
-    WGPUCommandEncoder encoder,
-    const ResolveResources& resources,
-    WGPURenderPipeline pipeline,
-    WGPULoadOp loadOp,
-    WGPUStoreOp storeOp,
-    bool includeResolveTargets,
-    bool draw) {
-    auto attachments = colorAttachments(resources, loadOp, storeOp, includeResolveTargets);
-    WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
-    passDesc.colorAttachmentCount = attachments.size();
-    passDesc.colorAttachments = attachments.data();
-    WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
-    if (draw) {
-        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
-        wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
-    }
-    wgpuRenderPassEncoderEnd(pass);
-}
-
-void expectPixelsInTexture(
-    AllFeaturesMaxLimitsGpuTest& t,
-    WGPUTexture texture,
-    const std::vector<PixelExpectation>& expectations) {
-    const uint32_t bytesPerRow = static_cast<uint32_t>(alignTo(kSize * kBytesPerPixel, kBytesPerRowAlignment));
-    const uint64_t byteLength = alignTo(
-        static_cast<uint64_t>(bytesPerRow) * (kSize - 1) + static_cast<uint64_t>(kSize) * kBytesPerPixel,
-        kBufferCopyAlignment);
-    WGPUBuffer buffer = createBuffer(t, byteLength, WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc);
-
-    WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-    t.copyTextureToBuffer(encoder, texture, buffer, bytesPerRow, WGPUExtent3D{kSize, kSize, 1});
-    submit(t, encoder);
-
-    t.expectGPUBufferValuesPassCheck(
-        buffer,
-        [&](const uint8_t* actual, size_t len) -> std::optional<std::string> {
-            for (const PixelExpectation& expectation : expectations) {
-                const uint64_t offset = static_cast<uint64_t>(expectation.y) * bytesPerRow
-                    + static_cast<uint64_t>(expectation.x) * kBytesPerPixel;
-                if (offset + kBytesPerPixel > len) {
-                    std::ostringstream message;
-                    message << "rgba8unorm pixel offset out of range: " << offset;
-                    return message.str();
-                }
-                for (uint32_t channel = 0; channel < kBytesPerPixel; ++channel) {
-                    const double decoded = static_cast<double>(actual[offset + channel]) / 255.0;
-                    if (std::abs(decoded - expectation.expected[channel]) > expectation.maxDiff) {
-                        std::ostringstream message;
-                        message << "rgba8unorm mismatch at (" << expectation.x << ", " << expectation.y
-                                << ") channel " << channel
-                                << ": expected " << expectation.expected[channel]
-                                << ", got " << decoded;
-                        return message.str();
-                    }
-                }
-            }
-            return std::nullopt;
-        },
-        0,
-        static_cast<size_t>(byteLength));
-}
-
-void verifyResolveTargets(AllFeaturesMaxLimitsGpuTest& t, const ResolveResources& resources) {
-    const std::vector<PixelExpectation> expectations = {
-        PixelExpectation{0, 0, {1.0, 1.0, 1.0, 1.0}, 0.0},
-        PixelExpectation{3, 3, {0.0, 0.0, 0.0, 0.0}, 0.0},
-        PixelExpectation{3, 0, {0.5, 0.5, 0.5, 0.5}, 2.0 / 255.0},
-    };
-    for (uint32_t i = 0; i < kNumColorAttachments; ++i) {
-        if (resources.hasResolveTarget[i]) {
-            expectPixelsInTexture(t, resources.resolveTextures[i], expectations);
-        }
-    }
+    // You can't resolve a non-multisampled format. Every other possibly-resolvable format has
+    // colorRender.resolve.
+    return t.isTextureFormatMultisampled(format);
 }
 
 CTS_TEST(g, "render_pass_resolve")
+    .desc(R"(
+Test basic render pass resolve behavior for combinations of:
+  - number of color attachments, some with and some without a resolveTarget
+  - {a single draw+resolve pass, one draw-store pass and one empty load-resolve pass}
+    (attempts to test known driver bugs with empty resolve passes)
+  - in the resolve pass, storeOp set to {'store', 'discard'}
+  - mip levels {0, 1} and array layers {0, 1}
+    TODO: cases where color attachment and resolve target don't have the same mip level
+  - resolveTarget {2d array layer, TODO: 3d slice} {0, >0} with {2d, TODO: 3d} resolveTarget
+    TODO: cases where color attachment and resolve target don't have the same z (slice or layer)
+  - TODO: test that any not-resolved attachments are rendered to correctly.
+  - TODO: test different loadOps
+  - TODO?: resolveTarget mip level {0, >0} (TODO?: different mip level from colorAttachment)
+  - TODO?: resolveTarget {2d array layer, TODO: 3d slice} {0, >0} with {2d, TODO: 3d} resolveTarget
+    (different z from colorAttachment)
+)")
     .params([](ParamsBuilder u) {
-        return u.combine("colorFormat", {Value("rgba8unorm")})
-            .beginSubcases()
+        return u.combine("colorFormat", colorFormatValues())
             .combine("separateResolvePass", {false, true})
-            .combine("storeOperation", {Value("store"), Value("discard")})
-            .combine("slotsToResolve", slotsToResolveValues());
+            .combine("storeOperation", {"discard", "store"})
+            .beginSubcases()
+            .combine("transientColorAttachment", {false, true})
+            // Exclude if transient AND (separate pass OR storing)
+            .filter([](const ParamRecord& p) {
+                return !(paramBool(p, "transientColorAttachment")
+                         && (paramBool(p, "separateResolvePass")
+                             || valueAs<std::string>(*findParam(p, "storeOperation")) == "store"));
+            })
+            .combine("numColorAttachments", {2, 4})
+            .combine("slotsToResolve", {"0,2", "1,3", "0,1,2,3"})
+            .combine("resolveTargetBaseMipLevel", {0, 1})
+            .combine("resolveTargetBaseArrayLayer", {0, 1})
+            .combine("transientDepthStencilAttachment", {false, true})
+            .combine("depthStencilAttachment", {false, true})
+            .filter([](const ParamRecord& p) {
+                return !(!paramBool(p, "depthStencilAttachment") && paramBool(p, "transientDepthStencilAttachment"));
+            });
     })
     .fn([](AllFeaturesMaxLimitsGpuTest& t) {
-        t.expect(t.param<std::string>("colorFormat") == "rgba8unorm", "T36 ports rgba8unorm only");
+        const WGPUTextureFormat colorFormat = parseTextureFormat(t.param<std::string>("colorFormat"));
         const bool separateResolvePass = t.param<bool>("separateResolvePass");
-        const WGPUStoreOp storeOp = parseStoreOp(t.param<std::string>("storeOperation"));
-        const std::string slotsToResolve = t.param<std::string>("slotsToResolve");
+        const WGPUStoreOp storeOperation = parseStoreOp(t.param<std::string>("storeOperation"));
+        const bool transientColorAttachment = t.param<bool>("transientColorAttachment");
+        const uint32_t numColorAttachments = static_cast<uint32_t>(t.param<int64_t>("numColorAttachments"));
+        const std::vector<uint32_t> slotsToResolve = parseSlots(t.param<std::string>("slotsToResolve"));
+        const uint32_t resolveTargetBaseMipLevel = static_cast<uint32_t>(t.param<int64_t>("resolveTargetBaseMipLevel"));
+        const uint32_t resolveTargetBaseArrayLayer =
+            static_cast<uint32_t>(t.param<int64_t>("resolveTargetBaseArrayLayer"));
+        const bool transientDepthStencilAttachment = t.param<bool>("transientDepthStencilAttachment");
+        const bool hasDepthStencilAttachment = t.param<bool>("depthStencilAttachment");
 
-        ResolveResources resources = createResolveResources(t, slotsToResolve);
-        WGPURenderPipeline pipeline = createResolvePipeline(t);
-        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
-        if (separateResolvePass) {
-            encodePass(t, encoder, resources, pipeline, WGPULoadOp_Clear, WGPUStoreOp_Store, false, true);
-            encodePass(t, encoder, resources, pipeline, WGPULoadOp_Load, storeOp, true, false);
-        } else {
-            encodePass(t, encoder, resources, pipeline, WGPULoadOp_Clear, storeOp, true, true);
+        t.skipIfTextureFormatNotSupported(colorFormat);
+        if (!isTextureFormatResolvable(t, colorFormat)) {
+            t.skip("texture format is not resolvable");
         }
-        submit(t, encoder);
+        if (transientColorAttachment || transientDepthStencilAttachment) {
+            t.skipIfTransientAttachmentNotSupported();
+        }
 
-        verifyResolveTargets(t, resources);
+        std::vector<WGPUColorTargetState> targets;
+        for (uint32_t i = 0; i < numColorAttachments; ++i) {
+            WGPUColorTargetState target = WGPU_COLOR_TARGET_STATE_INIT;
+            target.format = colorFormat;
+            targets.push_back(target);
+        }
+
+        WGPUDepthStencilState depthStencil = WGPU_DEPTH_STENCIL_STATE_INIT;
+        applyJsStencilFaceDefaults(depthStencil);
+        depthStencil.format = kDepthStencilFormat;
+        depthStencil.depthWriteEnabled = WGPUOptionalBool_False;
+
+        // These shaders will draw a white triangle into a texture. After draw, the top left half of
+        // the texture will be white, and the bottom right half will be unchanged. When this texture
+        // is resolved, there will be two distinct colors in each portion of the texture, as well as
+        // a line between the portions that contain the midpoint color due to the multisample resolve.
+        WGPUShaderModule vertexModule = t.createShaderModuleTracked(kVertexShader);
+        WGPUShaderModule fragmentModule = t.createShaderModuleTracked(kFragmentShader);
+        WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
+        fragment.module = fragmentModule;
+        fragment.entryPoint = stringView("main");
+        fragment.targetCount = targets.size();
+        fragment.targets = targets.data();
+
+        WGPURenderPipelineDescriptor pipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+        pipelineDesc.layout = nullptr; // 'auto'
+        pipelineDesc.vertex.module = vertexModule;
+        pipelineDesc.vertex.entryPoint = stringView("main");
+        pipelineDesc.fragment = &fragment;
+        pipelineDesc.depthStencil = hasDepthStencilAttachment ? &depthStencil : nullptr;
+        pipelineDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+        pipelineDesc.multisample.count = 4;
+        WGPURenderPipeline pipeline = t.createRenderPipelineTracked(pipelineDesc);
+
+        std::vector<WGPUTexture> resolveTargets;
+        std::vector<WGPURenderPassColorAttachment> drawPassAttachments;
+        std::vector<WGPURenderPassColorAttachment> resolvePassAttachments;
+
+        // The resolve target must be the same size as the color attachment. If we're resolving to
+        // mip level 1, the resolve target base mip level should be 2x the color attachment size.
+        const uint32_t kResolveTargetSize = kSize << resolveTargetBaseMipLevel;
+
+        for (uint32_t i = 0; i < numColorAttachments; ++i) {
+            WGPUTextureDescriptor colorDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+            colorDesc.format = colorFormat;
+            colorDesc.size = WGPUExtent3D{kSize, kSize, 1};
+            colorDesc.sampleCount = 4;
+            colorDesc.mipLevelCount = 1;
+            colorDesc.usage = transientColorAttachment
+                ? (WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TransientAttachment)
+                : WGPUTextureUsage_RenderAttachment;
+            WGPUTextureViewDescriptor defaultViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+            WGPUTextureView colorAttachment = t.createViewTracked(t.createTextureTracked(colorDesc), defaultViewDesc);
+
+            WGPUTextureView resolveTarget = nullptr;
+            if (std::find(slotsToResolve.begin(), slotsToResolve.end(), i) != slotsToResolve.end()) {
+                WGPUTextureDescriptor resolveDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+                resolveDesc.format = colorFormat;
+                resolveDesc.size =
+                    WGPUExtent3D{kResolveTargetSize, kResolveTargetSize, resolveTargetBaseArrayLayer + 1};
+                resolveDesc.sampleCount = 1;
+                resolveDesc.mipLevelCount = resolveTargetBaseMipLevel + 1;
+                resolveDesc.usage = WGPUTextureUsage_CopySrc | WGPUTextureUsage_RenderAttachment;
+                WGPUTexture resolveTargetTexture = t.createTextureTracked(resolveDesc);
+                resolveTargets.push_back(resolveTargetTexture);
+
+                WGPUTextureViewDescriptor resolveViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+                resolveViewDesc.baseMipLevel = resolveTargetBaseMipLevel;
+                resolveViewDesc.baseArrayLayer = resolveTargetBaseArrayLayer;
+                resolveTarget = t.createViewTracked(resolveTargetTexture, resolveViewDesc);
+            }
+
+            // Clear to black for the load operation. After the draw, the top left half of the
+            // attachment will be white and the bottom right half will be black.
+            WGPURenderPassColorAttachment draw = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+            draw.view = colorAttachment;
+            draw.clearValue = WGPUColor{0.0, 0.0, 0.0, 0.0};
+            draw.loadOp = WGPULoadOp_Clear;
+            if (separateResolvePass) {
+                draw.storeOp = WGPUStoreOp_Store;
+                drawPassAttachments.push_back(draw);
+
+                WGPURenderPassColorAttachment resolve = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+                resolve.view = colorAttachment;
+                resolve.resolveTarget = resolveTarget;
+                resolve.loadOp = WGPULoadOp_Load;
+                resolve.storeOp = storeOperation;
+                resolvePassAttachments.push_back(resolve);
+            } else {
+                draw.resolveTarget = resolveTarget;
+                draw.storeOp = storeOperation;
+                drawPassAttachments.push_back(draw);
+            }
+        }
+
+        WGPURenderPassDepthStencilAttachment depthStencilAttachment = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+        if (hasDepthStencilAttachment) {
+            WGPUTextureDescriptor dsDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+            dsDesc.format = kDepthStencilFormat;
+            dsDesc.size = WGPUExtent3D{kSize, kSize, 1};
+            dsDesc.sampleCount = 4;
+            dsDesc.usage = transientDepthStencilAttachment
+                ? (WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TransientAttachment)
+                : WGPUTextureUsage_RenderAttachment;
+            WGPUTextureViewDescriptor dsViewDesc = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+            depthStencilAttachment.view = t.createViewTracked(t.createTextureTracked(dsDesc), dsViewDesc);
+            depthStencilAttachment.depthClearValue = 1.0f;
+            depthStencilAttachment.depthLoadOp = WGPULoadOp_Clear;
+            depthStencilAttachment.depthStoreOp = WGPUStoreOp_Discard;
+            depthStencilAttachment.stencilLoadOp = WGPULoadOp_Clear;
+            depthStencilAttachment.stencilStoreOp = WGPUStoreOp_Discard;
+        }
+        const WGPURenderPassDepthStencilAttachment* depthStencilAttachmentPtr =
+            hasDepthStencilAttachment ? &depthStencilAttachment : nullptr;
+
+        WGPUCommandEncoder encoder = t.createCommandEncoderTracked();
+        {
+            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            passDesc.colorAttachmentCount = drawPassAttachments.size();
+            passDesc.colorAttachments = drawPassAttachments.data();
+            passDesc.depthStencilAttachment = depthStencilAttachmentPtr;
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
+            wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+            wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+            wgpuRenderPassEncoderEnd(pass);
+        }
+        if (separateResolvePass) {
+            WGPURenderPassDescriptor passDesc = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+            passDesc.colorAttachmentCount = resolvePassAttachments.size();
+            passDesc.colorAttachments = resolvePassAttachments.data();
+            passDesc.depthStencilAttachment = depthStencilAttachmentPtr;
+            WGPURenderPassEncoder pass = t.beginRenderPassTracked(encoder, &passDesc);
+            wgpuRenderPassEncoderEnd(pass);
+        }
+        WGPUCommandBuffer commandBuffer = t.finishTracked(encoder);
+        wgpuQueueSubmit(t.queue(), 1, &commandBuffer);
+
+        // Verify the resolve targets contain the correct values. Note that we use z to specify the
+        // array layer from which to pull the pixels for testing.
+        const uint32_t z = resolveTargetBaseArrayLayer;
+        for (WGPUTexture resolveTarget : resolveTargets) {
+            expectSinglePixelComparisonsAreOkInTexture(
+                t, resolveTarget, colorFormat, resolveTargetBaseMipLevel,
+                {
+                    // Top left pixel should be {1.0, 1.0, 1.0, 1.0}.
+                    PixelComparison{WGPUOrigin3D{0, 0, z}, {1.0, 1.0, 1.0, 1.0}},
+                    // Bottom right pixel should be {0, 0, 0, 0}.
+                    PixelComparison{WGPUOrigin3D{kSize - 1, kSize - 1, z}, {0, 0, 0, 0}},
+                    // Top right pixel should be {0.5, 0.5, 0.5, 0.5} due to the multisampled resolve.
+                    PixelComparison{WGPUOrigin3D{kSize - 1, 0, z}, {0.5, 0.5, 0.5, 0.5}},
+                });
+        }
     });
 
 } // namespace

@@ -16,6 +16,7 @@
 #include "webgpu/util/enum_strings.h"
 #include "webgpu/util/texel_data.h"
 #include "webgpu/util/texture_layout.h"
+#include "webgpu/util/texture_test_utils.h"
 
 using namespace cts;
 
@@ -560,81 +561,6 @@ BlendColor computeBlendOperation(
         default:
             std::abort();
     }
-}
-
-// texture_ok.ts TexelCompareOptions. Upstream's default (used when a test passes no options) is
-// { maxIntDiff: 0, maxDiffULPsForNormFormat: 1, maxDiffULPsForFloatFormat: 1 }.
-struct TexelCompareOptions {
-    double maxIntDiff = 0.0;
-    std::optional<double> maxFractionalDiff;
-    std::optional<int64_t> maxDiffULPsForNormFormat;
-    std::optional<int64_t> maxDiffULPsForFloatFormat;
-};
-
-TexelCompareOptions defaultTexelCompareOptions() {
-    TexelCompareOptions options;
-    options.maxDiffULPsForNormFormat = 1;
-    options.maxDiffULPsForFloatFormat = 1;
-    return options;
-}
-
-// Port of texture_ok.ts makeTexelViewComparer's predicate plus comparePerComponent, for one
-// texel: `actual` holds the texel's bytes; `expected` is a color fed through
-// TexelView.fromTexelsAsColors (so its `color` is the unquantized value and its ulpFromZero is
-// bitsToULPFromZero(numberToBits(color))).
-std::optional<std::string> compareTexelToColor(
-    WGPUTextureFormat format,
-    const uint8_t* actual,
-    size_t len,
-    const std::array<double, 4>& expected,
-    const TexelCompareOptions& options) {
-    const std::string_view identifier = textureFormatIdentifier(format);
-    const bool fmtIsInt = identifier.find("int") != std::string_view::npos;
-    const bool fmtIsNorm = identifier.find("norm") != std::string_view::npos;
-    const bool fmtIsFloat = identifier.find("float") != std::string_view::npos;
-    const TexelRepresentation& repr = texelRepresentation(format);
-    if (len < repr.bytesPerBlock) {
-        return std::string("readback too small for one texel");
-    }
-    const TexelComponents act = repr.bitsToNumber(repr.unpackBits(actual, repr.bytesPerBlock));
-
-    const bool useNormUlp = !fmtIsInt && fmtIsNorm && options.maxDiffULPsForNormFormat.has_value();
-    const bool useFloatUlp = !fmtIsInt && !useNormUlp && fmtIsFloat && options.maxDiffULPsForFloatFormat.has_value();
-    if (!fmtIsInt && !useNormUlp && !useFloatUlp && !options.maxFractionalDiff.has_value()) {
-        return std::string("need maxFractionalDiff or maxDiffULPs to compare this format");
-    }
-
-    for (TexelComponent component : repr.componentOrder) {
-        const uint32_t index = static_cast<uint32_t>(component);
-        const double a = act.values[index];
-        const double e = expected[index];
-        bool ok = false;
-        std::ostringstream detail;
-        if (fmtIsInt) {
-            ok = texelComponentEqual(a, e, options.maxIntDiff);
-            detail << "expected " << e << ", got " << a << " (tolerance +-" << options.maxIntDiff << ")";
-        } else if (useNormUlp || useFloatUlp) {
-            const int64_t tolerance = useNormUlp ? *options.maxDiffULPsForNormFormat : *options.maxDiffULPsForFloatFormat;
-            // The actual texel's bits decode exactly and re-encode to the same bits, so the
-            // round-trip through ulpFromZero equals upstream's bitsToULPFromZero(unpackBits(...)).
-            const int64_t actUlp = repr.ulpFromZero(index, a);
-            const int64_t expUlp = repr.ulpFromZero(index, e);
-            const int64_t diff = actUlp - expUlp;
-            ok = (diff < 0 ? -diff : diff) <= tolerance;
-            detail << "expected " << e << " (" << expUlp << " normal-ULPs from zero), got " << a << " ("
-                   << actUlp << " normal-ULPs from zero), tolerance +-" << tolerance << " normal-ULPs";
-        } else {
-            ok = texelComponentEqual(a, e, *options.maxFractionalDiff);
-            detail << "expected " << e << ", got " << a << " (tolerance +-" << *options.maxFractionalDiff << ")";
-        }
-        if (!ok) {
-            std::ostringstream message;
-            message << identifier << " texel mismatch at (0, 0, 0) component " << "RGBA"[index] << ": "
-                    << detail.str();
-            return message.str();
-        }
-    }
-    return std::nullopt;
 }
 
 // Port of expectTexelViewComparisonIsOkInTexture / expectSinglePixelComparisonsAreOkInTexture for
