@@ -164,19 +164,20 @@ re-baseline (642 files), so their counts are not comparable with the current one
 
 #### yawgpu — native Metal (Tint frontend), per-subcase
 
-Sweep 2026-11-20 after the `api/operation` parity campaign, upstream `d116bcc` (657 files, 283,799
-cases), yawgpu `01324f0`, Apple M2, `--workers 6`.
+Sweep 2026-11-20 after the F-170/F-171 fixes, upstream `d116bcc` (657 files, 283,799 cases), yawgpu
+`f2695f8`, Apple M2, `--workers 6`.
 
 | area | pass | skip | fail | crash |
 |------|------:|-----:|-----:|------:|
 | `api/validation` (128) | 342,191 | 55,814 | 2† | 0 |
-| `api/operation` (70) | 307,526 | 45,912 | 7§ | 0 |
-| `shader/execution` (246) | 847,622 | 29,196 | 2,855‡ | 0 |
+| `api/operation` (70) | 307,532 | 45,912 | 1§ | 0 |
+| `shader/execution` (246) | 847,628 | 29,196 | 2,849‡ | 0 |
 | `shader/validation` (213) | 661,419 | 20,235 | 2‡ | 0 |
-| **total** | **2,158,758** | **151,157** | **2,866** | **0** |
+| **total** | **2,158,770** | **151,157** | **2,854** | **0** |
 
-§ yawgpu findings, not in its expectations: F-170 (6, no workaround for Metal's 32 counter-sample-buffer
-limit) and F-171 (1, occlusion result lost when a query set is re-resolved in a later submit).
+§ `timestampQuery:many_query_sets:numQuerySets=65536;stage="render"` loses the device, as on Dawn (F-169);
+carried in yawgpu's expectations. F-170 and F-171 are resolved. The previous sweep (yawgpu `01324f0`) had pass
+2,158,758 and `api/operation` fail 7 (F-170 6, F-171 1).
 
 #### Dawn — native Metal (conformance oracle, Tint frontend), per-subcase
 

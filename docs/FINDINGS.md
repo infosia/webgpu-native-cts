@@ -118,8 +118,11 @@ F-167 subcases in partially failing cases, and the order-dependent F-169 `multi_
 
 **yawgpu, Metal:** full sweep 2026-11-20 after the `api/operation` parity campaign (`01324f0`, 283,799
 cases): pass 2,158,758 / skip 151,157 / fail 265 / crash 0 with expectations. Fails: F-167 (256, shared
-with Dawn), F-159 (2, shared), F-170 (6) and F-171 (1). F-161 to F-164 from the 2026-11-01 sweep are resolved. Carried in
-`expectations/yawgpu.txt`: `index_buffer_format_dirtying` and F-160 (shared with Dawn). The 2 F-159 cases fail as on
+with Dawn), F-159 (2, shared), F-170 (6) and F-171 (1). F-161 to F-164 from the 2026-11-01 sweep are resolved.
+Re-swept after the F-170/F-171 fixes (yawgpu `f2695f8`, same day): pass 2,158,770 / skip 151,157 / fail 259 /
+crash 0. Fails: F-167 (256, shared), F-159 (2, shared) and `many_query_sets:numQuerySets=65536;stage="render"`, which
+loses the device as on Dawn (F-169) and is now carried as `xfail`. Carried in `expectations/yawgpu.txt`:
+`index_buffer_format_dirtying`, F-160 (shared with Dawn) and that F-169-equivalent case. The 2 F-159 cases fail as on
 Dawn and are not listed.
 
 **yawgpu, native Vulkan:** last swept 2026-11-01 on `9977e34`, Linux and Windows / NVIDIA RTX 5060 Ti: with
@@ -128,8 +131,7 @@ expectations, only the 2 F-159 cases fail; Windows also had 1 intermittent drive
 F-111 and F-139 were resolved after that sweep; F-111 was confirmed on Windows native Vulkan, F-139 only through
 MoltenVK.
 
-**Open — yawgpu:** F-170 (no workaround for Metal's 32 counter-sample-buffer limit; abort at exit after
-65,536 query sets), F-171 (occlusion query result lost when a set is re-resolved in a later submit).
+**Open — yawgpu:** none. F-170 and F-171 were resolved on 2026-11-20.
 
 **Open — Dawn (oracle):** F-159 (two WGSL language features not reported yet), F-160 (`atomicStoreMax`/`Min` with a
 compile-time zero value on Metal; yawgpu fails the same cases), F-167 (Metal `textureSampleBias` with offset +
@@ -191,7 +193,15 @@ comment, not checked against an upstream checkout.
 
 ---
 
-## F-171 — yawgpu: re-resolving an occlusion query set in a later submit loses a result — OPEN (Metal and MoltenVK)
+## F-171 — yawgpu: re-resolving an occlusion query set in a later submit loses a result — RESOLVED
+
+Fixed by yawgpu Block 159 (`72f07ce`, `f7bad8d`). Root cause: a resolve copied only the queries written in the
+current submit (occlusion) or command buffer (timestamp) and zero-filled the rest; availability now lives on the
+query set and is committed when the submit succeeds, as in Dawn. `occlusionQuery:*` passes on Metal (244/244,
+2026-11-20). While verifying, yawgpu also found that on Apple GPUs a render pass writes every visibility slot below
+its highest used query index, so a later pass could zero an earlier result of the same set; yawgpu Block 162
+(`c9f33a5`) now writes through a per-pass scratch buffer. Dawn attaches the set's visibility buffer directly and is
+expected to share that defect; no CTS case covers it. The report below is the state on `01324f0`.
 
 **yawgpu DEFECT, cross-HAL** (found 2026-11-20, yawgpu `01324f0`, CTS batch O2 of
 `specs/apiop-parity.md`). `webgpu:api,operation,command_buffer,queries,occlusionQuery:occlusion_query,multi_resolve:*`
@@ -204,7 +214,16 @@ occlusion result across submits.
 
 ---
 
-## F-170 — yawgpu/Metal: no workaround for Metal's 32 counter-sample-buffer limit; abort at exit after 65,536 query sets — OPEN
+## F-170 — yawgpu/Metal: no workaround for Metal's 32 counter-sample-buffer limit; abort at exit after 65,536 query sets — RESOLVED (1 case shared with Dawn remains)
+
+Fixed by yawgpu Block 160 (`662a891`: timestamp query sets suballocate 4096-sample pooled buffers, as Dawn's
+`CounterSampleBufferAllocator`) and Block 161 (`f2695f8`, `3b7116d`). The 65,536-set cases then still failed, for a
+different reason: each timestamped pass cost three encoders (one mock blit per stamp), so the command buffer lost the
+device (compute) or the Metal driver aborted with `Failed to allocate IOGPUDeviceShmem` (render). Pass
+`timestampWrites` are now sampled through the pass descriptor, one encoder per pass, as in Dawn. On Metal (2026-11-20)
+`many_query_sets` passes for every `numQuerySets` in both stages except `65536` render, which loses the device exactly
+as Dawn does (F-169) and is carried as `xfail`. The exit-time Rust panic did not reproduce after the fix. The report
+below is the state on `01324f0`.
 
 **yawgpu DEFECT, Metal HAL** (found 2026-11-20, yawgpu `01324f0`). Metal allows 32
 `MTLCounterSampleBuffer`s per process; upstream's `timestampQuery:many_query_sets` exists to make
