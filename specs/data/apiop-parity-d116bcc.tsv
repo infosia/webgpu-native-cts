@@ -1,0 +1,265 @@
+file	test	up_cases	up_subcases	nat_cases	nat_subcases	status	missing_cases	missing_param_values
+api,operation,adapter,info	adapter_info	1	1	1	1	MATCH	0	
+api,operation,adapter,info	same_object	1	1	1	1	REGISTERED-UNIMPLEMENTED	0	
+api,operation,adapter,info	device_matches_adapter	1	4	1	1	REGISTERED-UNIMPLEMENTED	0	
+api,operation,adapter,info	subgroup_sizes	1	1	1	1	MATCH	0	
+api,operation,adapter,requestAdapter	requestAdapter	9	9	9	9	MATCH	0	
+api,operation,adapter,requestAdapter	requestAdapter_invalid_featureLevel	8	8	8	8	MATCH	0	
+api,operation,adapter,requestAdapter	requestAdapter_no_parameters	1	1	1	1	MATCH	0	
+api,operation,adapter,requestDevice	default	1	4	1	4	MATCH	0	
+api,operation,adapter,requestDevice	invalid	1	1	1	1	MATCH	0	
+api,operation,adapter,requestDevice	stale	1	10	1	10	MATCH	0	
+api,operation,adapter,requestDevice	features,unknown	1	1	1	1	MATCH	0	
+api,operation,adapter,requestDevice	features,known	25	25	25	25	MATCH	0	
+api,operation,adapter,requestDevice	limits,unknown	1	1	1	1	MATCH	0	
+api,operation,adapter,requestDevice	limits,supported	35	105	35	105	MATCH	0	
+api,operation,adapter,requestDevice	limit,better_than_supported	35	72	35	72	MATCH	0	
+api,operation,adapter,requestDevice	limit,out_of_range	35	595	35	595	REGISTERED-UNIMPLEMENTED	0	
+api,operation,adapter,requestDevice	limit,worse_than_default	35	72	35	72	MATCH	0	
+api,operation,adapter,requestDevice	always_returns_device	2	2	2	2	MATCH	0	
+api,operation,buffers,createBindGroup	buffer_binding_resource	1	20	1	20	MATCH	0	
+api,operation,buffers,map	mapAsync,write	9	171	9	171	MATCH	0	
+api,operation,buffers,map	mapAsync,write,unchanged_ranges_preserved	1	16	1	16	MATCH	0	
+api,operation,buffers,map	mapAsync,read	9	171	9	171	MATCH	0	
+api,operation,buffers,map	mapAsync,read,typedArrayAccess	9	54	9	54	MATCH	0	
+api,operation,buffers,map	mappedAtCreation	2	38	2	38	MATCH	0	
+api,operation,buffers,map	remapped_for_write	9	342	9	342	MATCH	0	
+api,operation,buffers,map	mappedAtCreation,mapState	12	12	12	12	MATCH	0	
+api,operation,buffers,map	mapAsync,mapState	96	96	96	96	MATCH	0	
+api,operation,buffers,map_ArrayBuffer	postMessage	4	4	0	0	MISSING	4	
+api,operation,buffers,map_detach	while_mapped	1	28	0	0	MISSING	1	
+api,operation,buffers,map_oom	mappedAtCreation	2	20	2	20	MATCH	0	
+api,operation,buffers,threading	serialize	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,buffers,threading	destroyed	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,command_buffer,basic	empty	1	1	1	1	MATCH	0	
+api,operation,command_buffer,basic	b2t2b	1	1	1	1	MATCH	0	
+api,operation,command_buffer,basic	b2t2t2b	1	1	1	1	MATCH	0	
+api,operation,command_buffer,clearBuffer	clear	1	50	1	50	MATCH	0	
+api,operation,command_buffer,copyBufferToBuffer	single	2	340	2	340	MATCH	0	
+api,operation,command_buffer,copyBufferToBuffer	state_transitions	1	1	1	1	MATCH	0	
+api,operation,command_buffer,copyBufferToBuffer	copy_order	1	1	1	1	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	color_textures,non_compressed,non_array	141	11280	141	11280	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	color_textures,compressed,non_array	282	47376	282	47376	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	color_textures,compressed,unaligned,non_array	94	1974	94	1974	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	color_textures,non_compressed,array	94	19552	94	19552	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	color_textures,compressed,array	188	19552	188	19552	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	zero_sized	1	78	1	78	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	copy_depth_stencil	6	216	6	216	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	copy_multisampled_color	1	1	1	1	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	copy_multisampled_depth	5	5	5	5	MATCH	0	
+api,operation,command_buffer,copyTextureToTexture	copy_multisampled_stencil	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,command_buffer,image_copy	rowsPerImage_and_bytesPerRow	669	28500	669	28500	MATCH	0	
+api,operation,command_buffer,image_copy	offsets_and_sizes	669	44022	669	44022	MATCH	0	
+api,operation,command_buffer,image_copy	origins_and_extents	669	82203	669	82203	MATCH	0	
+api,operation,command_buffer,image_copy	mip_levels	540	11487	540	11487	MATCH	0	
+api,operation,command_buffer,image_copy	compressed_textures,unaligned_mip_level_0	156	780	156	780	MATCH	0	
+api,operation,command_buffer,image_copy	undefined_params	9	48	9	48	MATCH	0	
+api,operation,command_buffer,image_copy	rowsPerImage_and_bytesPerRow_depth_stencil	12	864	12	864	MATCH	0	
+api,operation,command_buffer,image_copy	offsets_and_sizes_copy_depth_stencil	12	288	12	288	MATCH	0	
+api,operation,command_buffer,programmable,immediate	basic_execution	51	51	51	51	MATCH	0	
+api,operation,command_buffer,programmable,immediate	update_data	3	3	3	3	MATCH	0	
+api,operation,command_buffer,programmable,immediate	pipeline_switch	4	4	4	4	MATCH	0	
+api,operation,command_buffer,programmable,immediate	use_max_immediate_size	3	3	3	3	MATCH	0	
+api,operation,command_buffer,programmable,immediate	typed_array_arguments	36	216	36	216	MATCH	0	
+api,operation,command_buffer,programmable,immediate	multiple_updates_before_draw_or_dispatch	3	3	3	3	MATCH	0	
+api,operation,command_buffer,programmable,immediate	render_pass_and_bundle_mix	1	1	1	1	MATCH	0	
+api,operation,command_buffer,programmable,immediate	render_bundle_isolation	1	1	1	1	MATCH	0	
+api,operation,command_buffer,programmable,state_tracking	bind_group_indices	3	36	1	6	FEWER	3	encoderType:-3/3[compute pass,render bundle,render pass]
+api,operation,command_buffer,programmable,state_tracking	bind_group_order	3	36	0	0	MISSING	3	
+api,operation,command_buffer,programmable,state_tracking	bind_group_before_pipeline	3	24	0	0	MISSING	3	
+api,operation,command_buffer,programmable,state_tracking	one_bind_group_multiple_slots	3	6	0	0	MISSING	3	
+api,operation,command_buffer,programmable,state_tracking	bind_group_multiple_sets	3	6	0	0	MISSING	3	
+api,operation,command_buffer,programmable,state_tracking	compatible_pipelines	3	3	0	0	MISSING	3	
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,initial	1	1	0	0	MISSING	1	
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,unsubmitted_render_pass	1	1	0	0	MISSING	1	
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,basic	16	16	1	1	FEWER	16	writeMask:-2/2[0,15]; renderMode:-2/2[direct,render-bundle]; bufferOffset:-2/2[non-zero,zero]; querySetOffset:-2/2[non-zero,zero]
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,reuse	32	32	0	0	MISSING	32	
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,empty	1	1	1	1	MATCH	0	
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,scissor	16	16	0	0	MISSING	16	
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,depth	16	16	1	1	FEWER	16	writeMask:-2/2[0,15]; renderMode:-2/2[direct,render-bundle]; bufferOffset:-2/2[non-zero,zero]; querySetOffset:-2/2[non-zero,zero]
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,stencil	16	16	1	1	FEWER	16	writeMask:-2/2[0,15]; renderMode:-2/2[direct,render-bundle]; bufferOffset:-2/2[non-zero,zero]; querySetOffset:-2/2[non-zero,zero]
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,sample_mask	64	64	0	0	MISSING	64	
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,alpha_to_coverage	80	80	0	0	MISSING	80	
+api,operation,command_buffer,queries,occlusionQuery	occlusion_query,multi_resolve	1	1	0	0	MISSING	1	
+api,operation,command_buffer,queries,timestampQuery	many_query_sets	12	12	0	0	MISSING	12	
+api,operation,command_buffer,queries,timestampQuery	many_slots	2	2	0	0	MISSING	2	
+api,operation,command_buffer,queries,timestampQuery	resolve_unused_slots	2	2	1	2	FEWER	2	stage:-2/2[compute,render]
+api,operation,command_buffer,queries,timestampQuery	multi_resolve	2	2	0	0	MISSING	2	
+api,operation,command_buffer,queries,timestampQuery	unused_slots_are_zero	2	2	0	0	MISSING	2	
+api,operation,command_buffer,render,render_bundle	basic	1	1	1	1	MATCH	0	
+api,operation,command_buffer,render,render_bundle	two_bundles	1	1	1	1	MATCH	0	
+api,operation,command_buffer,render,render_bundle	one_bundle_used_multiple_times	1	1	1	1	MATCH	0	
+api,operation,command_buffer,render,render_bundle	one_bundle_used_multiple_times_same_executeBundles	1	1	1	1	MATCH	0	
+api,operation,command_buffer,render,state_tracking	set_index_buffer_without_changing_buffer	1	1	1	1	MATCH	0	
+api,operation,command_buffer,render,state_tracking	set_vertex_buffer_without_changing_buffer	1	1	1	1	MATCH	0	
+api,operation,command_buffer,render,state_tracking	change_pipeline_before_and_after_vertex_buffer	1	1	1	1	MATCH	0	
+api,operation,command_buffer,render,state_tracking	set_vertex_buffer_but_not_used_in_draw	1	1	1	1	MATCH	0	
+api,operation,command_buffer,render,state_tracking	set_index_buffer_before_non_indexed_draw	1	1	1	1	MATCH	0	
+api,operation,compute,basic	memcpy	1	1	1	1	MATCH	0	
+api,operation,compute,basic	large_dispatch	6	90	1	1	REGISTERED-UNIMPLEMENTED	6	
+api,operation,compute_pipeline,overrides	basic	2	2	2	2	MATCH	0	
+api,operation,compute_pipeline,overrides	numeric_id	2	2	2	2	MATCH	0	
+api,operation,compute_pipeline,overrides	computed	1	1	1	1	MATCH	0	
+api,operation,compute_pipeline,overrides	precision	2	2	2	2	MATCH	0	
+api,operation,compute_pipeline,overrides	workgroup_size	36	36	36	36	MATCH	0	
+api,operation,compute_pipeline,overrides	shared_shader_module	2	2	2	2	MATCH	0	
+api,operation,compute_pipeline,overrides	multi_entry_points	2	2	2	2	MATCH	0	
+api,operation,device,all_limits_and_features	everything	1	1	1	1	MATCH	0	
+api,operation,device,lost	not_lost_on_gc	1	1	1	1	REGISTERED-UNIMPLEMENTED	0	
+api,operation,device,lost	lost_on_destroy	1	1	1	1	MATCH	0	
+api,operation,device,lost	same_object	1	1	1	1	REGISTERED-UNIMPLEMENTED	0	
+api,operation,labels	object_has_descriptor_label	19	76	19	76	MATCH	0	
+api,operation,labels	wrappers_do_not_share_labels	1	1	1	1	REGISTERED-UNIMPLEMENTED	0	
+api,operation,limits,max_combined_limits	max_storage_buffer_texture_frag_outputs	3	3	3	3	MATCH	0	
+api,operation,memory_sync,buffer,multiple_buffers	rw	105	105	105	105	MATCH	0	
+api,operation,memory_sync,buffer,multiple_buffers	wr	105	105	105	105	MATCH	0	
+api,operation,memory_sync,buffer,multiple_buffers	ww	47	47	47	47	MATCH	0	
+api,operation,memory_sync,buffer,multiple_buffers	multiple_pairs_of_draws_in_one_render_pass	1	4	1	4	MATCH	0	
+api,operation,memory_sync,buffer,multiple_buffers	multiple_pairs_of_draws_in_one_render_bundle	1	1	1	1	MATCH	0	
+api,operation,memory_sync,buffer,multiple_buffers	multiple_pairs_of_dispatches_in_one_compute_pass	1	1	1	1	MATCH	0	
+api,operation,memory_sync,buffer,single_buffer	rw	105	105	8	8	FEWER	105	boundary:-2/4[dispatch,pass]; readOp:-7/9[b2t-copy,constant-uniform,input-index,input-indirect,input-indirect-dispatch,input-indirect-index,input-vertex]; readContext:-4/4[command-encoder,compute-pass-encoder,render-bundle-encoder,render-pass-encoder]; writeOp:-2/4[t2b-copy,write-buffer]; writeContext:-5/5[command-encoder,compute-pass-encoder,queue,render-bundle-encoder,render-pass-encoder]
+api,operation,memory_sync,buffer,single_buffer	wr	105	105	8	8	FEWER	105	boundary:-2/4[dispatch,pass]; readOp:-7/9[b2t-copy,constant-uniform,input-index,input-indirect,input-indirect-dispatch,input-indirect-index,input-vertex]; readContext:-4/4[command-encoder,compute-pass-encoder,render-bundle-encoder,render-pass-encoder]; writeOp:-2/4[t2b-copy,write-buffer]; writeContext:-5/5[command-encoder,compute-pass-encoder,queue,render-bundle-encoder,render-pass-encoder]
+api,operation,memory_sync,buffer,single_buffer	ww	47	47	8	8	FEWER	47	boundary:-2/4[dispatch,pass]; writeOps:-16/16[b2b-copy,b2b-copy,b2b-copy,storage,b2b-copy,t2b-copy,b2b-copy,write-buffer,storage,b2b-copy,storage,storage,storage,t2b-copy,storage,write-buffer,t2b-]; contexts:-17/17[command-encoder,command-encoder,command-encoder,compute-pass-encoder,command-encoder,queue,command-encoder,render-bundle-encoder,command-encoder,rende]
+api,operation,memory_sync,buffer,single_buffer	two_draws_in_the_same_render_pass	1	4	1	4	MATCH	0	
+api,operation,memory_sync,buffer,single_buffer	two_draws_in_the_same_render_bundle	1	1	1	1	MATCH	0	
+api,operation,memory_sync,buffer,single_buffer	two_dispatches_in_the_same_compute_pass	1	1	1	1	MATCH	0	
+api,operation,memory_sync,texture,readonly_depth_stencil	sampling_while_testing	16	16	4	4	FEWER	16	format:-6/6[depth16unorm,depth24plus,depth24plus-stencil8,depth32float,depth32float-stencil8,stencil8]; depthReadOnly:-1/3[_undef_]; stencilReadOnly:-1/3[_undef_]
+api,operation,memory_sync,texture,same_subresource	rw	53	53	1	1	FEWER	53	boundary:-4/4[command-buffer,dispatch,pass,queue-op]; read:-5/5[{"in": "command-encoder", "op": "t2b-copy"},{"in": "command-encoder", "op": "t2t-copy"},{"in": "compute-pass-encoder", "op": "sample"},{"in": "render-]; write:-8/8[{"in": "command-encoder", "op": "attachment-resolve"},{"in": "command-encoder", "op": "attachment-store"},{"in": "command-encoder", "op": "b2t-copy"},]
+api,operation,memory_sync,texture,same_subresource	wr	53	53	1	1	FEWER	53	boundary:-4/4[command-buffer,dispatch,pass,queue-op]; write:-8/8[{"in": "command-encoder", "op": "attachment-resolve"},{"in": "command-encoder", "op": "attachment-store"},{"in": "command-encoder", "op": "b2t-copy"},]; read:-5/5[{"in": "command-encoder", "op": "t2b-copy"},{"in": "command-encoder", "op": "t2t-copy"},{"in": "compute-pass-encoder", "op": "sample"},{"in": "render-]
+api,operation,memory_sync,texture,same_subresource	ww	83	83	1	1	FEWER	83	boundary:-4/4[command-buffer,dispatch,pass,queue-op]; first:-8/8[{"in": "command-encoder", "op": "attachment-resolve"},{"in": "command-encoder", "op": "attachment-store"},{"in": "command-encoder", "op": "b2t-copy"},]; second:-8/8[{"in": "command-encoder", "op": "attachment-resolve"},{"in": "command-encoder", "op": "attachment-store"},{"in": "command-encoder", "op": "b2t-copy"},]
+api,operation,memory_sync,texture,same_subresource	rw,single_pass,load_store	1	1	0	0	MISSING	1	
+api,operation,memory_sync,texture,same_subresource	rw,single_pass,load_resolve	1	1	0	0	MISSING	1	
+api,operation,onSubmittedWorkDone	without_work	1	1	1	1	MATCH	0	
+api,operation,onSubmittedWorkDone	with_work	1	1	1	1	MATCH	0	
+api,operation,onSubmittedWorkDone	many,serial	1	1	1	1	MATCH	0	
+api,operation,onSubmittedWorkDone	many,parallel	1	1	1	1	MATCH	0	
+api,operation,onSubmittedWorkDone	many,parallel_order	1	1	1	1	MATCH	0	
+api,operation,pipeline,default_layout	getBindGroupLayout_js_object	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,pipeline,default_layout	incompatible_with_explicit	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,pipeline,default_layout	layout	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,pipeline,pipeline_layout_created_with_null_bind_group_layout	pipeline_layout_with_null_bind_group_layout,rendering	12	12	12	12	MATCH	0	
+api,operation,pipeline,pipeline_layout_created_with_null_bind_group_layout	pipeline_layout_with_null_bind_group_layout,compute	12	12	12	12	MATCH	0	
+api,operation,queue,writeBuffer	array_types	16	16	16	16	MATCH	0	
+api,operation,queue,writeBuffer	multiple_writes_at_different_offsets_and_sizes	1	8	1	8	MATCH	0	
+api,operation,reflection	buffer_reflection_attributes	1	5	1	5	MATCH	0	
+api,operation,reflection	buffer_creation_from_reflection	1	4	1	4	MATCH	0	
+api,operation,reflection	texture_reflection_attributes	1	14	1	14	MATCH	0	
+api,operation,reflection	texture_creation_from_reflection	1	13	1	13	MATCH	0	
+api,operation,reflection	query_set_reflection_attributes	1	4	1	4	MATCH	0	
+api,operation,reflection	query_set_creation_from_reflection	1	3	1	3	MATCH	0	
+api,operation,render_pass,clear_value	loaded	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,render_pass,clear_value	stencil_clear_value	30	30	30	30	MATCH	0	
+api,operation,render_pass,resolve	render_pass_resolve	56	5040	1	12	FEWER	56	colorFormat:-13/14[bgra8unorm,bgra8unorm-srgb,r16float,r8snorm,r8unorm,rg11b10ufloat,rg16float,rg8snorm,rg8unorm,rgb10a2unorm,rgba16float,rgba8snorm,rgba8unorm-srgb]; separateResolvePass:-2/2[false,true]; storeOperation:-2/2[discard,store]
+api,operation,render_pass,storeOp	render_pass_store_op,color_attachment_with_depth_stencil_attachment	4	4	4	4	MATCH	0	
+api,operation,render_pass,storeOp	render_pass_store_op,color_attachment_only	78	312	2	2	FEWER	76	colorFormat:-38/39[bgra8unorm,bgra8unorm-srgb,r16float,r16sint,r16snorm,r16uint,r16unorm,r32float,r32sint,r32uint,r8sint,r8uint,r8unorm,rg11b10ufloat,rg16float,rg16sint,]
+api,operation,render_pass,storeOp	render_pass_store_op,multiple_color_attachments	4	16	4	16	MATCH	0	
+api,operation,render_pass,storeOp	render_pass_store_op,depth_stencil_attachment_only	6	24	4	4	FEWER	2	depthStencilFormat:-1/3[depth16unorm]
+api,operation,render_pass,storeop2	storeOp_controls_whether_1x1_drawn_quad_is_stored	2	2	2	2	MATCH	0	
+api,operation,render_pass,transient_attachment	increasing_attachments_count	1	1	1	1	MATCH	0	
+api,operation,render_pass,transient_attachment	overlapping_transient_attachments	1	1	1	1	MATCH	0	
+api,operation,render_pipeline,culling_tests	culling	6	48	6	12	FEWER	0	subcase-level reduction only
+api,operation,render_pipeline,overrides	basic	2	12	2	12	MATCH	0	
+api,operation,render_pipeline,overrides	precision	2	4	2	4	MATCH	0	
+api,operation,render_pipeline,overrides	shared_shader_module	2	6	2	6	MATCH	0	
+api,operation,render_pipeline,overrides	multi_entry_points	2	6	2	6	MATCH	0	
+api,operation,render_pipeline,pipeline_output_targets	color,attachments	39	351	2	2	FEWER	39	format:-39/39[bgra8unorm,bgra8unorm-srgb,r16float,r16sint,r16snorm,r16uint,r16unorm,r32float,r32sint,r32uint,r8sint,r8uint,r8unorm,rg11b10ufloat,rg16float,rg16sint,]
+api,operation,render_pipeline,pipeline_output_targets	color,component_count	39	95	3	8	FEWER	36	format:-36/39[bgra8unorm,bgra8unorm-srgb,r16float,r16sint,r16snorm,r16uint,r16unorm,r32float,r32sint,r32uint,r8sint,r8uint,rg11b10ufloat,rg16float,rg16sint,rg16snor]
+api,operation,render_pipeline,pipeline_output_targets	color,component_count,blend	4	36	1	5	FEWER	4	format:-4/4[bgra8unorm,r8unorm,rg8unorm,rgba8unorm]
+api,operation,render_pipeline,primitive_topology	basic	14	14	14	14	MATCH	0	
+api,operation,render_pipeline,primitive_topology	unaligned_vertex_count	6	6	6	6	MATCH	0	
+api,operation,render_pipeline,sample_mask	fragment_output_mask	36	2916	36	2916	MATCH	0	
+api,operation,render_pipeline,sample_mask	alpha_to_coverage_mask	32	96	32	96	MATCH	0	
+api,operation,render_pipeline,vertex_only_render_pipeline	draw_depth_and_stencil_with_vertex_only_pipeline	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,rendering,3d_texture_slices	one_color_attachment,mip_levels	234	234	6	6	FEWER	234	format:-39/39[bgra8unorm,bgra8unorm-srgb,r16float,r16sint,r16snorm,r16uint,r16unorm,r32float,r32sint,r32uint,r8sint,r8uint,r8unorm,rg11b10ufloat,rg16float,rg16sint,]
+api,operation,rendering,3d_texture_slices	multiple_color_attachments,same_mip_level	78	312	1	1	FEWER	78	format:-39/39[bgra8unorm,bgra8unorm-srgb,r16float,r16sint,r16snorm,r16uint,r16unorm,r32float,r32sint,r32uint,r8sint,r8uint,r8unorm,rg11b10ufloat,rg16float,rg16sint,]; sameTexture:-2/2[false,true]
+api,operation,rendering,3d_texture_slices	multiple_color_attachments,same_slice_with_diff_mip_levels	78	78	0	0	MISSING	78	
+api,operation,rendering,basic	clear	1	1	1	1	MATCH	0	
+api,operation,rendering,basic	fullscreen_quad	1	1	1	1	MATCH	0	
+api,operation,rendering,basic	large_draw	4	4	1	1	REGISTERED-UNIMPLEMENTED	4	
+api,operation,rendering,color_target_state	blending,GPUBlendComponent	578	3476	1	1	REGISTERED-UNIMPLEMENTED	578	
+api,operation,rendering,color_target_state	blending,formats	39	39	1	1	REGISTERED-UNIMPLEMENTED	39	
+api,operation,rendering,color_target_state	blend_constant,initial	1	1	1	1	MATCH	0	
+api,operation,rendering,color_target_state	blend_constant,setting	1	3	1	3	MATCH	0	
+api,operation,rendering,color_target_state	blend_constant,not_inherited	1	1	1	1	MATCH	0	
+api,operation,rendering,color_target_state	color_write_mask,channel_work	16	16	16	16	MATCH	0	
+api,operation,rendering,color_target_state	color_write_mask,blending_disabled	2	2	2	2	MATCH	0	
+api,operation,rendering,color_target_state	blending,clamping	16	16	1	1	REGISTERED-UNIMPLEMENTED	16	
+api,operation,rendering,depth	depth_disabled	1	1	1	1	MATCH	0	
+api,operation,rendering,depth	depth_write_disabled	4	4	4	4	MATCH	0	
+api,operation,rendering,depth	depth_test_fail	3	3	3	3	MATCH	0	
+api,operation,rendering,depth	depth_compare_func	120	120	120	120	MATCH	0	
+api,operation,rendering,depth	reverse_depth	2	2	2	2	MATCH	0	
+api,operation,rendering,depth	fragment_depth_qualifiers	2	2	2	2	MATCH	0	
+api,operation,rendering,depth_bias	depth_bias	7	7	7	7	MATCH	0	
+api,operation,rendering,depth_bias	depth_bias_24bit_format	6	6	6	6	MATCH	0	
+api,operation,rendering,depth_clip_clamp	depth_clamp_and_clip	60	60	2	2	FEWER	60	format:-5/5[depth16unorm,depth24plus,depth24plus-stencil8,depth32float,depth32float-stencil8]; unclippedDepth:-3/3[_undef_,false,true]; multisampled:-2/2[false,true]
+api,operation,rendering,depth_clip_clamp	depth_test_input_clamped	20	20	2	2	FEWER	20	format:-5/5[depth16unorm,depth24plus,depth24plus-stencil8,depth32float,depth32float-stencil8]; multisampled:-2/2[false,true]
+api,operation,rendering,draw	arguments	720	720	720	720	MATCH	0	
+api,operation,rendering,draw	default_arguments	2	24	2	24	MATCH	0	
+api,operation,rendering,draw	vertex_attributes,basic	64	64	1	1	REGISTERED-UNIMPLEMENTED	64	
+api,operation,rendering,draw	vertex_attributes,formats	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,rendering,draw	largeish_buffer	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,rendering,indirect_draw	basics	2	16	2	16	MATCH	0	
+api,operation,rendering,stencil	stencil_compare_func	72	72	72	72	MATCH	0	
+api,operation,rendering,stencil	stencil_passOp_operation	36	36	36	36	MATCH	0	
+api,operation,rendering,stencil	stencil_failOp_operation	39	39	39	39	MATCH	0	
+api,operation,rendering,stencil	stencil_depthFailOp_operation	26	26	26	26	MATCH	0	
+api,operation,rendering,stencil	stencil_read_write_mask	12	12	12	12	MATCH	0	
+api,operation,rendering,stencil	stencil_reference_initialized	3	3	3	3	MATCH	0	
+api,operation,rendering,stencil	stencil_accumulation	3	48	1	1	REGISTERED-UNIMPLEMENTED	3	
+api,operation,resource_init,buffer	partial_write_buffer	1	3	1	1	FEWER	0	subcase-level reduction only
+api,operation,resource_init,buffer	map_whole_buffer	2	2	0	0	MISSING	2	
+api,operation,resource_init,buffer	map_partial_buffer	2	6	0	0	MISSING	2	
+api,operation,resource_init,buffer	mapped_at_creation_whole_buffer	3	3	0	0	MISSING	3	
+api,operation,resource_init,buffer	mapped_at_creation_partial_buffer	3	9	0	0	MISSING	3	
+api,operation,resource_init,buffer	copy_buffer_to_buffer_copy_source	1	1	1	1	MATCH	0	
+api,operation,resource_init,buffer	copy_buffer_to_texture	1	2	0	0	MISSING	1	
+api,operation,resource_init,buffer	resolve_query_set_to_partial_buffer	1	2	0	0	MISSING	1	
+api,operation,resource_init,buffer	copy_texture_to_partial_buffer	1	20	0	0	MISSING	1	
+api,operation,resource_init,buffer	uniform_buffer	1	2	1	1	FEWER	0	subcase-level reduction only
+api,operation,resource_init,buffer	readonly_storage_buffer	1	2	0	0	MISSING	1	
+api,operation,resource_init,buffer	storage_buffer	1	2	1	1	FEWER	0	subcase-level reduction only
+api,operation,resource_init,buffer	vertex_buffer	1	2	1	1	FEWER	0	subcase-level reduction only
+api,operation,resource_init,buffer	index_buffer	1	2	1	1	FEWER	0	subcase-level reduction only
+api,operation,resource_init,buffer	indirect_buffer_for_draw_indirect	2	4	0	0	MISSING	2	
+api,operation,resource_init,buffer	indirect_buffer_for_dispatch_indirect	1	2	0	0	MISSING	1	
+api,operation,resource_init,texture_zero	uninitialized_texture_is_zero	403	6892	2	2	FEWER	403	dimension:-3/3[1d,2d,3d]; readMethod:-5/5[CopyToBuffer,CopyToTexture,DepthTest,Sample,StencilTest]; format:-47/49[bgra8unorm,bgra8unorm-srgb,depth16unorm,depth24plus,depth24plus-stencil8,depth32float,depth32float-stencil8,r16float,r16sint,r16snorm,r16uint,r16unorm]
+api,operation,sampling,anisotropy	anisotropic_filter_checkerboard	1	1	1	1	MATCH	0	
+api,operation,sampling,anisotropy	anisotropic_filter_mipmap_color	2	2	2	2	MATCH	0	
+api,operation,sampling,filter_mode	magFilter,nearest	20	180	1	9	FEWER	19	format:-19/20[bgra8unorm,bgra8unorm-srgb,r16float,r16snorm,r16unorm,r32float,r8unorm,rg11b10ufloat,rg16float,rg16snorm,rg16unorm,rg32float,rg8unorm,rgb10a2unorm,rgb]
+api,operation,sampling,filter_mode	magFilter,linear	20	180	1	1	REGISTERED-UNIMPLEMENTED	20	
+api,operation,sampling,filter_mode	minFilter,nearest	20	180	1	9	FEWER	19	format:-19/20[bgra8unorm,bgra8unorm-srgb,r16float,r16snorm,r16unorm,r32float,r8unorm,rg11b10ufloat,rg16float,rg16snorm,rg16unorm,rg32float,rg8unorm,rgb10a2unorm,rgb]
+api,operation,sampling,filter_mode	minFilter,linear	20	180	1	1	REGISTERED-UNIMPLEMENTED	20	
+api,operation,sampling,filter_mode	mipmapFilter	20	40	1	1	REGISTERED-UNIMPLEMENTED	20	
+api,operation,sampling,sampler_texture	sample_texture_combos	1	1	1	1	MATCH	0	
+api,operation,shader_module,compilation_info	getCompilationInfo_returns	6	6	6	6	MATCH	0	
+api,operation,shader_module,compilation_info	line_number_and_position	4	4	4	4	MATCH	0	
+api,operation,shader_module,compilation_info	offset_and_length	6	6	6	6	MATCH	0	
+api,operation,storage_texture,read_only	basic	600	600	3	3	FEWER	597	format:-37/40[bgra8unorm,r16float,r16sint,r16snorm,r16uint,r16unorm,r8sint,r8snorm,r8uint,r8unorm,rg11b10ufloat,rg16float,rg16sint,rg16snorm,rg16uint,rg16unorm,rg32]; shaderStage:-2/3[fragment,vertex]; dimension:-2/3[1d,3d]; depthOrArrayLayers:-1/2[2]
+api,operation,storage_texture,read_write	basic	400	400	3	3	FEWER	397	format:-37/40[bgra8unorm,r16float,r16sint,r16snorm,r16uint,r16unorm,r8sint,r8snorm,r8uint,r8unorm,rg11b10ufloat,rg16float,rg16sint,rg16snorm,rg16uint,rg16unorm,rg32]; shaderStage:-1/2[fragment]; textureDimension:-2/3[1d,3d]; depthOrArrayLayers:-1/2[2]
+api,operation,texture_view,format_reinterpretation	texture_binding	2	2	2	2	MATCH	0	
+api,operation,texture_view,format_reinterpretation	render_and_resolve_attachment	4	4	4	4	MATCH	0	
+api,operation,texture_view,texture_component_swizzle	read_swizzle	529	52326	529	52326	MATCH	0	
+api,operation,texture_view,write	format	336	336	336	336	MATCH	0	
+api,operation,texture_view,write	dimension	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,texture_view,write	aspect	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,uncapturederror	iff_uncaptured	4	4	4	4	MATCH	0	
+api,operation,uncapturederror	only_original_device_is_event_target	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,uncapturederror	uncapturederror_from_non_originating_thread	1	1	1	1	UPSTREAM-UNIMPLEMENTED	0	
+api,operation,uncapturederror	onuncapturederror_order_wrt_addEventListener	1	1	1	1	REGISTERED-UNIMPLEMENTED	0	
+api,operation,vertex_state,correctness	vertex_format_to_shader_format_conversion	168	1512	168	1512	MATCH	0	
+api,operation,vertex_state,correctness	setVertexBuffer_offset_and_attribute_offset	42	1472	42	1472	MATCH	0	
+api,operation,vertex_state,correctness	non_zero_array_stride_and_attribute_offset	42	792	42	792	MATCH	0	
+api,operation,vertex_state,correctness	buffers_with_varying_step_mode	1	4	1	4	MATCH	0	
+api,operation,vertex_state,correctness	vertex_buffer_used_multiple_times_overlapped	42	378	42	378	MATCH	0	
+api,operation,vertex_state,correctness	vertex_buffer_used_multiple_times_interleaved	42	378	42	378	MATCH	0	
+api,operation,vertex_state,correctness	max_buffers_and_attribs	42	42	42	42	MATCH	0	
+api,operation,vertex_state,correctness	array_stride_zero	42	700	42	700	MATCH	0	
+api,operation,vertex_state,correctness	discontiguous_location_and_attribs	1	1	1	1	MATCH	0	
+api,operation,vertex_state,correctness	overlapping_attributes	42	42	42	42	MATCH	0	
+api,operation,vertex_state,index_format	index_format,uint16	1	3	1	3	MATCH	0	
+api,operation,vertex_state,index_format	index_format,uint32	1	3	1	3	MATCH	0	
+api,operation,vertex_state,index_format	index_format,change_pipeline_after_setIndexBuffer	2	2	0	0	MISSING	2	
+api,operation,vertex_state,index_format	index_format,setIndexBuffer_before_setPipeline	2	2	0	0	MISSING	2	
+api,operation,vertex_state,index_format	index_format,setIndexBuffer_different_formats	1	1	0	0	MISSING	1	
+api,operation,vertex_state,index_format	primitive_restart	10	10	0	0	MISSING	10	
